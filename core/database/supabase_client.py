@@ -97,7 +97,12 @@ class SupabaseClient:
     
     def table(self, table_name: str):
         """Get a table with the configured schema"""
-        return self.client.schema(self.schema).table(table_name)
+        # Use schema() to set Accept-Profile header
+        if hasattr(self.client, 'schema'):
+            return self.client.schema(self.schema).table(table_name)
+        else:
+            # Fallback for older SDK versions
+            return self.client.table(table_name)
     
     def rpc(self, function_name: str, params: dict = None):
         """Call a remote procedure/function"""

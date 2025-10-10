@@ -40,7 +40,6 @@ config = config_manager.get_service_config()
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("order_service")
-api_logger = setup_service_logger("order_service", "API")
 logger = app_logger  # for backward compatibility
 
 

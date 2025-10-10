@@ -54,7 +54,6 @@ service_config = config_manager.get_service_config()
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("storage_service")
-api_logger = setup_service_logger("storage_service", "API")
 logger = app_logger  # for backward compatibility
 
 # 全局变量
@@ -182,7 +181,8 @@ async def upload_file(
     access_level: str = Form("private"),
     metadata: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
-    auto_delete_after_days: Optional[int] = Form(None)
+    auto_delete_after_days: Optional[int] = Form(None),
+    enable_indexing: bool = Form(True)
 ):
     """
     上传文件
@@ -209,13 +209,14 @@ async def upload_file(
         access_level=access_level,
         metadata=parsed_metadata,
         tags=parsed_tags,
-        auto_delete_after_days=auto_delete_after_days
+        auto_delete_after_days=auto_delete_after_days,
+        enable_indexing=enable_indexing
     )
 
     result = await storage_service.upload_file(file, request)
 
-    # Auto-index text files for intelligent search
-    if intelligence_service and file.content_type and file.content_type.startswith('text/'):
+    # Auto-index files for intelligent search if enabled
+    if intelligence_service and request.enable_indexing:
         try:
             # Read file content
             file_record = await storage_service.repository.get_file_by_id(result.file_id, user_id)

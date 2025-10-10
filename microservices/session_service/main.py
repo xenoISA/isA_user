@@ -44,7 +44,6 @@ config = config_manager.get_service_config()
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("session_service")
-api_logger = setup_service_logger("session_service", "API")
 logger = app_logger  # for backward compatibility
 
 
@@ -172,9 +171,14 @@ async def create_session(
     try:
         return await session_service.create_session(request)
     except SessionValidationError as e:
+        logger.error(f"Session validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except SessionServiceError as e:
+        logger.error(f"Session service error: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error creating session: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create session: {str(e)}")
 
 
 # Service statistics - must be before {session_id} route

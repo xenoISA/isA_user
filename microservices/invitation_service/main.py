@@ -31,7 +31,6 @@ config = config_manager.get_service_config()
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("invitation_service")
-api_logger = setup_service_logger("invitation_service", "API")
 logger = app_logger  # for backward compatibility
 
 # 全局服务实例

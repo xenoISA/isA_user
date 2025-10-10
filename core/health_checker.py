@@ -360,13 +360,20 @@ class HealthCheckRegistry:
 health_registry = HealthCheckRegistry()
 
 
-def setup_common_dependencies(checker: ServiceHealthChecker):
-    """设置常见的依赖服务"""
+def setup_common_dependencies(checker: ServiceHealthChecker, consul_host: str = "localhost", consul_port: int = 8500, auth_service_url: str = "http://localhost:8202"):
+    """设置常见的依赖服务
+    
+    Args:
+        checker: ServiceHealthChecker instance
+        consul_host: Consul host (default: localhost)
+        consul_port: Consul port (default: 8500)
+        auth_service_url: Auth service URL (default: http://localhost:8202)
+    """
     # Consul
-    checker.add_dependency("consul", "localhost:8500", timeout=3.0, critical=False)
+    checker.add_dependency("consul", f"{consul_host}:{consul_port}", timeout=3.0, critical=False)
     
     # Auth Service
-    checker.add_dependency("auth_service", "http://localhost:8202", timeout=5.0, critical=True)
+    checker.add_dependency("auth_service", auth_service_url, timeout=5.0, critical=True)
 
 
 async def main():

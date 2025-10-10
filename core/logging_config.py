@@ -112,9 +112,8 @@ class UnifiedLoggingConfig:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
 
-        # 确保服务日志目录存在
-        self.service_log_dir = self.log_dir / service_name
-        self.service_log_dir.mkdir(exist_ok=True)
+        # 所有日志直接保存在 logs/ 目录，不创建子目录
+        self.service_log_dir = self.log_dir
 
         # Loki 配置 (从环境变量读取)
         self.loki_url = os.getenv("LOKI_URL", "http://localhost:3100")

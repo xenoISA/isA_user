@@ -66,7 +66,7 @@ class ServiceConfig:
     s3_access_key: Optional[str] = None
     s3_secret_key: Optional[str] = None
 
-    # Gateway Configuration
+    # Gateway Configuration (Gateway is an external service, not discovered via Consul)
     gateway_url: Optional[str] = None
     gateway_enabled: bool = False
 

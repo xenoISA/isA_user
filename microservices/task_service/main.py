@@ -18,6 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.service_discovery import get_service_discovery
 from .models import (
     TaskCreateRequest, TaskUpdateRequest, TaskExecutionRequest,
     TaskResponse, TaskExecutionResponse, TaskTemplateResponse,
@@ -33,7 +34,6 @@ config = config_manager.get_service_config()
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("task_service")
-api_logger = setup_service_logger("task_service", "API")
 logger = app_logger  # for backward compatibility
 
 # Service instance
@@ -148,8 +148,13 @@ async def get_user_context(
     if not authorization and not x_api_key:
         raise HTTPException(status_code=401, detail="Authentication required")
     
-    # Call auth service for verification
-    auth_service_url = "http://localhost:8202"
+    # Use Consul service discovery for auth service
+    if not hasattr(app.state, 'consul_registry') or not app.state.consul_registry:
+        raise HTTPException(status_code=503, detail="Service discovery not available")
+    
+    auth_service_url = app.state.consul_registry.get_service_endpoint("auth_service")
+    if not auth_service_url:
+        raise HTTPException(status_code=503, detail="Auth service not available")
     
     try:
         if authorization:

@@ -29,6 +29,7 @@ services_names=(
     "task_service"
     "organization_service"
     "invitation_service"
+    "vault_service"
     "device_service"
     "ota_service"
     "telemetry_service"
@@ -49,6 +50,7 @@ services_ports=(
     8211
     8212
     8213
+    8214
     8220
     8221
     8225
@@ -122,11 +124,16 @@ load_environment() {
 check_venv() {
     if [[ "$VIRTUAL_ENV" == "" ]]; then
         print_message $YELLOW "⚠️  Virtual environment not detected, activating .venv ..."
-        if [ -f "../../.venv/bin/activate" ]; then
-            source ../../.venv/bin/activate
+        # Get project root directory (2 levels up from scripts directory)
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        local project_root="$(cd "$script_dir/../.." && pwd)"
+        local venv_path="$project_root/.venv/bin/activate"
+
+        if [ -f "$venv_path" ]; then
+            source "$venv_path"
             print_message $GREEN "✅ Virtual environment activated"
         else
-            print_message $RED "❌ Cannot find virtual environment ../../.venv/bin/activate"
+            print_message $RED "❌ Cannot find virtual environment: $venv_path"
             print_message $YELLOW "Please create virtual environment first: python -m venv .venv"
             exit 1
         fi
@@ -203,15 +210,15 @@ start_service() {
         return 1
     fi
 
-    # Start service
+    # Start service (logs managed by core/logger.py)
     if [ "$reload" = true ]; then
         print_message $BLUE "  Starting $service (Port: $port, Development mode - auto-reload)..."
         # Use uvicorn directly with auto-reload support
-        nohup uvicorn microservices.${service}.main:app --host 0.0.0.0 --port $port --reload > "$log_file" 2>&1 &
+        nohup uvicorn microservices.${service}.main:app --host 0.0.0.0 --port $port --reload >/dev/null 2>&1 &
     else
         print_message $BLUE "  Starting $service (Port: $port)..."
         # Use nohup to start service in background
-        nohup python -m microservices.${service}.main > "$log_file" 2>&1 &
+        nohup python -m microservices.${service}.main >/dev/null 2>&1 &
     fi
 
     local pid=$!
@@ -275,11 +282,18 @@ check_consul_registration() {
     fi
 
     # Check if service is in registered services list
+    # Try exact match first, then without _service suffix
     if echo "$services_json" | grep -q "\"${service}\""; then
         return 0  # Registered
-    else
-        return 2  # Not registered
     fi
+
+    # Try without _service suffix (e.g., auth_service -> auth)
+    local service_short="${service/_service/}"
+    if echo "$services_json" | grep -q "\"${service_short}\""; then
+        return 0  # Registered
+    fi
+
+    return 2  # Not registered
 }
 
 # Function: Wait for Consul registration

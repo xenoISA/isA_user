@@ -39,7 +39,6 @@ config = config_manager.get_service_config()
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("wallet_service")
-api_logger = setup_service_logger("wallet_service", "API")
 logger = app_logger  # for backward compatibility
 
 
@@ -426,19 +425,26 @@ async def get_user_credit_balance(
                 )
             )
             if create_result.success:
+                balance = float(create_result.balance or 0)
                 return {
                     "success": True,
-                    "balance": float(create_result.balance or 0),
-                    "currency": "CREDIT"
+                    "balance": balance,
+                    "available_balance": balance,
+                    "locked_balance": 0.0,
+                    "currency": "CREDIT",
+                    "wallet_id": create_result.wallet_id
                 }
             else:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to create wallet")
         
+        wallet = fiat_wallets[0]
         return {
             "success": True,
-            "balance": float(fiat_wallets[0].balance),
-            "currency": fiat_wallets[0].currency,
-            "wallet_id": fiat_wallets[0].wallet_id
+            "balance": float(wallet.balance),
+            "available_balance": float(wallet.available_balance) if hasattr(wallet, 'available_balance') else float(wallet.balance - wallet.locked_balance),
+            "locked_balance": float(wallet.locked_balance) if hasattr(wallet, 'locked_balance') else 0.0,
+            "currency": wallet.currency,
+            "wallet_id": wallet.wallet_id
         }
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

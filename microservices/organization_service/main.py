@@ -23,6 +23,8 @@ from .organization_service import (
     OrganizationNotFoundError, OrganizationAccessDeniedError,
     OrganizationValidationError
 )
+from .family_sharing_service import FamilySharingService
+from .family_sharing_repository import FamilySharingRepository
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
@@ -35,6 +37,13 @@ from .models import (
     OrganizationStatsResponse, OrganizationUsageResponse,
     OrganizationRole, HealthResponse, ServiceInfo, ServiceStats
 )
+from .family_sharing_models import (
+    CreateSharingRequest, UpdateSharingRequest,
+    UpdateMemberSharingPermissionRequest, GetMemberSharedResourcesRequest,
+    SharingResourceResponse, MemberSharingPermissionResponse,
+    SharedResourceDetailResponse, MemberSharedResourcesResponse,
+    SharingUsageStatsResponse, SharingResourceType, SharingStatus
+)
 
 # Initialize configuration
 config_manager = ConfigManager("organization_service")
@@ -42,25 +51,27 @@ config = config_manager.get_service_config()
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("organization_service")
-api_logger = setup_service_logger("organization_service", "API")
 logger = app_logger  # for backward compatibility
 
 
 class OrganizationMicroservice:
     """组织微服务核心类"""
-    
+
     def __init__(self):
         self.organization_service = None
-    
+        self.family_sharing_service = None
+
     async def initialize(self):
         """初始化微服务"""
         try:
             self.organization_service = OrganizationService()
+            sharing_repository = FamilySharingRepository()
+            self.family_sharing_service = FamilySharingService(repository=sharing_repository)
             logger.info("Organization microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize organization microservice: {e}")
             raise
-    
+
     async def shutdown(self):
         """关闭微服务"""
         try:
@@ -127,6 +138,16 @@ def get_organization_service() -> OrganizationService:
             detail="Organization service not initialized"
         )
     return organization_microservice.organization_service
+
+
+def get_family_sharing_service() -> FamilySharingService:
+    """获取家庭共享服务实例"""
+    if not organization_microservice.family_sharing_service:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Family sharing service not initialized"
+        )
+    return organization_microservice.family_sharing_service
 
 
 def get_current_user_id(
@@ -426,6 +447,189 @@ async def list_all_organizations(
         # TODO: 验证用户是否是平台管理员
         return await service.list_all_organizations(limit, offset, search, plan, status)
     except OrganizationServiceError as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ============ Family Sharing Endpoints ============
+
+@app.post("/api/v1/organizations/{organization_id}/sharing", response_model=SharingResourceResponse)
+async def create_sharing(
+    organization_id: str = Path(..., description="组织ID"),
+    request: CreateSharingRequest = ...,
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """创建共享资源"""
+    try:
+        logger.info(f"[API] Creating sharing | organization_id={organization_id} | resource_type={request.resource_type} | created_by={user_id}")
+        return await service.create_sharing(organization_id, request, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"[API] Failed to create sharing | organization_id={organization_id} | error={e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.get("/api/v1/organizations/{organization_id}/sharing/{sharing_id}", response_model=SharedResourceDetailResponse)
+async def get_sharing(
+    organization_id: str = Path(..., description="组织ID"),
+    sharing_id: str = Path(..., description="共享ID"),
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """获取共享资源详情"""
+    try:
+        return await service.get_sharing(sharing_id, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"[API] Failed to get sharing | sharing_id={sharing_id} | error={e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.put("/api/v1/organizations/{organization_id}/sharing/{sharing_id}", response_model=SharingResourceResponse)
+async def update_sharing(
+    organization_id: str = Path(..., description="组织ID"),
+    sharing_id: str = Path(..., description="共享ID"),
+    request: UpdateSharingRequest = ...,
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """更新共享资源"""
+    try:
+        logger.info(f"[API] Updating sharing | sharing_id={sharing_id} | updated_by={user_id}")
+        return await service.update_sharing(sharing_id, request, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"[API] Failed to update sharing | sharing_id={sharing_id} | error={e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.delete("/api/v1/organizations/{organization_id}/sharing/{sharing_id}")
+async def delete_sharing(
+    organization_id: str = Path(..., description="组织ID"),
+    sharing_id: str = Path(..., description="共享ID"),
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """删除共享资源"""
+    try:
+        logger.info(f"[API] Deleting sharing | sharing_id={sharing_id} | deleted_by={user_id}")
+        success = await service.delete_sharing(sharing_id, user_id)
+        if success:
+            return {"message": "Sharing deleted successfully"}
+        else:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete sharing")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"[API] Failed to delete sharing | sharing_id={sharing_id} | error={e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.get("/api/v1/organizations/{organization_id}/sharing", response_model=List[SharingResourceResponse])
+async def list_organization_sharings(
+    organization_id: str = Path(..., description="组织ID"),
+    resource_type: Optional[SharingResourceType] = Query(None, description="资源类型过滤"),
+    status_filter: Optional[SharingStatus] = Query(None, alias="status", description="状态过滤"),
+    limit: int = Query(50, ge=1, le=100, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """获取组织所有共享资源列表"""
+    try:
+        return await service.list_organization_sharings(organization_id, user_id, resource_type, status_filter, limit, offset)
+    except Exception as e:
+        logger.error(f"[API] Failed to list sharings | organization_id={organization_id} | error={e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.put("/api/v1/organizations/{organization_id}/sharing/{sharing_id}/members", response_model=MemberSharingPermissionResponse)
+async def update_member_permission(
+    organization_id: str = Path(..., description="组织ID"),
+    sharing_id: str = Path(..., description="共享ID"),
+    request: UpdateMemberSharingPermissionRequest = ...,
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """更新成员共享权限"""
+    try:
+        logger.info(f"[API] Updating member permission | sharing_id={sharing_id} | member_user_id={request.user_id} | updated_by={user_id}")
+        return await service.update_member_permission(sharing_id, request, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"[API] Failed to update member permission | sharing_id={sharing_id} | error={e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.delete("/api/v1/organizations/{organization_id}/sharing/{sharing_id}/members/{member_user_id}")
+async def revoke_member_access(
+    organization_id: str = Path(..., description="组织ID"),
+    sharing_id: str = Path(..., description="共享ID"),
+    member_user_id: str = Path(..., description="成员用户ID"),
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """撤销成员共享权限"""
+    try:
+        logger.info(f"[API] Revoking member access | sharing_id={sharing_id} | member_user_id={member_user_id} | revoked_by={user_id}")
+        success = await service.revoke_member_access(sharing_id, member_user_id, user_id)
+        if success:
+            return {"message": "Member access revoked successfully"}
+        else:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revoke member access")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"[API] Failed to revoke member access | sharing_id={sharing_id} | error={e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.get("/api/v1/organizations/{organization_id}/members/{member_user_id}/shared-resources", response_model=MemberSharedResourcesResponse)
+async def get_member_shared_resources(
+    organization_id: str = Path(..., description="组织ID"),
+    member_user_id: str = Path(..., description="成员用户ID"),
+    resource_type: Optional[SharingResourceType] = Query(None, description="资源类型过滤"),
+    status_filter: Optional[SharingStatus] = Query(None, alias="status", description="状态过滤"),
+    limit: int = Query(50, ge=1, le=100, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """获取成员所有共享资源"""
+    try:
+        request = GetMemberSharedResourcesRequest(
+            user_id=member_user_id,
+            resource_type=resource_type,
+            status=status_filter,
+            limit=limit,
+            offset=offset
+        )
+        return await service.get_member_shared_resources(organization_id, request)
+    except Exception as e:
+        logger.error(f"[API] Failed to get member shared resources | member_user_id={member_user_id} | error={e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.get("/api/v1/organizations/{organization_id}/sharing/{sharing_id}/usage", response_model=SharingUsageStatsResponse)
+async def get_sharing_usage_stats(
+    organization_id: str = Path(..., description="组织ID"),
+    sharing_id: str = Path(..., description="共享ID"),
+    period_start: datetime = Query(..., description="统计开始时间"),
+    period_end: datetime = Query(..., description="统计结束时间"),
+    user_id: str = Depends(get_current_user_id),
+    service: FamilySharingService = Depends(get_family_sharing_service)
+):
+    """获取共享资源使用统计"""
+    try:
+        return await service.get_sharing_usage_stats(sharing_id, user_id, period_start, period_end)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"[API] Failed to get sharing usage stats | sharing_id={sharing_id} | error={e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 

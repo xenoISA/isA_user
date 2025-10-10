@@ -243,7 +243,7 @@ class ConsulRegistry:
         instances = self.discover_service(service_name)
         if not instances:
             return None
-        
+
         # Load balancing strategies
         if strategy == 'random':
             import random
@@ -254,8 +254,42 @@ class ConsulRegistry:
         else:
             # Default to first available
             instance = instances[0]
-        
+
         return f"http://{instance['address']}:{instance['port']}"
+
+    def get_service_address(self, service_name: str, fallback_url: Optional[str] = None) -> str:
+        """
+        Get service address from Consul discovery with automatic fallback
+
+        Args:
+            service_name: Name of the service to discover
+            fallback_url: Fallback URL if service not found in Consul (e.g., "http://localhost:8201")
+
+        Returns:
+            Service URL (from Consul or fallback)
+
+        Example:
+            consul = ConsulRegistry("my_service", 8080)
+            url = consul.get_service_address("account_service", "http://localhost:8201")
+            # Returns: "http://10.0.1.5:8201" (from Consul) or "http://localhost:8201" (fallback)
+        """
+        try:
+            endpoint = self.get_service_endpoint(service_name)
+            if endpoint:
+                logger.debug(f"Discovered {service_name} at {endpoint}")
+                return endpoint
+
+            if fallback_url:
+                logger.warning(f"Service {service_name} not found in Consul, using fallback: {fallback_url}")
+                return fallback_url
+
+            raise ValueError(f"Service {service_name} not found and no fallback provided")
+
+        except Exception as e:
+            if fallback_url:
+                logger.warning(f"Consul discovery failed for {service_name}: {e}, using fallback: {fallback_url}")
+                return fallback_url
+            raise
     
     def watch_service(self, service_name: str, callback, wait_time: str = '30s'):
         """Watch for changes in service instances"""

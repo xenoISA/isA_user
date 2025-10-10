@@ -37,12 +37,7 @@ config_manager = ConfigManager("payment_service")
 config = config_manager.get_service_config()
 
 # 配置日志 (使用集成 Loki 的新日志系统)
-app_logger = setup_service_logger("payment_service", level=config.log_level.upper())
-api_logger = setup_service_logger("payment_service", "API", level=config.log_level.upper())
-stripe_logger = setup_service_logger("payment_service", "Stripe", level=config.log_level.upper())
-
-# 兼容旧代码
-logger = app_logger
+logger = setup_service_logger("payment_service", level=config.log_level.upper())
 
 # 打印配置信息（开发环境）
 if config.debug:
@@ -83,20 +78,20 @@ async def lifespan(app: FastAPI):
     if consul_registry.register():
         consul_registry.start_maintenance()
         app.state.consul_registry = consul_registry
-        app_logger.info("Payment service registered with Consul")
+        logger.info("Payment service registered with Consul")
     else:
-        app_logger.warning("Failed to register with Consul, continuing without service discovery")
+        logger.warning("Failed to register with Consul, continuing without service discovery")
 
-    app_logger.info(f"Payment Service started on port {SERVICE_PORT}")
-    
+    logger.info(f"Payment Service started on port {SERVICE_PORT}")
+
     yield
-    
+
     # Cleanup
     if hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
 
-    app_logger.info("Payment Service shutting down...")
+    logger.info("Payment Service shutting down...")
 
 
 # 创建FastAPI应用
@@ -198,7 +193,7 @@ async def create_plan(
         raise HTTPException(status_code=503, detail="Service not initialized")
 
     try:
-        api_logger.info(f"Creating subscription plan | plan_id={plan_id} | tier={tier.value}")
+        logger.info(f"[API] Creating subscription plan | plan_id={plan_id} | tier={tier.value}")
         plan = await payment_service.create_subscription_plan(
             plan_id=plan_id,
             name=name,
@@ -210,10 +205,10 @@ async def create_plan(
             stripe_product_id=stripe_product_id,
             stripe_price_id=stripe_price_id
         )
-        api_logger.info(f"Subscription plan created successfully | plan_id={plan_id}")
+        logger.info(f"[API] Subscription plan created successfully | plan_id={plan_id}")
         return plan
     except Exception as e:
-        api_logger.error(f"Error creating plan | plan_id={plan_id} | error={str(e)}", exc_info=True)
+        logger.error(f"[API] Error creating plan | plan_id={plan_id} | error={str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 

@@ -19,6 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.service_discovery import get_service_discovery
 from .models import (
     DeviceRegistrationRequest, DeviceUpdateRequest, DeviceAuthRequest,
     DeviceCommandRequest, DeviceGroupRequest,
@@ -34,7 +35,6 @@ config = config_manager.get_service_config()
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("device_service")
-api_logger = setup_service_logger("device_service", "API")
 logger = app_logger  # for backward compatibility
 
 # Service instance
@@ -139,8 +139,14 @@ async def get_user_context(
     
     # 调用auth服务验证token
     try:
-        auth_service_url = "http://localhost:8202"
+        # Use Consul service discovery
+        if not hasattr(app.state, 'consul_registry') or not app.state.consul_registry:
+            raise HTTPException(status_code=503, detail="Service discovery not available")
         
+        auth_service_url = app.state.consul_registry.get_service_endpoint("auth_service")
+        if not auth_service_url:
+            raise HTTPException(status_code=503, detail="Auth service not available")
+
         if authorization:
             # 验证JWT token
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
@@ -344,9 +350,14 @@ async def authenticate_device(
 ):
     """设备认证 - 调用 auth_service 进行验证"""
     try:
-        # 调用 auth_service 的设备认证端点
-        auth_service_url = "http://localhost:8202"
+        # Use Consul service discovery
+        if not hasattr(app.state, 'consul_registry') or not app.state.consul_registry:
+            raise HTTPException(status_code=503, detail="Service discovery not available")
         
+        auth_service_url = app.state.consul_registry.get_service_endpoint("auth_service")
+        if not auth_service_url:
+            raise HTTPException(status_code=503, detail="Auth service not available")
+
         logger.info(f"Authenticating device {request.device_id} via auth service")
         
         response = requests.post(
