@@ -1,0 +1,1009 @@
+{
+	"info": {
+		"_postman_id": "vault-service-collection-v1",
+		"name": "Vault Service API",
+		"description": "Complete API collection for Vault Service - Secure credential and secret management with encryption, sharing, and blockchain verification.\n\n**Service Port**: 8214\n**Version**: 1.0.0\n**Status**: Core features tested ✅\n\n**Test Coverage:**\n- Health checks and service info\n- Secret CRUD operations\n- Encryption/Decryption\n- Secret sharing and permissions\n- Audit logging\n- Secret rotation\n- Statistics\n\n**Note**: Requires X-User-Id header for authentication",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8214",
+			"type": "string"
+		},
+		{
+			"key": "vault_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "db_vault_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "test_user_id",
+			"value": "test_user_vault_postman",
+			"type": "string"
+		},
+		{
+			"key": "share_user_id",
+			"value": "test_user_vault_shared",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Service is healthy\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql(\"healthy\");",
+									"    pm.expect(jsonData.service).to.eql(\"vault_service\");",
+									"    pm.expect(jsonData.port).to.eql(8214);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Basic health check endpoint."
+					},
+					"response": []
+				},
+				{
+					"name": "Detailed Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Encryption is enabled\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.encryption).to.eql(\"enabled\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/detailed",
+							"host": ["{{base_url}}"],
+							"path": ["health", "detailed"]
+						},
+						"description": "Detailed health check including encryption and blockchain status."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Service Info",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Service info contains capabilities\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.eql(\"vault_service\");",
+									"    pm.expect(jsonData.capabilities.encryption).to.be.true;",
+									"    pm.expect(jsonData.capabilities.secret_storage).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/info",
+							"host": ["{{base_url}}"],
+							"path": ["info"]
+						},
+						"description": "Get service information including supported secret types and providers."
+					},
+					"response": []
+				}
+			],
+			"description": "Service health checks and information"
+		},
+		{
+			"name": "Secret Management",
+			"item": [
+				{
+					"name": "Create API Key Secret",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test(\"Secret created successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('vault_id');",
+									"    pm.expect(jsonData.secret_type).to.eql('api_key');",
+									"    ",
+									"    pm.collectionVariables.set('vault_id', jsonData.vault_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"OpenAI API Key\",\n  \"description\": \"Production OpenAI API key\",\n  \"secret_type\": \"api_key\",\n  \"provider\": \"openai\",\n  \"secret_value\": \"sk-proj-test1234567890abcdefghijklmnopqrstuvwxyz\",\n  \"tags\": [\"openai\", \"production\", \"api\"],\n  \"metadata\": {\n    \"environment\": \"production\",\n    \"team\": \"engineering\"\n  },\n  \"rotation_enabled\": true,\n  \"rotation_days\": 90\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets"]
+						},
+						"description": "Create a new encrypted API key secret."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Database Credential",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test(\"Database credential created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.secret_type).to.eql('database_credential');",
+									"    ",
+									"    pm.collectionVariables.set('db_vault_id', jsonData.vault_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Production PostgreSQL\",\n  \"description\": \"Main database credentials\",\n  \"secret_type\": \"database_credential\",\n  \"provider\": \"custom\",\n  \"secret_value\": \"postgresql://user:SecureP@ssw0rd!@db.example.com:5432/maindb\",\n  \"tags\": [\"database\", \"postgresql\", \"production\"],\n  \"metadata\": {\n    \"db_type\": \"postgresql\",\n    \"host\": \"db.example.com\",\n    \"database\": \"maindb\"\n  },\n  \"rotation_enabled\": true,\n  \"rotation_days\": 30\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets"]
+						},
+						"description": "Create database credentials secret."
+					},
+					"response": []
+				},
+				{
+					"name": "Create AWS Credential",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"AWS Access Keys\",\n  \"description\": \"Production AWS credentials\",\n  \"secret_type\": \"aws_credential\",\n  \"provider\": \"aws\",\n  \"secret_value\": \"{\\\"access_key\\\":\\\"AKIAIOSFODNN7EXAMPLE\\\",\\\"secret_key\\\":\\\"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\\\"}\",\n  \"tags\": [\"aws\", \"production\", \"cloud\"],\n  \"metadata\": {\n    \"region\": \"us-east-1\",\n    \"account_id\": \"123456789012\"\n  },\n  \"rotation_enabled\": true,\n  \"rotation_days\": 60\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets"]
+						},
+						"description": "Create AWS credentials secret."
+					},
+					"response": []
+				},
+				{
+					"name": "List All Secrets",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns paginated results\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('items');",
+									"    pm.expect(jsonData).to.have.property('total');",
+									"    pm.expect(jsonData).to.have.property('page');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets?page=1&page_size=20",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "page_size",
+									"value": "20"
+								}
+							]
+						},
+						"description": "List all secrets with pagination."
+					},
+					"response": []
+				},
+				{
+					"name": "Filter Secrets by Type",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns only API keys\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.items.length > 0) {",
+									"        jsonData.items.forEach(function(item) {",
+									"            pm.expect(item.secret_type).to.eql('api_key');",
+									"        });",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets?secret_type=api_key&page=1&page_size=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets"],
+							"query": [
+								{
+									"key": "secret_type",
+									"value": "api_key"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "page_size",
+									"value": "10"
+								}
+							]
+						},
+						"description": "Filter secrets by type."
+					},
+					"response": []
+				},
+				{
+					"name": "Filter Secrets by Tags",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets?tags=production,api",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets"],
+							"query": [
+								{
+									"key": "tags",
+									"value": "production,api"
+								}
+							]
+						},
+						"description": "Filter secrets by tags."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Secret (Encrypted)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Secret is encrypted\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.secret_value).to.eql('[ENCRYPTED]');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{vault_id}}?decrypt=false",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{vault_id}}"],
+							"query": [
+								{
+									"key": "decrypt",
+									"value": "false"
+								}
+							]
+						},
+						"description": "Get secret without decryption."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Secret (Decrypted)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Secret is decrypted\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.secret_value).to.not.eql('[ENCRYPTED]');",
+									"    pm.expect(jsonData.secret_value).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{vault_id}}?decrypt=true",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{vault_id}}"],
+							"query": [
+								{
+									"key": "decrypt",
+									"value": "true"
+								}
+							]
+						},
+						"description": "Get and decrypt secret."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Secret Metadata",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Secret updated\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.name).to.include('Updated');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"OpenAI API Key (Updated)\",\n  \"description\": \"Updated production OpenAI API key\",\n  \"tags\": [\"openai\", \"production\", \"api\", \"updated\"],\n  \"metadata\": {\n    \"environment\": \"production\",\n    \"team\": \"engineering\",\n    \"last_updated\": \"2024-10-14\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{vault_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{vault_id}}"]
+						},
+						"description": "Update secret metadata (non-secret fields)."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Secret Value",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Version incremented\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.version).to.be.above(1);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"secret_value\": \"sk-proj-new1234567890abcdefghijklmnopqrstuvwxyzABCDEF\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{vault_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{vault_id}}"]
+						},
+						"description": "Update the secret value (creates new version)."
+					},
+					"response": []
+				},
+				{
+					"name": "Rotate Secret",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Secret rotated\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.version).to.be.above(1);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{db_vault_id}}/rotate?new_secret_value=postgresql://user:NewRotatedP@ssw0rd!@db.example.com:5432/maindb",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{db_vault_id}}", "rotate"],
+							"query": [
+								{
+									"key": "new_secret_value",
+									"value": "postgresql://user:NewRotatedP@ssw0rd!@db.example.com:5432/maindb"
+								}
+							]
+						},
+						"description": "Rotate secret to a new value."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Secret",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Secret deleted\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('deleted');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{db_vault_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{db_vault_id}}"]
+						},
+						"description": "Delete (soft delete) a secret."
+					},
+					"response": []
+				}
+			],
+			"description": "Secret CRUD operations"
+		},
+		{
+			"name": "Sharing & Permissions",
+			"item": [
+				{
+					"name": "Share Secret (Read-Only)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Secret shared successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('share_id');",
+									"    pm.expect(jsonData.permission_level).to.eql('read');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"shared_with_user_id\": \"{{share_user_id}}\",\n  \"permission_level\": \"read\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{vault_id}}/share",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{vault_id}}", "share"]
+						},
+						"description": "Share secret with another user (read-only)."
+					},
+					"response": []
+				},
+				{
+					"name": "Share Secret (Read-Write)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Read-write permission granted\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.permission_level).to.eql('read_write');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"shared_with_user_id\": \"test_user_vault_admin\",\n  \"permission_level\": \"read_write\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{vault_id}}/share",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{vault_id}}", "share"]
+						},
+						"description": "Share secret with read-write permission."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Shared Secrets",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns array of shared secrets\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/shared",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "shared"]
+						},
+						"description": "Get secrets shared with the current user."
+					},
+					"response": []
+				}
+			],
+			"description": "Secret sharing and permission management"
+		},
+		{
+			"name": "Audit & Statistics",
+			"item": [
+				{
+					"name": "Get Audit Logs",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns audit log array\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/audit-logs?page=1&page_size=50",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "audit-logs"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "page_size",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Get all audit logs for the user."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Audit Logs for Specific Vault",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/audit-logs?vault_id={{vault_id}}&page=1&page_size=20",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "audit-logs"],
+							"query": [
+								{
+									"key": "vault_id",
+									"value": "{{vault_id}}"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "page_size",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Get audit logs for a specific vault item."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Vault Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Statistics contain required fields\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('total_secrets');",
+									"    pm.expect(jsonData).to.have.property('active_secrets');",
+									"    pm.expect(jsonData).to.have.property('secrets_by_type');",
+									"    pm.expect(jsonData).to.have.property('secrets_by_provider');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/stats",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "stats"]
+						},
+						"description": "Get vault statistics for the user."
+					},
+					"response": []
+				}
+			],
+			"description": "Audit logs and statistics"
+		},
+		{
+			"name": "Testing & Utilities",
+			"item": [
+				{
+					"name": "Test Credential",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Test result returned\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"    pm.expect(jsonData).to.have.property('message');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{test_user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vault/secrets/{{vault_id}}/test",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vault", "secrets", "{{vault_id}}", "test"]
+						},
+						"description": "Test if a credential is valid and accessible."
+					},
+					"response": []
+				}
+			],
+			"description": "Testing and utility endpoints"
+		}
+	]
+}
+

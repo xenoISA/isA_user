@@ -1,0 +1,108 @@
+version: '3.8'
+
+# Docker Compose configuration for isA User Staging Environment
+# This file deploys all user microservices in a single container
+
+services:
+  # ============================================
+  # isA User Services (All-in-One)
+  # ============================================
+  user:
+    image: isa-user-staging:latest
+    platform: linux/amd64
+    container_name: user-staging
+    hostname: user-staging  # Set hostname for Consul registration
+    restart: unless-stopped
+
+    # Environment configuration
+    env_file:
+      - config/.env.staging
+
+    # Port mapping for all services
+    ports:
+      - "8201:8201"  # Auth Service
+      - "8202:8202"  # Account Service
+      - "8203:8203"  # Session Service
+      - "8204:8204"  # Authorization Service
+      - "8205:8205"  # Audit Service
+      - "8206:8206"  # Notification Service
+      - "8207:8207"  # Payment Service
+      - "8208:8208"  # Wallet Service
+      - "8209:8209"  # Storage Service
+      - "8210:8210"  # Order Service
+      - "8211:8211"  # Task Service
+      - "8212:8212"  # Organization Service
+      - "8213:8213"  # Invitation Service
+      - "8214:8214"  # Vault Service
+      - "8215:8215"  # Product Service
+      - "8216:8216"  # Billing Service
+      - "8217:8217"  # Calendar Service
+      - "8218:8218"  # Weather Service
+      - "8219:8219"  # Album Service
+      - "8220:8220"  # Device Service
+      - "8221:8221"  # OTA Service
+      - "8222:8222"  # Media Service
+      - "8223:8223"  # Memory Service
+      - "8225:8225"  # Telemetry Service
+      - "8230:8230"  # Event Service
+
+    # Volume mounts for logs and source code hot-reload
+    volumes:
+      - ../../:/app  # Mount source code for hot-reload
+      - user-logs:/var/log/isa-services
+      - supervisor-logs:/var/log/supervisor
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+    # Extra hosts to allow container to access host services
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service.name,service.type"
+        tag: "{{.Name}}/{{.ID}}"
+
+    # Network configuration - join the staging network
+    networks:
+      - staging-network
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  staging-network:
+    external: true
+    name: staging_staging-network
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  user-logs:
+    name: isa-user-staging-logs
+    driver: local
+
+  supervisor-logs:
+    name: isa-user-staging-supervisor-logs
+    driver: local

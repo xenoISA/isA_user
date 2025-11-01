@@ -1,46 +1,49 @@
 """
-Storage Repository
+Storage Repository - Data access layer for storage service
+Handles database operations for file storage, sharing, and quotas
 
-数据访问层，处理文件存储相关的数据库操作
-使用Supabase客户端进行数据库操作
+Uses PostgresClient with gRPC for PostgreSQL access
+Migrated from Supabase to PostgresClient - 2025-10-24
 """
 
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
-import uuid
-import json
-
-# Database client setup
+from datetime import datetime, timezone, timedelta
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.database.supabase_client import get_supabase_client
+from isa_common.postgres_client import PostgresClient
 from .models import (
     StoredFile, FileShare, StorageQuota,
-    FileStatus, StorageProvider, FileAccessLevel,
-    PhotoVersion, PhotoVersionType
+    FileStatus, StorageProvider, FileAccessLevel
 )
 
 logger = logging.getLogger(__name__)
 
 
 class StorageRepository:
-    """存储数据访问层"""
-    
+    """Storage repository - data access layer for file storage operations"""
+
     def __init__(self):
-        """初始化存储仓库"""
-        self.supabase = get_supabase_client()
-        # 表名定义 - 使用dev schema
+        """Initialize storage repository with PostgresClient"""
+        # TODO: Use Consul service discovery instead of hardcoded host/port
+        self.db = PostgresClient(
+            host='isa-postgres-grpc',
+            port=50061,
+            user_id='storage_service'
+        )
+        # Table names (storage schema)
+        self.schema = "storage"
         self.files_table = "storage_files"
-        self.shares_table = "file_shares" 
+        self.shares_table = "file_shares"
         self.quotas_table = "storage_quotas"
-    
-    # ==================== 文件操作 ====================
-    
-    async def create_file_record(self, file_data: StoredFile) -> StoredFile:
-        """创建文件记录"""
+        self.intelligence_table = "storage_intelligence_index"
+
+    # ==================== Storage Files Operations ====================
+
+    async def create_file_record(self, file_data: StoredFile) -> Optional[StoredFile]:
+        """Create a new file record in storage_files table"""
         try:
             data = {
                 "file_id": file_data.file_id,
@@ -51,499 +54,529 @@ class StorageRepository:
                 "file_size": file_data.file_size,
                 "content_type": file_data.content_type,
                 "file_extension": file_data.file_extension,
-                "storage_provider": file_data.storage_provider.value,
+                "storage_provider": file_data.storage_provider.value if hasattr(file_data.storage_provider, 'value') else file_data.storage_provider,
                 "bucket_name": file_data.bucket_name,
                 "object_name": file_data.object_name,
-                "status": file_data.status.value,
-                "access_level": file_data.access_level.value,
+                "status": file_data.status.value if hasattr(file_data.status, 'value') else file_data.status,
+                "access_level": file_data.access_level.value if hasattr(file_data.access_level, 'value') else file_data.access_level,
                 "checksum": file_data.checksum,
                 "etag": file_data.etag,
                 "version_id": file_data.version_id,
-                "metadata": file_data.metadata,
-                "tags": file_data.tags,
+                "metadata": file_data.metadata or {},
+                "tags": file_data.tags or [],
                 "download_url": file_data.download_url,
                 "download_url_expires_at": file_data.download_url_expires_at.isoformat() if file_data.download_url_expires_at else None,
-                "uploaded_at": file_data.uploaded_at.isoformat() if file_data.uploaded_at else datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
+                "uploaded_at": (file_data.uploaded_at or datetime.now(timezone.utc)).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
-            
-            result = self.supabase.table(self.files_table).insert(data).execute()
-            
-            if result.data:
-                return StoredFile.model_validate(result.data[0])
+
+            with self.db:
+                count = self.db.insert_into(self.files_table, [data], schema=self.schema)
+
+            if count and count > 0:
+                # Fetch the created file
+                return await self.get_file_by_id(file_data.file_id, file_data.user_id)
             return None
-                
+
         except Exception as e:
             logger.error(f"Error creating file record: {e}")
             raise
-    
+
     async def get_file_by_id(self, file_id: str, user_id: Optional[str] = None) -> Optional[StoredFile]:
-        """根据文件ID获取文件记录"""
+        """Get file record by file_id"""
         try:
-            query = self.supabase.table(self.files_table).select("*").eq("file_id", file_id)
-            
-            # 排除已删除的文件
-            query = query.neq("status", FileStatus.DELETED.value)
-            
             if user_id:
-                query = query.eq("user_id", user_id)
-            
-            result = query.single().execute()
-            
-            if result.data:
-                return StoredFile.model_validate(result.data)
+                query = f"""
+                    SELECT * FROM {self.schema}.{self.files_table}
+                    WHERE file_id = $1 AND user_id = $2 AND status != 'deleted'
+                """
+                params = [file_id, user_id]
+            else:
+                query = f"""
+                    SELECT * FROM {self.schema}.{self.files_table}
+                    WHERE file_id = $1 AND status != 'deleted'
+                """
+                params = [file_id]
+
+            with self.db:
+                result = self.db.query_row(query, params, schema=self.schema)
+
+            if result:
+                return StoredFile.model_validate(result)
             return None
-                
+
         except Exception as e:
-            if "No rows found" in str(e):
-                return None
-            logger.error(f"Error getting file: {e}")
-            raise
-    
+            logger.error(f"Error getting file by ID {file_id}: {e}")
+            return None
+
     async def list_user_files(
         self,
         user_id: str,
         organization_id: Optional[str] = None,
         status: Optional[FileStatus] = None,
+        content_type: Optional[str] = None,
         prefix: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[StoredFile]:
-        """列出用户文件"""
+        """List files for a user with optional filters"""
         try:
-            query = self.supabase.table(self.files_table).select("*").eq("user_id", user_id)
-            
+            conditions = ["user_id = $1", "status != 'deleted'"]
+            params = [user_id]
+            param_count = 1
+
             if organization_id:
-                query = query.eq("organization_id", organization_id)
-            
+                param_count += 1
+                conditions.append(f"organization_id = ${param_count}")
+                params.append(organization_id)
+
             if status:
-                query = query.eq("status", status.value)
-            else:
-                # 默认排除已删除的文件
-                query = query.neq("status", FileStatus.DELETED.value)
-            
+                param_count += 1
+                status_value = status.value if hasattr(status, 'value') else status
+                conditions.append(f"status = ${param_count}")
+                params.append(status_value)
+
+            if content_type:
+                param_count += 1
+                conditions.append(f"content_type LIKE ${param_count}")
+                params.append(f"{content_type}%")
+
             if prefix:
-                query = query.ilike("file_name", f"{prefix}%")
-            
-            # 排序和分页
-            query = query.order("uploaded_at", desc=True).range(offset, offset + limit - 1)
-            
-            result = query.execute()
-            
-            if result.data:
-                return [StoredFile.model_validate(row) for row in result.data]
-            return []
-                
+                param_count += 1
+                conditions.append(f"file_path LIKE ${param_count}")
+                params.append(f"{prefix}%")
+
+            where_clause = " AND ".join(conditions)
+            query = f"""
+                SELECT * FROM {self.schema}.{self.files_table}
+                WHERE {where_clause}
+                ORDER BY uploaded_at DESC
+                LIMIT {limit} OFFSET {offset}
+            """
+
+            with self.db:
+                results = self.db.query(query, params, schema=self.schema)
+
+            return [StoredFile.model_validate(row) for row in results]
+
         except Exception as e:
-            logger.error(f"Error listing files: {e}")
+            logger.error(f"Error listing user files: {e}")
             return []
-    
+
     async def update_file_status(
         self,
         file_id: str,
+        user_id: str,
         status: FileStatus,
-        error_message: Optional[str] = None
+        download_url: Optional[str] = None,
+        download_url_expires_at: Optional[datetime] = None
     ) -> bool:
-        """更新文件状态"""
+        """Update file status and optionally download URL"""
         try:
-            update_data = {
-                "status": status.value,
-                "updated_at": datetime.utcnow().isoformat()
-            }
-            
-            if status == FileStatus.DELETED:
-                update_data["deleted_at"] = datetime.utcnow().isoformat()
-            
-            result = self.supabase.table(self.files_table).update(update_data).eq("file_id", file_id).execute()
-            
-            return len(result.data) > 0 if result.data else False
-                
+            status_value = status.value if hasattr(status, 'value') else status
+
+            if download_url:
+                query = f"""
+                    UPDATE {self.schema}.{self.files_table}
+                    SET status = $1, download_url = $2, download_url_expires_at = $3, updated_at = $4
+                    WHERE file_id = $5 AND user_id = $6
+                """
+                params = [status_value, download_url, download_url_expires_at, datetime.now(timezone.utc), file_id, user_id]
+            else:
+                query = f"""
+                    UPDATE {self.schema}.{self.files_table}
+                    SET status = $1, updated_at = $2
+                    WHERE file_id = $3 AND user_id = $4
+                """
+                params = [status_value, datetime.now(timezone.utc), file_id, user_id]
+
+            with self.db:
+                count = self.db.execute(query, params, schema=self.schema)
+
+            return count > 0
+
         except Exception as e:
             logger.error(f"Error updating file status: {e}")
-            return False
-    
+            raise
+
     async def delete_file(self, file_id: str, user_id: str) -> bool:
-        """删除文件（软删除）"""
+        """Soft delete a file (set status to deleted)"""
         try:
-            update_data = {
-                "status": FileStatus.DELETED.value,
-                "deleted_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
-            }
-            
-            result = self.supabase.table(self.files_table).update(update_data).eq("file_id", file_id).eq("user_id", user_id).execute()
-            
-            return len(result.data) > 0 if result.data else False
-                
+            query = f"""
+                UPDATE {self.schema}.{self.files_table}
+                SET status = 'deleted', deleted_at = $1, updated_at = $1
+                WHERE file_id = $2 AND user_id = $3
+            """
+            params = [datetime.now(timezone.utc), file_id, user_id]
+
+            with self.db:
+                count = self.db.execute(query, params, schema=self.schema)
+
+            return count > 0
+
         except Exception as e:
             logger.error(f"Error deleting file: {e}")
-            return False
-    
-    # ==================== 文件分享操作 ====================
-    
-    async def create_file_share(self, share_data: FileShare) -> FileShare:
-        """创建文件分享"""
+            raise
+
+    # ==================== File Shares Operations ====================
+
+    async def create_file_share(self, share_data: FileShare) -> Optional[FileShare]:
+        """Create a new file share record"""
         try:
-            share_id = f"share_{uuid.uuid4().hex[:12]}"
-            
+            # Convert permissions dict to array format for PostgreSQL
+            permissions_array = []
+            if share_data.permissions:
+                if share_data.permissions.get("view", False):
+                    permissions_array.append("read")
+                if share_data.permissions.get("download", False):
+                    permissions_array.append("download")
+                if share_data.permissions.get("delete", False):
+                    permissions_array.append("delete")
+
             data = {
-                "share_id": share_id,
+                "share_id": share_data.share_id,
                 "file_id": share_data.file_id,
                 "shared_by": share_data.shared_by,
                 "shared_with": share_data.shared_with,
                 "shared_with_email": share_data.shared_with_email,
-                "access_token": share_data.access_token,
+                "access_token": share_data.access_token or "",
                 "password": share_data.password,
-                "permissions": share_data.permissions,
+                "permissions": permissions_array or ["read"],
                 "max_downloads": share_data.max_downloads,
-                "download_count": 0,
+                "download_count": share_data.download_count or 0,
                 "expires_at": share_data.expires_at.isoformat() if share_data.expires_at else None,
-                "is_active": True,
-                "created_at": datetime.utcnow().isoformat()
+                "is_active": share_data.is_active if hasattr(share_data, 'is_active') else True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "accessed_at": None
             }
-            
-            result = self.supabase.table(self.shares_table).insert(data).execute()
-            
-            if result.data:
-                share_data.share_id = share_id
-                return FileShare.model_validate(result.data[0])
+
+            with self.db:
+                count = self.db.insert_into(self.shares_table, [data], schema=self.schema)
+
+            logger.info(f"Insert file share result: count={count}, share_id={share_data.share_id}")
+
+            if count and count > 0:
+                return await self.get_file_share(share_data.share_id)
+
+            logger.warning(f"Failed to create file share, count={count}")
             return None
-                
+
         except Exception as e:
             logger.error(f"Error creating file share: {e}")
             raise
-    
+
     async def get_file_share(
         self,
-        share_id: str,
-        access_token: Optional[str] = None
+        share_id: Optional[str] = None,
+        file_id: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> Optional[FileShare]:
-        """获取文件分享"""
+        """Get file share by share_id or file_id + user_id"""
         try:
-            query = self.supabase.table(self.shares_table).select("*").eq("share_id", share_id).eq("is_active", True)
-            
-            # 检查是否过期
-            query = query.or_(f"expires_at.is.null,expires_at.gt.{datetime.utcnow().isoformat()}")
-            
-            if access_token:
-                query = query.eq("access_token", access_token)
-            
-            result = query.single().execute()
-            
-            if result.data:
-                return FileShare.model_validate(result.data)
-            return None
-                
-        except Exception as e:
-            if "No rows found" in str(e):
+            logger.info(f"Getting file share: share_id={share_id}, file_id={file_id}, user_id={user_id}")
+
+            if share_id:
+                query = f"""
+                    SELECT * FROM {self.schema}.{self.shares_table}
+                    WHERE share_id = $1 AND is_active = TRUE
+                """
+                params = [share_id]
+            elif file_id and user_id:
+                query = f"""
+                    SELECT * FROM {self.schema}.{self.shares_table}
+                    WHERE file_id = $1 AND shared_with = $2 AND is_active = TRUE
+                """
+                params = [file_id, user_id]
+            else:
+                logger.error("Either share_id or (file_id + user_id) must be provided")
                 return None
-            logger.error(f"Error getting file share: {e}")
-            raise
-    
-    async def increment_share_download(self, share_id: str) -> bool:
-        """增加分享下载次数"""
+
+            with self.db:
+                result = self.db.query_row(query, params, schema=self.schema)
+
+            logger.info(f"Query result for share_id={share_id}: {result}")
+
+            if result:
+                # Convert permissions array to dict format
+                if 'permissions' in result:
+                    permissions_value = result['permissions']
+                    # Handle both list and protobuf ListValue
+                    if isinstance(permissions_value, list):
+                        permissions_array = permissions_value
+                    else:
+                        # Convert protobuf ListValue to list
+                        permissions_array = []
+                        try:
+                            for item in permissions_value:
+                                if hasattr(item, 'string_value'):
+                                    permissions_array.append(item.string_value)
+                                else:
+                                    permissions_array.append(str(item))
+                        except:
+                            permissions_array = []
+
+                    result['permissions'] = {
+                        "view": "read" in permissions_array or "view" in permissions_array,
+                        "download": "download" in permissions_array,
+                        "delete": "delete" in permissions_array
+                    }
+
+                share = FileShare.model_validate(result)
+                logger.info(f"Validated FileShare: {share}")
+                return share
+
+            logger.warning(f"No share found for share_id={share_id}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting file share (share_id={share_id}): {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
+    async def list_file_shares(
+        self,
+        file_id: Optional[str] = None,
+        shared_by: Optional[str] = None,
+        shared_with: Optional[str] = None
+    ) -> List[FileShare]:
+        """List file shares with optional filters"""
         try:
-            # 先获取当前下载次数
-            result = self.supabase.table(self.shares_table).select("download_count").eq("share_id", share_id).single().execute()
-            
-            if result.data:
-                current_count = result.data.get("download_count", 0)
-                
-                update_data = {
-                    "download_count": current_count + 1,
-                    "accessed_at": datetime.utcnow().isoformat()
-                }
-                
-                result = self.supabase.table(self.shares_table).update(update_data).eq("share_id", share_id).eq("is_active", True).execute()
-                
-                return len(result.data) > 0 if result.data else False
-            return False
-                
+            conditions = ["is_active = TRUE"]
+            params = []
+            param_count = 0
+
+            if file_id:
+                param_count += 1
+                conditions.append(f"file_id = ${param_count}")
+                params.append(file_id)
+
+            if shared_by:
+                param_count += 1
+                conditions.append(f"shared_by = ${param_count}")
+                params.append(shared_by)
+
+            if shared_with:
+                param_count += 1
+                conditions.append(f"shared_with = ${param_count}")
+                params.append(shared_with)
+
+            where_clause = " AND ".join(conditions)
+            query = f"""
+                SELECT * FROM {self.schema}.{self.shares_table}
+                WHERE {where_clause}
+                ORDER BY created_at DESC
+            """
+
+            with self.db:
+                results = self.db.query(query, params, schema=self.schema)
+
+            # Convert permissions array to dict format for each result
+            shares = []
+            for row in results:
+                if 'permissions' in row:
+                    permissions_value = row['permissions']
+                    # Handle both list and protobuf ListValue
+                    if isinstance(permissions_value, list):
+                        permissions_array = permissions_value
+                    else:
+                        # Convert protobuf ListValue to list
+                        permissions_array = []
+                        try:
+                            for item in permissions_value:
+                                if hasattr(item, 'string_value'):
+                                    permissions_array.append(item.string_value)
+                                else:
+                                    permissions_array.append(str(item))
+                        except:
+                            permissions_array = []
+
+                    row['permissions'] = {
+                        "view": "read" in permissions_array or "view" in permissions_array,
+                        "download": "download" in permissions_array,
+                        "delete": "delete" in permissions_array
+                    }
+                shares.append(FileShare.model_validate(row))
+
+            return shares
+
+        except Exception as e:
+            logger.error(f"Error listing file shares: {e}")
+            return []
+
+    async def increment_share_download(self, share_id: str) -> bool:
+        """Increment download count and update accessed_at for a share"""
+        try:
+            query = f"""
+                UPDATE {self.schema}.{self.shares_table}
+                SET download_count = download_count + 1, accessed_at = $1
+                WHERE share_id = $2
+            """
+            params = [datetime.now(timezone.utc), share_id]
+
+            with self.db:
+                count = self.db.execute(query, params, schema=self.schema)
+
+            return count > 0
+
         except Exception as e:
             logger.error(f"Error incrementing share download: {e}")
             return False
-    
-    # ==================== 配额操作 ====================
-    
+
+    # ==================== Storage Quotas Operations ====================
+
     async def get_storage_quota(
         self,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None
+        quota_type: str,
+        entity_id: str
     ) -> Optional[StorageQuota]:
-        """获取存储配额"""
+        """Get storage quota for user or organization"""
         try:
-            query = self.supabase.table(self.quotas_table).select("*").eq("is_active", True)
-            
-            if user_id:
-                query = query.eq("user_id", user_id)
-            
-            if organization_id:
-                query = query.eq("organization_id", organization_id)
-            
-            if not user_id and not organization_id:
-                return None
-            
-            result = query.single().execute()
-            
-            if result.data:
-                return StorageQuota.model_validate(result.data)
+            query = f"""
+                SELECT * FROM {self.schema}.{self.quotas_table}
+                WHERE quota_type = $1 AND entity_id = $2 AND is_active = TRUE
+            """
+            params = [quota_type, entity_id]
+
+            with self.db:
+                result = self.db.query_row(query, params, schema=self.schema)
+
+            if result:
+                return StorageQuota.model_validate(result)
             return None
-                
+
         except Exception as e:
-            if "No rows found" in str(e):
-                return None
             logger.error(f"Error getting storage quota: {e}")
             return None
-    
-    async def update_storage_usage(
+
+    async def create_storage_quota(
         self,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None,
-        bytes_delta: int = 0,
-        file_count_delta: int = 0
-    ) -> bool:
-        """更新存储使用量"""
+        quota_type: str,
+        entity_id: str,
+        total_quota_bytes: int = 10737418240,  # 10GB default
+        max_file_size: int = 104857600,  # 100MB default
+        max_file_count: int = 10000
+    ) -> Optional[StorageQuota]:
+        """Create a new storage quota record"""
         try:
-            # 先获取当前使用量
-            query = self.supabase.table(self.quotas_table).select("used_bytes, file_count")
-            
-            if user_id:
-                query = query.eq("user_id", user_id)
-            
-            if organization_id:
-                query = query.eq("organization_id", organization_id)
-            
-            if not user_id and not organization_id:
-                return False
-            
-            result = query.single().execute()
-            
-            if result.data:
-                current_bytes = result.data.get("used_bytes", 0)
-                current_count = result.data.get("file_count", 0)
-                
-                update_data = {
-                    "used_bytes": max(0, current_bytes + bytes_delta),  # 确保不会变成负数
-                    "file_count": max(0, current_count + file_count_delta),
-                    "updated_at": datetime.utcnow().isoformat()
-                }
-                
-                query = self.supabase.table(self.quotas_table).update(update_data)
-                
-                if user_id:
-                    query = query.eq("user_id", user_id)
-                if organization_id:
-                    query = query.eq("organization_id", organization_id)
-                
-                result = query.execute()
-                return len(result.data) > 0 if result.data else False
-            else:
-                # 如果没有配额记录，创建一个默认的
-                if user_id:
-                    default_quota = {
-                        "user_id": user_id,
-                        "organization_id": organization_id,
-                        "total_quota_bytes": 10 * 1024 * 1024 * 1024,  # 10GB
-                        "used_bytes": max(0, bytes_delta),
-                        "file_count": max(0, file_count_delta),
-                        "is_active": True,
-                        "updated_at": datetime.utcnow().isoformat()
-                    }
-                    result = self.supabase.table(self.quotas_table).insert(default_quota).execute()
-                    return len(result.data) > 0 if result.data else False
-            
-            return False
-                
-        except Exception as e:
-            logger.error(f"Error updating storage usage: {e}")
-            return False
-    
-    async def get_storage_stats(
-        self,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """获取存储统计信息"""
-        try:
-            # 获取文件列表
-            query = self.supabase.table(self.files_table).select("file_size, content_type, status")
-            
-            if user_id:
-                query = query.eq("user_id", user_id)
-            
-            if organization_id:
-                query = query.eq("organization_id", organization_id)
-            
-            # 排除已删除的文件
-            query = query.neq("status", FileStatus.DELETED.value)
-            
-            result = query.execute()
-            
-            # 统计信息
-            stats = {
+            data = {
+                "quota_type": quota_type,
+                "entity_id": entity_id,
+                "total_quota_bytes": total_quota_bytes,
+                "used_bytes": 0,
                 "file_count": 0,
-                "total_size": 0,
-                "by_type": {},
-                "by_status": {}
+                "max_file_size": max_file_size,
+                "max_file_count": max_file_count,
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
             }
-            
-            if result.data:
-                stats["file_count"] = len(result.data)
-                
-                for file in result.data:
-                    # 总大小
-                    file_size = file.get("file_size", 0)
-                    stats["total_size"] += file_size
-                    
-                    # 按类型统计
-                    content_type = file.get("content_type", "unknown")
-                    if content_type not in stats["by_type"]:
-                        stats["by_type"][content_type] = {"count": 0, "total_size": 0}
-                    stats["by_type"][content_type]["count"] += 1
-                    stats["by_type"][content_type]["total_size"] += file_size
-                    
-                    # 按状态统计
-                    status = file.get("status", "unknown")
-                    if status not in stats["by_status"]:
-                        stats["by_status"][status] = 0
-                    stats["by_status"][status] += 1
-            
-            return stats
-                
-        except Exception as e:
-            logger.error(f"Error getting storage stats: {e}")
-            return {
-                "file_count": 0,
-                "total_size": 0,
-                "by_type": {},
-                "by_status": {}
-            }
-    
-    # ==================== Photo Version Management ====================
-    
-    # 简单的内存存储用于演示
-    _photo_versions = {}  # {version_id: PhotoVersion}
-    _photo_versions_by_photo = {}  # {photo_id: [version_ids]}
-    
-    async def save_photo_version(self, photo_version: PhotoVersion) -> PhotoVersion:
-        """保存照片版本记录"""
-        try:
-            # 保存版本到内存
-            StorageRepository._photo_versions[photo_version.version_id] = photo_version
-            
-            # 更新照片的版本列表
-            if photo_version.photo_id not in StorageRepository._photo_versions_by_photo:
-                StorageRepository._photo_versions_by_photo[photo_version.photo_id] = []
-            StorageRepository._photo_versions_by_photo[photo_version.photo_id].append(photo_version.version_id)
-            
-            logger.info(f"Saving photo version: {photo_version.version_id}")
-            return photo_version
-        except Exception as e:
-            logger.error(f"Error saving photo version: {e}")
-            raise
-    
-    async def get_photo_versions(self, photo_id: str, user_id: str) -> List[PhotoVersion]:
-        """获取照片的所有版本"""
-        try:
-            logger.info(f"Getting photo versions for photo: {photo_id}")
-            
-            # 获取该照片的所有版本ID
-            version_ids = StorageRepository._photo_versions_by_photo.get(photo_id, [])
-            
-            # 获取版本详情并筛选用户
-            versions = []
-            for version_id in version_ids:
-                version = StorageRepository._photo_versions.get(version_id)
-                if version and version.user_id == user_id:
-                    versions.append(version)
-            
-            return versions
-        except Exception as e:
-            logger.error(f"Error getting photo versions: {e}")
-            raise
-    
-    async def get_photo_version(self, version_id: str, user_id: str) -> Optional[PhotoVersion]:
-        """获取单个照片版本"""
-        try:
-            logger.info(f"Getting photo version: {version_id}")
-            version = StorageRepository._photo_versions.get(version_id)
-            if version and version.user_id == user_id:
-                return version
+
+            with self.db:
+                count = self.db.insert_into(self.quotas_table, [data], schema=self.schema)
+
+            if count > 0:
+                return await self.get_storage_quota(quota_type, entity_id)
             return None
+
         except Exception as e:
-            logger.error(f"Error getting photo version: {e}")
-            raise
-    
-    async def get_photo_info(self, photo_id: str) -> Dict[str, Any]:
-        """获取照片基本信息"""
-        try:
-            logger.info(f"Getting photo info: {photo_id}")
-            return {
-                "title": "Test Photo",
-                "original_file_id": f"file_{photo_id}",
-                "current_version_id": f"ver_{photo_id}_original",
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-        except Exception as e:
-            logger.error(f"Error getting photo info: {e}")
-            raise
-    
-    async def update_photo_current_version(self, photo_id: str, version_id: str) -> bool:
-        """更新照片的当前版本"""
-        try:
-            logger.info(f"Updating photo {photo_id} current version to {version_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating photo current version: {e}")
-            raise
-    
-    async def update_version_current_flags(self, photo_id: str, current_version_id: str) -> bool:
-        """更新版本的当前标志"""
-        try:
-            logger.info(f"Updating version current flags for photo {photo_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating version current flags: {e}")
-            raise
-    
-    async def get_original_version(self, photo_id: str) -> Optional[PhotoVersion]:
-        """获取原始版本"""
-        try:
-            logger.info(f"Getting original version for photo: {photo_id}")
-            return PhotoVersion(
-                version_id=f"ver_{photo_id}_original",
-                photo_id=photo_id,
-                user_id="test_user",
-                version_name="Original",
-                version_type=PhotoVersionType.ORIGINAL,
-                file_id=f"file_{photo_id}_original",
-                cloud_url="https://example.com/original.jpg",
-                file_size=1024000,
-                is_current=True,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
-        except Exception as e:
-            logger.error(f"Error getting original version: {e}")
-            raise
-    
-    async def delete_photo_version(self, version_id: str) -> bool:
-        """删除照片版本"""
-        try:
-            logger.info(f"Deleting photo version: {version_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error deleting photo version: {e}")
+            logger.error(f"Error creating storage quota: {e}")
             raise
 
-    # ==================== 数据库初始化 ====================
-    
-    async def check_connection(self) -> bool:
-        """检查数据库连接"""
+    async def update_storage_usage(
+        self,
+        quota_type: str,
+        entity_id: str,
+        bytes_delta: int,
+        file_count_delta: int = 0
+    ) -> bool:
+        """Update storage usage (add or subtract bytes and file count)"""
         try:
-            result = self.supabase.table(self.files_table).select("count").limit(1).execute()
-            return True
+            query = f"""
+                UPDATE {self.schema}.{self.quotas_table}
+                SET
+                    used_bytes = used_bytes + $1,
+                    file_count = file_count + $2,
+                    updated_at = $3
+                WHERE quota_type = $4 AND entity_id = $5
+            """
+            params = [bytes_delta, file_count_delta, datetime.now(timezone.utc), quota_type, entity_id]
+
+            with self.db:
+                count = self.db.execute(query, params, schema=self.schema)
+
+            return count > 0
+
+        except Exception as e:
+            logger.error(f"Error updating storage usage: {e}")
+            raise
+
+    async def get_storage_stats(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get storage statistics for user and optionally organization"""
+        try:
+            stats = {
+                "user_quota": None,
+                "org_quota": None,
+                "total_files": 0,
+                "total_size": 0
+            }
+
+            # Get user quota
+            user_quota = await self.get_storage_quota("user", user_id)
+            if user_quota:
+                stats["user_quota"] = {
+                    "used_bytes": user_quota.used_bytes,
+                    "total_quota_bytes": user_quota.total_quota_bytes,
+                    "file_count": user_quota.file_count,
+                    "max_file_count": user_quota.max_file_count,
+                    "usage_percent": (user_quota.used_bytes / user_quota.total_quota_bytes * 100) if user_quota.total_quota_bytes > 0 else 0
+                }
+
+            # Get org quota if organization_id provided
+            if organization_id:
+                org_quota = await self.get_storage_quota("organization", organization_id)
+                if org_quota:
+                    stats["org_quota"] = {
+                        "used_bytes": org_quota.used_bytes,
+                        "total_quota_bytes": org_quota.total_quota_bytes,
+                        "file_count": org_quota.file_count,
+                        "max_file_count": org_quota.max_file_count,
+                        "usage_percent": (org_quota.used_bytes / org_quota.total_quota_bytes * 100) if org_quota.total_quota_bytes > 0 else 0
+                    }
+
+            # Get actual file stats from storage_files
+            query = f"""
+                SELECT COUNT(*) as file_count, COALESCE(SUM(file_size), 0) as total_size
+                FROM {self.schema}.{self.files_table}
+                WHERE user_id = $1 AND status = 'active'
+            """
+            params = [user_id]
+
+            with self.db:
+                result = self.db.query_row(query, params, schema=self.schema)
+
+            if result:
+                stats["total_files"] = result.get("file_count", 0)
+                stats["total_size"] = result.get("total_size", 0)
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error getting storage stats: {e}")
+            return stats
+
+    # ==================== Utility Methods ====================
+
+    async def check_connection(self) -> bool:
+        """Check database connection"""
+        try:
+            with self.db:
+                result = self.db.query_row("SELECT 1 as connected", [])
+            return result is not None
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")
             return False

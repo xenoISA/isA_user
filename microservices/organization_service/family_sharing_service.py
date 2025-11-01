@@ -7,7 +7,7 @@ Family Sharing Service
 
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from .family_sharing_models import (
@@ -18,6 +18,8 @@ from .family_sharing_models import (
     SharingUsageStatsResponse,
     SharingResourceType, SharingPermissionLevel, SharingStatus
 )
+# Import event bus components
+from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +47,16 @@ class SharingQuotaExceededError(FamilySharingServiceError):
 class FamilySharingService:
     """家庭共享服务"""
 
-    def __init__(self, repository=None):
+    def __init__(self, repository=None, event_bus=None):
         """
         初始化共享服务
 
         Args:
             repository: 数据访问层（暂时传入 organization_repository，后续可能需要专门的 sharing_repository）
+            event_bus: NATS event bus for publishing events
         """
         self.repository = repository
+        self.event_bus = event_bus
 
     # ============ 共享资源管理 ============
 
@@ -87,7 +91,7 @@ class FamilySharingService:
             sharing_id = str(uuid.uuid4())
 
             # 构建共享数据
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             sharing_data = {
                 "sharing_id": sharing_id,
                 "organization_id": organization_id,
@@ -98,16 +102,20 @@ class FamilySharingService:
                 "share_with_all_members": request.share_with_all_members,
                 "default_permission": request.default_permission.value if hasattr(request.default_permission, 'value') else request.default_permission,
                 "status": SharingStatus.ACTIVE.value,
-                "quota_settings": request.quota_settings,
-                "restrictions": request.restrictions,
+                "quota_settings": request.quota_settings or {},  # ✅ 确保不是 None
+                "restrictions": request.restrictions or {},  # ✅ 确保不是 None
                 "expires_at": request.expires_at.isoformat() if request.expires_at else None,
-                "metadata": request.metadata,
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
+                "metadata": request.metadata or {}  # ✅ 确保不是 None
+                # ✅ 不传 created_at 和 updated_at，让数据库使用默认值
             }
 
             # 保存到数据库
             sharing = await self.repository.create_sharing(sharing_data)
+
+            if not sharing:
+                raise FamilySharingServiceError(
+                    f"Failed to create sharing resource in database"
+                )
 
             # 如果指定了共享成员，创建成员权限
             if request.shared_with_members:
@@ -130,6 +138,30 @@ class FamilySharingService:
                 f"Sharing created | sharing_id={sharing_id} | "
                 f"resource_type={request.resource_type} | resource_id={request.resource_id}"
             )
+
+            # Publish family.resource_shared event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.FAMILY_RESOURCE_SHARED,
+                        source=ServiceSource.ORG_SERVICE,
+                        data={
+                            "sharing_id": sharing_id,
+                            "organization_id": organization_id,
+                            "resource_type": request.resource_type.value if hasattr(request.resource_type, 'value') else request.resource_type,
+                            "resource_id": request.resource_id,
+                            "resource_name": request.resource_name,
+                            "created_by": created_by,
+                            "share_with_all_members": request.share_with_all_members,
+                            "default_permission": request.default_permission.value if hasattr(request.default_permission, 'value') else request.default_permission,
+                            "shared_with_count": len(request.shared_with_members) if request.shared_with_members else 0,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published family.resource_shared event for sharing {sharing_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish family.resource_shared event: {e}")
 
             return SharingResourceResponse(**sharing)
 
@@ -448,6 +480,58 @@ class FamilySharingService:
 
     # ============ 使用量统计 ============
 
+    async def list_organization_sharings(
+        self,
+        organization_id: str,
+        user_id: str,
+        resource_type: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[SharingResourceResponse]:
+        """
+        列出组织的所有共享资源
+
+        Args:
+            organization_id: 组织/家庭ID
+            user_id: 用户ID（用于权限验证）
+            resource_type: 资源类型过滤
+            status: 状态过滤
+            limit: 返回数量限制
+            offset: 偏移量
+
+        Returns:
+            共享资源列表
+        """
+        try:
+            # 验证用户是否是组织成员
+            has_access = await self.repository.check_organization_member(
+                organization_id, user_id
+            )
+            if not has_access:
+                raise SharingAccessDeniedError(
+                    f"User {user_id} is not a member of organization {organization_id}"
+                )
+
+            # 获取共享资源列表
+            sharings = await self.repository.list_organization_sharings(
+                organization_id,
+                resource_type=resource_type,
+                status=status,
+                limit=limit,
+                offset=offset
+            )
+
+            return [SharingResourceResponse(**sharing) for sharing in sharings]
+
+        except Exception as e:
+            logger.error(f"Error listing organization sharings: {e}")
+            if isinstance(e, FamilySharingServiceError):
+                raise
+            raise FamilySharingServiceError(
+                f"Failed to list organization sharings: {str(e)}"
+            )
+
     async def get_sharing_usage_stats(
         self,
         sharing_id: str,
@@ -489,9 +573,8 @@ class FamilySharingService:
         user_id: str
     ) -> bool:
         """检查用户是否是组织管理员"""
-        # TODO: 调用 organization_repository 检查用户角色
-        # 暂时返回 True，实际应该检查用户是否是 OWNER 或 ADMIN
-        return True
+        # Use repository to check admin permissions
+        return await self.repository.check_organization_admin(organization_id, user_id)
 
     async def _check_sharing_access(
         self,
@@ -499,8 +582,25 @@ class FamilySharingService:
         user_id: str
     ) -> bool:
         """检查用户是否有访问共享资源的权限"""
+        # 获取共享资源
+        sharing = await self.repository.get_sharing(sharing_id)
+        if not sharing:
+            return False
+
+        # 创建者总是有访问权限
+        if sharing.get("created_by") == user_id:
+            return True
+
+        # 检查是否有成员权限
         permission = await self.repository.get_member_permission(sharing_id, user_id)
-        return permission is not None
+        if permission is not None:
+            return True
+
+        # 检查是否是组织管理员
+        has_admin = await self.repository.check_organization_admin(
+            sharing.get("organization_id"), user_id
+        )
+        return has_admin
 
     async def _grant_member_permission(
         self,

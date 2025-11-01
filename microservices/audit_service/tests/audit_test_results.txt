@@ -1,0 +1,270 @@
+======================================================================
+Audit Service Tests
+======================================================================
+
+
+[0;34m======================================[0m
+[0;34mTest 0: Generate Test Token from Auth Service[0m
+[0;34m======================================[0m
+
+POST http://localhost:8201/api/v1/auth/dev-token
+Response:
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzYwNTA3NTUwLCJzdWIiOiJ0ZXN0X2F1ZGl0X3VzZXJfMTc2MDUwMzk1MCIsImVtYWlsIjoidGVzdF9hdWRpdF91c2VyXzE3NjA1MDM5NTBAZXhhbXBsZS5jb20iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzYwNTAzOTUwfQ.HfKlDhv_vyHpi2n_lyPOSxwwkWS4lEbdjcEI5Il4Wvo",
+  "expires_in": 3600,
+  "token_type": "Bearer",
+  "user_id": "test_audit_user_1760503950",
+  "email": "test_audit_user_1760503950@example.com"
+}
+HTTP Status: 200
+[0;32m✓ PASSED[0m: Test token generated successfully
+[1;33mToken (first 50 chars): eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhd...[0m
+
+[0;34m======================================[0m
+[0;34mTest 1: Health Check[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/health
+Response:
+{
+  "status": "healthy",
+  "service": "authorization_service",
+  "port": 8204,
+  "version": "1.0.0"
+}
+HTTP Status: 200
+[0;32m✓ PASSED[0m: Health check successful
+
+[0;34m======================================[0m
+[0;34mTest 2: Detailed Health Check[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/health/detailed
+Response:
+{
+  "service": "authorization_service",
+  "status": "operational",
+  "port": 8204,
+  "version": "1.0.0",
+  "database_connected": true,
+  "timestamp": "2025-10-15T04:52:30.977911"
+}
+HTTP Status: 200
+[0;32m✓ PASSED[0m: Detailed health check successful
+
+[0;34m======================================[0m
+[0;34mTest 3: Get Service Info[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/api/v1/audit/info
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to get service info
+
+[0;34m======================================[0m
+[0;34mTest 4: Get Service Stats[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/api/v1/audit/stats
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to get service stats
+
+[0;34m======================================[0m
+[0;34mTest 5: Create Audit Event[0m
+[0;34m======================================[0m
+
+POST http://localhost:8204/api/v1/audit/events
+Request Body:
+{
+  "event_type": "user_login",
+  "user_id": "test_audit_user_1760503950",
+  "organization_id": "org_test_123",
+  "resource_type": "session",
+  "resource_id": "session_123",
+  "action": "login",
+  "severity": "low",
+  "status": "success",
+  "ip_address": "192.168.1.100",
+  "user_agent": "Mozilla/5.0 Test Browser",
+  "metadata": {
+    "login_method": "password",
+    "location": "Beijing"
+  }
+}
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to create audit event
+
+[0;34m======================================[0m
+[0;34mTest 6: Batch Create Audit Events[0m
+[0;34m======================================[0m
+
+POST http://localhost:8204/api/v1/audit/events/batch
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to create batch audit events
+
+[0;34m======================================[0m
+[0;34mTest 7: Query Audit Events[0m
+[0;34m======================================[0m
+
+POST http://localhost:8204/api/v1/audit/events/query
+Request Body:
+{
+  "user_id": "test_audit_user_1760503950",
+  "start_time": "2025-10-15T03:52:31Z",
+  "end_time": "2025-10-15T04:52:31Z",
+  "limit": 50
+}
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to query audit events
+
+[0;34m======================================[0m
+[0;34mTest 8: List Audit Events[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/api/v1/audit/events?limit=10
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to list audit events
+
+[0;34m======================================[0m
+[0;34mTest 9: Get User Activities[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/api/v1/audit/users/test_audit_user_1760503950/activities?limit=10
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to get user activities
+
+[0;34m======================================[0m
+[0;34mTest 10: Get User Activity Summary[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/api/v1/audit/users/test_audit_user_1760503950/summary
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to get user activity summary
+
+[0;34m======================================[0m
+[0;34mTest 11: Create Security Alert[0m
+[0;34m======================================[0m
+
+POST http://localhost:8204/api/v1/audit/security/alerts
+Request Body:
+{
+  "event_type": "security_alert",
+  "user_id": "test_audit_user_1760503950",
+  "severity": "high",
+  "alert_type": "suspicious_login",
+  "description": "Multiple failed login attempts detected",
+  "metadata": {
+    "failed_attempts": 5,
+    "ip_address": "192.168.1.999",
+    "time_window": "5 minutes"
+  }
+}
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to create security alert
+
+[0;34m======================================[0m
+[0;34mTest 12: List Security Events[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/api/v1/audit/security/events?limit=10
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to get security events
+
+[0;34m======================================[0m
+[0;34mTest 13: Get Compliance Standards[0m
+[0;34m======================================[0m
+
+GET http://localhost:8204/api/v1/audit/compliance/standards
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to get compliance standards
+
+[0;34m======================================[0m
+[0;34mTest 14: Generate Compliance Report[0m
+[0;34m======================================[0m
+
+POST http://localhost:8204/api/v1/audit/compliance/reports
+Request Body:
+{
+  "standard": "SOC2",
+  "start_time": "2025-10-08T04:52:31Z",
+  "end_time": "2025-10-15T04:52:31Z",
+  "scope": {
+    "organization_id": "org_test_123"
+  }
+}
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to generate compliance report
+
+[0;34m======================================[0m
+[0;34mTest 15: Maintenance Cleanup (Old Events)[0m
+[0;34m======================================[0m
+
+POST http://localhost:8204/api/v1/audit/maintenance/cleanup
+Request Body:
+{
+  "retention_days": 365,
+  "dry_run": true
+}
+Response:
+{
+  "detail": "Not Found"
+}
+HTTP Status: 404
+[0;31m✗ FAILED[0m: Failed to execute maintenance cleanup
+
+======================================================================
+[0;34mTest Summary[0m
+======================================================================
+[0;32mPassed: 3[0m
+[0;31mFailed: 13[0m
+Total: 16
+
+[0;31m✗ Some tests failed. Please review the output above.[0m

@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 # Import ConfigManager
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
 
 # Import local components
 from .account_service import AccountService, AccountServiceError, AccountValidationError, AccountNotFoundError
@@ -49,22 +50,27 @@ logger = app_logger  # for backward compatibility
 
 class AccountMicroservice:
     """Account microservice core class"""
-    
+
     def __init__(self):
         self.account_service = None
-    
-    async def initialize(self):
+        self.event_bus = None
+
+    async def initialize(self, event_bus=None):
         """Initialize the microservice"""
         try:
-            self.account_service = AccountService()
+            self.event_bus = event_bus
+            self.account_service = AccountService(event_bus=event_bus)
             logger.info("Account microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize account microservice: {e}")
             raise
-    
+
     async def shutdown(self):
         """Shutdown the microservice"""
         try:
+            if self.event_bus:
+                await self.event_bus.close()
+                logger.info("Event bus closed")
             logger.info("Account microservice shutdown completed")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -77,9 +83,18 @@ account_microservice = AccountMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    # Initialize microservice
-    await account_microservice.initialize()
-    
+    # Initialize event bus
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("account_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
+    # Initialize microservice with event bus
+    await account_microservice.initialize(event_bus=event_bus)
+
     # Register with Consul
     consul_registry = ConsulRegistry(
         service_name=config.service_name,
@@ -89,21 +104,21 @@ async def lifespan(app: FastAPI):
         service_host=config.service_host,
         tags=["microservice", "accounts", "api"]
     )
-    
+
     if config.consul_enabled and consul_registry.register():
         consul_registry.start_maintenance()
         app.state.consul_registry = consul_registry
         logger.info(f"{config.service_name} registered with Consul")
     elif config.consul_enabled:
         logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+
     yield
-    
+
     # Cleanup
     if config.consul_enabled and hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
-    
+
     await account_microservice.shutdown()
 
 

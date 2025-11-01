@@ -25,9 +25,13 @@ from .organization_service import (
 )
 from .family_sharing_service import FamilySharingService
 from .family_sharing_repository import FamilySharingRepository
+# Note: AccountServiceClient and AuthServiceClient were removed as they were unused
+# If user validation is needed in the future, implement via auth_dependencies
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
+from core.auth_dependencies import require_auth_or_internal_service, is_internal_service_request
 from .models import (
     OrganizationCreateRequest, OrganizationUpdateRequest,
     OrganizationMemberAddRequest, OrganizationMemberUpdateRequest,
@@ -60,13 +64,25 @@ class OrganizationMicroservice:
     def __init__(self):
         self.organization_service = None
         self.family_sharing_service = None
+        self.event_bus = None
 
     async def initialize(self):
         """初始化微服务"""
         try:
-            self.organization_service = OrganizationService()
+            # Initialize event bus for event-driven communication
+            try:
+                self.event_bus = await get_event_bus("organization_service")
+                logger.info("Event bus initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+                self.event_bus = None
+
+            self.organization_service = OrganizationService(event_bus=self.event_bus)
             sharing_repository = FamilySharingRepository()
-            self.family_sharing_service = FamilySharingService(repository=sharing_repository)
+            self.family_sharing_service = FamilySharingService(
+                repository=sharing_repository,
+                event_bus=self.event_bus
+            )
             logger.info("Organization microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize organization microservice: {e}")
@@ -75,6 +91,8 @@ class OrganizationMicroservice:
     async def shutdown(self):
         """关闭微服务"""
         try:
+            if self.event_bus:
+                await self.event_bus.close()
             logger.info("Organization microservice shutdown completed")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -89,7 +107,26 @@ async def lifespan(app: FastAPI):
     """Application lifespan management"""
     # Initialize microservice
     await organization_microservice.initialize()
-    
+
+    # Subscribe to events for cleanup and synchronization
+    if organization_microservice.event_bus:
+        try:
+            from .events import OrganizationEventHandler
+            from .organization_repository import OrganizationRepository
+
+            repository = OrganizationRepository()
+            event_handler = OrganizationEventHandler(repository)
+
+            # Subscribe to user.deleted events - clean up organization memberships
+            await organization_microservice.event_bus.subscribe(
+                subject="events.user.deleted",
+                callback=lambda msg: event_handler.handle_event(msg)
+            )
+            logger.info("✅ Subscribed to user.deleted events")
+
+        except Exception as e:
+            logger.error(f"Failed to subscribe to events: {e}")
+
     # Register with Consul
     if config.consul_enabled:
         consul_registry = ConsulRegistry(
@@ -150,25 +187,8 @@ def get_family_sharing_service() -> FamilySharingService:
     return organization_microservice.family_sharing_service
 
 
-def get_current_user_id(
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    authorization: Optional[str] = Header(None)
-) -> str:
-    """从请求头获取当前用户ID"""
-    # 优先使用X-User-Id头
-    if x_user_id:
-        return x_user_id
-    
-    # TODO: 从JWT token中提取user_id
-    if authorization:
-        # 这里应该验证JWT并提取user_id
-        # 暂时返回测试用户ID
-        return "test-user"
-    
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="User authentication required"
-    )
+# 使用统一的认证依赖（已导入）
+# get_current_user_id = require_auth_or_internal_service
 
 
 # ============ Health Check Endpoints ============
@@ -204,7 +224,7 @@ async def get_service_stats(
 @app.post("/api/v1/organizations", response_model=OrganizationResponse)
 async def create_organization(
     request: OrganizationCreateRequest,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """创建组织"""
@@ -219,7 +239,7 @@ async def create_organization(
 @app.get("/api/v1/organizations/{organization_id}", response_model=OrganizationResponse)
 async def get_organization(
     organization_id: str = Path(..., description="组织ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取组织信息"""
@@ -237,7 +257,7 @@ async def get_organization(
 async def update_organization(
     organization_id: str = Path(..., description="组织ID"),
     request: OrganizationUpdateRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """更新组织信息"""
@@ -256,7 +276,7 @@ async def update_organization(
 @app.delete("/api/v1/organizations/{organization_id}")
 async def delete_organization(
     organization_id: str = Path(..., description="组织ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """删除组织"""
@@ -276,7 +296,7 @@ async def delete_organization(
 
 @app.get("/api/v1/users/organizations", response_model=OrganizationListResponse)
 async def get_user_organizations(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取用户所属的所有组织"""
@@ -292,7 +312,7 @@ async def get_user_organizations(
 async def add_organization_member(
     organization_id: str = Path(..., description="组织ID"),
     request: OrganizationMemberAddRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """添加组织成员"""
@@ -314,7 +334,7 @@ async def get_organization_members(
     limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
     role: Optional[OrganizationRole] = Query(None, description="角色过滤"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取组织成员列表"""
@@ -333,7 +353,7 @@ async def update_organization_member(
     organization_id: str = Path(..., description="组织ID"),
     member_user_id: str = Path(..., description="成员用户ID"),
     request: OrganizationMemberUpdateRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """更新组织成员"""
@@ -353,7 +373,7 @@ async def update_organization_member(
 async def remove_organization_member(
     organization_id: str = Path(..., description="组织ID"),
     member_user_id: str = Path(..., description="成员用户ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """移除组织成员"""
@@ -378,7 +398,7 @@ async def remove_organization_member(
 @app.post("/api/v1/organizations/context", response_model=OrganizationContextResponse)
 async def switch_organization_context(
     request: OrganizationSwitchRequest,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """切换用户上下文（组织或个人）"""
@@ -397,7 +417,7 @@ async def switch_organization_context(
 @app.get("/api/v1/organizations/{organization_id}/stats", response_model=OrganizationStatsResponse)
 async def get_organization_stats(
     organization_id: str = Path(..., description="组织ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取组织统计信息"""
@@ -416,7 +436,7 @@ async def get_organization_usage(
     organization_id: str = Path(..., description="组织ID"),
     start_date: Optional[datetime] = Query(None, description="开始日期"),
     end_date: Optional[datetime] = Query(None, description="结束日期"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取组织使用量"""
@@ -439,7 +459,7 @@ async def list_all_organizations(
     search: Optional[str] = Query(None, description="搜索关键词"),
     plan: Optional[str] = Query(None, description="计划过滤"),
     status: Optional[str] = Query(None, description="状态过滤"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取所有组织列表（平台管理员）"""
@@ -456,7 +476,7 @@ async def list_all_organizations(
 async def create_sharing(
     organization_id: str = Path(..., description="组织ID"),
     request: CreateSharingRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """创建共享资源"""
@@ -474,7 +494,7 @@ async def create_sharing(
 async def get_sharing(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """获取共享资源详情"""
@@ -492,7 +512,7 @@ async def update_sharing(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
     request: UpdateSharingRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """更新共享资源"""
@@ -510,7 +530,7 @@ async def update_sharing(
 async def delete_sharing(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """删除共享资源"""
@@ -535,7 +555,7 @@ async def list_organization_sharings(
     status_filter: Optional[SharingStatus] = Query(None, alias="status", description="状态过滤"),
     limit: int = Query(50, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """获取组织所有共享资源列表"""
@@ -551,7 +571,7 @@ async def update_member_permission(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
     request: UpdateMemberSharingPermissionRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """更新成员共享权限"""
@@ -570,7 +590,7 @@ async def revoke_member_access(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
     member_user_id: str = Path(..., description="成员用户ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """撤销成员共享权限"""
@@ -596,7 +616,7 @@ async def get_member_shared_resources(
     status_filter: Optional[SharingStatus] = Query(None, alias="status", description="状态过滤"),
     limit: int = Query(50, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """获取成员所有共享资源"""
@@ -620,7 +640,7 @@ async def get_sharing_usage_stats(
     sharing_id: str = Path(..., description="共享ID"),
     period_start: datetime = Query(..., description="统计开始时间"),
     period_end: datetime = Query(..., description="统计结束时间"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """获取共享资源使用统计"""

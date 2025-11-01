@@ -1,0 +1,793 @@
+{
+  "info": {
+    "name": "Organization Service API",
+    "description": "Complete API collection for Organization Service including organization management, member management, family sharing, and context switching.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "organization-service-api",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8212",
+      "type": "string"
+    },
+    {
+      "key": "test_user_id",
+      "value": "test_user_123",
+      "type": "string"
+    },
+    {
+      "key": "organization_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "member_user_id",
+      "value": "test_member_456",
+      "type": "string"
+    },
+    {
+      "key": "sharing_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Info",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check service health status"
+          },
+          "response": []
+        },
+        {
+          "name": "Service Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/info",
+              "host": ["{{base_url}}"],
+              "path": ["info"]
+            },
+            "description": "Get service information and capabilities"
+          },
+          "response": []
+        },
+        {
+          "name": "Service Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "stats"]
+            },
+            "description": "Get service-level statistics"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Organization Management",
+      "item": [
+        {
+          "name": "Create Organization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('organization_id', jsonData.organization_id);",
+                  "    pm.test('Organization created successfully', function () {",
+                  "        pm.expect(jsonData.organization_id).to.exist;",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Organization\",\n  \"billing_email\": \"billing@testorg.com\",\n  \"plan\": \"professional\",\n  \"settings\": {\n    \"allow_external_sharing\": true,\n    \"require_2fa\": false\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations"]
+            },
+            "description": "Create a new organization"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Organization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}"]
+            },
+            "description": "Get organization details by ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Organization",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Organization Name\",\n  \"settings\": {\n    \"allow_external_sharing\": false,\n    \"require_2fa\": true\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}"]
+            },
+            "description": "Update organization information"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Organization",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}"]
+            },
+            "description": "Delete an organization"
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Organizations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/organizations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "organizations"]
+            },
+            "description": "Get all organizations for current user"
+          },
+          "response": []
+        },
+        {
+          "name": "List All Organizations (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/organizations?limit=100&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "organizations"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                },
+                {
+                  "key": "search",
+                  "value": "test",
+                  "disabled": true
+                },
+                {
+                  "key": "plan",
+                  "value": "professional",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all organizations (admin only)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Member Management",
+      "item": [
+        {
+          "name": "Add Organization Member",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{member_user_id}}\",\n  \"role\": \"member\",\n  \"permissions\": [\"read\", \"write\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/members",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "members"]
+            },
+            "description": "Add a member to the organization"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Organization Members",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/members?limit=100&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "members"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                },
+                {
+                  "key": "role",
+                  "value": "member",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all members of an organization"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Organization Member",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"admin\",\n  \"permissions\": [\"read\", \"write\", \"delete\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/members/{{member_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "members", "{{member_user_id}}"]
+            },
+            "description": "Update organization member role and permissions"
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Organization Member",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/members/{{member_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "members", "{{member_user_id}}"]
+            },
+            "description": "Remove a member from the organization"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Context Switching",
+      "item": [
+        {
+          "name": "Switch to Organization Context",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organization_id\": \"{{organization_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/context",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "context"]
+            },
+            "description": "Switch user context to organization"
+          },
+          "response": []
+        },
+        {
+          "name": "Switch to Individual Context",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organization_id\": null\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/context",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "context"]
+            },
+            "description": "Switch user context back to individual"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Statistics & Analytics",
+      "item": [
+        {
+          "name": "Get Organization Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "stats"]
+            },
+            "description": "Get organization statistics"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Organization Usage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/usage",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "usage"],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2024-01-01T00:00:00Z",
+                  "disabled": true
+                },
+                {
+                  "key": "end_date",
+                  "value": "2024-12-31T23:59:59Z",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get organization usage analytics"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Family Sharing",
+      "item": [
+        {
+          "name": "Create Sharing Resource",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('sharing_id', jsonData.sharing_id);",
+                  "    pm.test('Sharing created successfully', function () {",
+                  "        pm.expect(jsonData.sharing_id).to.exist;",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resource_type\": \"album\",\n  \"resource_id\": \"album_12345\",\n  \"name\": \"Family Vacation Photos\",\n  \"description\": \"Photos from our 2024 vacation\",\n  \"member_permissions\": {\n    \"{{member_user_id}}\": {\n      \"can_view\": true,\n      \"can_edit\": false,\n      \"can_delete\": false,\n      \"can_share\": false\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/sharing",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "sharing"]
+            },
+            "description": "Create a family sharing resource"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Sharing Resource",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/sharing/{{sharing_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "sharing", "{{sharing_id}}"]
+            },
+            "description": "Get sharing resource details"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Sharing Resource",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Vacation Photos\",\n  \"description\": \"Updated description\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/sharing/{{sharing_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "sharing", "{{sharing_id}}"]
+            },
+            "description": "Update sharing resource"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Sharing Resource",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/sharing/{{sharing_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "sharing", "{{sharing_id}}"]
+            },
+            "description": "Delete sharing resource"
+          },
+          "response": []
+        },
+        {
+          "name": "List Organization Sharings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/sharing?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "sharing"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                },
+                {
+                  "key": "resource_type",
+                  "value": "album",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all sharing resources in organization"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Member Sharing Permission",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{member_user_id}}\",\n  \"can_view\": true,\n  \"can_edit\": true,\n  \"can_delete\": false,\n  \"can_share\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/sharing/{{sharing_id}}/members",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "sharing", "{{sharing_id}}", "members"]
+            },
+            "description": "Update member permissions for sharing resource"
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke Member Access",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/sharing/{{sharing_id}}/members/{{member_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "sharing", "{{sharing_id}}", "members", "{{member_user_id}}"]
+            },
+            "description": "Revoke member access to sharing resource"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Member Shared Resources",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/members/{{member_user_id}}/shared-resources?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "members", "{{member_user_id}}", "shared-resources"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                },
+                {
+                  "key": "resource_type",
+                  "value": "album",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all shared resources for a member"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Sharing Usage Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{test_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/sharing/{{sharing_id}}/usage?period_start=2024-01-01T00:00:00Z&period_end=2024-12-31T23:59:59Z",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "organizations", "{{organization_id}}", "sharing", "{{sharing_id}}", "usage"],
+              "query": [
+                {
+                  "key": "period_start",
+                  "value": "2024-01-01T00:00:00Z"
+                },
+                {
+                  "key": "period_end",
+                  "value": "2024-12-31T23:59:59Z"
+                }
+              ]
+            },
+            "description": "Get usage statistics for sharing resource"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

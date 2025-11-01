@@ -19,15 +19,17 @@ from .models import (
     RudderStackEvent
 )
 from .event_repository import EventRepository
+from core.nats_client import Event as NATSEvent, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
 
 class EventService:
     """事件服务核心类"""
-    
-    def __init__(self):
+
+    def __init__(self, event_bus=None):
         self.repository = EventRepository()
+        self.event_bus = event_bus
         self.processors: Dict[str, EventProcessor] = {}
         self.subscriptions: Dict[str, EventSubscription] = {}
         self.projections: Dict[str, EventProjection] = {}
@@ -66,14 +68,33 @@ class EventService:
         
         # 存储事件
         stored_event = await self.repository.save_event(event)
-        
+
         # 添加到处理队列
         await self.processing_queue.put(stored_event)
-        
+
         # 触发实时处理器
         asyncio.create_task(self._trigger_realtime_processors(stored_event))
-        
+
         logger.info(f"Event created: {stored_event.event_id} - {stored_event.event_type}")
+
+        # Publish event.stored event
+        if self.event_bus:
+            try:
+                nats_event = NATSEvent(
+                    event_type=EventType.EVENT_STORED,
+                    source=ServiceSource.EVENT_SERVICE,
+                    data={
+                        "event_id": stored_event.event_id,
+                        "event_type": stored_event.event_type,
+                        "event_source": stored_event.event_source.value,
+                        "event_category": stored_event.event_category.value,
+                        "user_id": stored_event.user_id,
+                        "timestamp": stored_event.timestamp.isoformat()
+                    }
+                )
+                await self.event_bus.publish_event(nats_event)
+            except Exception as e:
+                logger.error(f"Failed to publish event.stored event: {e}")
         
         return EventResponse(
             event_id=stored_event.event_id,
@@ -250,9 +271,9 @@ class EventService:
             stats.processing_rate = (stats.processed_events / total) * 100
             stats.error_rate = (stats.failed_events / total) * 100
         
-        # 获取热门数据
-        stats.top_users = await self.repository.get_top_users(5)
-        stats.top_event_types = await self.repository.get_top_event_types(10)
+        # 获取热门数据 (TODO: implement these methods in repository)
+        stats.top_users = []  # await self.repository.get_top_users(5) 
+        stats.top_event_types = []  # await self.repository.get_top_event_types(10)
         
         return stats
     
@@ -281,17 +302,55 @@ class EventService:
         if result.status == ProcessingStatus.SUCCESS:
             event.status = EventStatus.PROCESSED
             event.processed_at = datetime.utcnow()
+
+            # Publish event.processed.success event
+            if self.event_bus:
+                try:
+                    nats_event = NATSEvent(
+                        event_type=EventType.EVENT_PROCESSED_SUCCESS,
+                        source=ServiceSource.EVENT_SERVICE,
+                        data={
+                            "event_id": event.event_id,
+                            "event_type": event.event_type,
+                            "processor_name": processor_name,
+                            "duration_ms": result.duration_ms,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(nats_event)
+                except Exception as e:
+                    logger.error(f"Failed to publish event.processed.success event: {e}")
+
         elif result.status == ProcessingStatus.FAILED:
             event.status = EventStatus.FAILED
             event.error_message = result.message
             event.retry_count += 1
-        
+
+            # Publish event.processed.failed event
+            if self.event_bus:
+                try:
+                    nats_event = NATSEvent(
+                        event_type=EventType.EVENT_PROCESSED_FAILED,
+                        source=ServiceSource.EVENT_SERVICE,
+                        data={
+                            "event_id": event.event_id,
+                            "event_type": event.event_type,
+                            "processor_name": processor_name,
+                            "error_message": result.message,
+                            "retry_count": event.retry_count,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(nats_event)
+                except Exception as e:
+                    logger.error(f"Failed to publish event.processed.failed event: {e}")
+
         # 保存更新
         await self.repository.update_event(event)
-        
+
         # 记录处理结果
         await self.repository.save_processing_result(result)
-        
+
         return True
     
     async def retry_failed_events(self, max_retries: int = 3) -> int:
@@ -310,7 +369,7 @@ class EventService:
     async def replay_events(self, request: EventReplayRequest) -> Dict[str, Any]:
         """重放事件"""
         events = []
-        
+
         if request.event_ids:
             # 按ID重放
             for event_id in request.event_ids:
@@ -323,10 +382,28 @@ class EventService:
         elif request.start_time and request.end_time:
             # 按时间范围重放
             events = await self.repository.get_events_by_time_range(
-                request.start_time, 
+                request.start_time,
                 request.end_time
             )
-        
+
+        # Publish event.replay.started event
+        if self.event_bus and not request.dry_run:
+            try:
+                nats_event = NATSEvent(
+                    event_type=EventType.EVENT_REPLAY_STARTED,
+                    source=ServiceSource.EVENT_SERVICE,
+                    data={
+                        "events_count": len(events),
+                        "stream_id": request.stream_id,
+                        "target_service": request.target_service,
+                        "dry_run": request.dry_run,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                )
+                await self.event_bus.publish_event(nats_event)
+            except Exception as e:
+                logger.error(f"Failed to publish event.replay.started event: {e}")
+
         if request.dry_run:
             # 模拟运行
             return {
@@ -334,11 +411,11 @@ class EventService:
                 "events_count": len(events),
                 "events": [e.event_id for e in events]
             }
-        
+
         # 实际重放
         replayed = 0
         failed = 0
-        
+
         for event in events:
             try:
                 # 重新发布事件
@@ -347,7 +424,7 @@ class EventService:
             except Exception as e:
                 logger.error(f"Failed to replay event {event.event_id}: {e}")
                 failed += 1
-        
+
         return {
             "replayed": replayed,
             "failed": failed,
@@ -357,9 +434,9 @@ class EventService:
     # ==================== 事件投影 ====================
     
     async def create_projection(
-        self, 
-        projection_name: str, 
-        entity_id: str, 
+        self,
+        projection_name: str,
+        entity_id: str,
         entity_type: str
     ) -> EventProjection:
         """创建事件投影"""
@@ -368,19 +445,39 @@ class EventService:
             entity_id=entity_id,
             entity_type=entity_type
         )
-        
+
         # 获取相关事件流
         stream_id = f"{entity_type}:{entity_id}"
         events = await self.repository.get_event_stream(stream_id)
-        
+
         # 应用事件到投影
         for event in events:
             projection = await self._apply_event_to_projection(projection, event)
-        
+
         # 保存投影
         await self.repository.save_projection(projection)
         self.projections[projection.projection_id] = projection
-        
+
+        # Publish event.projection.created event
+        if self.event_bus:
+            try:
+                nats_event = NATSEvent(
+                    event_type=EventType.EVENT_PROJECTION_CREATED,
+                    source=ServiceSource.EVENT_SERVICE,
+                    data={
+                        "projection_id": projection.projection_id,
+                        "projection_name": projection_name,
+                        "entity_id": entity_id,
+                        "entity_type": entity_type,
+                        "events_count": len(events),
+                        "version": projection.version,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                )
+                await self.event_bus.publish_event(nats_event)
+            except Exception as e:
+                logger.error(f"Failed to publish event.projection.created event: {e}")
+
         return projection
     
     async def get_projection(self, projection_id: str) -> Optional[EventProjection]:
@@ -397,10 +494,35 @@ class EventService:
         # 保存订阅
         await self.repository.save_subscription(subscription)
         self.subscriptions[subscription.subscription_id] = subscription
-        
+
         logger.info(f"Created subscription: {subscription.subscriber_name}")
-        
+
+        # Publish event.subscription.created event
+        if self.event_bus:
+            try:
+                nats_event = NATSEvent(
+                    event_type=EventType.EVENT_SUBSCRIPTION_CREATED,
+                    source=ServiceSource.EVENT_SERVICE,
+                    data={
+                        "subscription_id": subscription.subscription_id,
+                        "subscriber_name": subscription.subscriber_name,
+                        "event_types": subscription.event_types,
+                        "event_sources": [s.value if hasattr(s, 'value') else str(s) for s in subscription.event_sources] if subscription.event_sources else [],
+                        "enabled": subscription.enabled,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                )
+                await self.event_bus.publish_event(nats_event)
+            except Exception as e:
+                logger.error(f"Failed to publish event.subscription.created event: {e}")
+
         return subscription
+    
+    async def list_subscriptions(self) -> List[EventSubscription]:
+        """列出所有订阅"""
+        # Return all subscriptions in memory
+        # TODO: Load from repository if persistence is implemented
+        return list(self.subscriptions.values())
     
     async def trigger_subscriptions(self, event: Event):
         """触发事件订阅"""

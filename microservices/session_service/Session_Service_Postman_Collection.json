@@ -1,0 +1,551 @@
+{
+	"info": {
+		"_postman_id": "session-service-staging-v1",
+		"name": "Session Service API - Staging",
+		"description": "Session Management Microservice\n\nBase URL: http://localhost:8203\nEnvironment: Staging (Docker)\nVersion: 1.0.0\n\nCapabilities:\n- Session lifecycle management (create, update, end)\n- Conversation message tracking\n- Session memory/context management\n- Multi-user session support\n- Session analytics and statistics",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "1.0.0"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8203",
+			"type": "string",
+			"description": "Session service base URL (port 8203 in staging)"
+		},
+		{
+			"key": "api_base",
+			"value": "{{base_url}}/api/v1",
+			"type": "string",
+			"description": "API base path"
+		},
+		{
+			"key": "user_id",
+			"value": "test_user_123",
+			"type": "string",
+			"description": "Test user ID"
+		},
+		{
+			"key": "session_id",
+			"value": "",
+			"type": "string",
+			"description": "Session ID from create response"
+		},
+		{
+			"key": "message_id",
+			"value": "",
+			"type": "string",
+			"description": "Message ID from add message response"
+		}
+	],
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service is healthy', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"    pm.expect(jsonData.service).to.eql('session_service');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Health check endpoint\n\nReturns:\n- status: healthy\n- service: session_service\n- port: 8203\n- version: 1.0.0"
+					},
+					"response": []
+				},
+				{
+					"name": "Detailed Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/detailed",
+							"host": ["{{base_url}}"],
+							"path": ["health", "detailed"]
+						},
+						"description": "Detailed health check with database status"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check endpoints"
+		},
+		{
+			"name": "Session Management",
+			"item": [
+				{
+					"name": "Create Session",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('session_id', jsonData.session_id);",
+									"    pm.test('Session created successfully', function () {",
+									"        pm.expect(jsonData.session_id).to.be.a('string');",
+									"        pm.expect(jsonData.status).to.eql('active');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"conversation_data\": {\n    \"topic\": \"session_management\",\n    \"context\": \"Testing session creation\"\n  },\n  \"metadata\": {\n    \"source\": \"postman\",\n    \"test\": true\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/sessions",
+							"host": ["{{api_base}}"],
+							"path": ["sessions"]
+						},
+						"description": "Create a new session\n\nRequest Body:\n- user_id: User ID (required)\n- conversation_data: Initial conversation data\n- metadata: Session metadata\n\nResponse:\n- session_id: Unique session identifier\n- status: Session status (active)\n- is_active: true\n- message_count: 0"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Session",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID for authorization"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "Get session by ID\n\nReturns full session details including:\n- Session metadata\n- Message count\n- Token usage\n- Cost tracking"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Session",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"completed\",\n  \"metadata\": {\n    \"completion_reason\": \"user_finished\",\n    \"satisfaction\": \"high\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "Update session status and metadata\n\nRequest Body:\n- status: New status (optional)\n- metadata: Updated metadata (optional)"
+					},
+					"response": []
+				},
+				{
+					"name": "End Session",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "End a session\n\nSets status to 'ended' and is_active to false"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Sessions",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/users/:user_id/sessions?active_only=false&page=1&page_size=50",
+							"host": ["{{api_base}}"],
+							"path": ["users", ":user_id", "sessions"],
+							"query": [
+								{
+									"key": "active_only",
+									"value": "false",
+									"description": "Only return active sessions"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "page_size",
+									"value": "50"
+								}
+							],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							]
+						},
+						"description": "Get all sessions for a user\n\nSupports pagination and filtering by active status"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Session Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id/summary?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id", "summary"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "Get session summary with metrics\n\nReturns:\n- Message count\n- Token usage\n- Cost tracking\n- Memory status"
+					},
+					"response": []
+				}
+			],
+			"description": "Session lifecycle management endpoints"
+		},
+		{
+			"name": "Messages",
+			"item": [
+				{
+					"name": "Add User Message",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('message_id', jsonData.message_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"user\",\n  \"content\": \"Hello! I need help with my account settings.\",\n  \"message_type\": \"chat\",\n  \"metadata\": {\n    \"timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"tokens_used\": 10,\n  \"cost_usd\": 0.0001\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id/messages?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id", "messages"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "Add user message to session\n\nRequest Body:\n- role: 'user' (required)\n- content: Message content (required)\n- message_type: Message type (default: chat)\n- metadata: Additional metadata\n- tokens_used: Token count\n- cost_usd: Cost in USD"
+					},
+					"response": []
+				},
+				{
+					"name": "Add Assistant Message",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"assistant\",\n  \"content\": \"I'd be happy to help you with your account settings. What would you like to change?\",\n  \"message_type\": \"chat\",\n  \"metadata\": {\n    \"model\": \"gpt-4\",\n    \"temperature\": 0.7\n  },\n  \"tokens_used\": 18,\n  \"cost_usd\": 0.00018\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id/messages?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id", "messages"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "Add assistant message to session"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Session Messages",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id/messages?user_id={{user_id}}&page=1&page_size=100",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id", "messages"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "page_size",
+									"value": "100"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "Get all messages in a session\n\nSupports pagination with page and page_size parameters"
+					},
+					"response": []
+				}
+			],
+			"description": "Message management within sessions"
+		},
+		{
+			"name": "Session Memory",
+			"item": [
+				{
+					"name": "Create Session Memory",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"memory_type\": \"conversation\",\n  \"content\": \"User is interested in updating account settings. Prefers dark mode and email notifications.\",\n  \"metadata\": {\n    \"key_topics\": [\"account_settings\", \"preferences\"],\n    \"user_preferences\": {\n      \"theme\": \"dark\",\n      \"notifications\": \"email\"\n    }\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id/memory?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id", "memory"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "Create or update session memory\n\nRequest Body:\n- memory_type: Type of memory (required)\n- content: Memory content (required)\n- metadata: Additional context"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Session Memory",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/sessions/:session_id/memory?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", ":session_id", "memory"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "session_id",
+									"value": "{{session_id}}"
+								}
+							]
+						},
+						"description": "Get session memory\n\nReturns stored context and preferences for the session"
+					},
+					"response": []
+				}
+			],
+			"description": "Session memory/context management for conversation continuity"
+		},
+		{
+			"name": "Statistics",
+			"item": [
+				{
+					"name": "Get Service Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/sessions/stats",
+							"host": ["{{api_base}}"],
+							"path": ["sessions", "stats"]
+						},
+						"description": "Get service-wide statistics\n\nReturns:\n- Total sessions\n- Active sessions\n- Total messages\n- Total tokens\n- Total cost\n- Average messages per session"
+					},
+					"response": []
+				}
+			],
+			"description": "Service statistics and analytics"
+		}
+	],
+	"auth": {
+		"type": "noauth"
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}

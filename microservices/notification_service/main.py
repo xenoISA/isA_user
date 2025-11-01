@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 # Import ConsulRegistry and ConfigManager
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
+from core.nats_client import get_event_bus
 
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from typing import Optional, List
@@ -20,6 +21,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from .notification_service import NotificationService
+from .events.handlers import NotificationEventHandlers
 from .models import (
     SendNotificationRequest, SendBatchRequest,
     CreateTemplateRequest, UpdateTemplateRequest,
@@ -44,6 +46,8 @@ logger = app_logger  # for backward compatibility
 
 # 全局服务实例
 service: Optional[NotificationService] = None
+event_bus = None
+event_handlers = None
 
 # 后台任务
 background_task = None
@@ -68,11 +72,42 @@ async def process_pending_notifications_task():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global service, background_task
-    
-    # 启动时初始化
+    global service, background_task, event_bus, event_handlers
+
+    # Initialize event bus first
+    try:
+        event_bus = await get_event_bus("notification_service")
+        logger.info("Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
+    # Initialize service with event bus
     logger.info("Starting Notification Service...")
-    service = NotificationService()
+    service = NotificationService(event_bus=event_bus)
+
+    # Initialize event handlers if event bus is available
+    if event_bus:
+        try:
+            event_handlers = NotificationEventHandlers(service)
+
+        # Subscribe to events
+        handler_map = event_handlers.get_event_handler_map()
+        for event_type, handler_func in handler_map.items():
+            # Subscribe to each event type
+            # Convert event type like "user.logged_in" to subscription pattern "*.*user.logged_in"
+            await event_bus.subscribe_to_events(
+                pattern=f"*.{event_type}",
+                handler=handler_func
+            )
+            logger.info(f"Subscribed to {event_type} events")
+
+        logger.info(f"Subscribed to {len(handler_map)} event types")
+
+    except Exception as e:
+        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event subscriptions.")
+        event_bus = None
+        event_handlers = None
     
     # Register with Consul
     if config.consul_enabled:
@@ -99,19 +134,24 @@ async def lifespan(app: FastAPI):
     
     # 关闭时清理
     logger.info("Shutting down Notification Service...")
-    
+
+    # Close event bus
+    if event_bus:
+        await event_bus.close()
+        logger.info("Event bus closed")
+
     # Deregister from Consul
     if config.consul_enabled and hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
-    
+
     if background_task:
         background_task.cancel()
         try:
             await background_task
         except asyncio.CancelledError:
             pass
-    
+
     if service:
         await service.cleanup()
 
@@ -384,11 +424,12 @@ async def get_notification_stats(
 # ====================
 
 @app.post("/api/v1/notifications/test/email", tags=["Test"])
-async def test_email(to: str, subject: str = "Test Email"):
+async def test_email(to: str, subject: str = "Test Email", user_id: str = "test_user_email"):
     """测试邮件发送"""
     try:
         request = SendNotificationRequest(
             type=NotificationType.EMAIL,
+            recipient_id=user_id,
             recipient_email=to,
             subject=subject,
             content="This is a test email from Notification Service.",

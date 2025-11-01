@@ -1,21 +1,19 @@
 """
 Event Repository
 
-事件数据存储层 - 使用 Supabase Client
+Data access layer for event management using PostgresClient.
 """
 
 import os
 import sys
-import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any, Tuple
-from decimal import Decimal
+import uuid
 
-# Add parent directories to path to import from core
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.database.supabase_client import get_supabase_client
+from isa_common.postgres_client import PostgresClient
 from .models import (
     Event, EventStatus, EventSource, EventCategory,
     EventStatistics, EventProcessingResult,
@@ -26,25 +24,32 @@ logger = logging.getLogger(__name__)
 
 
 class EventRepository:
-    """事件存储库 - 使用 Supabase"""
-    
+    """Event Repository - using PostgresClient"""
+
     def __init__(self):
-        """初始化仓库"""
-        self.supabase = get_supabase_client()
-        # 表名定义
+        """Initialize Event Repository with PostgresClient"""
+        self.db = PostgresClient(
+            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
+            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
+            user_id="event_service"
+        )
+
+        self.schema = "event"
         self.events_table = "events"
         self.event_streams_table = "event_streams"
         self.event_projections_table = "event_projections"
         self.event_processors_table = "event_processors"
         self.event_subscriptions_table = "event_subscriptions"
         self.processing_results_table = "processing_results"
-    
+
+        logger.info("EventRepository initialized with PostgresClient")
+
     async def initialize(self):
-        """初始化（与其他服务保持接口一致）"""
-        logger.info("Event Repository initialized with Supabase client")
-    
+        """Initialize (for interface consistency with other services)"""
+        logger.info("Event Repository initialized")
+
     async def save_event(self, event: Event) -> Event:
-        """保存事件"""
+        """Save event"""
         try:
             event_dict = {
                 'event_id': event.event_id,
@@ -56,13 +61,13 @@ class EventRepository:
                 'organization_id': event.organization_id,
                 'device_id': event.device_id,
                 'correlation_id': event.correlation_id,
-                'data': json.dumps(event.data),
-                'metadata': json.dumps(event.metadata),
-                'context': json.dumps(event.context) if event.context else None,
-                'properties': json.dumps(event.properties) if event.properties else None,
+                'data': event.data or {},  # Direct dict, not json.dumps()
+                'metadata': event.metadata or {},
+                'context': event.context or {},
+                'properties': event.properties or {},
                 'status': event.status.value,
                 'processed_at': event.processed_at.isoformat() if event.processed_at else None,
-                'processors': event.processors,
+                'processors': event.processors or [],
                 'error_message': event.error_message,
                 'retry_count': event.retry_count,
                 'timestamp': event.timestamp.isoformat(),
@@ -71,198 +76,291 @@ class EventRepository:
                 'version': event.version,
                 'schema_version': event.schema_version
             }
-            
-            result = self.supabase.table(self.events_table).insert(event_dict).execute()
-            
-            if result.data:
+
+            with self.db:
+                count = self.db.insert_into(self.events_table, [event_dict], schema=self.schema)
+
+            if count is not None and count > 0:
                 logger.info(f"Event {event.event_id} saved successfully")
                 return event
-            else:
-                raise Exception("Failed to save event")
-                
+
+            # Try to get event if insert returned None/0
+            result = await self.get_event(event.event_id)
+            if result:
+                return result
+
+            raise Exception("Failed to save event")
+
         except Exception as e:
             logger.error(f"Error saving event {event.event_id}: {e}")
             raise
-    
+
     async def get_event(self, event_id: str) -> Optional[Event]:
-        """获取单个事件"""
+        """Get single event by ID"""
         try:
-            result = self.supabase.table(self.events_table).select('*').eq('event_id', event_id).single().execute()
-            
-            if result.data:
-                return self._row_to_event(result.data)
+            query = f'SELECT * FROM {self.schema}.{self.events_table} WHERE event_id = $1'
+
+            with self.db:
+                result = self.db.query_row(query, [event_id], schema=self.schema)
+
+            if result:
+                return self._row_to_event(result)
             return None
-            
+
         except Exception as e:
             logger.error(f"Error getting event {event_id}: {e}")
             return None
-    
-    async def query_events(self, 
+
+    async def query_events(self,
                           user_id: Optional[str] = None,
                           event_type: Optional[str] = None,
                           event_source: Optional[EventSource] = None,
                           event_category: Optional[EventCategory] = None,
                           status: Optional[EventStatus] = None,
+                          correlation_id: Optional[str] = None,
                           start_time: Optional[datetime] = None,
                           end_time: Optional[datetime] = None,
                           limit: int = 100,
                           offset: int = 0) -> Tuple[List[Event], int]:
-        """查询事件"""
+        """Query events with filters"""
         try:
-            # 构建查询条件
-            query = self.supabase.table(self.events_table).select('*')
-            count_query = self.supabase.table(self.events_table).select('*', count='exact')
-            
-            # 应用过滤条件
+            conditions = []
+            params = []
+            param_count = 0
+
             if user_id:
-                query = query.eq('user_id', user_id)
-                count_query = count_query.eq('user_id', user_id)
+                param_count += 1
+                conditions.append(f"user_id = ${param_count}")
+                params.append(user_id)
+
             if event_type:
-                query = query.eq('event_type', event_type)
-                count_query = count_query.eq('event_type', event_type)
+                param_count += 1
+                conditions.append(f"event_type = ${param_count}")
+                params.append(event_type)
+
             if event_source:
-                query = query.eq('event_source', event_source.value)
-                count_query = count_query.eq('event_source', event_source.value)
+                param_count += 1
+                conditions.append(f"event_source = ${param_count}")
+                params.append(event_source.value)
+
             if event_category:
-                query = query.eq('event_category', event_category.value)
-                count_query = count_query.eq('event_category', event_category.value)
+                param_count += 1
+                conditions.append(f"event_category = ${param_count}")
+                params.append(event_category.value)
+
             if status:
-                query = query.eq('status', status.value)
-                count_query = count_query.eq('status', status.value)
+                param_count += 1
+                conditions.append(f"status = ${param_count}")
+                params.append(status.value)
+
+            if correlation_id:
+                param_count += 1
+                conditions.append(f"correlation_id = ${param_count}")
+                params.append(correlation_id)
+
             if start_time:
-                query = query.gte('timestamp', start_time.isoformat())
-                count_query = count_query.gte('timestamp', start_time.isoformat())
+                param_count += 1
+                conditions.append(f"timestamp >= ${param_count}")
+                params.append(start_time.isoformat())
+
             if end_time:
-                query = query.lte('timestamp', end_time.isoformat())
-                count_query = count_query.lte('timestamp', end_time.isoformat())
-            
-            # 执行查询
-            query = query.order('timestamp', desc=True).range(offset, offset + limit - 1)
-            result = query.execute()
-            count_result = count_query.execute()
-            
-            events = []
-            if result.data:
-                events = [self._row_to_event(row) for row in result.data]
-            
-            total = count_result.count if count_result.count is not None else 0
-            return events, total
-            
+                param_count += 1
+                conditions.append(f"timestamp <= ${param_count}")
+                params.append(end_time.isoformat())
+
+            where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+            # Get total count
+            count_query = f'SELECT COUNT(*) as count FROM {self.schema}.{self.events_table} WHERE {where_clause}'
+            with self.db:
+                count_result = self.db.query_row(count_query, params, schema=self.schema)
+            total_count = int(count_result.get("count", 0)) if count_result else 0
+
+            # Get events
+            query = f'''
+                SELECT * FROM {self.schema}.{self.events_table}
+                WHERE {where_clause}
+                ORDER BY timestamp DESC
+                LIMIT {limit} OFFSET {offset}
+            '''
+
+            with self.db:
+                results = self.db.query(query, params, schema=self.schema)
+
+            events = [self._row_to_event(row) for row in results] if results else []
+
+            return events, total_count
+
         except Exception as e:
             logger.error(f"Error querying events: {e}")
             return [], 0
-    
-    async def update_event_status(self, event_id: str, status: EventStatus, 
-                                 error_message: Optional[str] = None) -> bool:
-        """更新事件状态"""
+
+    async def update_event_status(self, event_id: str, status: EventStatus,
+                                  error_message: Optional[str] = None,
+                                  processed_at: Optional[datetime] = None) -> bool:
+        """Update event status"""
         try:
             update_data = {
-                'status': status.value,
-                'updated_at': datetime.utcnow().isoformat()
+                "status": status.value,
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
-            
-            if status == EventStatus.PROCESSED:
-                update_data['processed_at'] = datetime.utcnow().isoformat()
-            
+
             if error_message:
-                update_data['error_message'] = error_message
-            
-            result = self.supabase.table(self.events_table).update(update_data).eq('event_id', event_id).execute()
-            
-            return bool(result.data)
-            
+                update_data["error_message"] = error_message
+
+            if processed_at:
+                update_data["processed_at"] = processed_at.isoformat()
+            elif status == EventStatus.PROCESSED:
+                update_data["processed_at"] = datetime.now(timezone.utc).isoformat()
+
+            set_clauses = []
+            params = []
+            param_count = 0
+
+            for key, value in update_data.items():
+                param_count += 1
+                set_clauses.append(f"{key} = ${param_count}")
+                params.append(value)
+
+            param_count += 1
+            params.append(event_id)
+
+            set_clause = ", ".join(set_clauses)
+            query = f'''
+                UPDATE {self.schema}.{self.events_table}
+                SET {set_clause}
+                WHERE event_id = ${param_count}
+            '''
+
+            with self.db:
+                count = self.db.execute(query, params, schema=self.schema)
+
+            return count is not None and count > 0
+
         except Exception as e:
-            logger.error(f"Error updating event {event_id} status: {e}")
+            logger.error(f"Error updating event status {event_id}: {e}")
             return False
-    
+
     async def update_event(self, event: Event) -> bool:
-        """更新事件"""
+        """Update event"""
         try:
             update_data = {
-                'status': event.status.value,
-                'processors': event.processors,
-                'processed_at': event.processed_at.isoformat() if event.processed_at else None,
-                'error_message': event.error_message,
-                'retry_count': event.retry_count,
-                'updated_at': datetime.utcnow().isoformat()
+                "data": event.data or {},
+                "metadata": event.metadata or {},
+                "context": event.context or {},
+                "properties": event.properties or {},
+                "status": event.status.value,
+                "processed_at": event.processed_at.isoformat() if event.processed_at else None,
+                "processors": event.processors or [],
+                "error_message": event.error_message,
+                "retry_count": event.retry_count,
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
-            
-            result = self.supabase.table(self.events_table).update(update_data).eq('event_id', event.event_id).execute()
-            
-            return bool(result.data)
-            
+
+            set_clauses = []
+            params = []
+            param_count = 0
+
+            for key, value in update_data.items():
+                param_count += 1
+                set_clauses.append(f"{key} = ${param_count}")
+                params.append(value)
+
+            param_count += 1
+            params.append(event.event_id)
+
+            set_clause = ", ".join(set_clauses)
+            query = f'''
+                UPDATE {self.schema}.{self.events_table}
+                SET {set_clause}
+                WHERE event_id = ${param_count}
+            '''
+
+            with self.db:
+                count = self.db.execute(query, params, schema=self.schema)
+
+            return count is not None and count > 0
+
         except Exception as e:
             logger.error(f"Error updating event {event.event_id}: {e}")
             return False
-    
+
     async def get_unprocessed_events(self, limit: int = 100) -> List[Event]:
-        """获取未处理的事件"""
+        """Get unprocessed events"""
         try:
-            query = self.supabase.table(self.events_table).select('*')
-            query = query.eq('status', EventStatus.PENDING.value)
-            query = query.order('timestamp', desc=False)  # 按时间顺序处理
-            query = query.limit(limit)
-            result = query.execute()
-            
-            if result.data:
-                return [self._row_to_event(row) for row in result.data]
-            return []
-            
+            query = f'''
+                SELECT * FROM {self.schema}.{self.events_table}
+                WHERE status = $1
+                ORDER BY timestamp ASC
+                LIMIT {limit}
+            '''
+
+            with self.db:
+                results = self.db.query(query, [EventStatus.PENDING.value], schema=self.schema)
+
+            return [self._row_to_event(row) for row in results] if results else []
+
         except Exception as e:
             logger.error(f"Error getting unprocessed events: {e}")
             return []
-    
+
     async def get_statistics(self, user_id: Optional[str] = None) -> EventStatistics:
-        """获取事件统计"""
+        """Get event statistics"""
         try:
-            # 基础查询
-            query = self.supabase.table(self.events_table).select('*', count='exact')
-            
+            conditions = []
+            params = []
+
             if user_id:
-                query = query.eq('user_id', user_id)
-            
-            # 获取总数
-            total_result = query.execute()
-            total_events = len(total_result.data) if total_result.data else 0
-            
-            # 获取各状态的事件数
-            pending_query = self.supabase.table(self.events_table).select('*', count='exact').eq('status', EventStatus.PENDING.value)
-            processed_query = self.supabase.table(self.events_table).select('*', count='exact').eq('status', EventStatus.PROCESSED.value)
-            failed_query = self.supabase.table(self.events_table).select('*', count='exact').eq('status', EventStatus.FAILED.value)
-            
-            if user_id:
-                pending_query = pending_query.eq('user_id', user_id)
-                processed_query = processed_query.eq('user_id', user_id)
-                failed_query = failed_query.eq('user_id', user_id)
-            
-            pending_events = len(pending_query.execute().data or [])
-            processed_events = len(processed_query.execute().data or [])
-            failed_events = len(failed_query.execute().data or [])
-            
-            # 获取今日事件数
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-            today_query = self.supabase.table(self.events_table).select('*', count='exact').gte('timestamp', today_start.isoformat())
-            
-            if user_id:
-                today_query = today_query.eq('user_id', user_id)
-            
-            events_today = len(today_query.execute().data or [])
-            
-            # 计算处理率和错误率
-            processing_rate = (processed_events / total_events * 100) if total_events > 0 else 0
-            error_rate = (failed_events / total_events * 100) if total_events > 0 else 0
-            
+                conditions.append("user_id = $1")
+                params.append(user_id)
+
+            where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+            # Get counts by status
+            query = f'''
+                SELECT
+                    COUNT(*) as total_events,
+                    COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_events,
+                    COUNT(CASE WHEN status = 'processed' THEN 1 END) as processed_events,
+                    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_events,
+                    COUNT(CASE WHEN timestamp >= CURRENT_DATE THEN 1 END) as events_today,
+                    COUNT(CASE WHEN timestamp >= CURRENT_DATE - INTERVAL '7 days' THEN 1 END) as events_week,
+                    COUNT(CASE WHEN timestamp >= CURRENT_DATE - INTERVAL '30 days' THEN 1 END) as events_month
+                FROM {self.schema}.{self.events_table}
+                WHERE {where_clause}
+            '''
+
+            with self.db:
+                result = self.db.query_row(query, params, schema=self.schema)
+
+            if result:
+                return EventStatistics(
+                    total_events=int(result.get("total_events", 0)),
+                    pending_events=int(result.get("pending_events", 0)),
+                    processed_events=int(result.get("processed_events", 0)),
+                    failed_events=int(result.get("failed_events", 0)),
+                    events_today=int(result.get("events_today", 0)),
+                    events_this_week=int(result.get("events_week", 0)),
+                    events_this_month=int(result.get("events_month", 0)),
+                    events_by_type={},
+                    events_by_source={},
+                    events_by_category={}
+                )
+
+            # Return default statistics
             return EventStatistics(
-                total_events=total_events,
-                pending_events=pending_events,
-                processed_events=processed_events,
-                failed_events=failed_events,
-                events_today=events_today,
-                processing_rate=processing_rate,
-                error_rate=error_rate,
-                calculated_at=datetime.utcnow()
+                total_events=0,
+                pending_events=0,
+                processed_events=0,
+                failed_events=0,
+                events_today=0,
+                events_this_week=0,
+                events_this_month=0,
+                events_by_type={},
+                events_by_source={},
+                events_by_category={}
             )
-            
+
         except Exception as e:
             logger.error(f"Error getting statistics: {e}")
             return EventStatistics(
@@ -271,99 +369,116 @@ class EventRepository:
                 processed_events=0,
                 failed_events=0,
                 events_today=0,
-                processing_rate=0.0,
-                error_rate=0.0,
-                calculated_at=datetime.utcnow()
+                events_this_week=0,
+                events_this_month=0,
+                events_by_type={},
+                events_by_source={},
+                events_by_category={}
             )
-    
+
     async def save_processing_result(self, result: EventProcessingResult):
-        """保存处理结果"""
+        """Save processing result"""
         try:
             result_dict = {
                 'event_id': result.event_id,
                 'processor_name': result.processor_name,
                 'status': result.status.value,
                 'message': result.message,
-                'processed_at': result.processed_at.isoformat(),
+                'processed_at': result.processed_at.isoformat() if result.processed_at else datetime.now(timezone.utc).isoformat(),
                 'duration_ms': result.duration_ms
             }
-            
-            self.supabase.table(self.processing_results_table).insert(result_dict).execute()
-            
+
+            with self.db:
+                count = self.db.insert_into(self.processing_results_table, [result_dict], schema=self.schema)
+
+            if count is not None and count > 0:
+                logger.info(f"Processing result for event {result.event_id} saved")
+
         except Exception as e:
             logger.error(f"Error saving processing result: {e}")
-    
-    async def get_event_stream(self, stream_id: str, 
-                              from_version: Optional[int] = None) -> List[Event]:
-        """获取事件流"""
+            raise
+
+    async def get_event_stream(self, stream_id: str,
+                              entity_type: Optional[str] = None,
+                              entity_id: Optional[str] = None) -> Optional[Dict]:
+        """Get event stream"""
         try:
-            # 获取流信息
-            stream_result = self.supabase.table(self.event_streams_table).select('*').eq('stream_id', stream_id).single().execute()
-            
-            if not stream_result.data:
-                return []
-            
-            # 获取流中的事件
-            events_data = json.loads(stream_result.data.get('events', '[]'))
-            events = []
-            
-            for event_id in events_data:
-                event = await self.get_event(event_id)
-                if event:
-                    events.append(event)
-            
-            return events
-            
+            if stream_id:
+                query = f'SELECT * FROM {self.schema}.{self.event_streams_table} WHERE stream_id = $1'
+                params = [stream_id]
+            elif entity_type and entity_id:
+                query = f'SELECT * FROM {self.schema}.{self.event_streams_table} WHERE entity_type = $1 AND entity_id = $2'
+                params = [entity_type, entity_id]
+            else:
+                return None
+
+            with self.db:
+                result = self.db.query_row(query, params, schema=self.schema)
+
+            return result
+
         except Exception as e:
-            logger.error(f"Error getting event stream {stream_id}: {e}")
-            return []
-    
+            logger.error(f"Error getting event stream: {e}")
+            return None
+
     async def save_projection(self, projection: EventProjection):
-        """保存投影"""
+        """Save event projection"""
         try:
             projection_dict = {
                 'projection_id': projection.projection_id,
                 'projection_name': projection.projection_name,
                 'entity_id': projection.entity_id,
                 'entity_type': projection.entity_type,
-                'state': json.dumps(projection.state),
+                'state': projection.state or {},
                 'version': projection.version,
                 'last_event_id': projection.last_event_id,
                 'created_at': projection.created_at.isoformat(),
                 'updated_at': projection.updated_at.isoformat()
             }
-            
-            # Upsert projection
-            self.supabase.table(self.event_projections_table).upsert(projection_dict).execute()
-            
+
+            with self.db:
+                count = self.db.insert_into(self.event_projections_table, [projection_dict], schema=self.schema)
+
+            if count is not None and count > 0:
+                logger.info(f"Projection {projection.projection_id} saved")
+
         except Exception as e:
             logger.error(f"Error saving projection: {e}")
-    
-    async def get_projection(self, entity_type: str, entity_id: str) -> Optional[EventProjection]:
-        """获取投影"""
+            raise
+
+    async def get_projection(self, entity_type: str, entity_id: str,
+                            projection_name: str = "default") -> Optional[EventProjection]:
+        """Get event projection"""
         try:
-            result = self.supabase.table(self.event_projections_table).select('*').eq('entity_type', entity_type).eq('entity_id', entity_id).single().execute()
-            
-            if result.data:
+            query = f'''
+                SELECT * FROM {self.schema}.{self.event_projections_table}
+                WHERE entity_type = $1 AND entity_id = $2 AND projection_name = $3
+            '''
+
+            with self.db:
+                result = self.db.query_row(query, [entity_type, entity_id, projection_name], schema=self.schema)
+
+            if result:
                 return EventProjection(
-                    projection_id=result.data['projection_id'],
-                    projection_name=result.data['projection_name'],
-                    entity_id=result.data['entity_id'],
-                    entity_type=result.data['entity_type'],
-                    state=json.loads(result.data['state']),
-                    version=result.data['version'],
-                    last_event_id=result.data.get('last_event_id'),
-                    created_at=datetime.fromisoformat(result.data['created_at']),
-                    updated_at=datetime.fromisoformat(result.data['updated_at'])
+                    projection_id=result['projection_id'],
+                    projection_name=result['projection_name'],
+                    entity_id=result['entity_id'],
+                    entity_type=result['entity_type'],
+                    state=result.get('state', {}),
+                    version=result.get('version', 0),
+                    last_event_id=result.get('last_event_id'),
+                    created_at=datetime.fromisoformat(result['created_at'].replace('Z', '+00:00')),
+                    updated_at=datetime.fromisoformat(result['updated_at'].replace('Z', '+00:00'))
                 )
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error getting projection: {e}")
             return None
-    
+
     async def save_processor(self, processor: EventProcessor):
-        """保存处理器"""
+        """Save event processor"""
         try:
             processor_dict = {
                 'processor_id': processor.processor_id,
@@ -371,99 +486,159 @@ class EventRepository:
                 'processor_type': processor.processor_type,
                 'enabled': processor.enabled,
                 'priority': processor.priority,
-                'filters': json.dumps(processor.filters),
-                'config': json.dumps(processor.config),
+                'filters': processor.filters or {},
+                'config': processor.config or {},
                 'error_count': processor.error_count,
                 'last_error': processor.last_error,
-                'last_processed_at': processor.last_processed_at.isoformat() if processor.last_processed_at else None
+                'last_processed_at': processor.last_processed_at.isoformat() if processor.last_processed_at else None,
+                'created_at': processor.created_at.isoformat(),
+                'updated_at': processor.updated_at.isoformat()
             }
-            
-            self.supabase.table(self.event_processors_table).upsert(processor_dict).execute()
-            
+
+            with self.db:
+                count = self.db.insert_into(self.event_processors_table, [processor_dict], schema=self.schema)
+
+            if count is not None and count > 0:
+                logger.info(f"Processor {processor.processor_id} saved")
+
         except Exception as e:
             logger.error(f"Error saving processor: {e}")
-    
+            raise
+
     async def get_processors(self) -> List[EventProcessor]:
-        """获取所有处理器"""
+        """Get all event processors"""
         try:
-            result = self.supabase.table(self.event_processors_table).select('*').order('priority', desc=True).execute()
-            
-            if result.data:
-                processors = []
-                for row in result.data:
+            query = f'''
+                SELECT * FROM {self.schema}.{self.event_processors_table}
+                WHERE enabled = TRUE
+                ORDER BY priority DESC
+            '''
+
+            with self.db:
+                results = self.db.query(query, [], schema=self.schema)
+
+            processors = []
+            if results:
+                for row in results:
                     processors.append(EventProcessor(
                         processor_id=row['processor_id'],
                         processor_name=row['processor_name'],
                         processor_type=row['processor_type'],
-                        enabled=row['enabled'],
-                        priority=row['priority'],
-                        filters=json.loads(row['filters']),
-                        config=json.loads(row['config']),
-                        error_count=row['error_count'],
+                        enabled=row.get('enabled', True),
+                        priority=row.get('priority', 0),
+                        filters=row.get('filters', {}),
+                        config=row.get('config', {}),
+                        error_count=row.get('error_count', 0),
                         last_error=row.get('last_error'),
-                        last_processed_at=datetime.fromisoformat(row['last_processed_at']) if row.get('last_processed_at') else None
+                        last_processed_at=datetime.fromisoformat(row['last_processed_at'].replace('Z', '+00:00')) if row.get('last_processed_at') else None,
+                        created_at=datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')),
+                        updated_at=datetime.fromisoformat(row['updated_at'].replace('Z', '+00:00'))
                     ))
-                return processors
-            return []
-            
+
+            return processors
+
         except Exception as e:
             logger.error(f"Error getting processors: {e}")
             return []
-    
+
     async def save_subscription(self, subscription: EventSubscription):
-        """保存订阅"""
+        """Save event subscription"""
         try:
             subscription_dict = {
                 'subscription_id': subscription.subscription_id,
                 'subscriber_name': subscription.subscriber_name,
                 'subscriber_type': subscription.subscriber_type,
-                'event_types': subscription.event_types,
-                'event_sources': [s.value for s in subscription.event_sources] if subscription.event_sources else None,
-                'event_categories': [c.value for c in subscription.event_categories] if subscription.event_categories else None,
+                'event_types': subscription.event_types or [],
+                'event_sources': subscription.event_sources or [],
+                'event_categories': subscription.event_categories or [],
                 'callback_url': subscription.callback_url,
                 'webhook_secret': subscription.webhook_secret,
                 'enabled': subscription.enabled,
-                'retry_policy': json.dumps(subscription.retry_policy),
+                'retry_policy': subscription.retry_policy or {},
                 'created_at': subscription.created_at.isoformat(),
                 'updated_at': subscription.updated_at.isoformat()
             }
-            
-            self.supabase.table(self.event_subscriptions_table).upsert(subscription_dict).execute()
-            
+
+            with self.db:
+                count = self.db.insert_into(self.event_subscriptions_table, [subscription_dict], schema=self.schema)
+
+            if count is not None and count > 0:
+                logger.info(f"Subscription {subscription.subscription_id} saved")
+                return subscription
+
+            return None
+
         except Exception as e:
             logger.error(f"Error saving subscription: {e}")
-    
+            raise
+
     async def get_subscriptions(self) -> List[EventSubscription]:
-        """获取所有订阅"""
+        """Get all event subscriptions"""
         try:
-            result = self.supabase.table(self.event_subscriptions_table).select('*').execute()
-            
-            if result.data:
-                subscriptions = []
-                for row in result.data:
+            query = f'''
+                SELECT * FROM {self.schema}.{self.event_subscriptions_table}
+                WHERE enabled = TRUE
+                ORDER BY created_at DESC
+            '''
+
+            with self.db:
+                results = self.db.query(query, [], schema=self.schema)
+
+            subscriptions = []
+            if results:
+                for row in results:
                     subscriptions.append(EventSubscription(
                         subscription_id=row['subscription_id'],
                         subscriber_name=row['subscriber_name'],
                         subscriber_type=row['subscriber_type'],
-                        event_types=row['event_types'],
-                        event_sources=[EventSource(s) for s in row['event_sources']] if row.get('event_sources') else None,
-                        event_categories=[EventCategory(c) for c in row['event_categories']] if row.get('event_categories') else None,
+                        event_types=row.get('event_types', []),
+                        event_sources=row.get('event_sources', []),
+                        event_categories=row.get('event_categories', []),
                         callback_url=row.get('callback_url'),
                         webhook_secret=row.get('webhook_secret'),
-                        enabled=row['enabled'],
-                        retry_policy=json.loads(row['retry_policy']),
-                        created_at=datetime.fromisoformat(row['created_at']),
-                        updated_at=datetime.fromisoformat(row['updated_at'])
+                        enabled=row.get('enabled', True),
+                        retry_policy=row.get('retry_policy', {}),
+                        created_at=datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')),
+                        updated_at=datetime.fromisoformat(row['updated_at'].replace('Z', '+00:00'))
                     ))
-                return subscriptions
-            return []
-            
+
+            return subscriptions
+
         except Exception as e:
             logger.error(f"Error getting subscriptions: {e}")
             return []
-    
+
     def _row_to_event(self, row: Dict) -> Event:
-        """将数据库行转换为事件对象"""
+        """Convert database row to Event model"""
+        # Handle JSONB fields
+        data = row.get('data')
+        if isinstance(data, str):
+            import json
+            data = json.loads(data)
+        elif not isinstance(data, dict):
+            data = {}
+
+        metadata = row.get('metadata')
+        if isinstance(metadata, str):
+            import json
+            metadata = json.loads(metadata)
+        elif not isinstance(metadata, dict):
+            metadata = {}
+
+        context = row.get('context')
+        if isinstance(context, str):
+            import json
+            context = json.loads(context)
+        elif not isinstance(context, dict):
+            context = {}
+
+        properties = row.get('properties')
+        if isinstance(properties, str):
+            import json
+            properties = json.loads(properties)
+        elif not isinstance(properties, dict):
+            properties = {}
+
         return Event(
             event_id=row['event_id'],
             event_type=row['event_type'],
@@ -474,22 +649,22 @@ class EventRepository:
             organization_id=row.get('organization_id'),
             device_id=row.get('device_id'),
             correlation_id=row.get('correlation_id'),
-            data=json.loads(row['data']) if row.get('data') else {},
-            metadata=json.loads(row['metadata']) if row.get('metadata') else {},
-            context=json.loads(row['context']) if row.get('context') else None,
-            properties=json.loads(row['properties']) if row.get('properties') else None,
+            data=data,
+            metadata=metadata,
+            context=context,
+            properties=properties,
             status=EventStatus(row['status']),
-            processed_at=datetime.fromisoformat(row['processed_at']) if row.get('processed_at') else None,
+            processed_at=datetime.fromisoformat(row['processed_at'].replace('Z', '+00:00')) if row.get('processed_at') else None,
             processors=row.get('processors', []),
             error_message=row.get('error_message'),
             retry_count=row.get('retry_count', 0),
-            timestamp=datetime.fromisoformat(row['timestamp']),
-            created_at=datetime.fromisoformat(row['created_at']),
-            updated_at=datetime.fromisoformat(row['updated_at']),
+            timestamp=datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00')),
+            created_at=datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')),
+            updated_at=datetime.fromisoformat(row['updated_at'].replace('Z', '+00:00')),
             version=row.get('version', '1.0.0'),
             schema_version=row.get('schema_version', '1.0.0')
         )
-    
+
     async def close(self):
-        """关闭连接（Supabase client 不需要显式关闭）"""
-        pass
+        """Close repository (for interface consistency)"""
+        logger.info("Event Repository closed")

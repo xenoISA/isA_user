@@ -19,6 +19,7 @@ from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.service_discovery import get_service_discovery
+from core.nats_client import get_event_bus
 from .models import (
     FirmwareUploadRequest, UpdateCampaignRequest, DeviceUpdateRequest, UpdateApprovalRequest,
     FirmwareResponse, UpdateCampaignResponse, DeviceUpdateResponse,
@@ -26,6 +27,8 @@ from .models import (
     UpdateType, UpdateStatus, DeploymentStrategy, Priority
 )
 from .ota_service import OTAService
+from .ota_repository import OTARepository
+from .events import OTAEventHandler
 from datetime import datetime
 
 # Initialize configuration
@@ -40,12 +43,20 @@ logger = app_logger  # for backward compatibility
 class OTAMicroservice:
     def __init__(self):
         self.service = None
-    
-    async def initialize(self):
-        self.service = OTAService()
+        self.event_bus = None
+
+    async def initialize(self, event_bus=None):
+        self.event_bus = event_bus
+        self.service = OTAService(event_bus=event_bus)
         logger.info("OTA service initialized")
-    
+
     async def shutdown(self):
+        if self.event_bus:
+            try:
+                await self.event_bus.close()
+                logger.info("Event bus connection closed")
+            except Exception as e:
+                logger.error(f"Error closing event bus: {e}")
         logger.info("OTA service shutting down")
 
 # Global instance
@@ -55,9 +66,32 @@ microservice = OTAMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    # Initialize event bus
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("ota_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
     # Startup
-    await microservice.initialize()
-    
+    await microservice.initialize(event_bus=event_bus)
+
+    # Set up event subscriptions
+    if event_bus:
+        try:
+            ota_repo = OTARepository()
+            event_handler = OTAEventHandler(ota_repo)
+
+            await event_bus.subscribe(
+                subject="events.device.deleted",
+                callback=lambda msg: event_handler.handle_event(msg)
+            )
+            logger.info("✅ Subscribed to device.deleted events")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
+
     # Consul注册
     if config.consul_enabled:
         consul_registry = ConsulRegistry(
@@ -68,14 +102,14 @@ async def lifespan(app: FastAPI):
             service_host=config.service_host,
             tags=["microservice", "iot", "ota", "firmware", "update", "api", "v1"]
         )
-    
+
         if consul_registry.register():
             consul_registry.start_maintenance()
             app.state.consul_registry = consul_registry
             logger.info(f"{config.service_name} registered with Consul")
         else:
             logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+
     yield
     
     # Shutdown
@@ -134,12 +168,32 @@ async def detailed_health_check():
 # ======================
 # Dependencies
 # ======================
+#
+# NOTE: When deployed behind an API Gateway:
+# - External requests: Gateway validates JWT → Service trusts gateway headers
+# - Internal service calls: Can use get_user_context_optional() for no auth
+# - For production: Gateway should handle ALL authentication
+#
 
 async def get_user_context(
     authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None)
+    x_api_key: Optional[str] = Header(None),
+    x_internal_call: Optional[str] = Header(None)  # For internal service-to-service calls
 ) -> Dict[str, Any]:
-    """获取用户上下文信息"""
+    """
+    Get user context with authentication
+
+    For internal service calls, set header: X-Internal-Call: true
+    to bypass auth (use with caution - only for trusted services)
+    """
+    # Allow internal service-to-service calls without auth
+    if x_internal_call == "true":
+        return {
+            "user_id": "internal_service",
+            "organization_id": None,
+            "role": "service"
+        }
+
     if not authorization and not x_api_key:
         raise HTTPException(status_code=401, detail="Authentication required")
     
@@ -261,19 +315,60 @@ async def list_firmware(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取固件列表"""
-    # 实现固件列表查询
-    return {
-        "firmware": [],
-        "count": 0,
-        "limit": limit,
-        "offset": offset,
-        "filters": {
-            "device_model": device_model,
-            "manufacturer": manufacturer,
-            "is_beta": is_beta,
-            "is_security_update": is_security_update
+    try:
+        # Query firmware from repository
+        firmware_list = await microservice.service.repository.list_firmware(
+            device_model=device_model,
+            manufacturer=manufacturer,
+            is_beta=is_beta,
+            is_security_update=is_security_update,
+            limit=limit,
+            offset=offset
+        )
+
+        # Convert to response models
+        firmware_responses = []
+        for fw in firmware_list:
+            firmware_responses.append(FirmwareResponse(
+                firmware_id=fw['firmware_id'],
+                name=fw['name'],
+                version=fw['version'],
+                description=fw.get('description'),
+                device_model=fw['device_model'],
+                manufacturer=fw['manufacturer'],
+                min_hardware_version=fw.get('min_hardware_version'),
+                max_hardware_version=fw.get('max_hardware_version'),
+                file_size=fw['file_size'],
+                file_url=fw['file_url'],
+                checksum_md5=fw['checksum_md5'],
+                checksum_sha256=fw['checksum_sha256'],
+                tags=fw.get('tags') or [],
+                metadata=fw.get('metadata') or {},
+                is_beta=fw.get('is_beta', False),
+                is_security_update=fw.get('is_security_update', False),
+                changelog=fw.get('changelog'),
+                download_count=fw.get('download_count', 0),
+                success_rate=float(fw.get('success_rate', 0.0)),
+                created_at=datetime.fromisoformat(fw['created_at'].replace('Z', '+00:00')) if isinstance(fw['created_at'], str) else fw['created_at'],
+                updated_at=datetime.fromisoformat(fw['updated_at'].replace('Z', '+00:00')) if isinstance(fw['updated_at'], str) else fw['updated_at'],
+                created_by=fw['created_by']
+            ))
+
+        return {
+            "firmware": firmware_responses,
+            "count": len(firmware_responses),
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "device_model": device_model,
+                "manufacturer": manufacturer,
+                "is_beta": is_beta,
+                "is_security_update": is_security_update
+            }
         }
-    }
+    except Exception as e:
+        logger.error(f"Error listing firmware: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/firmware/{firmware_id}/download")
 async def download_firmware(
@@ -359,16 +454,74 @@ async def list_campaigns(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取活动列表"""
-    return {
-        "campaigns": [],
-        "count": 0,
-        "limit": limit,
-        "offset": offset,
-        "filters": {
-            "status": status,
-            "priority": priority
+    try:
+        # Query campaigns from repository
+        campaigns_list = await microservice.service.repository.list_campaigns(
+            status=status.value if status else None,
+            priority=priority.value if priority else None,
+            limit=limit,
+            offset=offset
+        )
+
+        # Convert to response models
+        campaign_responses = []
+        for camp in campaigns_list:
+            # Get firmware for each campaign
+            firmware = await microservice.service.get_firmware(camp['firmware_id'])
+            if not firmware:
+                logger.warning(f"Firmware not found for campaign {camp['campaign_id']}")
+                continue
+
+            campaign_responses.append(UpdateCampaignResponse(
+                campaign_id=camp['campaign_id'],
+                name=camp['name'],
+                description=camp.get('description'),
+                firmware=firmware,
+                status=UpdateStatus(camp['status']),
+                deployment_strategy=DeploymentStrategy(camp['deployment_strategy']),
+                priority=Priority(camp['priority']),
+                target_device_count=camp.get('target_device_count', 0),
+                targeted_devices=camp.get('targeted_devices') or [],
+                targeted_groups=camp.get('targeted_groups') or [],
+                rollout_percentage=camp.get('rollout_percentage', 100),
+                max_concurrent_updates=camp.get('max_concurrent_updates', 10),
+                batch_size=camp.get('batch_size', 50),
+                total_devices=camp.get('total_devices', 0),
+                pending_devices=camp.get('pending_devices', 0),
+                in_progress_devices=camp.get('in_progress_devices', 0),
+                completed_devices=camp.get('completed_devices', 0),
+                failed_devices=camp.get('failed_devices', 0),
+                cancelled_devices=camp.get('cancelled_devices', 0),
+                scheduled_start=datetime.fromisoformat(camp['scheduled_start'].replace('Z', '+00:00')) if camp.get('scheduled_start') and isinstance(camp['scheduled_start'], str) else camp.get('scheduled_start'),
+                scheduled_end=datetime.fromisoformat(camp['scheduled_end'].replace('Z', '+00:00')) if camp.get('scheduled_end') and isinstance(camp['scheduled_end'], str) else camp.get('scheduled_end'),
+                actual_start=datetime.fromisoformat(camp['actual_start'].replace('Z', '+00:00')) if camp.get('actual_start') and isinstance(camp['actual_start'], str) else camp.get('actual_start'),
+                actual_end=datetime.fromisoformat(camp['actual_end'].replace('Z', '+00:00')) if camp.get('actual_end') and isinstance(camp['actual_end'], str) else camp.get('actual_end'),
+                timeout_minutes=camp.get('timeout_minutes', 60),
+                auto_rollback=camp.get('auto_rollback', True),
+                failure_threshold_percent=camp.get('failure_threshold_percent', 20),
+                rollback_triggers=camp.get('rollback_triggers') or [],
+                requires_approval=camp.get('requires_approval', False),
+                approved=camp.get('approved'),
+                approved_by=camp.get('approved_by'),
+                approval_comment=camp.get('approval_comment'),
+                created_at=datetime.fromisoformat(camp['created_at'].replace('Z', '+00:00')) if isinstance(camp['created_at'], str) else camp['created_at'],
+                updated_at=datetime.fromisoformat(camp['updated_at'].replace('Z', '+00:00')) if isinstance(camp['updated_at'], str) else camp['updated_at'],
+                created_by=camp['created_by']
+            ))
+
+        return {
+            "campaigns": campaign_responses,
+            "count": len(campaign_responses),
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "status": status,
+                "priority": priority
+            }
         }
-    }
+    except Exception as e:
+        logger.error(f"Error listing campaigns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/campaigns/{campaign_id}/start")
 async def start_campaign(
@@ -442,6 +595,10 @@ async def update_device(
         if device_update:
             return device_update
         raise HTTPException(status_code=400, detail="Failed to start device update")
+    except ValueError as ve:
+        # Handle validation errors (device not found, firmware incompatible, etc.)
+        logger.warning(f"Validation error: {ve}")
+        raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
         logger.error(f"Error updating device: {e}")
         raise HTTPException(status_code=500, detail=str(e))

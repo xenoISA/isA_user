@@ -24,6 +24,9 @@ class SharingResourceType(str, Enum):
     CALENDAR = "calendar"  # 家庭日历
     SHOPPING_LIST = "shopping_list"  # 购物清单
     LOCATION = "location"  # 位置共享
+    # 智能相框新增资源类型
+    ALBUM = "album"  # 相册共享（智能相框相册）
+    SMART_FRAME = "smart_frame"  # 智能相框设备共享
 
 
 class SharingPermissionLevel(str, Enum):
@@ -35,6 +38,11 @@ class SharingPermissionLevel(str, Enum):
     READ_ONLY = "read_only"  # 只读访问
     LIMITED = "limited"  # 受限访问（有配额/时间限制）
     VIEW_ONLY = "view_only"  # 仅查看
+    # 相册专用权限级别
+    ALBUM_VIEWER = "album_viewer"  # 只能查看相册照片
+    ALBUM_CONTRIBUTOR = "album_contributor"  # 可以添加照片，不能删除
+    ALBUM_EDITOR = "album_editor"  # 可以添加、删除、编辑照片
+    ALBUM_MANAGER = "album_manager"  # 可以管理相册设置和权限
 
 
 class SharingStatus(str, Enum):

@@ -6,7 +6,7 @@ Invitation Service
 
 import logging
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import httpx
 
 import sys
@@ -20,6 +20,7 @@ from .models import (
     AcceptInvitationResponse
 )
 from core.consul_registry import ConsulRegistry
+from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,11 @@ class InvitationServiceError(Exception):
 class InvitationService:
     """邀请服务"""
 
-    def __init__(self):
+    def __init__(self, event_bus=None):
         self.repository = InvitationRepository()
         self.invitation_base_url = "https://app.iapro.ai/accept-invitation"
         self.consul = None
+        self.event_bus = event_bus
         self._init_consul()
 
     def _init_consul(self):
@@ -114,7 +116,28 @@ class InvitationService:
             
             # 发送邀请邮件（这里简化处理）
             email_sent = await self._send_invitation_email(invitation, message)
-            
+
+            # Publish invitation.sent event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.INVITATION_SENT,
+                        source=ServiceSource.INVITATION_SERVICE,
+                        data={
+                            "invitation_id": invitation.invitation_id,
+                            "organization_id": organization_id,
+                            "email": email,
+                            "role": role.value,
+                            "invited_by": inviter_user_id,
+                            "email_sent": email_sent,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published invitation.sent event for invitation {invitation.invitation_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish invitation.sent event: {e}")
+
             logger.info(f"Invitation created: {invitation.invitation_id}, email_sent: {email_sent}")
             return True, invitation, "Invitation created successfully"
             
@@ -138,11 +161,34 @@ class InvitationService:
             expires_at_str = invitation_info.get('expires_at')
             if expires_at_str:
                 expires_at = datetime.fromisoformat(expires_at_str.replace('Z', ''))
-                if expires_at < datetime.utcnow():
+                # Make sure both datetimes are timezone-aware for comparison
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at < datetime.now(timezone.utc):
                     # 更新状态为过期
                     await self.repository.update_invitation(invitation_info['invitation_id'], {
                         'status': InvitationStatus.EXPIRED.value
                     })
+
+                    # Publish invitation.expired event
+                    if self.event_bus:
+                        try:
+                            event = Event(
+                                event_type=EventType.INVITATION_EXPIRED,
+                                source=ServiceSource.INVITATION_SERVICE,
+                                data={
+                                    "invitation_id": invitation_info['invitation_id'],
+                                    "organization_id": invitation_info['organization_id'],
+                                    "email": invitation_info['email'],
+                                    "expired_at": expires_at.isoformat(),
+                                    "timestamp": datetime.now(timezone.utc).isoformat()
+                                }
+                            )
+                            await self.event_bus.publish_event(event)
+                            logger.info(f"Published invitation.expired event for invitation {invitation_info['invitation_id']}")
+                        except Exception as e:
+                            logger.error(f"Failed to publish invitation.expired event: {e}")
+
                     return False, None, "Invitation has expired"
             
             # 构建响应
@@ -157,7 +203,7 @@ class InvitationService:
                 inviter_name=invitation_info.get('inviter_name'),
                 inviter_email=invitation_info.get('inviter_email'),
                 expires_at=datetime.fromisoformat(expires_at_str) if expires_at_str else None,
-                created_at=datetime.fromisoformat(invitation_info['created_at']) if invitation_info.get('created_at') else datetime.utcnow()
+                created_at=datetime.fromisoformat(invitation_info['created_at']) if invitation_info.get('created_at') else datetime.now(timezone.utc)
             )
             
             return True, invitation_detail, "Invitation found"
@@ -189,11 +235,15 @@ class InvitationService:
             if not accept_success:
                 return False, None, "Failed to accept invitation"
             
-            # 添加用户到组织
+            # 添加用户到组织（使用邀请创建者的身份）
+            invitation = await self.repository.get_invitation_by_token(invitation_token)
+            inviter_user_id = invitation.invited_by if invitation else "system"
+
             add_member_success = await self._add_user_to_organization(
                 invitation_detail.organization_id,
                 user_id,
-                invitation_detail.role
+                invitation_detail.role,
+                inviter_user_id
             )
             
             if not add_member_success:
@@ -211,9 +261,30 @@ class InvitationService:
                 organization_name=invitation_detail.organization_name,
                 user_id=user_id,
                 role=invitation_detail.role,
-                accepted_at=datetime.utcnow()
+                accepted_at=datetime.now(timezone.utc)
             )
-            
+
+            # Publish invitation.accepted event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.INVITATION_ACCEPTED,
+                        source=ServiceSource.INVITATION_SERVICE,
+                        data={
+                            "invitation_id": invitation_detail.invitation_id,
+                            "organization_id": invitation_detail.organization_id,
+                            "user_id": user_id,
+                            "email": invitation_detail.email,
+                            "role": invitation_detail.role.value,
+                            "accepted_at": accept_response.accepted_at.isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published invitation.accepted event for invitation {invitation_detail.invitation_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish invitation.accepted event: {e}")
+
             logger.info(f"Invitation accepted: user_id={user_id}, org_id={invitation_detail.organization_id}")
             return True, accept_response, "Invitation accepted successfully"
             
@@ -274,8 +345,27 @@ class InvitationService:
             
             # 取消邀请
             success = await self.repository.cancel_invitation(invitation_id)
-            
+
             if success:
+                # Publish invitation.cancelled event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.INVITATION_CANCELLED,
+                            source=ServiceSource.INVITATION_SERVICE,
+                            data={
+                                "invitation_id": invitation_id,
+                                "organization_id": invitation.organization_id,
+                                "email": invitation.email,
+                                "cancelled_by": user_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published invitation.cancelled event for invitation {invitation_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish invitation.cancelled event: {e}")
+
                 return True, "Invitation cancelled successfully"
             else:
                 return False, "Failed to cancel invitation"
@@ -307,7 +397,7 @@ class InvitationService:
             
             # 延长过期时间
             from datetime import timedelta
-            new_expires_at = datetime.utcnow() + timedelta(days=7)
+            new_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
             await self.repository.update_invitation(invitation_id, {
                 'expires_at': new_expires_at.isoformat()
             })
@@ -396,10 +486,11 @@ class InvitationService:
             return False
     
     async def _add_user_to_organization(
-        self, 
-        organization_id: str, 
-        user_id: str, 
-        role: OrganizationRole
+        self,
+        organization_id: str,
+        user_id: str,
+        role: OrganizationRole,
+        inviter_user_id: str
     ) -> bool:
         """添加用户到组织"""
         try:
@@ -407,7 +498,7 @@ class InvitationService:
                 response = await client.post(
                     f"{self._get_service_url('organization_service', 8212)}/api/v1/organizations/{organization_id}/members",
                     headers={
-                        "X-User-Id": "system",  # 系统级操作
+                        "X-User-Id": inviter_user_id,  # Use inviter's identity for permission check
                         "Content-Type": "application/json"
                     },
                     json={

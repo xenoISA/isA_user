@@ -1,0 +1,870 @@
+{
+	"info": {
+		"_postman_id": "invitation-service-collection",
+		"name": "Invitation Service API",
+		"description": "Complete API collection for Invitation Service - Organization invitation management, member onboarding, and access control",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8213",
+			"type": "string"
+		},
+		{
+			"key": "auth_url",
+			"value": "http://localhost:8201",
+			"type": "string"
+		},
+		{
+			"key": "org_url",
+			"value": "http://localhost:8212",
+			"type": "string"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "test_user_123",
+			"type": "string"
+		},
+		{
+			"key": "organization_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "invitation_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "invitation_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "invited_email",
+			"value": "newmember@example.com",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "0. Setup - Prerequisites",
+			"item": [
+				{
+					"name": "Generate Auth Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"jwt_token\", jsonData.token);",
+									"    console.log(\"JWT Token saved:\", jsonData.token.substring(0, 50) + \"...\");",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"email\": \"admin@example.com\",\n  \"organization_id\": \"org_test_123\",\n  \"role\": \"admin\",\n  \"expires_in\": 3600\n}"
+						},
+						"url": {
+							"raw": "{{auth_url}}/api/v1/auth/dev-token",
+							"host": [
+								"{{auth_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"dev-token"
+							]
+						},
+						"description": "Generate a development JWT token for testing"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Test Organization",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"organization_id\", jsonData.organization_id);",
+									"    console.log(\"Organization ID saved:\", jsonData.organization_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Test Organization for Invitations\",\n  \"billing_email\": \"billing@example.com\",\n  \"plan\": \"professional\"\n}"
+						},
+						"url": {
+							"raw": "{{org_url}}/api/v1/organizations",
+							"host": [
+								"{{org_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"organizations"
+							]
+						},
+						"description": "Create a test organization to invite users to"
+					},
+					"response": []
+				}
+			],
+			"description": "Setup steps to prepare for testing invitation service"
+		},
+		{
+			"name": "1. Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Basic health check"
+					},
+					"response": []
+				},
+				{
+					"name": "Service Info",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/info",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"info"
+							]
+						},
+						"description": "Get service information and capabilities"
+					},
+					"response": []
+				}
+			],
+			"description": "Health and service information endpoints"
+		},
+		{
+			"name": "2. Invitation Management",
+			"item": [
+				{
+					"name": "Create Invitation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"invitation_id\", jsonData.invitation_id);",
+									"    pm.collectionVariables.set(\"invitation_token\", jsonData.invitation_token);",
+									"    console.log(\"Invitation ID saved:\", jsonData.invitation_id);",
+									"    console.log(\"Invitation Token saved:\", jsonData.invitation_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"{{invited_email}}\",\n  \"role\": \"member\",\n  \"message\": \"Welcome to our team! We're excited to have you join our organization.\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"organizations",
+								"{{organization_id}}",
+								"invitations"
+							]
+						},
+						"description": "Create a new invitation to invite a user to the organization by email"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Invitation by Token",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/invitations/{{invitation_token}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"invitations",
+								"{{invitation_token}}"
+							]
+						},
+						"description": "Get invitation details by token (used when user clicks invitation link)"
+					},
+					"response": []
+				},
+				{
+					"name": "List Organization Invitations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations?limit=100&offset=0",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"organizations",
+								"{{organization_id}}",
+								"invitations"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "100"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "List all invitations for an organization (admin/owner only)"
+					},
+					"response": []
+				}
+			],
+			"description": "Core invitation creation and retrieval operations"
+		},
+		{
+			"name": "3. Invitation Actions",
+			"item": [
+				{
+					"name": "Accept Invitation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "invited_user_456"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"invitation_token\": \"{{invitation_token}}\",\n  \"user_id\": \"invited_user_456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/invitations/accept",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"invitations",
+								"accept"
+							]
+						},
+						"description": "Accept an invitation and join the organization"
+					},
+					"response": []
+				},
+				{
+					"name": "Resend Invitation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/invitations/{{invitation_id}}/resend",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"invitations",
+								"{{invitation_id}}",
+								"resend"
+							]
+						},
+						"description": "Resend invitation email to the invited user"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Invitation",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-User-Id",
+								"value": "{{user_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/invitations/{{invitation_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"invitations",
+								"{{invitation_id}}"
+							]
+						},
+						"description": "Cancel a pending invitation"
+					},
+					"response": []
+				}
+			],
+			"description": "Actions that can be performed on invitations"
+		},
+		{
+			"name": "4. Admin Operations",
+			"item": [
+				{
+					"name": "Expire Old Invitations",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/expire-invitations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"admin",
+								"expire-invitations"
+							]
+						},
+						"description": "Expire old pending invitations (admin endpoint, typically run via cron)"
+					},
+					"response": []
+				}
+			],
+			"description": "Administrative operations for invitation management"
+		},
+		{
+			"name": "5. Example Workflows",
+			"item": [
+				{
+					"name": "Workflow: Complete Invitation Flow",
+					"item": [
+						{
+							"name": "Step 1: Admin creates invitation",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    var jsonData = pm.response.json();",
+											"    pm.collectionVariables.set(\"invitation_token\", jsonData.invitation_token);",
+											"    console.log(\"✓ Invitation created with token:\", jsonData.invitation_token);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "X-User-Id",
+										"value": "{{user_id}}"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"email\": \"workflow-test@example.com\",\n  \"role\": \"member\",\n  \"message\": \"You've been invited to join our organization!\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"organizations",
+										"{{organization_id}}",
+										"invitations"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "Step 2: User checks invitation details",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    var jsonData = pm.response.json();",
+											"    console.log(\"✓ Invitation details retrieved\");",
+											"    console.log(\"  Organization:\", jsonData.organization_name);",
+											"    console.log(\"  Role:\", jsonData.role);",
+											"    console.log(\"  Status:\", jsonData.status);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/invitations/{{invitation_token}}",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"invitations",
+										"{{invitation_token}}"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "Step 3: User accepts invitation",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    var jsonData = pm.response.json();",
+											"    console.log(\"✓ Invitation accepted successfully\");",
+											"    console.log(\"  User ID:\", jsonData.user_id);",
+											"    console.log(\"  Organization:\", jsonData.organization_name);",
+											"    console.log(\"  Role:\", jsonData.role);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "X-User-Id",
+										"value": "workflow_user_789"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"invitation_token\": \"{{invitation_token}}\",\n  \"user_id\": \"workflow_user_789\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/invitations/accept",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"invitations",
+										"accept"
+									]
+								}
+							},
+							"response": []
+						}
+					],
+					"description": "Complete workflow from invitation creation to acceptance"
+				},
+				{
+					"name": "Workflow: Bulk Invite Users",
+					"item": [
+						{
+							"name": "Invite User 1 - Developer",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    console.log(\"✓ Developer invited\");",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "X-User-Id",
+										"value": "{{user_id}}"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"email\": \"developer1@example.com\",\n  \"role\": \"member\",\n  \"message\": \"Welcome to the development team!\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"organizations",
+										"{{organization_id}}",
+										"invitations"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "Invite User 2 - Admin",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    console.log(\"✓ Admin invited\");",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "X-User-Id",
+										"value": "{{user_id}}"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"email\": \"admin2@example.com\",\n  \"role\": \"admin\",\n  \"message\": \"Welcome to the admin team!\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"organizations",
+										"{{organization_id}}",
+										"invitations"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "View All Pending Invitations",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    var jsonData = pm.response.json();",
+											"    console.log(\"✓ Total pending invitations:\", jsonData.total);",
+											"    jsonData.invitations.forEach((inv, idx) => {",
+											"        console.log(`  ${idx + 1}. ${inv.email} - ${inv.role} - ${inv.status}`);",
+											"    });",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "X-User-Id",
+										"value": "{{user_id}}"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations?limit=100",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"organizations",
+										"{{organization_id}}",
+										"invitations"
+									],
+									"query": [
+										{
+											"key": "limit",
+											"value": "100"
+										}
+									]
+								}
+							},
+							"response": []
+						}
+					],
+					"description": "Example workflow for inviting multiple users to an organization"
+				}
+			],
+			"description": "Real-world workflow examples"
+		},
+		{
+			"name": "6. Error Handling Examples",
+			"item": [
+				{
+					"name": "Invalid Token",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/invitations/invalid_token_123",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"invitations",
+								"invalid_token_123"
+							]
+						},
+						"description": "Test error handling with invalid invitation token (should return 404)"
+					},
+					"response": []
+				},
+				{
+					"name": "Duplicate Invitation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"{{invited_email}}\",\n  \"role\": \"member\",\n  \"message\": \"Duplicate invitation test\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"organizations",
+								"{{organization_id}}",
+								"invitations"
+							]
+						},
+						"description": "Test duplicate invitation handling (should return error if pending invitation exists)"
+					},
+					"response": []
+				},
+				{
+					"name": "Unauthorized Access",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"organizations",
+								"{{organization_id}}",
+								"invitations"
+							]
+						},
+						"description": "Test unauthorized access without X-User-Id header (should return 401)"
+					},
+					"response": []
+				},
+				{
+					"name": "Non-existent Organization",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-User-Id",
+								"value": "{{user_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test@example.com\",\n  \"role\": \"member\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/organizations/invalid_org_id/invitations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"organizations",
+								"invalid_org_id",
+								"invitations"
+							]
+						},
+						"description": "Test invitation to non-existent organization (should return 400)"
+					},
+					"response": []
+				}
+			],
+			"description": "Examples of error handling and edge cases"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}

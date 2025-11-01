@@ -119,8 +119,10 @@ class UpdateCampaignRequest(BaseModel):
 
 
 class DeviceUpdateRequest(BaseModel):
-    """设备更新请求"""
-    device_id: str
+    """设备更新请求
+
+    Note: device_id is in the URL path, not required in request body
+    """
     firmware_id: str
     priority: Priority = Priority.NORMAL
     force_update: bool = False  # 强制更新，跳过版本检查

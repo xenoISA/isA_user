@@ -2,21 +2,22 @@
 Authorization Repository
 
 Data access layer for the authorization microservice.
-Handles all database operations for permissions and resource access.
+Migrated to use PostgresClient with gRPC.
+Uses service clients instead of direct cross-schema database queries.
 """
 
 import logging
-import asyncio
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 
-# Database client setup (reusing the pattern from other services)
+# Database client setup
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.database.supabase_client import get_supabase_client
+from isa_common.postgres_client import PostgresClient
+from google.protobuf.json_format import MessageToDict
 from .models import (
     ResourcePermission, UserPermissionRecord, OrganizationPermission,
     ResourceType, AccessLevel, PermissionSource, SubscriptionTier,
@@ -24,15 +25,35 @@ from .models import (
     PermissionAuditLog, ExternalServiceUser, ExternalServiceOrganization
 )
 
+# Import service clients for cross-service communication
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from microservices.account_service.client import AccountServiceClient
+from microservices.organization_service.client import OrganizationServiceClient
+
 logger = logging.getLogger(__name__)
 
 
 class AuthorizationRepository:
     """Repository for authorization data operations"""
-    
+
     def __init__(self):
-        self.supabase = get_supabase_client()
-        self.table_name = "auth_permissions"  # Use unified permissions table
+        self.db = PostgresClient(
+            host='isa-postgres-grpc',
+            port=50061,
+            user_id='authorization_service'
+        )
+        self.schema = "authz"
+        self.table_name = "permissions"  # Use unified permissions table
+
+        # Initialize service clients for cross-service communication
+        self.account_client = AccountServiceClient()
+        self.org_client = OrganizationServiceClient()
+
+    def _convert_proto_jsonb(self, jsonb_raw):
+        """Convert proto JSONB to Python dict"""
+        if hasattr(jsonb_raw, 'fields'):
+            return MessageToDict(jsonb_raw)
+        return jsonb_raw if jsonb_raw else {}
     
     # ====================
     # Connection Management
@@ -41,8 +62,9 @@ class AuthorizationRepository:
     async def check_connection(self) -> bool:
         """Check database connectivity"""
         try:
-            result = self.supabase.table(self.table_name).select("count").limit(1).execute()
-            return True
+            with self.db:
+                result = self.db.health_check()
+            return result is not None
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")
             return False
@@ -66,32 +88,18 @@ class AuthorizationRepository:
                 "subscription_tier_required": permission.subscription_tier_required.value,
                 "description": permission.description,
                 "is_active": permission.is_enabled,
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
+                "metadata": {}
             }
-            
-            result = self.supabase.table(self.table_name).insert(data).execute()
-            
-            if result.data:
-                # Convert id to string to match model expectations
-                response_data = result.data[0]
-                response_data["id"] = str(response_data["id"]) if response_data.get("id") else None
-                # Map back to ResourcePermission model fields
-                mapped_data = {
-                    "id": response_data.get("id"),
-                    "resource_type": response_data.get("resource_type"),
-                    "resource_name": response_data.get("resource_name"),
-                    "resource_category": response_data.get("resource_category"),
-                    "subscription_tier_required": response_data.get("subscription_tier_required"),
-                    "access_level": response_data.get("access_level"),
-                    "is_enabled": response_data.get("is_active"),
-                    "description": response_data.get("description"),
-                    "created_at": response_data.get("created_at"),
-                    "updated_at": response_data.get("updated_at")
-                }
-                return ResourcePermission(**mapped_data)
+
+            with self.db:
+                count = self.db.insert_into(self.table_name, [data], schema=self.schema)
+
+            if count is not None and count > 0:
+                # Query back the created permission
+                return await self.get_resource_permission(permission.resource_type, permission.resource_name)
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Failed to create resource permission: {e}")
             return None
@@ -220,37 +228,19 @@ class AuthorizationRepository:
                 "resource_name": permission.resource_name,
                 "access_level": permission.access_level.value,
                 "permission_source": permission.permission_source.value,
-                "granted_by_user_id": permission.granted_by_user_id,
-                "expires_at": permission.expires_at.isoformat() if permission.expires_at else None,
                 "is_active": permission.is_active,
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
+                "metadata": {"granted_by": permission.granted_by_user_id}
             }
-            
-            # Insert user permission record
-            result = self.supabase.table(self.table_name)\
-                .insert(data)\
-                .execute()
-            
-            if result.data:
-                # Map back to UserPermissionRecord model
-                record_data = {
-                    "id": result.data[0].get("id"),
-                    "user_id": result.data[0].get("target_id"),
-                    "resource_type": result.data[0].get("resource_type"),
-                    "resource_name": result.data[0].get("resource_name"),
-                    "access_level": result.data[0].get("access_level"),
-                    "permission_source": result.data[0].get("permission_source"),
-                    "granted_by_user_id": result.data[0].get("granted_by_user_id"),
-                    "organization_id": permission.organization_id,
-                    "expires_at": result.data[0].get("expires_at"),
-                    "is_active": result.data[0].get("is_active"),
-                    "created_at": result.data[0].get("created_at"),
-                    "updated_at": result.data[0].get("updated_at")
-                }
-                return UserPermissionRecord(**record_data)
+
+            with self.db:
+                count = self.db.insert_into(self.table_name, [data], schema=self.schema)
+
+            if count is not None and count > 0:
+                # Query back the created permission
+                return await self.get_user_permission(permission.user_id, permission.resource_type, permission.resource_name)
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Failed to grant user permission: {e}")
             return None
@@ -258,36 +248,38 @@ class AuthorizationRepository:
     async def get_user_permission(self, user_id: str, resource_type: ResourceType, resource_name: str) -> Optional[UserPermissionRecord]:
         """Get user permission for specific resource"""
         try:
-            result = self.supabase.table(self.table_name)\
-                .select("*")\
-                .eq("permission_type", "user_permission")\
-                .eq("target_id", user_id)\
-                .eq("resource_type", resource_type.value)\
-                .eq("resource_name", resource_name)\
-                .eq("is_active", True)\
-                .or_("expires_at.is.null,expires_at.gt.now()")\
-                .single()\
-                .execute()
-            
-            if result.data:
-                # Map back to UserPermissionRecord model
+            with self.db:
+                result = self.db.query_row(
+                    f"""SELECT * FROM {self.schema}.{self.table_name}
+                        WHERE permission_type = $1
+                        AND target_id = $2
+                        AND resource_type = $3
+                        AND resource_name = $4
+                        AND is_active = TRUE
+                    """,
+                    ["user_permission", user_id, resource_type.value, resource_name],
+                    schema=self.schema
+                )
+
+            if result:
+                metadata = self._convert_proto_jsonb(result.get('metadata', {}))
                 record_data = {
-                    "id": str(result.data.get("id")) if result.data.get("id") else None,
-                    "user_id": result.data.get("target_id"),
-                    "resource_type": result.data.get("resource_type"),
-                    "resource_name": result.data.get("resource_name"),
-                    "access_level": result.data.get("access_level"),
-                    "permission_source": result.data.get("permission_source"),
-                    "granted_by_user_id": result.data.get("granted_by_user_id"),
-                    "organization_id": None,  # Not stored in unified table currently
-                    "expires_at": result.data.get("expires_at"),
-                    "is_active": result.data.get("is_active"),
-                    "created_at": result.data.get("created_at"),
-                    "updated_at": result.data.get("updated_at")
+                    "id": str(result.get("id")),
+                    "user_id": result.get("target_id"),
+                    "resource_type": result.get("resource_type"),
+                    "resource_name": result.get("resource_name"),
+                    "access_level": result.get("access_level"),
+                    "permission_source": result.get("permission_source"),
+                    "granted_by_user_id": metadata.get("granted_by"),
+                    "organization_id": None,
+                    "expires_at": None,
+                    "is_active": result.get("is_active"),
+                    "created_at": result.get("created_at"),
+                    "updated_at": result.get("updated_at")
                 }
                 return UserPermissionRecord(**record_data)
             return None
-            
+
         except Exception as e:
             logger.debug(f"User permission not found: {user_id} - {resource_type}:{resource_name}")
             return None
@@ -336,16 +328,23 @@ class AuthorizationRepository:
     async def revoke_user_permission(self, user_id: str, resource_type: ResourceType, resource_name: str) -> bool:
         """Revoke user permission"""
         try:
-            result = self.supabase.table(self.table_name)\
-                .delete()\
-                .eq("permission_type", "user_permission")\
-                .eq("target_id", user_id)\
-                .eq("resource_type", resource_type.value)\
-                .eq("resource_name", resource_name)\
-                .execute()
-            
-            return len(result.data) > 0
-            
+            now = datetime.now(tz=timezone.utc)
+
+            with self.db:
+                self.db.execute(
+                    f"""UPDATE {self.schema}.{self.table_name}
+                        SET is_active = FALSE, updated_at = $1
+                        WHERE permission_type = $2
+                        AND target_id = $3
+                        AND resource_type = $4
+                        AND resource_name = $5
+                    """,
+                    [now, "user_permission", user_id, resource_type.value, resource_name],
+                    schema=self.schema
+                )
+
+            return True
+
         except Exception as e:
             logger.error(f"Failed to revoke user permission: {e}")
             return False
@@ -385,7 +384,7 @@ class AuthorizationRepository:
             }
             
             result = self.supabase.table(self.table_name).insert(unified_data).execute()
-            
+
             if result.data:
                 return OrganizationPermission(**result.data[0])
             return None
@@ -438,86 +437,87 @@ class AuthorizationRepository:
     # ====================
     
     async def get_user_info(self, user_id: str) -> Optional[ExternalServiceUser]:
-        """Get user information from account service tables"""
+        """Get user information from account service via HTTP client"""
         try:
-            result = self.supabase.table("users")\
-                .select("user_id, email, subscription_status, is_active")\
-                .eq("user_id", user_id)\
-                .single()\
-                .execute()
-            
-            if result.data:
-                # Get organization info if user is a member
-                org_result = self.supabase.table("organization_members")\
-                    .select("organization_id")\
-                    .eq("user_id", user_id)\
-                    .eq("status", "active")\
-                    .limit(1)\
-                    .execute()
-                
-                organization_id = None
-                if org_result.data:
-                    organization_id = org_result.data[0]["organization_id"]
-                
-                return ExternalServiceUser(
-                    user_id=result.data["user_id"],
-                    email=result.data["email"],
-                    subscription_status=result.data["subscription_status"],
-                    is_active=result.data["is_active"],
-                    organization_id=organization_id
-                )
-            return None
-            
+            # Use AccountServiceClient instead of direct database query
+            account_profile = await self.account_client.get_account_profile(user_id)
+
+            if not account_profile:
+                logger.debug(f"User not found via account service: {user_id}")
+                return None
+
+            # Get user's organizations via OrganizationServiceClient
+            user_orgs = await self.org_client.get_user_organizations(user_id)
+            organization_id = None
+            if user_orgs and len(user_orgs) > 0:
+                # Take the first active organization
+                organization_id = user_orgs[0].get("organization_id")
+
+            return ExternalServiceUser(
+                user_id=account_profile.get("user_id"),
+                email=account_profile.get("email"),
+                subscription_status=account_profile.get("subscription_plan", "free"),
+                is_active=account_profile.get("is_active", True),
+                organization_id=organization_id
+            )
+
         except Exception as e:
-            logger.error(f"Failed to get user info: {e}")
+            logger.error(f"Failed to get user info via service client: {e}")
             return None
     
     async def get_organization_info(self, organization_id: str) -> Optional[ExternalServiceOrganization]:
-        """Get organization information from account service tables"""
+        """Get organization information from organization service via HTTP client"""
         try:
-            result = self.supabase.table("organizations")\
-                .select("organization_id, plan, is_active")\
-                .eq("organization_id", organization_id)\
-                .single()\
-                .execute()
-            
-            if result.data:
-                # Get member count
-                member_result = self.supabase.table("organization_members")\
-                    .select("count")\
-                    .eq("organization_id", organization_id)\
-                    .eq("status", "active")\
-                    .execute()
-                
-                member_count = len(member_result.data) if member_result.data else 0
-                
-                return ExternalServiceOrganization(
-                    organization_id=result.data["organization_id"],
-                    plan=result.data["plan"],
-                    is_active=result.data["is_active"],
-                    member_count=member_count
-                )
-            return None
-            
+            # Use OrganizationServiceClient instead of direct database query
+            # Note: We need a user_id for authorization, using system user
+            org_data = await self.org_client.get_organization(
+                organization_id=organization_id,
+                user_id="system"  # Internal service call
+            )
+
+            if not org_data:
+                logger.debug(f"Organization not found via service: {organization_id}")
+                return None
+
+            # Get member count from members list
+            members = await self.org_client.get_members(
+                organization_id=organization_id,
+                user_id="system"
+            )
+            member_count = len(members) if members else 0
+
+            return ExternalServiceOrganization(
+                organization_id=org_data.get("organization_id"),
+                plan=org_data.get("plan", "free"),
+                is_active=org_data.get("is_active", True),
+                member_count=member_count
+            )
+
         except Exception as e:
-            logger.error(f"Failed to get organization info: {e}")
+            logger.error(f"Failed to get organization info via service client: {e}")
             return None
     
     async def is_user_organization_member(self, user_id: str, organization_id: str) -> bool:
-        """Check if user is a member of organization"""
+        """Check if user is a member of organization via service client"""
         try:
-            result = self.supabase.table("organization_members")\
-                .select("id")\
-                .eq("user_id", user_id)\
-                .eq("organization_id", organization_id)\
-                .eq("status", "active")\
-                .single()\
-                .execute()
-            
-            return result.data is not None
-            
+            # Get organization members via OrganizationServiceClient
+            members = await self.org_client.get_members(
+                organization_id=organization_id,
+                user_id="system"  # Internal service call
+            )
+
+            if not members:
+                return False
+
+            # Check if user_id is in the members list
+            for member in members:
+                if member.get("user_id") == user_id and member.get("status") == "active":
+                    return True
+
+            return False
+
         except Exception as e:
-            logger.debug(f"User is not organization member: {user_id} - {organization_id}")
+            logger.debug(f"User is not organization member: {user_id} - {organization_id}, error: {e}")
             return False
     
     # ====================
@@ -642,9 +642,22 @@ class AuthorizationRepository:
             return 0
     
     # ====================
+    # Cleanup
+    # ====================
+
+    async def cleanup(self):
+        """Cleanup resources (close service clients)"""
+        try:
+            await self.account_client.close()
+            await self.org_client.close()
+            logger.info("Service clients closed successfully")
+        except Exception as e:
+            logger.error(f"Error closing service clients: {e}")
+
+    # ====================
     # Audit Logging
     # ====================
-    
+
     async def log_permission_action(self, audit_log: PermissionAuditLog) -> bool:
         """Log permission action for audit trail"""
         try:
@@ -677,7 +690,7 @@ class AuthorizationRepository:
             }
             
             result = self.supabase.table(self.table_name).insert(audit_data).execute()
-            
+
             return result.data is not None
             
         except Exception as e:

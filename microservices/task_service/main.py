@@ -19,6 +19,7 @@ from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.service_discovery import get_service_discovery
+from core.nats_client import get_event_bus
 from .models import (
     TaskCreateRequest, TaskUpdateRequest, TaskExecutionRequest,
     TaskResponse, TaskExecutionResponse, TaskTemplateResponse,
@@ -27,6 +28,7 @@ from .models import (
 )
 from .task_service import TaskService
 from .task_repository import TaskRepository
+from .events import TaskEventHandler
 
 # 初始化配置
 config_manager = ConfigManager("task_service")
@@ -42,9 +44,9 @@ class TaskMicroservice:
         self.service = None
         self.repository = None
     
-    async def initialize(self):
+    async def initialize(self, event_bus=None):
         self.repository = TaskRepository()
-        self.service = TaskService()
+        self.service = TaskService(event_bus=event_bus)
         logger.info("Task service initialized")
     
     async def shutdown(self):
@@ -57,9 +59,33 @@ microservice = TaskMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    # Initialize event bus
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("task_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
     # Startup
-    await microservice.initialize()
-    
+    await microservice.initialize(event_bus=event_bus)
+
+    # Set up event subscriptions
+    if event_bus:
+        try:
+            task_repo = TaskRepository()
+            event_handler = TaskEventHandler(task_repo)
+
+            # Subscribe to user.deleted events
+            await event_bus.subscribe(
+                subject="events.user.deleted",
+                callback=lambda msg: event_handler.handle_event(msg)
+            )
+            logger.info("✅ Subscribed to user.deleted events")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
+
     # Consul注册
     consul_registry = ConsulRegistry(
         service_name="task_service",
@@ -84,7 +110,15 @@ async def lifespan(app: FastAPI):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
         logger.info("Deregistered from Consul")
-    
+
+    # Close event bus
+    if event_bus:
+        try:
+            await event_bus.close()
+            logger.info("Event bus closed")
+        except Exception as e:
+            logger.error(f"Error closing event bus: {e}")
+
     await microservice.shutdown()
 
 # Create FastAPI application
@@ -374,7 +408,7 @@ async def get_task_templates(
     """获取可用的任务模板"""
     try:
         templates = await microservice.service.get_task_templates(
-            user_context["subscription_level"]
+            user_context["user_id"]
         )
         return templates
     except Exception as e:
@@ -407,15 +441,24 @@ async def create_task_from_template(
         task_data = {
             "name": customization.get("name", template.name),
             "description": customization.get("description", template.description),
-            "task_type": template.task_type,
+            "task_type": template.task_type.value if hasattr(template.task_type, 'value') else template.task_type,
             "config": {**template.default_config, **customization.get("config", {})},
-            "credits_per_run": template.credits_per_run,
-            **customization
+            "credits_per_run": float(template.credits_per_run),
+            "priority": customization.get("priority", "medium"),
+            "tags": customization.get("tags", []),
+            "metadata": customization.get("metadata", {}),
+            "schedule": customization.get("schedule"),
+            "due_date": customization.get("due_date"),
+            "reminder_time": customization.get("reminder_time")
         }
+        
+        # Create TaskCreateRequest object
+        from .models import TaskCreateRequest
+        task_request = TaskCreateRequest(**task_data)
         
         task = await microservice.service.create_task(
             user_context["user_id"],
-            task_data
+            task_request
         )
         
         if task:

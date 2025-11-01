@@ -18,6 +18,7 @@ from .models import (
     AccountSearchParams, User, SubscriptionStatus
 )
 from .account_repository import UserNotFoundException, DuplicateEntryException
+from core.nats_client import Event, EventType, ServiceSource
 # Database connection now handled by repositories directly
 
 logger = logging.getLogger(__name__)
@@ -41,13 +42,14 @@ class AccountNotFoundError(AccountServiceError):
 class AccountService:
     """
     Account management business logic service
-    
+
     Handles all account-related business operations while delegating
     data access to the AccountRepository layer.
     """
-    
-    def __init__(self):
+
+    def __init__(self, event_bus=None):
         self.account_repo = AccountRepository()
+        self.event_bus = event_bus
         
     # Account Lifecycle Operations
     
@@ -68,14 +70,10 @@ class AccountService:
         try:
             # Validate request
             self._validate_account_ensure_request(request)
-            
-            # Use user_id as primary identifier, fallback to auth0_id
-            user_id = request.auth0_id  # In most cases, these are the same
-            
+
             # Ensure account exists
             user = await self.account_repo.ensure_account_exists(
-                user_id=user_id,
-                auth0_id=request.auth0_id,
+                user_id=request.user_id,
                 email=request.email,
                 name=request.name,
                 subscription_plan=request.subscription_plan or SubscriptionStatus.FREE
@@ -83,12 +81,31 @@ class AccountService:
             
             # Convert to response
             account_response = self._user_to_profile_response(user)
-            
+
             # Check if it was newly created (simplified logic)
-            was_created = (user.created_at and 
+            was_created = (user.created_at and
                           (datetime.now(timezone.utc) - user.created_at).total_seconds() < 60)
-            
-            logger.info(f"Account ensured: {user_id}, created: {was_created}")
+
+            # Publish USER_CREATED event if account was newly created
+            if was_created and self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.USER_CREATED,
+                        source=ServiceSource.ACCOUNT_SERVICE,
+                        data={
+                            "user_id": request.user_id,
+                            "email": request.email,
+                            "name": request.name,
+                            "subscription_plan": request.subscription_plan or SubscriptionStatus.FREE.value,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published user.created event for user {request.user_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish user.created event: {e}")
+
+            logger.info(f"Account ensured: {request.user_id}, created: {was_created}")
             return account_response, was_created
             
         except DuplicateEntryException as e:
@@ -159,7 +176,26 @@ class AccountService:
             updated_user = await self.account_repo.update_account_profile(user_id, update_data)
             if not updated_user:
                 raise AccountNotFoundError(f"Account not found: {user_id}")
-                
+
+            # Publish USER_PROFILE_UPDATED event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.USER_PROFILE_UPDATED,
+                        source=ServiceSource.ACCOUNT_SERVICE,
+                        data={
+                            "user_id": user_id,
+                            "updated_fields": list(update_data.keys()),
+                            "email": updated_user.email,
+                            "name": updated_user.name,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published user.profile_updated event for user {user_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish user.profile_updated event: {e}")
+
             logger.info(f"Account profile updated: {user_id}")
             return self._user_to_profile_response(updated_user)
             
@@ -242,20 +278,46 @@ class AccountService:
     async def delete_account(self, user_id: str, reason: Optional[str] = None) -> bool:
         """
         Delete account (soft delete)
-        
+
         Args:
             user_id: User identifier
             reason: Deletion reason
-            
+
         Returns:
             True if successful
         """
         try:
+            # Get account info before deletion for event
+            user = None
+            if self.event_bus:
+                try:
+                    user = await self.account_repo.get_account_by_id(user_id)
+                except Exception:
+                    pass  # Continue with deletion even if we can't get user info
+
             success = await self.account_repo.delete_account(user_id)
             if success:
+                # Publish USER_DELETED event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.USER_DELETED,
+                            source=ServiceSource.ACCOUNT_SERVICE,
+                            data={
+                                "user_id": user_id,
+                                "email": user.email if user else None,
+                                "reason": reason,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published user.deleted event for user {user_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish user.deleted event: {e}")
+
                 logger.info(f"Account deleted: {user_id}, reason: {reason}")
             return success
-            
+
         except Exception as e:
             logger.error(f"Failed to delete account {user_id}: {e}")
             raise AccountServiceError(f"Failed to delete account: {str(e)}")
@@ -370,13 +432,13 @@ class AccountService:
     
     def _validate_account_ensure_request(self, request: AccountEnsureRequest) -> None:
         """Validate account ensure request"""
-        if not request.auth0_id or not request.auth0_id.strip():
-            raise AccountValidationError("auth0_id is required")
+        if not request.user_id or not request.user_id.strip():
+            raise AccountValidationError("user_id is required")
         if not request.email or not request.email.strip():
             raise AccountValidationError("email is required")
         if not request.name or not request.name.strip():
             raise AccountValidationError("name is required")
-            
+
         # Validate email format (basic check)
         if not re.match(r'^[^@]+@[^@]+\.[^@]+$', request.email):
             raise AccountValidationError("Invalid email format")
@@ -392,12 +454,9 @@ class AccountService:
         """Convert User model to AccountProfileResponse"""
         return AccountProfileResponse(
             user_id=user.user_id,
-            auth0_id=user.auth0_id,
             email=user.email,
             name=user.name,
             subscription_status=user.subscription_status,
-            credits_remaining=user.credits_remaining,
-            credits_total=user.credits_total,
             is_active=user.is_active,
             preferences=getattr(user, 'preferences', {}),
             created_at=user.created_at,

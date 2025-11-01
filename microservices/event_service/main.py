@@ -37,6 +37,7 @@ from .event_repository import EventRepository
 from core.config_manager import ConfigManager
 from core.consul_registry import ConsulRegistry
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
 
 
 # ==================== 配置 ====================
@@ -56,6 +57,7 @@ event_service: Optional[EventService] = None
 event_repository: Optional[EventRepository] = None
 nats_client: Optional[NATS] = None
 js: Optional[JetStreamContext] = None
+event_bus = None  # Centralized NATS event bus
 
 
 # ==================== 生命周期管理 ====================
@@ -63,12 +65,20 @@ js: Optional[JetStreamContext] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global event_service, event_repository, nats_client, js
-    
+    global event_service, event_repository, nats_client, js, event_bus
+
     try:
+        # Initialize centralized NATS event bus first
+        try:
+            event_bus = await get_event_bus("event_service")
+            logger.info("✅ Centralized event bus initialized successfully")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to initialize centralized event bus: {e}. Continuing without event publishing.")
+            event_bus = None
+
         # 初始化事件服务（EventService 会自己初始化 repository）
         print(f"[event-service] Initializing event service...")
-        event_service = EventService()
+        event_service = EventService(event_bus=event_bus)
         event_repository = event_service.repository
         await event_repository.initialize()
         
@@ -76,12 +86,20 @@ async def lifespan(app: FastAPI):
         try:
             if config.nats_enabled and config.nats_url:
                 print(f"[event-service] Connecting to NATS at {config.nats_url}...")
-                nats_client = await nats.connect(
-                    servers=[config.nats_url],
-                    user=config.nats_username or "isa_user_service",
-                    password=config.nats_password or "service123",
-                    name="event-service"
-                )
+
+                # Connect with or without credentials based on configuration
+                connect_args = {
+                    "servers": [config.nats_url],
+                    "name": "event-service"
+                }
+
+                # Only add credentials if explicitly configured
+                if hasattr(config, 'nats_username') and config.nats_username:
+                    connect_args["user"] = config.nats_username
+                if hasattr(config, 'nats_password') and config.nats_password:
+                    connect_args["password"] = config.nats_password
+
+                nats_client = await nats.connect(**connect_args)
                 js = nats_client.jetstream()
             else:
                 print(f"[event-service] NATS disabled or not configured")
@@ -137,6 +155,14 @@ async def lifespan(app: FastAPI):
     finally:
         # 清理资源
         print(f"[event-service] Shutting down...")
+
+        # Close centralized event bus
+        if event_bus:
+            try:
+                await event_bus.close()
+                logger.info("Event service event bus closed")
+            except Exception as e:
+                logger.error(f"Error closing event bus: {e}")
 
         # 注销Consul
         if hasattr(app.state, 'consul_registry'):
@@ -266,7 +292,60 @@ async def create_batch_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/events/{{event_id}}", response_model=EventResponse)
+@app.get("/api/events/statistics", response_model=EventStatistics)
+async def get_statistics(
+    user_id: Optional[str] = Query(None),
+    service: EventService = Depends(get_event_service)
+):
+    """获取事件统计"""
+    try:
+        # For now, just return overall statistics regardless of user_id
+        # TODO: Implement user-specific statistics when needed
+        stats = await service.get_statistics()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/events/subscriptions", response_model=EventSubscription)
+async def create_subscription(
+    subscription: EventSubscription = Body(...),
+    service: EventService = Depends(get_event_service)
+):
+    """创建事件订阅"""
+    try:
+        result = await service.create_subscription(subscription)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/events/subscriptions", response_model=List[EventSubscription])
+async def list_subscriptions(
+    service: EventService = Depends(get_event_service)
+):
+    """列出所有订阅"""
+    try:
+        subscriptions = await service.list_subscriptions()
+        return subscriptions
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/events/subscriptions/{subscription_id}")
+async def delete_subscription(
+    subscription_id: str,
+    service: EventService = Depends(get_event_service)
+):
+    """删除订阅"""
+    try:
+        await service.delete_subscription(subscription_id)
+        return {"status": "deleted", "subscription_id": subscription_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/events/{event_id}", response_model=EventResponse)
 async def get_event(
     event_id: str,
     service: EventService = Depends(get_event_service)
@@ -301,28 +380,9 @@ async def query_events(
 ):
     """查询事件"""
     try:
-        events = await service.query_events(query)
-        total = await service.count_events(query)
-        
-        return EventListResponse(
-            events=[
-                EventResponse(
-                    event_id=e.event_id,
-                    event_type=e.event_type,
-                    event_source=e.event_source,
-                    event_category=e.event_category,
-                    user_id=e.user_id,
-                    data=e.data,
-                    status=e.status,
-                    timestamp=e.timestamp,
-                    created_at=e.created_at
-                ) for e in events
-            ],
-            total=total,
-            limit=query.limit,
-            offset=query.offset,
-            has_more=(query.offset + query.limit) < total
-        )
+        # Service already returns EventListResponse
+        result = await service.query_events(query)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -341,19 +401,6 @@ async def get_event_stream(
         return stream
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/events/statistics", response_model=EventStatistics)
-async def get_statistics(
-    user_id: Optional[str] = Query(None),
-    service: EventService = Depends(get_event_service)
-):
-    """获取事件统计"""
-    try:
-        stats = await service.get_statistics(user_id)
-        return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -438,46 +485,6 @@ async def rudderstack_webhook(
     except Exception as e:
         print(f"Error processing RudderStack webhook: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-
-
-# ==================== 订阅管理端点 ====================
-
-@app.post("/api/events/subscriptions", response_model=EventSubscription)
-async def create_subscription(
-    subscription: EventSubscription = Body(...),
-    service: EventService = Depends(get_event_service)
-):
-    """创建事件订阅"""
-    try:
-        result = await service.create_subscription(subscription)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/events/subscriptions", response_model=List[EventSubscription])
-async def list_subscriptions(
-    service: EventService = Depends(get_event_service)
-):
-    """列出所有订阅"""
-    try:
-        subscriptions = await service.list_subscriptions()
-        return subscriptions
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/api/events/subscriptions/{{subscription_id}}")
-async def delete_subscription(
-    subscription_id: str,
-    service: EventService = Depends(get_event_service)
-):
-    """删除订阅"""
-    try:
-        await service.delete_subscription(subscription_id)
-        return {"status": "deleted", "subscription_id": subscription_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== 处理器管理端点 ====================

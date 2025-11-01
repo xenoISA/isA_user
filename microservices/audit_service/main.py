@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
 
 from .audit_service import AuditService
 from .models import (
@@ -40,24 +41,41 @@ logger = app_logger  # for backward compatibility
 
 # 全局服务实例
 audit_service: Optional[AuditService] = None
+event_bus = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global audit_service
-    
+    global audit_service, event_bus
+
     logger.info("🚀 Audit Service starting up...")
-    
+
     try:
         # 初始化服务
         audit_service = AuditService()
-        
+
         # 检查数据库连接
         if await audit_service.repository.check_connection():
             logger.info("✅ 数据库连接成功")
         else:
             logger.warning("⚠️ 数据库连接失败")
+
+        # Initialize event bus
+        try:
+            event_bus = await get_event_bus("audit_service")
+            logger.info("✅ Event bus initialized successfully")
+
+            # Subscribe to ALL events using wildcard pattern
+            await event_bus.subscribe_to_events(
+                pattern="*.*",  # Subscribe to all events from all services
+                handler=audit_service.handle_nats_event
+            )
+            logger.info("✅ Subscribed to all NATS events (*.*) for audit logging")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize event bus: {e}. Continuing without event subscriptions.")
+            event_bus = None
         
         # Register with Consul
         if config.consul_enabled:
@@ -86,12 +104,17 @@ async def lifespan(app: FastAPI):
     yield
     
     logger.info("🛑 Audit Service shutting down...")
-    
+
+    # Close event bus
+    if event_bus:
+        await event_bus.close()
+        logger.info("✅ Event bus closed")
+
     # Deregister from Consul
     if config.consul_enabled and hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
-    
+
     if audit_service:
         logger.info("✅ Audit Service cleanup completed")
 

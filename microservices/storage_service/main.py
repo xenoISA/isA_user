@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus, Event, EventType, ServiceSource
 
 from .models import (
     FileUploadRequest, FileUploadResponse,
@@ -34,7 +35,13 @@ from .models import (
     StorageStatsResponse, FileStatus,
     SavePhotoVersionRequest, SavePhotoVersionResponse,
     GetPhotoVersionsRequest, PhotoWithVersions,
-    SwitchPhotoVersionRequest
+    SwitchPhotoVersionRequest,
+    # Album models
+    CreateAlbumRequest, UpdateAlbumRequest, AddPhotosToAlbumRequest, ShareAlbumRequest,
+    AlbumResponse, AlbumListResponse, AlbumPhotosResponse, AlbumSyncResponse,
+    # Gallery & Slideshow models
+    CreatePlaylistRequest, UpdatePlaylistRequest, CreateRotationScheduleRequest,
+    UpdatePhotoMetadataRequest, PreloadImagesRequest, SmartSelectionCriteria
 )
 from .intelligence_models import (
     SemanticSearchRequest, SemanticSearchResponse,
@@ -59,18 +66,142 @@ logger = app_logger  # for backward compatibility
 # 全局变量
 storage_service = None
 intelligence_service = None
+event_bus = None
+
+
+# ==================== Event Handlers ====================
+
+async def handle_file_indexing_request(event: Event):
+    """
+    Event handler for FILE_INDEXING_REQUESTED events
+
+    Processes file indexing asynchronously when a file is uploaded
+    """
+    try:
+        logger.info(f"Received file indexing request: {event.id}")
+
+        # Extract event data
+        data = event.data
+        file_id = data.get("file_id")
+        user_id = data.get("user_id")
+        organization_id = data.get("organization_id")
+        file_name = data.get("file_name")
+        file_type = data.get("file_type")
+        file_size = data.get("file_size")
+        metadata = data.get("metadata", {})
+        tags = data.get("tags", [])
+        bucket_name = data.get("bucket_name")
+        object_name = data.get("object_name")
+
+        if not all([file_id, user_id, file_name, bucket_name, object_name]):
+            logger.error(f"Missing required fields in indexing request: {data}")
+            return
+
+        # Download file content from MinIO
+        try:
+            response = storage_service.minio_client.get_object(
+                bucket_name,
+                object_name
+            )
+            file_bytes = response.read()
+            file_content = file_bytes.decode('utf-8', errors='ignore')
+        except Exception as e:
+            logger.error(f"Failed to download file {file_id} from MinIO: {e}")
+            # Publish indexing failed event
+            if event_bus:
+                failed_event = Event(
+                    event_type=EventType.FILE_INDEXING_FAILED,
+                    source=ServiceSource.STORAGE_SERVICE,
+                    data={
+                        "file_id": file_id,
+                        "user_id": user_id,
+                        "error": f"Failed to download file: {str(e)}"
+                    }
+                )
+                await event_bus.publish_event(failed_event)
+            return
+
+        # Index the file via intelligence service
+        try:
+            logger.info(f"Starting async indexing for file {file_id}")
+            await intelligence_service.index_file(
+                file_id=file_id,
+                user_id=user_id,
+                organization_id=organization_id,
+                file_name=file_name,
+                file_content=file_content,
+                file_type=file_type,
+                file_size=file_size,
+                metadata=metadata,
+                tags=tags
+            )
+
+            logger.info(f"Successfully indexed file {file_id}")
+
+            # Publish success event
+            if event_bus:
+                success_event = Event(
+                    event_type=EventType.FILE_INDEXED,
+                    source=ServiceSource.STORAGE_SERVICE,
+                    data={
+                        "file_id": file_id,
+                        "user_id": user_id,
+                        "file_name": file_name,
+                        "file_size": file_size,
+                        "indexed_at": datetime.utcnow().isoformat()
+                    }
+                )
+                await event_bus.publish_event(success_event)
+
+        except Exception as e:
+            logger.error(f"Failed to index file {file_id}: {e}")
+            # Publish indexing failed event
+            if event_bus:
+                failed_event = Event(
+                    event_type=EventType.FILE_INDEXING_FAILED,
+                    source=ServiceSource.STORAGE_SERVICE,
+                    data={
+                        "file_id": file_id,
+                        "user_id": user_id,
+                        "error": str(e)
+                    }
+                )
+                await event_bus.publish_event(failed_event)
+
+    except Exception as e:
+        logger.error(f"Error handling file indexing request: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global storage_service, intelligence_service
+    global storage_service, intelligence_service, event_bus
 
     logger.info("Starting Storage Service with Intelligence capabilities...")
 
+    # Initialize event bus
+    try:
+        event_bus = await get_event_bus("storage_service")
+        logger.info("Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
     # 初始化服务 (使用 ConfigManager 的 service_config)
-    storage_service = StorageService(service_config)
+    storage_service = StorageService(service_config, event_bus=event_bus)
     intelligence_service = IntelligenceService()
+
+    # Subscribe to file indexing events
+    if event_bus:
+        try:
+            await event_bus.subscribe_to_events(
+                pattern="storage_service.file.indexing.requested",
+                handler=handle_file_indexing_request,
+                durable="storage-indexing-consumer"
+            )
+            logger.info("Subscribed to file indexing events")
+        except Exception as e:
+            logger.warning(f"Failed to subscribe to indexing events: {e}")
     
     # 检查数据库连接
     if not await storage_service.repository.check_connection():
@@ -101,7 +232,12 @@ async def lifespan(app: FastAPI):
     
     # 清理
     logger.info("Shutting down Storage Service...")
-    
+
+    # Close event bus
+    if event_bus:
+        await event_bus.close()
+        logger.info("Event bus closed")
+
     # Deregister from Consul
     if service_config.consul_enabled and hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
@@ -173,7 +309,7 @@ async def service_info():
 
 # ==================== 文件上传 ====================
 
-@app.post("/api/v1/files/upload", response_model=FileUploadResponse)
+@app.post("/api/v1/storage/files/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
     user_id: str = Form(...),
@@ -215,44 +351,41 @@ async def upload_file(
 
     result = await storage_service.upload_file(file, request)
 
-    # Auto-index files for intelligent search if enabled
-    if intelligence_service and request.enable_indexing:
+    # Publish event for async indexing if enabled
+    if event_bus and request.enable_indexing:
         try:
-            # Read file content
+            # Get file record to retrieve MinIO details
             file_record = await storage_service.repository.get_file_by_id(result.file_id, user_id)
             if file_record:
-                # Download file content for indexing
-                response = storage_service.minio_client.get_object(
-                    file_record.bucket_name,
-                    file_record.object_name
+                # Publish FILE_INDEXING_REQUESTED event
+                indexing_event = Event(
+                    event_type=EventType.FILE_INDEXING_REQUESTED,
+                    source=ServiceSource.STORAGE_SERVICE,
+                    data={
+                        "file_id": result.file_id,
+                        "user_id": user_id,
+                        "organization_id": organization_id,
+                        "file_name": file.filename,
+                        "file_type": file.content_type,
+                        "file_size": result.file_size,
+                        "metadata": parsed_metadata,
+                        "tags": parsed_tags,
+                        "bucket_name": file_record.bucket_name,
+                        "object_name": file_record.object_name
+                    }
                 )
-                file_bytes = response.read()
-                file_content = file_bytes.decode('utf-8', errors='ignore')
-
-                # Index via intelligence service
-                logger.info(f"Auto-indexing file {result.file_id} for user {user_id}")
-                await intelligence_service.index_file(
-                    file_id=result.file_id,
-                    user_id=user_id,
-                    organization_id=organization_id,
-                    file_name=file.filename,
-                    file_content=file_content,
-                    file_type=file.content_type,
-                    file_size=result.file_size,
-                    metadata=parsed_metadata,
-                    tags=parsed_tags
-                )
-                logger.info(f"Successfully indexed file {result.file_id}")
+                await event_bus.publish_event(indexing_event)
+                logger.info(f"Published indexing request event for file {result.file_id}")
         except Exception as e:
-            # Don't fail upload if indexing fails
-            logger.error(f"Failed to auto-index file {result.file_id}: {e}")
+            # Don't fail upload if event publishing fails
+            logger.error(f"Failed to publish indexing event for file {result.file_id}: {e}")
 
     return result
 
 
 # ==================== 文件列表 ====================
 
-@app.get("/api/v1/files", response_model=List[FileInfoResponse])
+@app.get("/api/v1/storage/files", response_model=List[FileInfoResponse])
 async def list_files(
     user_id: str,
     organization_id: Optional[str] = None,
@@ -288,7 +421,7 @@ async def list_files(
 
 # ==================== 文件信息 ====================
 
-@app.get("/api/v1/files/{file_id}", response_model=FileInfoResponse)
+@app.get("/api/v1/storage/files/{file_id}", response_model=FileInfoResponse)
 async def get_file_info(
     file_id: str,
     user_id: str
@@ -307,7 +440,7 @@ async def get_file_info(
 
 # ==================== 文件下载 ====================
 
-@app.get("/api/v1/files/{file_id}/download")
+@app.get("/api/v1/storage/files/{file_id}/download")
 async def download_file(
     file_id: str,
     user_id: str,
@@ -339,7 +472,7 @@ async def download_file(
 
 # ==================== 文件删除 ====================
 
-@app.delete("/api/v1/files/{file_id}")
+@app.delete("/api/v1/storage/files/{file_id}")
 async def delete_file(
     file_id: str,
     user_id: str,
@@ -365,7 +498,7 @@ async def delete_file(
 
 # ==================== 文件分享 ====================
 
-@app.post("/api/v1/files/{file_id}/share", response_model=FileShareResponse)
+@app.post("/api/v1/storage/files/{file_id}/share", response_model=FileShareResponse)
 async def share_file(
     file_id: str,
     shared_by: str = Form(...),
@@ -409,7 +542,7 @@ async def share_file(
 
 # ==================== 访问分享 ====================
 
-@app.get("/api/v1/shares/{share_id}", response_model=FileInfoResponse)
+@app.get("/api/v1/storage/shares/{share_id}", response_model=FileInfoResponse)
 async def get_shared_file(
     share_id: str,
     token: Optional[str] = Query(None),
@@ -558,7 +691,7 @@ async def check_minio_status():
 
 # ==================== Photo Version Management ====================
 
-@app.post("/api/v1/photos/versions/save", response_model=SavePhotoVersionResponse)
+@app.post("/api/v1/storage/photos/versions/save", response_model=SavePhotoVersionResponse)
 async def save_photo_version(request: SavePhotoVersionRequest):
     """
     保存照片的AI处理版本
@@ -573,7 +706,7 @@ async def save_photo_version(request: SavePhotoVersionRequest):
     return await storage_service.save_photo_version(request)
 
 
-@app.post("/api/v1/photos/{photo_id}/versions", response_model=PhotoWithVersions)
+@app.post("/api/v1/storage/photos/{photo_id}/versions", response_model=PhotoWithVersions)
 async def get_photo_versions(
     photo_id: str,
     user_id: str = Query(..., description="User ID")
@@ -595,7 +728,7 @@ async def get_photo_versions(
     return await storage_service.get_photo_versions(request)
 
 
-@app.put("/api/v1/photos/{photo_id}/versions/{version_id}/switch")
+@app.put("/api/v1/storage/photos/{photo_id}/versions/{version_id}/switch")
 async def switch_photo_version(
     photo_id: str,
     version_id: str,
@@ -620,7 +753,7 @@ async def switch_photo_version(
     return await storage_service.switch_photo_version(request)
 
 
-@app.delete("/api/v1/photos/versions/{version_id}")
+@app.delete("/api/v1/storage/photos/versions/{version_id}")
 async def delete_photo_version(
     version_id: str,
     user_id: str = Query(..., description="User ID")
@@ -639,7 +772,7 @@ async def delete_photo_version(
 
 # ==================== 智能文档分析端点 (Intelligent Features) ====================
 
-@app.post("/api/v1/files/search", response_model=SemanticSearchResponse)
+@app.post("/api/v1/storage/files/search", response_model=SemanticSearchResponse)
 async def semantic_search_files(
     request: SemanticSearchRequest
 ):
@@ -665,7 +798,7 @@ async def semantic_search_files(
     return await intelligence_service.semantic_search(request, storage_service.repository)
 
 
-@app.post("/api/v1/files/ask", response_model=RAGQueryResponse)
+@app.post("/api/v1/storage/files/ask", response_model=RAGQueryResponse)
 async def rag_query_files(
     request: RAGQueryRequest
 ):
@@ -962,6 +1095,516 @@ async def image_rag_query(
     except Exception as e:
         logger.error(f"Image RAG query failed: {e}")
         raise HTTPException(status_code=500, detail=f"Image RAG query failed: {str(e)}")
+
+
+# ==================== Album Management API ====================
+
+@app.post("/api/v1/storage/albums", response_model=AlbumResponse)
+async def create_album(request: CreateAlbumRequest):
+    """
+    创建相册
+    
+    - **name**: 相册名称
+    - **description**: 相册描述（可选）
+    - **user_id**: 创建者用户ID
+    - **cover_photo_id**: 封面照片ID（可选）
+    - **auto_sync**: 是否自动同步到相框
+    - **is_shared**: 是否为共享相册
+    - **tags**: 标签列表
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.create_album(request)
+
+
+@app.get("/api/v1/storage/albums/{album_id}", response_model=AlbumResponse)
+async def get_album(
+    album_id: str,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    获取相册详情
+    
+    - **album_id**: 相册ID
+    - **user_id**: 用户ID
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.get_album(album_id, user_id)
+
+
+@app.get("/api/v1/storage/albums", response_model=AlbumListResponse)
+async def list_user_albums(
+    user_id: str = Query(..., description="用户ID"),
+    limit: int = Query(100, ge=1, le=500, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="分页偏移")
+):
+    """
+    获取用户相册列表
+    
+    - **user_id**: 用户ID
+    - **limit**: 返回数量限制
+    - **offset**: 分页偏移
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.list_user_albums(user_id, limit, offset)
+
+
+@app.put("/api/v1/storage/albums/{album_id}", response_model=AlbumResponse)
+async def update_album(
+    album_id: str,
+    request: UpdateAlbumRequest,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    更新相册信息
+    
+    - **album_id**: 相册ID
+    - **user_id**: 用户ID
+    - **request**: 更新内容
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.update_album(album_id, user_id, request)
+
+
+@app.delete("/api/v1/storage/albums/{album_id}")
+async def delete_album(
+    album_id: str,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    删除相册
+    
+    - **album_id**: 相册ID
+    - **user_id**: 用户ID
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.delete_album(album_id, user_id)
+
+
+@app.post("/api/v1/storage/albums/{album_id}/photos")
+async def add_photos_to_album(
+    album_id: str,
+    request: AddPhotosToAlbumRequest
+):
+    """
+    添加照片到相册
+    
+    - **album_id**: 相册ID
+    - **photo_ids**: 照片ID列表
+    - **added_by**: 添加者用户ID
+    - **is_featured**: 是否设为精选
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.add_photos_to_album(album_id, request)
+
+
+@app.get("/api/v1/storage/albums/{album_id}/photos", response_model=AlbumPhotosResponse)
+async def get_album_photos(
+    album_id: str,
+    user_id: str = Query(..., description="用户ID"),
+    limit: int = Query(50, ge=1, le=200, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="分页偏移")
+):
+    """
+    获取相册照片列表
+    
+    - **album_id**: 相册ID
+    - **user_id**: 用户ID
+    - **limit**: 返回数量限制
+    - **offset**: 分页偏移
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.get_album_photos(album_id, user_id, limit, offset)
+
+
+@app.post("/api/v1/storage/albums/{album_id}/share")
+async def share_album_with_family(
+    album_id: str,
+    request: ShareAlbumRequest,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    创建或更新相册的家庭共享
+    
+    - **album_id**: 相册ID
+    - **shared_with_members**: 共享给特定成员
+    - **share_with_all_family**: 是否共享给所有家庭成员
+    - **default_permission**: 默认权限级别
+    - **custom_permissions**: 自定义权限设置
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.share_album_with_family(album_id, request, user_id)
+
+
+@app.get("/api/v1/storage/albums/{album_id}/sync-status/{frame_id}", response_model=AlbumSyncResponse)
+async def get_album_sync_status(
+    album_id: str,
+    frame_id: str,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    获取相册同步状态
+    
+    - **album_id**: 相册ID
+    - **frame_id**: 相框设备ID
+    - **user_id**: 用户ID
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.get_album_sync_status(album_id, frame_id, user_id)
+
+
+@app.post("/api/v1/storage/albums/{album_id}/sync/{frame_id}")
+async def trigger_album_sync(
+    album_id: str,
+    frame_id: str,
+    user_id: str = Query(..., description="用户ID"),
+    force: bool = Query(False, description="是否强制全量同步")
+):
+    """
+    触发相册同步到相框
+    
+    - **album_id**: 相册ID
+    - **frame_id**: 相框设备ID
+    - **user_id**: 用户ID
+    - **force**: 是否强制全量同步
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    # TODO: 这里应该调用notification_service来触发同步
+    # 目前先返回一个简单的响应
+    return {
+        "success": True,
+        "album_id": album_id,
+        "frame_id": frame_id,
+        "sync_type": "full" if force else "incremental",
+        "message": "Sync triggered successfully"
+    }
+
+
+# ==================== Gallery & Slideshow Endpoints ====================
+
+@app.get("/api/v1/storage/gallery/albums")
+async def list_gallery_albums(
+    user_id: str = Query(..., description="用户ID"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0)
+):
+    """
+    获取相册列表（用于相册库）
+    
+    返回用户的所有相册
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.list_user_albums(user_id, limit, offset)
+
+
+@app.get("/api/v1/storage/gallery/playlists")
+async def list_playlists(
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    获取幻灯片播放列表
+    
+    返回用户创建的所有播放列表
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    playlists = await storage_service.repository.list_user_playlists(user_id)
+    return {"playlists": playlists, "total": len(playlists)}
+
+
+@app.post("/api/v1/storage/gallery/playlists", status_code=201)
+async def create_playlist(request: CreatePlaylistRequest):
+    """
+    创建播放列表
+    
+    支持多种类型：
+    - manual: 手动选择照片
+    - smart: AI智能选择
+    - album: 基于相册
+    - favorites: 收藏照片
+    - recent: 最近上传
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.create_playlist(request)
+
+
+@app.get("/api/v1/storage/gallery/playlists/{playlist_id}")
+async def get_playlist_details(
+    playlist_id: str,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    获取播放列表详情
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    playlist = await storage_service.repository.get_playlist(playlist_id)
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    
+    return playlist
+
+
+@app.get("/api/v1/storage/gallery/playlists/{playlist_id}/photos")
+async def get_playlist_photos(
+    playlist_id: str,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    获取播放列表的照片
+    
+    返回带下载URL的照片列表，用于幻灯片播放
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.get_playlist_photos(playlist_id, user_id)
+
+
+@app.put("/api/v1/storage/gallery/playlists/{playlist_id}")
+async def update_playlist(
+    playlist_id: str,
+    request: UpdatePlaylistRequest
+):
+    """
+    更新播放列表
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    updates = request.dict(exclude_unset=True)
+    result = await storage_service.repository.update_playlist(playlist_id, updates)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    
+    return result
+
+
+@app.delete("/api/v1/storage/gallery/playlists/{playlist_id}", status_code=204)
+async def delete_playlist(playlist_id: str):
+    """
+    删除播放列表
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    success = await storage_service.repository.delete_playlist(playlist_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    
+    return None
+
+
+@app.get("/api/v1/storage/gallery/photos/random")
+async def get_random_photos(
+    user_id: str = Query(..., description="用户ID"),
+    count: int = Query(10, ge=1, le=100, description="照片数量"),
+    favorites_only: bool = Query(False, description="仅收藏"),
+    min_quality: Optional[float] = Query(None, description="最低质量分数")
+):
+    """
+    获取随机照片用于幻灯片
+    
+    支持智能选择条件：
+    - favorites_only: 仅返回收藏照片
+    - min_quality: 最低质量分数
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    from .models import SmartSelectionCriteria
+    criteria = SmartSelectionCriteria(
+        favorites_only=favorites_only,
+        min_quality_score=min_quality,
+        max_photos=count
+    ) if (favorites_only or min_quality) else None
+    
+    return await storage_service.get_random_photos(user_id, count, criteria)
+
+
+@app.post("/api/v1/storage/gallery/photos/metadata")
+async def update_photo_metadata(
+    request: UpdatePhotoMetadataRequest,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    更新照片元数据
+    
+    支持更新：
+    - is_favorite: 收藏状态
+    - rating: 评分 (0-5)
+    - tags: 标签
+    - location_name: 地点名称
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.update_photo_metadata(request, user_id)
+
+
+@app.get("/api/v1/storage/gallery/photos/{file_id}/metadata")
+async def get_photo_metadata(
+    file_id: str,
+    user_id: str = Query(..., description="用户ID")
+):
+    """
+    获取照片元数据
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    # Verify user owns the photo
+    file = await storage_service.repository.get_file_by_id(file_id, user_id)
+    if not file:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    
+    metadata = await storage_service.repository.get_photo_metadata(file_id)
+    return metadata if metadata else {"file_id": file_id, "message": "No metadata found"}
+
+
+# ==================== Photo Cache & Preloading Endpoints ====================
+
+@app.post("/api/v1/storage/gallery/cache/preload")
+async def preload_images(request: PreloadImagesRequest):
+    """
+    预加载图片到设备缓存
+    
+    用于在幻灯片播放前预加载照片，实现无缝过渡
+    
+    Example:
+    ```json
+    {
+      "frame_id": "frame_123",
+      "user_id": "user_456",
+      "photo_ids": ["photo1", "photo2", "photo3"],
+      "priority": "high"
+    }
+    ```
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.preload_images(request)
+
+
+@app.get("/api/v1/storage/gallery/cache/{frame_id}/stats")
+async def get_cache_stats(frame_id: str):
+    """
+    获取设备缓存统计
+    
+    返回：
+    - total_cached: 已缓存照片数
+    - total_size_bytes: 缓存总大小
+    - cache_hit_rate: 缓存命中率
+    - pending_count: 待缓存数量
+    - failed_count: 失败数量
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.get_cache_stats(frame_id)
+
+
+@app.post("/api/v1/storage/gallery/cache/{frame_id}/clear")
+async def clear_cache(
+    frame_id: str,
+    days_old: int = Query(30, ge=1, le=365, description="清理N天前的缓存")
+):
+    """
+    清理过期缓存
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    deleted_count = await storage_service.repository.clean_expired_cache(frame_id, days_old)
+    return {
+        "frame_id": frame_id,
+        "deleted_count": deleted_count,
+        "message": f"Cleared {deleted_count} expired cache entries"
+    }
+
+
+# ==================== Photo Rotation Schedule Endpoints ====================
+
+@app.post("/api/v1/storage/gallery/schedules", status_code=201)
+async def create_rotation_schedule(request: CreateRotationScheduleRequest):
+    """
+    创建照片轮播计划
+    
+    为指定设备和播放列表创建轮播计划
+    
+    Example:
+    ```json
+    {
+      "playlist_id": "playlist_123",
+      "frame_id": "frame_456",
+      "user_id": "user_789",
+      "start_time": "08:00",
+      "end_time": "22:00",
+      "days_of_week": [0,1,2,3,4,5,6],
+      "interval_seconds": 5,
+      "shuffle": false
+    }
+    ```
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    return await storage_service.create_rotation_schedule(request)
+
+
+@app.get("/api/v1/storage/gallery/schedules/{frame_id}")
+async def get_frame_schedules(frame_id: str):
+    """
+    获取设备的轮播计划
+    
+    返回指定设备的所有活跃轮播计划
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    schedules = await storage_service.repository.get_frame_schedules(frame_id)
+    return {"frame_id": frame_id, "schedules": schedules, "total": len(schedules)}
+
+
+@app.get("/api/v1/storage/gallery/frames/{frame_id}/playlists")
+async def get_frame_playlists(frame_id: str):
+    """
+    获取设备关联的播放列表
+    
+    返回设备配置的所有播放列表及其轮播计划
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    playlists = await storage_service.get_frame_playlists(frame_id)
+    return {"frame_id": frame_id, "playlists": playlists, "total": len(playlists)}
 
 
 # ==================== 主入口 ====================

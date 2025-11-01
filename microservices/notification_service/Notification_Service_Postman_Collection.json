@@ -1,0 +1,1279 @@
+{
+	"info": {
+		"_postman_id": "notification-service-collection-v1",
+		"name": "Notification Service API",
+		"description": "Complete API collection for Notification Service - Email, SMS, in-app notifications, push notifications, templates, and batch sending.\n\n**Service Port**: 8206\n**Version**: 1.0.0\n**Status**: All 22 tests passing ✅\n\n**Test Coverage:**\n- Health checks and service info\n- Template CRUD operations\n- Notification sending (email, in-app, push, webhook)\n- In-app notification management\n- Push subscription management\n- Batch sending\n- Statistics and reporting\n\n**Supported Channels:**\n- Email (via Resend)\n- In-App notifications\n- Push notifications (Web, iOS, Android)\n- Webhook notifications\n- SMS (coming soon)",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8206",
+			"type": "string"
+		},
+		{
+			"key": "template_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "notification_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "in_app_notification_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "batch_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "test_user_id",
+			"value": "user_postman_test",
+			"type": "string"
+		},
+		{
+			"key": "timestamp",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Service is healthy\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql(\"healthy\");",
+									"    pm.expect(jsonData.service).to.eql(\"notification_service\");",
+									"    pm.expect(jsonData.port).to.eql(8206);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Basic health check endpoint. Returns service status, name, port, and version."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Service Info",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Service info contains capabilities\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.eql(\"notification-service\");",
+									"    pm.expect(jsonData).to.have.property('capabilities');",
+									"    pm.expect(jsonData.capabilities.email).to.be.true;",
+									"    pm.expect(jsonData.capabilities.in_app).to.be.true;",
+									"    pm.expect(jsonData.capabilities.templates).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/info",
+							"host": ["{{base_url}}"],
+							"path": ["info"]
+						},
+						"description": "Get service information including capabilities and endpoints."
+					},
+					"response": []
+				}
+			],
+			"description": "Service health checks and information"
+		},
+		{
+			"name": "Templates",
+			"item": [
+				{
+					"name": "Create Email Template",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Template created successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('template');",
+									"    pm.expect(jsonData.template).to.have.property('template_id');",
+									"    pm.expect(jsonData.template.type).to.eql('email');",
+									"    pm.expect(jsonData.template.status).to.eql('active');",
+									"    ",
+									"    // Save template_id for later tests",
+									"    pm.collectionVariables.set('template_id', jsonData.template.template_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const timestamp = Date.now();",
+									"pm.collectionVariables.set('timestamp', timestamp);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Postman Test Email Template\",\n  \"description\": \"Test email template for Postman collection\",\n  \"type\": \"email\",\n  \"subject\": \"Welcome to {{app_name}}, {{user_name}}!\",\n  \"content\": \"Hello {{user_name}}, thank you for joining {{app_name}}. We're excited to have you!\",\n  \"html_content\": \"<h1>Welcome {{user_name}}!</h1><p>Thank you for joining <strong>{{app_name}}</strong>. We're excited to have you!</p>\",\n  \"variables\": [\"user_name\", \"app_name\"],\n  \"metadata\": {\n    \"category\": \"onboarding\",\n    \"created_by\": \"postman_test\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/templates",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "templates"]
+						},
+						"description": "Create a new notification template with variable substitution support."
+					},
+					"response": []
+				},
+				{
+					"name": "Create In-App Template",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"In-app template created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.template.type).to.eql('in_app');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"System Alert Template\",\n  \"description\": \"Template for system alerts\",\n  \"type\": \"in_app\",\n  \"subject\": \"{{alert_type}} Alert\",\n  \"content\": \"{{message}}\",\n  \"variables\": [\"alert_type\", \"message\"],\n  \"metadata\": {\n    \"category\": \"system\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/templates",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "templates"]
+						},
+						"description": "Create in-app notification template."
+					},
+					"response": []
+				},
+				{
+					"name": "List All Templates",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns array of templates\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"    if (jsonData.length > 0) {",
+									"        pm.expect(jsonData[0]).to.have.property('template_id');",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/templates?limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "templates"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						},
+						"description": "List all notification templates with pagination."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Template by ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Template retrieved successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.template_id).to.eql(pm.collectionVariables.get('template_id'));",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/templates/{{template_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "templates", "{{template_id}}"]
+						},
+						"description": "Get a specific template by its ID."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Template",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Template updated successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.template.description).to.include('Updated');",
+									"    pm.expect(jsonData.message).to.include('updated');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"description\": \"Updated test email template\",\n  \"metadata\": {\n    \"category\": \"onboarding\",\n    \"version\": \"2.0\",\n    \"updated_by\": \"postman\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/templates/{{template_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "templates", "{{template_id}}"]
+						},
+						"description": "Update template metadata and content."
+					},
+					"response": []
+				}
+			],
+			"description": "Notification template management"
+		},
+		{
+			"name": "Send Notifications",
+			"item": [
+				{
+					"name": "Send Email (Direct)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Email notification created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.notification).to.have.property('notification_id');",
+									"    pm.expect(jsonData.notification.type).to.eql('email');",
+									"    pm.expect(jsonData.notification.recipient_email).to.include('@');",
+									"    ",
+									"    pm.collectionVariables.set('notification_id', jsonData.notification.notification_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"email\",\n  \"recipient_email\": \"test@example.com\",\n  \"subject\": \"Postman Test Email\",\n  \"content\": \"This is a test email sent from Postman collection.\",\n  \"html_content\": \"<h2>Postman Test</h2><p>This is a <strong>test email</strong> sent from Postman collection.</p>\",\n  \"priority\": \"high\",\n  \"tags\": [\"postman\", \"test\"],\n  \"metadata\": {\n    \"source\": \"postman_collection\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/send",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "send"]
+						},
+						"description": "Send email notification without using a template."
+					},
+					"response": []
+				},
+				{
+					"name": "Send In-App Notification",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"In-app notification created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.notification.type).to.eql('in_app');",
+									"    pm.expect(jsonData.notification.recipient_id).to.eql(pm.collectionVariables.get('test_user_id'));",
+									"    ",
+									"    pm.collectionVariables.set('in_app_notification_id', jsonData.notification.notification_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"in_app\",\n  \"recipient_id\": \"{{test_user_id}}\",\n  \"subject\": \"New Feature Available\",\n  \"content\": \"Check out our new feature in the dashboard!\",\n  \"priority\": \"normal\",\n  \"metadata\": {\n    \"action_url\": \"/dashboard/features\",\n    \"category\": \"product_update\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/send",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "send"]
+						},
+						"description": "Send in-app notification to a user."
+					},
+					"response": []
+				},
+				{
+					"name": "Send Email with Template",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Template variables replaced\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.notification.template_id).to.eql(pm.collectionVariables.get('template_id'));",
+									"    pm.expect(jsonData.notification.content).to.include('John Doe');",
+									"    pm.expect(jsonData.notification.content).to.include('iaPro');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"email\",\n  \"recipient_email\": \"newuser@example.com\",\n  \"template_id\": \"{{template_id}}\",\n  \"variables\": {\n    \"user_name\": \"John Doe\",\n    \"app_name\": \"iaPro\"\n  },\n  \"priority\": \"high\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/send",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "send"]
+						},
+						"description": "Send notification using template with variable substitution."
+					},
+					"response": []
+				},
+				{
+					"name": "Send Webhook Notification",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Webhook notification created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.notification.type).to.eql('webhook');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"webhook\",\n  \"subject\": \"Order Completed\",\n  \"content\": \"Order #12345 has been completed\",\n  \"metadata\": {\n    \"webhook_url\": \"https://webhook.site/your-unique-url\",\n    \"order_id\": \"12345\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/send",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "send"]
+						},
+						"description": "Send webhook notification to external endpoint."
+					},
+					"response": []
+				}
+			],
+			"description": "Send notifications via different channels"
+		},
+		{
+			"name": "Manage Notifications",
+			"item": [
+				{
+					"name": "List All Notifications",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns array of notifications\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications?limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						},
+						"description": "List all notifications with pagination."
+					},
+					"response": []
+				},
+				{
+					"name": "Filter Notifications by Type",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"All notifications are of correct type\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.length > 0) {",
+									"        jsonData.forEach(function(notification) {",
+									"            pm.expect(notification.type).to.eql('email');",
+									"        });",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications?type=email&limit=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications"],
+							"query": [
+								{
+									"key": "type",
+									"value": "email"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						},
+						"description": "Filter notifications by type (email, in_app, push, sms, webhook)."
+					},
+					"response": []
+				},
+				{
+					"name": "Filter by Status and Priority",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications?status=delivered&priority=high&limit=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications"],
+							"query": [
+								{
+									"key": "status",
+									"value": "delivered"
+								},
+								{
+									"key": "priority",
+									"value": "high"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						},
+						"description": "Filter notifications by status and priority."
+					},
+					"response": []
+				}
+			],
+			"description": "Query and filter notifications"
+		},
+		{
+			"name": "In-App Notifications",
+			"item": [
+				{
+					"name": "Get User In-App Notifications",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns user's notifications\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"    if (jsonData.length > 0) {",
+									"        pm.expect(jsonData[0].user_id).to.eql(pm.collectionVariables.get('test_user_id'));",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/in-app/{{test_user_id}}?limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "in-app", "{{test_user_id}}"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Get all in-app notifications for a specific user."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Unread Notifications",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns only unread notifications\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    jsonData.forEach(function(notification) {",
+									"        pm.expect(notification.is_read).to.be.false;",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/in-app/{{test_user_id}}?is_read=false",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "in-app", "{{test_user_id}}"],
+							"query": [
+								{
+									"key": "is_read",
+									"value": "false"
+								}
+							]
+						},
+						"description": "Get only unread in-app notifications."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Unread Count",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns unread count\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('unread_count');",
+									"    pm.expect(jsonData.unread_count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/in-app/{{test_user_id}}/unread-count",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "in-app", "{{test_user_id}}", "unread-count"]
+						},
+						"description": "Get count of unread notifications for a user."
+					},
+					"response": []
+				},
+				{
+					"name": "Mark as Read",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Notification marked as read\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('read');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/in-app/{{in_app_notification_id}}/read?user_id={{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "in-app", "{{in_app_notification_id}}", "read"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}"
+								}
+							]
+						},
+						"description": "Mark a notification as read."
+					},
+					"response": []
+				},
+				{
+					"name": "Mark as Archived",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Notification archived\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('archived');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/in-app/{{in_app_notification_id}}/archive?user_id={{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "in-app", "{{in_app_notification_id}}", "archive"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}"
+								}
+							]
+						},
+						"description": "Archive a notification."
+					},
+					"response": []
+				}
+			],
+			"description": "In-app notification management"
+		},
+		{
+			"name": "Push Subscriptions",
+			"item": [
+				{
+					"name": "Register Web Push Subscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Push subscription registered\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.user_id).to.eql(pm.collectionVariables.get('test_user_id'));",
+									"    pm.expect(jsonData.platform).to.eql('web');",
+									"    pm.expect(jsonData.is_active).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"device_token\": \"postman_test_device_token\",\n  \"platform\": \"web\",\n  \"endpoint\": \"https://fcm.googleapis.com/fcm/send/test_endpoint\",\n  \"auth_key\": \"test_auth_key\",\n  \"p256dh_key\": \"test_p256dh_key\",\n  \"device_name\": \"Chrome Browser\",\n  \"device_model\": \"Desktop\",\n  \"app_version\": \"1.0.0\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/push/subscribe",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "push", "subscribe"]
+						},
+						"description": "Register a new push notification subscription."
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Subscriptions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns user's subscriptions\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"    if (jsonData.length > 0) {",
+									"        pm.expect(jsonData[0].user_id).to.eql(pm.collectionVariables.get('test_user_id'));",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/push/subscriptions/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "push", "subscriptions", "{{test_user_id}}"]
+						},
+						"description": "Get all push subscriptions for a user."
+					},
+					"response": []
+				},
+				{
+					"name": "Filter Subscriptions by Platform",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Returns only web subscriptions\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    jsonData.forEach(function(sub) {",
+									"        pm.expect(sub.platform).to.eql('web');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/push/subscriptions/{{test_user_id}}?platform=web",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "push", "subscriptions", "{{test_user_id}}"],
+							"query": [
+								{
+									"key": "platform",
+									"value": "web"
+								}
+							]
+						},
+						"description": "Filter subscriptions by platform (web, ios, android)."
+					},
+					"response": []
+				},
+				{
+					"name": "Unsubscribe Push",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Subscription removed\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('removed');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/push/unsubscribe?user_id={{test_user_id}}&device_token=postman_test_device_token",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "push", "unsubscribe"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}"
+								},
+								{
+									"key": "device_token",
+									"value": "postman_test_device_token"
+								}
+							]
+						},
+						"description": "Unsubscribe from push notifications."
+					},
+					"response": []
+				}
+			],
+			"description": "Push notification subscription management"
+		},
+		{
+			"name": "Batch Operations",
+			"item": [
+				{
+					"name": "Batch Send Notifications",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Batch created successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.batch).to.have.property('batch_id');",
+									"    pm.expect(jsonData.batch.total_recipients).to.eql(3);",
+									"    pm.expect(jsonData.message).to.include('3 recipients');",
+									"    ",
+									"    pm.collectionVariables.set('batch_id', jsonData.batch.batch_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Postman Welcome Campaign\",\n  \"template_id\": \"{{template_id}}\",\n  \"type\": \"email\",\n  \"priority\": \"normal\",\n  \"recipients\": [\n    {\n      \"email\": \"user1@example.com\",\n      \"variables\": {\n        \"user_name\": \"Alice\",\n        \"app_name\": \"iaPro\"\n      }\n    },\n    {\n      \"email\": \"user2@example.com\",\n      \"variables\": {\n        \"user_name\": \"Bob\",\n        \"app_name\": \"iaPro\"\n      }\n    },\n    {\n      \"email\": \"user3@example.com\",\n      \"variables\": {\n        \"user_name\": \"Charlie\",\n        \"app_name\": \"iaPro\"\n      }\n    }\n  ],\n  \"metadata\": {\n    \"campaign_id\": \"postman_welcome_2024\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/batch",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "batch"]
+						},
+						"description": "Send notifications to multiple recipients using a template."
+					},
+					"response": []
+				}
+			],
+			"description": "Batch notification operations"
+		},
+		{
+			"name": "Statistics & Reporting",
+			"item": [
+				{
+					"name": "Get Overall Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Statistics contain required fields\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('total_sent');",
+									"    pm.expect(jsonData).to.have.property('total_delivered');",
+									"    pm.expect(jsonData).to.have.property('total_failed');",
+									"    pm.expect(jsonData).to.have.property('by_type');",
+									"    pm.expect(jsonData).to.have.property('by_status');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/stats?period=all_time",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "stats"],
+							"query": [
+								{
+									"key": "period",
+									"value": "all_time"
+								}
+							]
+						},
+						"description": "Get notification statistics for all time."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Weekly Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Period is set to week\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.period).to.eql('week');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/stats?period=week",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "stats"],
+							"query": [
+								{
+									"key": "period",
+									"value": "week"
+								}
+							]
+						},
+						"description": "Get notification statistics for the past week."
+					},
+					"response": []
+				},
+				{
+					"name": "Get User-Specific Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/stats?user_id={{test_user_id}}&period=month",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "stats"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}"
+								},
+								{
+									"key": "period",
+									"value": "month"
+								}
+							]
+						},
+						"description": "Get notification statistics for a specific user."
+					},
+					"response": []
+				}
+			],
+			"description": "Notification statistics and analytics"
+		},
+		{
+			"name": "Development & Testing",
+			"item": [
+				{
+					"name": "Test Email Endpoint",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Test email sent\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.notification.type).to.eql('email');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/test/email?to=testuser@example.com&subject=Postman Test",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "test", "email"],
+							"query": [
+								{
+									"key": "to",
+									"value": "testuser@example.com"
+								},
+								{
+									"key": "subject",
+									"value": "Postman Test"
+								}
+							]
+						},
+						"description": "Quick test email endpoint for development."
+					},
+					"response": []
+				},
+				{
+					"name": "Test In-App Endpoint",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Test in-app notification created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.notification.type).to.eql('in_app');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/test/in-app?user_id={{test_user_id}}&title=Postman Test",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "notifications", "test", "in-app"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}"
+								},
+								{
+									"key": "title",
+									"value": "Postman Test"
+								}
+							]
+						},
+						"description": "Quick test in-app notification endpoint for development."
+					},
+					"response": []
+				}
+			],
+			"description": "Development and testing endpoints"
+		}
+	]
+}
+

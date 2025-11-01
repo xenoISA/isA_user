@@ -1,0 +1,930 @@
+{
+	"info": {
+		"_postman_id": "ota-service-collection",
+		"name": "OTA Service API",
+		"description": "Complete API collection for OTA (Over-The-Air) Update Service - Firmware management, update campaigns, device updates, and rollback operations",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8240",
+			"type": "string"
+		},
+		{
+			"key": "auth_url",
+			"value": "http://localhost:8201",
+			"type": "string"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "firmware_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "campaign_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "update_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "device_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "0. Setup - Get Auth Token",
+			"item": [
+				{
+					"name": "Generate Dev Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"jwt_token\", jsonData.token);",
+									"    console.log(\"JWT Token saved:\", jsonData.token.substring(0, 50) + \"...\");",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"test_user_123\",\n  \"email\": \"test@example.com\",\n  \"organization_id\": \"org_test_123\",\n  \"role\": \"admin\",\n  \"expires_in\": 3600\n}"
+						},
+						"url": {
+							"raw": "{{auth_url}}/api/v1/auth/dev-token",
+							"host": [
+								"{{auth_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"dev-token"
+							]
+						},
+						"description": "Generate a development JWT token for testing"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "1. Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Basic health check"
+					},
+					"response": []
+				},
+				{
+					"name": "Detailed Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/detailed",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health",
+								"detailed"
+							]
+						},
+						"description": "Detailed health check with storage, network status, and metrics"
+					},
+					"response": []
+				},
+				{
+					"name": "Service Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/service/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service",
+								"stats"
+							]
+						},
+						"description": "Get service statistics and capabilities"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. Firmware Management",
+			"item": [
+				{
+					"name": "Upload Firmware",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"firmware_id\", jsonData.firmware_id);",
+									"    console.log(\"Firmware ID saved:\", jsonData.firmware_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "metadata",
+									"value": "{\"name\":\"SmartFrame Firmware\",\"version\":\"2.1.0\",\"description\":\"New features and bug fixes\",\"device_model\":\"SF-2024-Pro\",\"manufacturer\":\"SmartTech\",\"file_size\":5242880,\"checksum_md5\":\"d41d8cd98f00b204e9800998ecf8427e\",\"checksum_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"is_beta\":false,\"is_security_update\":false,\"changelog\":\"- Improved photo rendering\\n- Fixed battery drain issue\\n- Enhanced Wi-Fi stability\"}",
+									"type": "text"
+								},
+								{
+									"key": "file",
+									"type": "file",
+									"src": [],
+									"description": "Select firmware binary file (.bin, .hex, .elf, .tar.gz, .zip)"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/firmware",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"firmware"
+							]
+						},
+						"description": "Upload firmware file with metadata"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Firmware Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/firmware/{{firmware_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"firmware",
+								"{{firmware_id}}"
+							]
+						},
+						"description": "Get firmware details by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "List Firmware",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/firmware?limit=50&offset=0",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"firmware"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "device_model",
+									"value": "SF-2024-Pro",
+									"disabled": true
+								},
+								{
+									"key": "manufacturer",
+									"value": "SmartTech",
+									"disabled": true
+								},
+								{
+									"key": "is_beta",
+									"value": "false",
+									"disabled": true
+								},
+								{
+									"key": "is_security_update",
+									"value": "true",
+									"disabled": true
+								}
+							]
+						},
+						"description": "List firmware with optional filters"
+					},
+					"response": []
+				},
+				{
+					"name": "Download Firmware",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/firmware/{{firmware_id}}/download",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"firmware",
+								"{{firmware_id}}",
+								"download"
+							]
+						},
+						"description": "Get firmware download URL with expiration"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Firmware",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/firmware/{{firmware_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"firmware",
+								"{{firmware_id}}"
+							]
+						},
+						"description": "Delete firmware by ID"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. Update Campaigns",
+			"item": [
+				{
+					"name": "Create Campaign",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"campaign_id\", jsonData.campaign_id);",
+									"    console.log(\"Campaign ID saved:\", jsonData.campaign_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Q4 2024 Smart Frame Update\",\n  \"description\": \"Quarterly firmware update with new features\",\n  \"firmware_id\": \"{{firmware_id}}\",\n  \"target_devices\": [],\n  \"target_groups\": [],\n  \"target_filters\": {\n    \"device_type\": \"smart_frame\",\n    \"firmware_version\": \"<2.0.0\"\n  },\n  \"deployment_strategy\": \"staged\",\n  \"priority\": \"normal\",\n  \"rollout_percentage\": 100,\n  \"max_concurrent_updates\": 50,\n  \"batch_size\": 10,\n  \"timeout_minutes\": 60,\n  \"auto_rollback\": true,\n  \"failure_threshold_percent\": 20,\n  \"notify_on_start\": true,\n  \"notify_on_complete\": true,\n  \"notify_on_failure\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/campaigns",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"campaigns"
+							]
+						},
+						"description": "Create a new update campaign"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Campaign Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/campaigns/{{campaign_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"campaigns",
+								"{{campaign_id}}"
+							]
+						},
+						"description": "Get campaign details by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "List Campaigns",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/campaigns?limit=50&offset=0",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"campaigns"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "status",
+									"value": "in_progress",
+									"disabled": true
+								},
+								{
+									"key": "priority",
+									"value": "high",
+									"disabled": true
+								}
+							]
+						},
+						"description": "List campaigns with optional filters"
+					},
+					"response": []
+				},
+				{
+					"name": "Start Campaign",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/campaigns/{{campaign_id}}/start",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"campaigns",
+								"{{campaign_id}}",
+								"start"
+							]
+						},
+						"description": "Start an update campaign"
+					},
+					"response": []
+				},
+				{
+					"name": "Pause Campaign",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/campaigns/{{campaign_id}}/pause",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"campaigns",
+								"{{campaign_id}}",
+								"pause"
+							]
+						},
+						"description": "Pause a running campaign"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Campaign",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/campaigns/{{campaign_id}}/cancel",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"campaigns",
+								"{{campaign_id}}",
+								"cancel"
+							]
+						},
+						"description": "Cancel a campaign"
+					},
+					"response": []
+				},
+				{
+					"name": "Approve Campaign",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"campaign_id\": \"{{campaign_id}}\",\n  \"approved\": true,\n  \"approval_comment\": \"Approved for deployment after successful QA testing\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/campaigns/{{campaign_id}}/approve",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"campaigns",
+								"{{campaign_id}}",
+								"approve"
+							]
+						},
+						"description": "Approve or reject campaign deployment"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Campaign Stats",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/stats/campaigns/{{campaign_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"stats",
+								"campaigns",
+								"{{campaign_id}}"
+							]
+						},
+						"description": "Get campaign statistics and progress"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4. Device Updates",
+			"item": [
+				{
+					"name": "Update Single Device",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"update_id\", jsonData.update_id);",
+									"    console.log(\"Update ID saved:\", jsonData.update_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_id\": \"{{device_id}}\",\n  \"firmware_id\": \"{{firmware_id}}\",\n  \"priority\": \"high\",\n  \"force_update\": false,\n  \"max_retries\": 3,\n  \"timeout_minutes\": 30\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}/update",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}",
+								"update"
+							]
+						},
+						"description": "Update a single device to specified firmware"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Update Progress",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/updates/{{update_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"updates",
+								"{{update_id}}"
+							]
+						},
+						"description": "Get update progress and status"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Device Update History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}/updates?limit=50",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}",
+								"updates"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Get update history for a device"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Update",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/updates/{{update_id}}/cancel",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"updates",
+								"{{update_id}}",
+								"cancel"
+							]
+						},
+						"description": "Cancel an in-progress update"
+					},
+					"response": []
+				},
+				{
+					"name": "Retry Update",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/updates/{{update_id}}/retry",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"updates",
+								"{{update_id}}",
+								"retry"
+							]
+						},
+						"description": "Retry a failed update"
+					},
+					"response": []
+				},
+				{
+					"name": "Bulk Update Devices",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_ids\": [\"device_001\", \"device_002\", \"device_003\"],\n  \"firmware_id\": \"{{firmware_id}}\",\n  \"priority\": \"normal\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/bulk/update",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"bulk",
+								"update"
+							]
+						},
+						"description": "Update multiple devices at once"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "5. Rollback Operations",
+			"item": [
+				{
+					"name": "Rollback Device",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"to_version\": \"1.9.0\",\n  \"reason\": \"Critical bug found in 2.0.0\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}/rollback",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}",
+								"rollback"
+							]
+						},
+						"description": "Rollback a device to previous firmware version"
+					},
+					"response": []
+				},
+				{
+					"name": "Rollback Campaign",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"High failure rate detected\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/campaigns/{{campaign_id}}/rollback",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"campaigns",
+								"{{campaign_id}}",
+								"rollback"
+							]
+						},
+						"description": "Rollback entire campaign"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "6. Statistics & Analytics",
+			"item": [
+				{
+					"name": "Get Update Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"stats"
+							]
+						},
+						"description": "Get overall update statistics"
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

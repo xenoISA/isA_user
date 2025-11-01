@@ -1,0 +1,60 @@
+# ==========================================
+# isA User Platform - Staging Multi-Service Container
+# ==========================================
+# All microservices in one container for staging environment
+
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies and uv
+RUN apt-get update && apt-get install -y \
+    supervisor \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv
+
+# Create app user
+RUN useradd --create-home --shell /bin/bash app && \
+    chown app:app /app
+
+# Copy requirements and install Python dependencies using uv (much faster!)
+COPY deployment/staging/config/requirements.staging.txt .
+RUN uv pip install --system --no-cache -r requirements.staging.txt
+
+# Copy the entire application
+COPY . .
+
+# Fix permissions
+RUN chown -R app:app /app
+
+# Copy supervisor configuration
+COPY deployment/staging/config/supervisord.staging.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Copy startup script
+COPY deployment/staging/scripts/start-staging.sh /usr/local/bin/start-staging.sh
+RUN chmod +x /usr/local/bin/start-staging.sh
+
+# Health check script
+COPY deployment/staging/scripts/healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
+# Expose all service ports
+EXPOSE 8201 8202 8203 8204 8205 8206 8207 8208 8209 8210 8211 8212 8213 8214 8215 8216 8217 8218 8219 8220 8221 8222 8223 8225 8230
+
+# Set environment
+ENV ENVIRONMENT=staging
+ENV PYTHONPATH=/app
+ENV LOG_LEVEL=INFO
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD /usr/local/bin/healthcheck.sh
+
+# Run as root so supervisord can manage services and switch users
+# Supervisord will run each service as 'app' user
+# This ensures all logs go to stdout/stderr properly
+
+# Start all services using supervisor
+CMD ["/usr/local/bin/start-staging.sh"]

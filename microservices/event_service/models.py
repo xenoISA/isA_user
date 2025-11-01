@@ -275,8 +275,8 @@ class EventProcessor(BaseModel):
 class EventSubscription(BaseModel):
     """事件订阅"""
     subscription_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    subscriber_name: str = Field(..., description="订阅者名称")
-    subscriber_type: str = Field(..., description="订阅者类型")
+    subscriber_name: str = Field(default="default_subscriber", description="订阅者名称")
+    subscriber_type: str = Field(default="service", description="订阅者类型")
     
     event_types: List[str] = Field(..., description="订阅的事件类型")
     event_sources: Optional[List[EventSource]] = Field(None, description="订阅的事件源")

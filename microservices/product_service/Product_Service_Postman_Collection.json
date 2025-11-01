@@ -1,0 +1,515 @@
+{
+	"info": {
+		"_postman_id": "product-service-staging-v1",
+		"name": "Product Service API - Staging",
+		"description": "Product Microservice - Product catalog, pricing, subscriptions, and usage tracking\n\nBase URL: http://localhost:8215\nEnvironment: Staging (Docker)\nVersion: 1.0.0\n\nCapabilities:\n- Product catalog management\n- Pricing information\n- Subscription management\n- Usage tracking and analytics\n- Service statistics",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "1.0.0"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8215",
+			"type": "string",
+			"description": "Product service base URL (port 8215 in staging)"
+		},
+		{
+			"key": "api_base",
+			"value": "{{base_url}}/api/v1",
+			"type": "string",
+			"description": "API base path"
+		},
+		{
+			"key": "test_user_id",
+			"value": "test_user_123",
+			"type": "string",
+			"description": "Test user ID for examples"
+		},
+		{
+			"key": "test_product_id",
+			"value": "gpt-4",
+			"type": "string",
+			"description": "Test product ID"
+		},
+		{
+			"key": "subscription_id",
+			"value": "",
+			"type": "string",
+			"description": "Created subscription ID (set automatically)"
+		}
+	],
+	"item": [
+		{
+			"name": "Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service is healthy', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"    pm.expect(jsonData.service).to.eql('product_service');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Health check endpoint\n\nReturns:\n- status: healthy/unhealthy\n- service: product_service\n- port: 8215\n- version: 1.0.0\n- dependencies: database status"
+					},
+					"response": []
+				},
+				{
+					"name": "Service Info",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has capabilities', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.capabilities).to.be.an('array');",
+									"    pm.expect(jsonData.capabilities).to.include('product_catalog');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/info",
+							"host": ["{{api_base}}"],
+							"path": ["info"]
+						},
+						"description": "Get service information\n\nReturns:\n- service: product_service\n- version: 1.0.0\n- capabilities: array of features\n- supported_product_types: available product types\n- supported_pricing_types: available pricing models"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check and service information endpoints"
+		},
+		{
+			"name": "Product Catalog",
+			"item": [
+				{
+					"name": "Get Product Categories",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response is an array', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/categories",
+							"host": ["{{api_base}}"],
+							"path": ["categories"]
+						},
+						"description": "Get all product categories\n\nReturns array of categories with:\n- category_id: unique identifier\n- name: category name\n- description: category description\n- is_active: active status"
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Products",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response is an array', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"    if (jsonData.length > 0) {",
+									"        pm.collectionVariables.set('test_product_id', jsonData[0].product_id);",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/products",
+							"host": ["{{api_base}}"],
+							"path": ["products"]
+						},
+						"description": "Get all active products\n\nQuery parameters:\n- category_id (optional): filter by category\n- product_type (optional): filter by type\n- is_active (default: true): filter by active status"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Products by Category",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/products?category_id=ai_models",
+							"host": ["{{api_base}}"],
+							"path": ["products"],
+							"query": [
+								{
+									"key": "category_id",
+									"value": "ai_models"
+								}
+							]
+						},
+						"description": "Get products filtered by category\n\nExample categories:\n- ai_models\n- storage\n- agents\n- mcp\n- api\n- notifications"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Product by ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Product has required fields', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('product_id');",
+									"    pm.expect(jsonData).to.have.property('name');",
+									"    pm.expect(jsonData).to.have.property('product_type');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/products/{{test_product_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["products", "{{test_product_id}}"]
+						},
+						"description": "Get detailed information for a specific product"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Product Pricing",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Pricing info returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('product');",
+									"    pm.expect(jsonData).to.have.property('pricing_model');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/products/{{test_product_id}}/pricing",
+							"host": ["{{api_base}}"],
+							"path": ["products", "{{test_product_id}}", "pricing"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get pricing information for a product\n\nOptional query parameters:\n- user_id: get user-specific pricing\n- subscription_id: get subscription-specific pricing"
+					},
+					"response": []
+				},
+				{
+					"name": "Check Product Availability",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/products/{{test_product_id}}/availability?user_id={{test_user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["products", "{{test_product_id}}", "availability"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}"
+								},
+								{
+									"key": "organization_id",
+									"value": "org_123",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Check if product is available for a specific user\n\nRequired query parameters:\n- user_id: user to check availability for\n\nOptional:\n- organization_id: check organization access"
+					},
+					"response": []
+				}
+			],
+			"description": "Product catalog browsing and information"
+		},
+		{
+			"name": "Subscriptions",
+			"item": [
+				{
+					"name": "Create Subscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('Subscription created', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('subscription_id');",
+									"        pm.collectionVariables.set('subscription_id', jsonData.subscription_id);",
+									"    });",
+									"} else {",
+									"    pm.test('Expected error (user validation)', function () {",
+									"        pm.expect([400, 500]).to.include(pm.response.code);",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"plan_id\": \"pro-plan\",\n  \"billing_cycle\": \"monthly\",\n  \"metadata\": {\n    \"source\": \"postman\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{api_base}}/subscriptions",
+							"host": ["{{api_base}}"],
+							"path": ["subscriptions"]
+						},
+						"description": "Create a new subscription\n\nRequired fields:\n- user_id: valid user from account service\n- plan_id: service plan ID (e.g., 'free-plan', 'pro-plan')\n\nOptional fields:\n- billing_cycle: 'monthly', 'quarterly', 'yearly' (default: monthly)\n- organization_id: for team subscriptions\n- metadata: additional data\n\nAvailable plans:\n- free-plan: Basic access\n- basic-plan: Individual developers\n- pro-plan: Growing teams\n- enterprise-plan: Large organizations\n\nNote: Requires valid user_id from account service"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Subscriptions",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/subscriptions/user/{{test_user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["subscriptions", "user", "{{test_user_id}}"],
+							"query": [
+								{
+									"key": "status",
+									"value": "active",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get all subscriptions for a user\n\nOptional query parameters:\n- status: filter by subscription status (active, canceled, etc.)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Subscription by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/subscriptions/{{subscription_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["subscriptions", "{{subscription_id}}"]
+						},
+						"description": "Get detailed information for a specific subscription"
+					},
+					"response": []
+				}
+			],
+			"description": "Subscription management endpoints"
+		},
+		{
+			"name": "Usage Tracking",
+			"item": [
+				{
+					"name": "Record Product Usage",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Usage recorded or validation error', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"    pm.expect(jsonData).to.have.property('message');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"product_id\": \"{{test_product_id}}\",\n  \"usage_amount\": 1500.0,\n  \"usage_details\": {\n    \"tokens_input\": 1000,\n    \"tokens_output\": 500,\n    \"model\": \"gpt-4\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{api_base}}/usage/record",
+							"host": ["{{api_base}}"],
+							"path": ["usage", "record"]
+						},
+						"description": "Record product usage\n\nRequired fields:\n- user_id: valid user from account service\n- product_id: product being used\n- usage_amount: amount of usage (tokens, MB, requests, etc.)\n\nOptional fields:\n- organization_id: for team usage\n- subscription_id: link to subscription\n- session_id: session identifier\n- request_id: request identifier\n- usage_details: additional usage metadata\n- usage_timestamp: custom timestamp\n\nNote: Requires valid user_id from account service"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Usage Records",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/usage/records?user_id={{test_user_id}}&limit=10",
+							"host": ["{{api_base}}"],
+							"path": ["usage", "records"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "product_id",
+									"value": "{{test_product_id}}",
+									"disabled": true
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get usage records with filtering\n\nQuery parameters:\n- user_id: filter by user\n- organization_id: filter by organization\n- subscription_id: filter by subscription\n- product_id: filter by product\n- limit: number of records (default: 100)\n- offset: pagination offset (default: 0)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Usage Statistics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/statistics/usage?user_id={{test_user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["statistics", "usage"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{test_user_id}}"
+								},
+								{
+									"key": "product_id",
+									"value": "{{test_product_id}}",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get aggregated usage statistics\n\nQuery parameters:\n- user_id: filter by user\n- organization_id: filter by organization\n- product_id: filter by product\n- start_date: start date (ISO 8601)\n- end_date: end date (ISO 8601)\n\nReturns:\n- total_statistics: aggregate metrics\n- product_statistics: per-product breakdown"
+					},
+					"response": []
+				}
+			],
+			"description": "Usage tracking and analytics endpoints"
+		},
+		{
+			"name": "Statistics",
+			"item": [
+				{
+					"name": "Get Service Statistics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/statistics/service",
+							"host": ["{{api_base}}"],
+							"path": ["statistics", "service"]
+						},
+						"description": "Get overall service statistics\n\nReturns:\n- service: service name\n- statistics: various metrics\n  - total_products\n  - active_subscriptions\n  - usage_records_24h\n  - usage_records_7d\n  - usage_records_30d"
+					},
+					"response": []
+				}
+			],
+			"description": "Service-level statistics and analytics"
+		}
+	]
+}

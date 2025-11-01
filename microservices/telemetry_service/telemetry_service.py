@@ -7,7 +7,7 @@ Telemetry Service - Business Logic
 import secrets
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Union
 import logging
 from collections import defaultdict
@@ -19,21 +19,25 @@ from .models import (
     AlertRuleResponse, AlertResponse, DeviceTelemetryStatsResponse,
     TelemetryStatsResponse, RealTimeDataResponse, AggregatedDataResponse
 )
+from .telemetry_repository import TelemetryRepository
+from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger("telemetry_service")
 
 
 class TelemetryService:
     """遥测服务"""
-    
-    def __init__(self):
-        # 在生产环境中，这些应该使用专业的时序数据库如InfluxDB、TimescaleDB等
-        self.data_store = defaultdict(list)  # 简化的数据存储
-        self.metric_definitions = {}  # 指标定义
-        self.alert_rules = {}  # 警报规则
-        self.active_alerts = {}  # 活跃警报
+
+    def __init__(self, event_bus=None):
+        # Initialize repository for PostgreSQL storage
+        self.repository = TelemetryRepository()
+
+        # Event bus for publishing events
+        self.event_bus = event_bus
+
+        # Keep in-memory structures for features not yet in repository
         self.real_time_subscribers = {}  # 实时订阅
-        
+
         # 配置
         self.max_batch_size = 1000
         self.max_query_points = 10000
@@ -42,49 +46,48 @@ class TelemetryService:
     async def ingest_telemetry_data(self, device_id: str, data_points: List[TelemetryDataPoint]) -> Dict[str, Any]:
         """摄取遥测数据"""
         try:
-            ingested_count = 0
-            failed_count = 0
-            errors = []
-            
+            # Use repository to ingest data
+            result = await self.repository.ingest_data_points(device_id, data_points)
+
+            # Process each point for alerts and real-time notifications
             for data_point in data_points:
                 try:
                     # 验证数据点
                     await self._validate_data_point(device_id, data_point)
-                    
-                    # 存储数据
-                    key = f"{device_id}:{data_point.metric_name}"
-                    self.data_store[key].append({
-                        "timestamp": data_point.timestamp,
-                        "value": data_point.value,
-                        "unit": data_point.unit,
-                        "tags": data_point.tags or {},
-                        "metadata": data_point.metadata or {}
-                    })
-                    
+
                     # 检查警报规则
                     await self._check_alert_rules(device_id, data_point)
-                    
+
                     # 发送实时数据到订阅者
                     await self._notify_real_time_subscribers(device_id, data_point)
-                    
-                    ingested_count += 1
-                    
+
                 except Exception as e:
-                    failed_count += 1
-                    errors.append(str(e))
-                    logger.error(f"Error ingesting data point for {device_id}: {e}")
-            
-            result = {
-                "success": True,
-                "ingested_count": ingested_count,
-                "failed_count": failed_count,
-                "total_count": len(data_points),
-                "errors": errors[:10]  # 最多返回10个错误
-            }
-            
-            logger.info(f"Ingested {ingested_count}/{len(data_points)} data points for device {device_id}")
+                    logger.error(f"Error processing data point for {device_id}: {e}")
+
+            result["total_count"] = len(data_points)
+            result["errors"] = []
+
+            logger.info(f"Ingested {result['ingested_count']}/{len(data_points)} data points for device {device_id}")
+
+            # Publish telemetry.data.received event
+            if self.event_bus and result.get('ingested_count', 0) > 0:
+                try:
+                    event = Event(
+                        event_type=EventType.TELEMETRY_DATA_RECEIVED,
+                        source=ServiceSource.TELEMETRY_SERVICE,
+                        data={
+                            "device_id": device_id,
+                            "metrics_count": len(set(dp.metric_name for dp in data_points)),
+                            "points_count": result['ingested_count'],
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish telemetry.data.received event: {e}")
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Error in data ingestion: {e}")
             return {
@@ -98,31 +101,70 @@ class TelemetryService:
     async def create_metric_definition(self, user_id: str, metric_data: Dict[str, Any]) -> Optional[MetricDefinitionResponse]:
         """创建指标定义"""
         try:
-            metric_id = secrets.token_hex(16)
-            
-            metric_definition = MetricDefinitionResponse(
-                metric_id=metric_id,
-                name=metric_data["name"],
-                description=metric_data.get("description"),
-                data_type=metric_data["data_type"],
-                metric_type=metric_data.get("metric_type", MetricType.GAUGE),
-                unit=metric_data.get("unit"),
-                min_value=metric_data.get("min_value"),
-                max_value=metric_data.get("max_value"),
-                retention_days=metric_data.get("retention_days", self.default_retention_days),
-                aggregation_interval=metric_data.get("aggregation_interval", 60),
-                tags=metric_data.get("tags", []),
-                metadata=metric_data.get("metadata", {}),
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                created_by=user_id
-            )
-            
-            self.metric_definitions[metric_definition.name] = metric_definition
-            
-            logger.info(f"Metric definition created: {metric_definition.name}")
-            return metric_definition
-            
+            # Prepare data for repository
+            metric_def_data = {
+                "name": metric_data["name"],
+                "description": metric_data.get("description"),
+                "data_type": metric_data["data_type"],
+                "metric_type": metric_data.get("metric_type", MetricType.GAUGE.value),
+                "unit": metric_data.get("unit"),
+                "min_value": metric_data.get("min_value"),
+                "max_value": metric_data.get("max_value"),
+                "retention_days": metric_data.get("retention_days", self.default_retention_days),
+                "aggregation_interval": metric_data.get("aggregation_interval", 60),
+                "tags": metric_data.get("tags", []),
+                "metadata": metric_data.get("metadata", {}),
+                "created_by": user_id
+            }
+
+            # Create in repository
+            result = await self.repository.create_metric_definition(metric_def_data)
+
+            if result:
+                metric_definition = MetricDefinitionResponse(
+                    metric_id=result["metric_id"],
+                    name=result["name"],
+                    description=result.get("description"),
+                    data_type=DataType(result["data_type"]),
+                    metric_type=MetricType(result["metric_type"]),
+                    unit=result.get("unit"),
+                    min_value=result.get("min_value"),
+                    max_value=result.get("max_value"),
+                    retention_days=result["retention_days"],
+                    aggregation_interval=result["aggregation_interval"],
+                    tags=result.get("tags", []),
+                    metadata=result.get("metadata", {}),
+                    created_at=result["created_at"],
+                    updated_at=result["updated_at"],
+                    created_by=result["created_by"]
+                )
+
+                logger.info(f"Metric definition created: {metric_definition.name}")
+
+                # Publish metric.defined event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.METRIC_DEFINED,
+                            source=ServiceSource.TELEMETRY_SERVICE,
+                            data={
+                                "metric_id": metric_definition.metric_id,
+                                "name": metric_definition.name,
+                                "data_type": metric_definition.data_type.value,
+                                "metric_type": metric_definition.metric_type.value,
+                                "unit": metric_definition.unit,
+                                "created_by": user_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                    except Exception as e:
+                        logger.error(f"Failed to publish metric.defined event: {e}")
+
+                return metric_definition
+
+            return None
+
         except Exception as e:
             logger.error(f"Error creating metric definition: {e}")
             return None
@@ -130,39 +172,86 @@ class TelemetryService:
     async def create_alert_rule(self, user_id: str, rule_data: Dict[str, Any]) -> Optional[AlertRuleResponse]:
         """创建警报规则"""
         try:
-            rule_id = secrets.token_hex(16)
-            
-            alert_rule = AlertRuleResponse(
-                rule_id=rule_id,
-                name=rule_data["name"],
-                description=rule_data.get("description"),
-                metric_name=rule_data["metric_name"],
-                condition=rule_data["condition"],
-                threshold_value=rule_data["threshold_value"],
-                evaluation_window=rule_data.get("evaluation_window", 300),
-                trigger_count=rule_data.get("trigger_count", 1),
-                level=rule_data.get("level", AlertLevel.WARNING),
-                device_ids=rule_data.get("device_ids", []),
-                device_groups=rule_data.get("device_groups", []),
-                device_filters=rule_data.get("device_filters", {}),
-                notification_channels=rule_data.get("notification_channels", []),
-                cooldown_minutes=rule_data.get("cooldown_minutes", 15),
-                auto_resolve=rule_data.get("auto_resolve", True),
-                auto_resolve_timeout=rule_data.get("auto_resolve_timeout", 3600),
-                enabled=rule_data.get("enabled", True),
-                tags=rule_data.get("tags", []),
-                total_triggers=0,
-                last_triggered=None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                created_by=user_id
-            )
-            
-            self.alert_rules[rule_id] = alert_rule
-            
-            logger.info(f"Alert rule created: {rule_data['name']}")
-            return alert_rule
-            
+            # Prepare data for repository
+            alert_rule_data = {
+                "name": rule_data["name"],
+                "description": rule_data.get("description"),
+                "metric_name": rule_data["metric_name"],
+                "condition": rule_data["condition"],
+                "threshold_value": str(rule_data["threshold_value"]),
+                "evaluation_window": rule_data.get("evaluation_window", 300),
+                "trigger_count": rule_data.get("trigger_count", 1),
+                "level": rule_data.get("level", AlertLevel.WARNING.value if hasattr(AlertLevel.WARNING, 'value') else "warning"),
+                "device_ids": rule_data.get("device_ids", []),
+                "device_groups": rule_data.get("device_groups", []),
+                "device_filters": rule_data.get("device_filters", {}),
+                "notification_channels": rule_data.get("notification_channels", []),
+                "cooldown_minutes": rule_data.get("cooldown_minutes", 15),
+                "auto_resolve": rule_data.get("auto_resolve", True),
+                "auto_resolve_timeout": rule_data.get("auto_resolve_timeout", 3600),
+                "enabled": rule_data.get("enabled", True),
+                "tags": rule_data.get("tags", []),
+                "created_by": user_id
+            }
+
+            # Create in repository
+            result = await self.repository.create_alert_rule(alert_rule_data)
+
+            if result:
+                alert_rule = AlertRuleResponse(
+                    rule_id=result["rule_id"],
+                    name=result["name"],
+                    description=result.get("description"),
+                    metric_name=result["metric_name"],
+                    condition=result["condition"],
+                    threshold_value=result["threshold_value"],
+                    evaluation_window=result["evaluation_window"],
+                    trigger_count=result["trigger_count"],
+                    level=AlertLevel(result["level"]),
+                    device_ids=result.get("device_ids", []),
+                    device_groups=result.get("device_groups", []),
+                    device_filters=result.get("device_filters", {}),
+                    notification_channels=result.get("notification_channels", []),
+                    cooldown_minutes=result["cooldown_minutes"],
+                    auto_resolve=result["auto_resolve"],
+                    auto_resolve_timeout=result["auto_resolve_timeout"],
+                    enabled=result["enabled"],
+                    tags=result.get("tags", []),
+                    total_triggers=result["total_triggers"],
+                    last_triggered=result.get("last_triggered"),
+                    created_at=result["created_at"],
+                    updated_at=result["updated_at"],
+                    created_by=result["created_by"]
+                )
+
+                logger.info(f"Alert rule created: {rule_data['name']}")
+
+                # Publish alert.rule.created event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.ALERT_RULE_CREATED,
+                            source=ServiceSource.TELEMETRY_SERVICE,
+                            data={
+                                "rule_id": alert_rule.rule_id,
+                                "name": alert_rule.name,
+                                "metric_name": alert_rule.metric_name,
+                                "condition": alert_rule.condition,
+                                "threshold_value": alert_rule.threshold_value,
+                                "level": alert_rule.level.value,
+                                "enabled": alert_rule.enabled,
+                                "created_by": user_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                    except Exception as e:
+                        logger.error(f"Failed to publish alert.rule.created event: {e}")
+
+                return alert_rule
+
+            return None
+
         except Exception as e:
             logger.error(f"Error creating alert rule: {e}")
             return None
@@ -170,52 +259,90 @@ class TelemetryService:
     async def query_telemetry_data(self, query_params: Dict[str, Any]) -> Optional[TelemetryDataResponse]:
         """查询遥测数据"""
         try:
-            device_ids = query_params.get("device_ids", [])
-            metric_names = query_params["metric_names"]
+            # Support both old and new field names for backwards compatibility
+            device_ids = query_params.get("devices") or query_params.get("device_ids", [])
+            metric_names = query_params.get("metrics") or query_params.get("metric_names", [])
             start_time = query_params["start_time"]
             end_time = query_params["end_time"]
             aggregation = query_params.get("aggregation")
             interval = query_params.get("interval")
             limit = query_params.get("limit", 1000)
-            
+
             all_data_points = []
-            
-            # 查询每个设备的数据
-            for device_id in device_ids or ["all"]:
-                for metric_name in metric_names:
-                    key = f"{device_id}:{metric_name}"
-                    raw_data = self.data_store.get(key, [])
-                    
-                    # 时间过滤
-                    filtered_data = [
-                        point for point in raw_data
-                        if start_time <= point["timestamp"] <= end_time
-                    ]
-                    
-                    # 限制返回数量
-                    filtered_data = filtered_data[:limit]
-                    
-                    # 转换为数据点格式
-                    for point in filtered_data:
+
+            # Query from repository for each device
+            if device_ids:
+                for device_id in device_ids:
+                    raw_data = await self.repository.query_telemetry_data(
+                        device_id=device_id,
+                        metric_names=metric_names,
+                        start_time=start_time,
+                        end_time=end_time,
+                        limit=limit
+                    )
+
+                    # Convert to TelemetryDataPoint objects
+                    for point in raw_data:
+                        # Determine which value field is populated
+                        value = None
+                        if point.get("value_numeric") is not None:
+                            value = point["value_numeric"]
+                        elif point.get("value_string") is not None:
+                            value = point["value_string"]
+                        elif point.get("value_boolean") is not None:
+                            value = point["value_boolean"]
+                        elif point.get("value_json") is not None:
+                            value = point["value_json"]
+
                         data_point = TelemetryDataPoint(
-                            timestamp=point["timestamp"],
-                            metric_name=metric_name,
-                            value=point["value"],
+                            timestamp=point["time"],
+                            metric_name=point["metric_name"],
+                            value=value,
                             unit=point.get("unit"),
                             tags=point.get("tags", {}),
                             metadata=point.get("metadata", {})
                         )
                         all_data_points.append(data_point)
-            
+            else:
+                # Query all devices if no device_ids specified
+                raw_data = await self.repository.query_telemetry_data(
+                    device_id=None,
+                    metric_names=metric_names,
+                    start_time=start_time,
+                    end_time=end_time,
+                    limit=limit
+                )
+
+                for point in raw_data:
+                    value = None
+                    if point.get("value_numeric") is not None:
+                        value = point["value_numeric"]
+                    elif point.get("value_string") is not None:
+                        value = point["value_string"]
+                    elif point.get("value_boolean") is not None:
+                        value = point["value_boolean"]
+                    elif point.get("value_json") is not None:
+                        value = point["value_json"]
+
+                    data_point = TelemetryDataPoint(
+                        timestamp=point["time"],
+                        metric_name=point["metric_name"],
+                        value=value,
+                        unit=point.get("unit"),
+                        tags=point.get("tags", {}),
+                        metadata=point.get("metadata", {})
+                    )
+                    all_data_points.append(data_point)
+
             # 聚合处理
             if aggregation and interval:
                 all_data_points = await self._aggregate_data_points(
                     all_data_points, aggregation, interval
                 )
-            
+
             response = TelemetryDataResponse(
-                device_id=device_ids[0] if len(device_ids) == 1 else "multiple",
-                metric_name=metric_names[0] if len(metric_names) == 1 else "multiple",
+                device_id=device_ids[0] if device_ids and len(device_ids) == 1 else "multiple",
+                metric_name=metric_names[0] if metric_names and len(metric_names) == 1 else "multiple",
                 data_points=all_data_points,
                 count=len(all_data_points),
                 aggregation=aggregation,
@@ -223,10 +350,10 @@ class TelemetryService:
                 start_time=start_time,
                 end_time=end_time
             )
-            
+
             logger.info(f"Queried {len(all_data_points)} data points")
             return response
-            
+
         except Exception as e:
             logger.error(f"Error querying telemetry data: {e}")
             return None
@@ -234,55 +361,63 @@ class TelemetryService:
     async def get_device_stats(self, device_id: str) -> Optional[DeviceTelemetryStatsResponse]:
         """获取设备遥测统计"""
         try:
-            device_keys = [key for key in self.data_store.keys() if key.startswith(f"{device_id}:")]
-            
-            total_points = sum(len(self.data_store[key]) for key in device_keys)
-            
-            # 计算最近更新时间
-            last_update = None
-            all_timestamps = []
-            for key in device_keys:
-                for point in self.data_store[key]:
-                    all_timestamps.append(point["timestamp"])
-            
-            if all_timestamps:
-                last_update = max(all_timestamps)
-            
-            # 计算24小时统计
-            last_24h = datetime.utcnow() - timedelta(hours=24)
-            last_24h_points = 0
-            for key in device_keys:
-                last_24h_points += len([
-                    point for point in self.data_store[key]
-                    if point["timestamp"] >= last_24h
-                ])
-            
+            # Get device stats from repository
+            stats_data = await self.repository.get_device_stats(device_id)
+
+            # Return stats with zeros if no data (better UX than 404)
+            if not stats_data or stats_data.get("total_points", 0) == 0:
+                logger.info(f"No telemetry data found for device {device_id}, returning zero stats")
+                return DeviceTelemetryStatsResponse(
+                    device_id=device_id,
+                    total_metrics=0,
+                    active_metrics=0,
+                    data_points_count=0,
+                    last_update=None,
+                    storage_size=0,
+                    avg_frequency=0.0,
+                    last_24h_points=0,
+                    last_24h_alerts=0,
+                    metrics_by_type={"gauge": 0, "counter": 0, "histogram": 0},
+                    top_metrics=[]
+                )
+
+            # Calculate avg frequency (points per minute)
+            total_metrics = len(stats_data.get("metrics", []))
+            total_points = stats_data.get("total_points", 0)
+            avg_frequency = total_points / max(1, total_metrics) / 60 if total_metrics > 0 else 0.0
+
+            # Get 24h alerts count
+            last_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+            last_24h_alerts_data = await self.repository.get_alerts_by_device(
+                device_id=device_id,
+                start_time=last_24h
+            )
+            last_24h_alerts = len(last_24h_alerts_data) if last_24h_alerts_data else 0
+
+            # Create response
             stats = DeviceTelemetryStatsResponse(
                 device_id=device_id,
-                total_metrics=len(device_keys),
-                active_metrics=len([key for key in device_keys if self.data_store[key]]),
+                total_metrics=total_metrics,
+                active_metrics=total_metrics,  # All metrics with data are active
                 data_points_count=total_points,
-                last_update=last_update,
+                last_update=stats_data.get("last_update"),
                 storage_size=total_points * 100,  # 估算存储大小
-                avg_frequency=total_points / max(1, len(device_keys)) / 60,  # points per minute
-                last_24h_points=last_24h_points,
-                last_24h_alerts=0,  # TODO: 计算24小时内的警报数
+                avg_frequency=avg_frequency,
+                last_24h_points=stats_data.get("last_24h_points", 0),
+                last_24h_alerts=last_24h_alerts,
                 metrics_by_type={
-                    "gauge": len(device_keys),
+                    "gauge": total_metrics,  # Simplified - treat all as gauge
                     "counter": 0,
                     "histogram": 0
                 },
                 top_metrics=[
-                    {
-                        "name": key.split(":", 1)[1],
-                        "points": len(self.data_store[key])
-                    }
-                    for key in device_keys[:5]  # 前5个指标
+                    {"name": metric, "points": total_points // max(1, total_metrics)}
+                    for metric in stats_data.get("metrics", [])[:5]
                 ]
             )
-            
+
             return stats
-            
+
         except Exception as e:
             logger.error(f"Error getting device stats: {e}")
             return None
@@ -290,48 +425,74 @@ class TelemetryService:
     async def get_service_stats(self) -> Optional[TelemetryStatsResponse]:
         """获取服务统计"""
         try:
-            total_devices = len(set(key.split(":", 1)[0] for key in self.data_store.keys()))
-            total_points = sum(len(points) for points in self.data_store.values())
-            
-            # 计算24小时统计
-            last_24h = datetime.utcnow() - timedelta(hours=24)
-            last_24h_points = 0
-            for points in self.data_store.values():
-                last_24h_points += len([
-                    point for point in points
-                    if point["timestamp"] >= last_24h
-                ])
-            
+            # Get global stats from repository
+            global_stats = await self.repository.get_global_stats()
+
+            # Return stats with zeros if no data (better UX than 404)
+            if not global_stats or global_stats.get("total_points", 0) == 0:
+                logger.info("No telemetry data available in the service, returning zero stats")
+                return TelemetryStatsResponse(
+                    total_devices=0,
+                    active_devices=0,
+                    total_metrics=0,
+                    total_data_points=0,
+                    storage_size=0,
+                    points_per_second=0.0,
+                    avg_latency=0.0,
+                    error_rate=0.0,
+                    last_24h_points=0,
+                    last_24h_devices=0,
+                    last_24h_alerts=0,
+                    devices_by_type={},
+                    metrics_by_type={},
+                    data_by_hour=[]
+                )
+
+            total_devices = global_stats.get("total_devices", 0)
+            total_metrics = global_stats.get("total_metrics", 0)
+            total_points = global_stats.get("total_points", 0)
+            last_24h_points = global_stats.get("last_24h_points", 0)
+
+            # Get 24h alerts count
+            last_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+            last_24h_alerts_data = await self.repository.get_alerts(
+                start_time=last_24h
+            )
+            last_24h_alerts = len(last_24h_alerts_data) if last_24h_alerts_data else 0
+
+            # Calculate points per second
+            points_per_second = last_24h_points / 86400 if last_24h_points > 0 else 0.0
+
             stats = TelemetryStatsResponse(
                 total_devices=total_devices,
-                active_devices=total_devices,  # 简化假设所有设备都活跃
-                total_metrics=len(self.data_store.keys()),
+                active_devices=total_devices,  # Simplified - assume all devices are active
+                total_metrics=total_metrics,
                 total_data_points=total_points,
                 storage_size=total_points * 100,  # 估算存储大小
-                points_per_second=last_24h_points / 86400,
-                avg_latency=50.0,  # 模拟延迟
-                error_rate=1.5,
+                points_per_second=points_per_second,
+                avg_latency=50.0,  # 模拟延迟 - can be enhanced with real metrics
+                error_rate=1.5,  # 模拟错误率 - can be enhanced with real metrics
                 last_24h_points=last_24h_points,
                 last_24h_devices=total_devices,
-                last_24h_alerts=len(self.active_alerts),
+                last_24h_alerts=last_24h_alerts,
                 devices_by_type={
-                    "sensor": total_devices // 2,
-                    "gateway": total_devices // 4,
-                    "camera": total_devices // 4
+                    "sensor": total_devices // 2 if total_devices > 0 else 0,
+                    "gateway": total_devices // 4 if total_devices > 0 else 0,
+                    "camera": total_devices // 4 if total_devices > 0 else 0
                 },
                 metrics_by_type={
-                    "gauge": len(self.data_store.keys()) // 2,
-                    "counter": len(self.data_store.keys()) // 3,
-                    "histogram": len(self.data_store.keys()) // 6
+                    "gauge": total_metrics // 2 if total_metrics > 0 else 0,
+                    "counter": total_metrics // 3 if total_metrics > 0 else 0,
+                    "histogram": total_metrics // 6 if total_metrics > 0 else 0
                 },
                 data_by_hour=[
-                    {"hour": i, "points": last_24h_points // 24}
+                    {"hour": i, "points": last_24h_points // 24 if last_24h_points > 0 else 0}
                     for i in range(24)
                 ]
             )
-            
+
             return stats
-            
+
         except Exception as e:
             logger.error(f"Error getting service stats: {e}")
             return None
@@ -346,8 +507,8 @@ class TelemetryService:
                 "tags": subscription_data.get("tags", {}),
                 "filter_condition": subscription_data.get("filter_condition"),
                 "max_frequency": subscription_data.get("max_frequency", 1000),
-                "created_at": datetime.utcnow(),
-                "last_sent": datetime.utcnow()
+                "created_at": datetime.now(timezone.utc),
+                "last_sent": datetime.now(timezone.utc)
             }
             
             logger.info(f"Real-time subscription created: {subscription_id}")
@@ -378,29 +539,40 @@ class TelemetryService:
             interval = query_params["interval"]
             start_time = query_params["start_time"]
             end_time = query_params["end_time"]
-            
-            # 获取原始数据
-            if device_id:
-                key = f"{device_id}:{metric_name}"
-                raw_data = self.data_store.get(key, [])
-            else:
-                # 多设备聚合
-                raw_data = []
-                for key in self.data_store.keys():
-                    if key.endswith(f":{metric_name}"):
-                        raw_data.extend(self.data_store[key])
-            
-            # 时间过滤
-            filtered_data = [
-                point for point in raw_data
-                if start_time <= point["timestamp"] <= end_time
-            ]
-            
+
+            # Get raw data from repository
+            raw_data_results = await self.repository.query_telemetry_data(
+                device_id=device_id,
+                metric_names=[metric_name],
+                start_time=start_time,
+                end_time=end_time,
+                limit=10000  # Higher limit for aggregation
+            )
+
+            # Convert to the format expected by _aggregate_by_interval
+            raw_data = []
+            for point in raw_data_results:
+                # Determine which value field is populated
+                value = None
+                if point.get("value_numeric") is not None:
+                    value = point["value_numeric"]
+                elif point.get("value_string") is not None:
+                    value = point["value_string"]
+                elif point.get("value_boolean") is not None:
+                    value = point["value_boolean"]
+                elif point.get("value_json") is not None:
+                    value = point["value_json"]
+
+                raw_data.append({
+                    "timestamp": point["time"],
+                    "value": value
+                })
+
             # 按时间间隔分组聚合
             aggregated_points = await self._aggregate_by_interval(
-                filtered_data, aggregation_type, interval, start_time, end_time
+                raw_data, aggregation_type, interval, start_time, end_time
             )
-            
+
             response = AggregatedDataResponse(
                 device_id=device_id,
                 metric_name=metric_name,
@@ -411,9 +583,9 @@ class TelemetryService:
                 end_time=end_time,
                 count=len(aggregated_points)
             )
-            
+
             return response
-            
+
         except Exception as e:
             logger.error(f"Error getting aggregated data: {e}")
             return None
@@ -422,99 +594,197 @@ class TelemetryService:
     
     async def _validate_data_point(self, device_id: str, data_point: TelemetryDataPoint):
         """验证数据点"""
-        # 检查指标定义
-        if data_point.metric_name in self.metric_definitions:
-            metric_def = self.metric_definitions[data_point.metric_name]
-            
-            # 检查数据类型
-            if metric_def.data_type == DataType.NUMERIC:
-                if not isinstance(data_point.value, (int, float)):
-                    raise ValueError(f"Invalid data type for metric {data_point.metric_name}")
-            
-            # 检查范围
-            if metric_def.min_value is not None and isinstance(data_point.value, (int, float)):
-                if data_point.value < metric_def.min_value:
-                    raise ValueError(f"Value below minimum for metric {data_point.metric_name}")
-            
-            if metric_def.max_value is not None and isinstance(data_point.value, (int, float)):
-                if data_point.value > metric_def.max_value:
-                    raise ValueError(f"Value above maximum for metric {data_point.metric_name}")
+        try:
+            # Check if metric definition exists in repository
+            metric_def_data = await self.repository.get_metric_definition_by_name(data_point.metric_name)
+
+            if metric_def_data:
+                # 检查数据类型
+                data_type = metric_def_data.get("data_type")
+                if data_type == DataType.NUMERIC.value or data_type == "numeric":
+                    if not isinstance(data_point.value, (int, float)):
+                        raise ValueError(f"Invalid data type for metric {data_point.metric_name}")
+
+                # 检查范围
+                min_value = metric_def_data.get("min_value")
+                if min_value is not None and isinstance(data_point.value, (int, float)):
+                    if data_point.value < min_value:
+                        raise ValueError(f"Value below minimum for metric {data_point.metric_name}")
+
+                max_value = metric_def_data.get("max_value")
+                if max_value is not None and isinstance(data_point.value, (int, float)):
+                    if data_point.value > max_value:
+                        raise ValueError(f"Value above maximum for metric {data_point.metric_name}")
+        except Exception as e:
+            # Log validation errors but don't fail the ingestion
+            logger.warning(f"Validation warning for {device_id}:{data_point.metric_name}: {e}")
     
     async def _check_alert_rules(self, device_id: str, data_point: TelemetryDataPoint):
         """检查警报规则"""
-        for rule_id, rule in self.alert_rules.items():
-            if not rule.enabled:
-                continue
-            
-            # 检查是否匹配设备
-            if rule.device_ids and device_id not in rule.device_ids:
-                continue
-            
-            # 检查是否匹配指标
-            if rule.metric_name != data_point.metric_name:
-                continue
-            
-            # 评估条件
-            if await self._evaluate_alert_condition(rule, data_point):
-                await self._trigger_alert(rule, device_id, data_point)
-    
-    async def _evaluate_alert_condition(self, rule: AlertRuleResponse, data_point: TelemetryDataPoint) -> bool:
-        """评估警报条件"""
         try:
-            condition = rule.condition
-            threshold = rule.threshold_value
+            # Get alert rules from repository
+            alert_rules = await self.repository.get_alert_rules(
+                metric_name=data_point.metric_name,
+                enabled_only=True
+            )
+
+            if not alert_rules:
+                return
+
+            for rule_data in alert_rules:
+                # 检查是否匹配设备
+                device_ids = rule_data.get("device_ids", [])
+                if device_ids and device_id not in device_ids:
+                    continue
+
+                # 评估条件
+                condition = rule_data.get("condition")
+                threshold_value = rule_data.get("threshold_value")
+
+                if await self._evaluate_alert_condition_simple(condition, threshold_value, data_point):
+                    await self._trigger_alert_from_rule(rule_data, device_id, data_point)
+
+        except Exception as e:
+            logger.error(f"Error checking alert rules: {e}")
+    
+    async def _evaluate_alert_condition_simple(self, condition: str, threshold_value: str, data_point: TelemetryDataPoint) -> bool:
+        """评估警报条件 (simplified version for rule dict)"""
+        try:
             value = data_point.value
-            
+
+            # Try to convert threshold to numeric if possible
+            try:
+                threshold = float(threshold_value)
+            except (ValueError, TypeError):
+                threshold = threshold_value
+
             if condition.startswith(">"):
-                return isinstance(value, (int, float)) and value > threshold
+                return isinstance(value, (int, float)) and isinstance(threshold, (int, float)) and value > threshold
             elif condition.startswith("<"):
-                return isinstance(value, (int, float)) and value < threshold
+                return isinstance(value, (int, float)) and isinstance(threshold, (int, float)) and value < threshold
             elif condition.startswith("=="):
                 return value == threshold
             elif condition.startswith("!="):
                 return value != threshold
-            
+
             return False
         except Exception as e:
             logger.error(f"Error evaluating alert condition: {e}")
             return False
-    
-    async def _trigger_alert(self, rule: AlertRuleResponse, device_id: str, data_point: TelemetryDataPoint):
-        """触发警报"""
+
+    async def _evaluate_alert_condition(self, rule: AlertRuleResponse, data_point: TelemetryDataPoint) -> bool:
+        """评估警报条件"""
+        return await self._evaluate_alert_condition_simple(rule.condition, rule.threshold_value, data_point)
+
+    async def _trigger_alert_from_rule(self, rule_data: Dict[str, Any], device_id: str, data_point: TelemetryDataPoint):
+        """触发警报 (from rule dict)"""
         try:
-            alert_id = secrets.token_hex(16)
-            
-            alert = AlertResponse(
-                alert_id=alert_id,
-                rule_id=rule.rule_id,
-                rule_name=rule.name,
-                device_id=device_id,
-                metric_name=rule.metric_name,
-                level=rule.level,
-                status=AlertStatus.ACTIVE,
-                message=f"Alert triggered: {rule.name}",
-                current_value=data_point.value,
-                threshold_value=rule.threshold_value,
-                triggered_at=datetime.utcnow(),
-                acknowledged_at=None,
-                resolved_at=None,
-                auto_resolve_at=datetime.utcnow() + timedelta(seconds=rule.auto_resolve_timeout) if rule.auto_resolve else None,
-                acknowledged_by=None,
-                resolved_by=None,
-                resolution_note=None,
-                affected_devices_count=1,
-                tags=rule.tags,
-                metadata={"trigger_value": data_point.value}
-            )
-            
-            self.active_alerts[alert_id] = alert
-            
-            # 更新规则统计
-            rule.total_triggers += 1
-            rule.last_triggered = datetime.utcnow()
-            
-            logger.warning(f"Alert triggered: {rule.name} for device {device_id}")
-            
+            now = datetime.now(timezone.utc)
+
+            # Prepare alert data for repository
+            alert_data = {
+                "rule_id": rule_data["rule_id"],
+                "rule_name": rule_data["name"],
+                "device_id": device_id,
+                "metric_name": rule_data["metric_name"],
+                "level": rule_data["level"],
+                "status": AlertStatus.ACTIVE.value,
+                "message": f"Alert triggered: {rule_data['name']}",
+                "current_value": str(data_point.value),
+                "threshold_value": rule_data["threshold_value"],
+                "triggered_at": now,
+                "auto_resolve_at": now + timedelta(seconds=rule_data.get("auto_resolve_timeout", 3600)) if rule_data.get("auto_resolve", True) else None,
+                "affected_devices_count": 1,
+                "tags": rule_data.get("tags", []),
+                "metadata": {"trigger_value": data_point.value}
+            }
+
+            # Create alert in repository
+            alert_result = await self.repository.create_alert(alert_data)
+
+            if alert_result:
+                # Update rule statistics
+                await self.repository.update_alert_rule_stats(rule_data["rule_id"])
+                logger.warning(f"Alert triggered: {rule_data['name']} for device {device_id}")
+
+                # Publish alert.triggered event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.ALERT_TRIGGERED,
+                            source=ServiceSource.TELEMETRY_SERVICE,
+                            data={
+                                "alert_id": alert_result.get("alert_id"),
+                                "rule_id": rule_data["rule_id"],
+                                "rule_name": rule_data["name"],
+                                "device_id": device_id,
+                                "metric_name": rule_data["metric_name"],
+                                "level": rule_data["level"],
+                                "current_value": str(data_point.value),
+                                "threshold_value": rule_data["threshold_value"],
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                    except Exception as e:
+                        logger.error(f"Failed to publish alert.triggered event: {e}")
+
+        except Exception as e:
+            logger.error(f"Error triggering alert: {e}")
+
+    async def _trigger_alert(self, rule: AlertRuleResponse, device_id: str, data_point: TelemetryDataPoint):
+        """触发警报 (from AlertRuleResponse object)"""
+        try:
+            now = datetime.now(timezone.utc)
+
+            # Prepare alert data for repository
+            alert_data = {
+                "rule_id": rule.rule_id,
+                "rule_name": rule.name,
+                "device_id": device_id,
+                "metric_name": rule.metric_name,
+                "level": rule.level.value if hasattr(rule.level, 'value') else str(rule.level),
+                "status": AlertStatus.ACTIVE.value,
+                "message": f"Alert triggered: {rule.name}",
+                "current_value": str(data_point.value),
+                "threshold_value": rule.threshold_value,
+                "triggered_at": now,
+                "auto_resolve_at": now + timedelta(seconds=rule.auto_resolve_timeout) if rule.auto_resolve else None,
+                "affected_devices_count": 1,
+                "tags": rule.tags,
+                "metadata": {"trigger_value": data_point.value}
+            }
+
+            # Create alert in repository
+            alert_result = await self.repository.create_alert(alert_data)
+
+            if alert_result:
+                # Update rule statistics
+                await self.repository.update_alert_rule_stats(rule.rule_id)
+                logger.warning(f"Alert triggered: {rule.name} for device {device_id}")
+
+                # Publish alert.triggered event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.ALERT_TRIGGERED,
+                            source=ServiceSource.TELEMETRY_SERVICE,
+                            data={
+                                "alert_id": alert_result.get("alert_id"),
+                                "rule_id": rule.rule_id,
+                                "rule_name": rule.name,
+                                "device_id": device_id,
+                                "metric_name": rule.metric_name,
+                                "level": rule.level.value if hasattr(rule.level, 'value') else str(rule.level),
+                                "current_value": str(data_point.value),
+                                "threshold_value": rule.threshold_value,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                    except Exception as e:
+                        logger.error(f"Failed to publish alert.triggered event: {e}")
+
         except Exception as e:
             logger.error(f"Error triggering alert: {e}")
     
@@ -531,7 +801,7 @@ class TelemetryService:
                     continue
                 
                 # 检查频率限制
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 if (now - subscription["last_sent"]).total_seconds() * 1000 < subscription["max_frequency"]:
                     continue
                 

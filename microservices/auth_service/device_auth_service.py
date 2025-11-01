@@ -11,18 +11,24 @@ from typing import Optional, Dict, Any, List
 import logging
 import jwt
 import os
+import sys
+
+# Add parent directory to path for core imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from .device_auth_repository import DeviceAuthRepository
+from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
 class DeviceAuthService:
     """设备认证服务"""
-    
-    def __init__(self, repository: DeviceAuthRepository):
+
+    def __init__(self, repository: DeviceAuthRepository, event_bus=None):
         self.repository = repository
         self.jwt_secret = os.getenv('JWT_SECRET', 'your-secret-key-change-in-production')
         self.jwt_algorithm = 'HS256'
+        self.event_bus = event_bus
     
     def _generate_device_secret(self) -> str:
         """生成设备密钥"""
@@ -79,13 +85,13 @@ class DeviceAuthService:
             }
     
     async def authenticate_device(self, device_id: str, device_secret: str,
-                                 ip_address: str = None, 
+                                 ip_address: str = None,
                                  user_agent: str = None) -> Dict[str, Any]:
         """认证设备"""
         try:
             # 哈希提供的密钥
             device_secret_hash = self._hash_secret(device_secret)
-            
+
             # 验证凭证
             device = await self.repository.verify_device_credential(
                 device_id, device_secret_hash
@@ -93,17 +99,44 @@ class DeviceAuthService:
             
             if device:
                 # 生成设备 JWT token
+                now = datetime.now(timezone.utc)
+                exp_time = now + timedelta(hours=24)
+
                 token_payload = {
                     'device_id': device['device_id'],
                     'organization_id': device['organization_id'],
                     'device_type': device.get('device_type'),
                     'type': 'device',
-                    'iat': datetime.now(timezone.utc),
-                    'exp': datetime.now(timezone.utc) + timedelta(hours=24)
+                    'iat': int(now.timestamp()),  # Convert to Unix timestamp
+                    'exp': int(exp_time.timestamp())  # Convert to Unix timestamp
                 }
-                
+
                 token = jwt.encode(token_payload, self.jwt_secret, algorithm=self.jwt_algorithm)
-                
+
+                # Publish device.authenticated event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.DEVICE_AUTHENTICATED,
+                            source=ServiceSource.AUTH_SERVICE,
+                            data={
+                                "device_id": device['device_id'],
+                                "organization_id": device['organization_id'],
+                                "device_name": device.get('device_name'),
+                                "device_type": device.get('device_type'),
+                                "timestamp": now.isoformat(),
+                                "ip_address": ip_address
+                            },
+                            metadata={
+                                "user_agent": user_agent or ""
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published device.authenticated event for device {device['device_id']}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish device.authenticated event: {e}")
+                        # Don't fail authentication if event publishing fails
+
                 return {
                     'success': True,
                     'authenticated': True,
@@ -111,7 +144,8 @@ class DeviceAuthService:
                     'organization_id': device['organization_id'],
                     'device_name': device.get('device_name'),
                     'device_type': device.get('device_type'),
-                    'token': token,
+                    'access_token': token,
+                    'token_type': 'Bearer',
                     'expires_in': 86400  # 24 hours
                 }
             else:

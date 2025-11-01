@@ -12,7 +12,7 @@ import uuid
 import requests
 
 from .session_repository import (
-    SessionRepository, SessionMessageRepository, SessionMemoryRepository,
+    SessionRepository, SessionMessageRepository,
     SessionNotFoundException
 )
 from .models import (
@@ -21,6 +21,7 @@ from .models import (
     MessageResponse, MessageListResponse, MemoryResponse, SessionSummaryResponse,
     SessionStatsResponse, Session, SessionMessage, SessionMemory
 )
+from .client import get_account_client
 
 # Import Consul registry for service discovery
 import sys
@@ -28,6 +29,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
+from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +67,12 @@ class SessionService:
     data access to the Repository layers.
     """
     
-    def __init__(self):
+    def __init__(self, event_bus=None):
         self.session_repo = SessionRepository()
         self.message_repo = SessionMessageRepository()
-        self.memory_repo = SessionMemoryRepository()
+        # Note: Memory functionality is handled by dedicated memory_service
+        self.account_client = get_account_client()
+        self.event_bus = event_bus
 
         # Initialize Consul for service discovery
         config_manager = ConfigManager("session_service")
@@ -100,19 +104,16 @@ class SessionService:
             # Validate request
             self._validate_session_create_request(request)
 
-            # Application-layer validation: Check if user exists
-            # This replaces the database foreign key constraint for microservice independence
-            user_exists = await self._check_user_exists(request.user_id)
+            # Application-layer validation: Check if user exists via account service API
+            # This replaces database foreign key constraint for microservice independence
+            user_exists = self.account_client.check_user_exists(request.user_id)
             if not user_exists:
                 logger.warning(f"Creating session for potentially non-existent user: {request.user_id}")
                 # Note: We log a warning but don't fail - this allows eventual consistency
-                # If you want strict validation, uncomment the following lines:
-                # raise SessionValidationError(
-                #     f"User {request.user_id} does not exist. Please create the user first."
-                # )
+                # The account_client fails open (returns True) if account service is unavailable
 
-            # Generate session ID
-            session_id = str(uuid.uuid4())
+            # Use provided session_id or generate new UUID
+            session_id = request.session_id if request.session_id else str(uuid.uuid4())
 
             # Prepare session data
             session_data = {
@@ -130,6 +131,25 @@ class SessionService:
                 raise SessionServiceError("Failed to create session")
 
             logger.info(f"Session created: {session_id} for user {request.user_id}")
+
+            # Publish SESSION_STARTED event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.SESSION_STARTED,
+                        source=ServiceSource.SESSION_SERVICE,
+                        data={
+                            "session_id": session_id,
+                            "user_id": request.user_id,
+                            "metadata": request.metadata or {},
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published session.started event for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish session.started event: {e}")
+
             return self._session_to_response(session)
 
         except Exception as e:
@@ -271,10 +291,32 @@ class SessionService:
             
             # Update status to ended
             success = await self.session_repo.update_session_status(session_id, "ended")
-            
+
             if success:
                 logger.info(f"Session ended: {session_id}")
-            
+
+                # Publish SESSION_ENDED event
+                if self.event_bus:
+                    try:
+                        # Get updated session for metrics
+                        updated_session = await self.session_repo.get_by_session_id(session_id)
+                        event = Event(
+                            event_type=EventType.SESSION_ENDED,
+                            source=ServiceSource.SESSION_SERVICE,
+                            data={
+                                "session_id": session_id,
+                                "user_id": session.user_id,
+                                "total_messages": updated_session.message_count if updated_session else 0,
+                                "total_tokens": updated_session.total_tokens if updated_session else 0,
+                                "total_cost": float(updated_session.total_cost) if updated_session and updated_session.total_cost else 0.0,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published session.ended event for session {session_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish session.ended event: {e}")
+
             return success
             
         except SessionNotFoundError:
@@ -334,11 +376,53 @@ class SessionService:
             
             # Update session metrics
             await self.session_repo.increment_message_count(
-                session_id, 
-                request.tokens_used, 
+                session_id,
+                request.tokens_used,
                 request.cost_usd
             )
-            
+
+            # Publish SESSION_MESSAGE_SENT event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.SESSION_MESSAGE_SENT,
+                        source=ServiceSource.SESSION_SERVICE,
+                        data={
+                            "session_id": session_id,
+                            "user_id": session.user_id,
+                            "message_id": message.message_id,
+                            "role": request.role,
+                            "message_type": request.message_type,
+                            "tokens_used": request.tokens_used or 0,
+                            "cost_usd": float(request.cost_usd) if request.cost_usd else 0.0,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published session.message_sent event for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish session.message_sent event: {e}")
+
+            # Publish SESSION_TOKENS_USED event if tokens were consumed
+            if self.event_bus and request.tokens_used and request.tokens_used > 0:
+                try:
+                    event = Event(
+                        event_type=EventType.SESSION_TOKENS_USED,
+                        source=ServiceSource.SESSION_SERVICE,
+                        data={
+                            "session_id": session_id,
+                            "user_id": session.user_id,
+                            "message_id": message.message_id,
+                            "tokens_used": request.tokens_used,
+                            "cost_usd": float(request.cost_usd) if request.cost_usd else 0.0,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published session.tokens_used event for session {session_id}: {request.tokens_used} tokens")
+                except Exception as e:
+                    logger.error(f"Failed to publish session.tokens_used event: {e}")
+
             return self._message_to_response(message)
             
         except (SessionNotFoundError, SessionValidationError):
@@ -397,106 +481,9 @@ class SessionService:
             logger.error(f"Error getting messages for session {session_id}: {e}")
             raise SessionServiceError(f"Failed to get session messages: {str(e)}")
     
-    # Memory Operations
-    
-    async def create_session_memory(
-        self, 
-        session_id: str, 
-        request: MemoryCreateRequest,
-        user_id: Optional[str] = None
-    ) -> MemoryResponse:
-        """
-        Create or update session memory
-        
-        Args:
-            session_id: Session ID
-            request: Memory creation request
-            user_id: Optional user ID for authorization
-            
-        Returns:
-            Memory response
-        """
-        try:
-            # Verify session exists and authorize
-            session = await self.session_repo.get_by_session_id(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session not found: {session_id}")
-            
-            if user_id and session.user_id != user_id:
-                raise SessionNotFoundError(f"Session not found: {session_id}")
-            
-            # Check if memory already exists
-            existing_memory = await self.memory_repo.get_by_session_id(session_id)
-            
-            if existing_memory:
-                # Update existing memory
-                memory_data = {
-                    'content': request.content,
-                    'metadata': request.metadata or {}
-                }
-                success = await self.memory_repo.update_memory(session_id, memory_data)
-                
-                if not success:
-                    raise SessionServiceError("Failed to update session memory")
-                
-                # Get updated memory
-                updated_memory = await self.memory_repo.get_by_session_id(session_id)
-                return self._memory_to_response(updated_memory)
-            else:
-                # Create new memory
-                memory_data = {
-                    'session_id': session_id,
-                    'user_id': session.user_id,
-                    'memory_type': request.memory_type,
-                    'content': request.content,
-                    'metadata': request.metadata or {}
-                }
-                
-                memory = await self.memory_repo.create_memory(memory_data)
-                
-                if not memory:
-                    raise SessionServiceError("Failed to create session memory")
-                
-                return self._memory_to_response(memory)
-            
-        except (SessionNotFoundError, SessionServiceError):
-            raise
-        except Exception as e:
-            logger.error(f"Error creating session memory for {session_id}: {e}")
-            raise SessionServiceError(f"Failed to create session memory: {str(e)}")
-    
-    async def get_session_memory(self, session_id: str, user_id: Optional[str] = None) -> Optional[MemoryResponse]:
-        """
-        Get session memory
-        
-        Args:
-            session_id: Session ID
-            user_id: Optional user ID for authorization
-            
-        Returns:
-            Memory response or None
-        """
-        try:
-            # Verify session exists and authorize
-            session = await self.session_repo.get_by_session_id(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session not found: {session_id}")
-            
-            if user_id and session.user_id != user_id:
-                raise SessionNotFoundError(f"Session not found: {session_id}")
-            
-            memory = await self.memory_repo.get_by_session_id(session_id)
-            
-            if memory:
-                return self._memory_to_response(memory)
-            return None
-            
-        except SessionNotFoundError:
-            raise
-        except Exception as e:
-            logger.error(f"Error getting session memory for {session_id}: {e}")
-            raise SessionServiceError(f"Failed to get session memory: {str(e)}")
-    
+    # Note: Memory Operations are handled by dedicated memory_service
+    # See microservices/memory_service for session memory functionality
+
     # Utility Methods
     
     async def get_session_summary(self, session_id: str, user_id: Optional[str] = None) -> SessionSummaryResponse:
@@ -507,12 +494,11 @@ class SessionService:
             session = await self.session_repo.get_by_session_id(session_id)
             if not session:
                 raise SessionNotFoundError(f"Session not found: {session_id}")
-            
+
             if user_id and session.user_id != user_id:
                 raise SessionNotFoundError(f"Session not found: {session_id}")
-            
-            memory = await self.memory_repo.get_by_session_id(session_id)
-            
+
+            # Note: Memory is handled by dedicated memory_service
             return SessionSummaryResponse(
                 session_id=session.session_id,
                 user_id=session.user_id,
@@ -520,7 +506,7 @@ class SessionService:
                 message_count=session.message_count,
                 total_tokens=session.total_tokens,
                 total_cost=session.total_cost,
-                has_memory=memory is not None,
+                has_memory=False,  # Memory is handled by memory_service
                 is_active=session.is_active,
                 created_at=session.created_at,
                 last_activity=session.last_activity
@@ -574,51 +560,6 @@ class SessionService:
         if not request.user_id or not request.user_id.strip():
             raise SessionValidationError("user_id is required")
 
-    async def _check_user_exists(self, user_id: str) -> bool:
-        """
-        Check if user exists by calling account_service via Consul
-
-        This is application-layer validation replacing database foreign key constraints.
-        Allows microservice independence while maintaining data integrity.
-
-        Args:
-            user_id: User ID to check
-
-        Returns:
-            True if user exists, False otherwise
-        """
-        try:
-            # Discover account_service via Consul
-            account_service_url = self.consul_registry.get_service_address(
-                "account_service",
-                fallback_url="http://localhost:8201"
-            )
-
-            # Call account service to check if user exists
-            response = requests.get(
-                f"{account_service_url}/api/v1/accounts/profile/{user_id}",
-                timeout=2  # 2 second timeout to avoid blocking
-            )
-
-            if response.status_code == 200:
-                logger.debug(f"User {user_id} exists in account_service")
-                return True
-            elif response.status_code == 404:
-                logger.debug(f"User {user_id} not found in account_service")
-                return False
-            else:
-                logger.warning(f"Unexpected response from account_service: {response.status_code}")
-                return False
-
-        except requests.exceptions.Timeout:
-            logger.warning(f"Timeout checking user existence for {user_id}, assuming user exists (eventual consistency)")
-            return True  # Fail open - allow session creation even if account_service is slow
-        except requests.exceptions.ConnectionError:
-            logger.warning(f"Cannot connect to account_service, assuming user exists (eventual consistency)")
-            return True  # Fail open - allow session creation even if account_service is down
-        except Exception as e:
-            logger.error(f"Error checking user existence for {user_id}: {e}")
-            return True  # Fail open - allow session creation on error
 
     def _validate_message_create_request(self, request: MessageCreateRequest):
         """Validate message creation request"""
@@ -662,14 +603,3 @@ class SessionService:
             created_at=message.created_at
         )
     
-    def _memory_to_response(self, memory: SessionMemory) -> MemoryResponse:
-        """Convert SessionMemory model to MemoryResponse"""
-        return MemoryResponse(
-            memory_id=memory.memory_id or "",
-            session_id=memory.session_id,
-            user_id=memory.user_id,
-            memory_type=memory.memory_type,
-            content=memory.content,
-            metadata=memory.metadata,
-            created_at=memory.created_at
-        )

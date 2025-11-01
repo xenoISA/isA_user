@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import sys
 import os
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 # Add parent directory to path
@@ -26,6 +26,7 @@ from .wallet_service import WalletService
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus, Event, EventType, ServiceSource
 from .models import (
     WalletCreate, WalletUpdate, WalletBalance, WalletResponse,
     DepositRequest, WithdrawRequest, ConsumeRequest, TransferRequest,
@@ -41,22 +42,130 @@ config = config_manager.get_service_config()
 app_logger = setup_service_logger("wallet_service")
 logger = app_logger  # for backward compatibility
 
+# Track processed event IDs for idempotency
+processed_event_ids = set()
+
+
+def is_event_processed(event_id: str) -> bool:
+    """Check if event has already been processed (idempotency)"""
+    return event_id in processed_event_ids
+
+
+def mark_event_processed(event_id: str):
+    """Mark event as processed"""
+    global processed_event_ids
+    processed_event_ids.add(event_id)
+    if len(processed_event_ids) > 10000:
+        # Remove oldest half to prevent memory bloat
+        processed_event_ids = set(list(processed_event_ids)[5000:])
+
+
+# ==================== Event Handlers ====================
+
+async def handle_payment_completed(event: Event):
+    """
+    Handle payment.completed event
+    Deposit funds into wallet after successful payment
+    """
+    try:
+        if is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        user_id = event.data.get("user_id")
+        amount = event.data.get("amount")
+        currency = event.data.get("currency", "USD")
+        payment_id = event.data.get("payment_id")
+
+        if not user_id or not amount:
+            logger.warning(f"payment.completed event missing required fields: {event.id}")
+            return
+
+        # Get user's primary wallet
+        wallet = await wallet_microservice.wallet_service.repository.get_primary_wallet(user_id)
+        if not wallet:
+            logger.warning(f"No wallet found for user {user_id}, skipping deposit")
+            mark_event_processed(event.id)
+            return
+
+        # Deposit into wallet
+        deposit_request = DepositRequest(
+            amount=Decimal(str(amount)),
+            description=f"Payment received (payment_id: {payment_id})",
+            reference_id=payment_id,
+            metadata={
+                "event_id": event.id,
+                "event_type": event.type,
+                "payment_id": payment_id,
+                "timestamp": event.timestamp,
+                "currency": currency
+            }
+        )
+
+        result = await wallet_microservice.wallet_service.deposit(wallet.wallet_id, deposit_request)
+
+        mark_event_processed(event.id)
+        logger.info(f"✅ Deposited {amount} {currency} to wallet for user {user_id} (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle payment.completed event {event.id}: {e}")
+
+
+async def handle_user_created(event: Event):
+    """
+    Handle user.created event
+    Automatically create wallet for new user
+    """
+    try:
+        if is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        user_id = event.data.get("user_id")
+
+        if not user_id:
+            logger.warning(f"user.created event missing user_id: {event.id}")
+            return
+
+        # Create wallet for user
+        wallet_request = WalletCreate(
+            user_id=user_id,
+            wallet_type=WalletType.FIAT,
+            currency="USD",
+            initial_balance=Decimal("0"),
+            metadata={
+                "auto_created": True,
+                "event_id": event.id,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+        )
+
+        wallet = await wallet_microservice.wallet_service.create_wallet(wallet_request)
+
+        mark_event_processed(event.id)
+        logger.info(f"✅ Auto-created wallet {wallet.wallet_id} for user {user_id} (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle user.created event {event.id}: {e}")
+
 
 class WalletMicroservice:
     """Wallet microservice core class"""
-    
+
     def __init__(self):
         self.wallet_service = None
-    
-    async def initialize(self):
+        self.event_bus = None
+
+    async def initialize(self, event_bus=None):
         """Initialize the microservice"""
         try:
-            self.wallet_service = WalletService()
+            self.event_bus = event_bus
+            self.wallet_service = WalletService(event_bus=event_bus)
             logger.info("Wallet microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize wallet microservice: {e}")
             raise
-    
+
     async def shutdown(self):
         """Shutdown the microservice"""
         try:
@@ -72,9 +181,40 @@ wallet_microservice = WalletMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
+    # Initialize event bus
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("wallet_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
     # Initialize microservice
-    await wallet_microservice.initialize()
-    
+    await wallet_microservice.initialize(event_bus=event_bus)
+
+    # Subscribe to events
+    if event_bus:
+        try:
+            # Subscribe to payment.completed from payment_service
+            await event_bus.subscribe_to_events(
+                pattern="payment_service.payment.completed",
+                handler=handle_payment_completed,
+                durable="wallet-payment-consumer"
+            )
+            logger.info("✅ Subscribed to payment.completed events")
+
+            # Subscribe to user.created from account_service
+            await event_bus.subscribe_to_events(
+                pattern="account_service.user.created",
+                handler=handle_user_created,
+                durable="wallet-user-consumer"
+            )
+            logger.info("✅ Subscribed to user.created events")
+
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to subscribe to events: {e}")
+
     # Register with Consul
     if config.consul_enabled:
         consul_registry = ConsulRegistry(
@@ -83,23 +223,27 @@ async def lifespan(app: FastAPI):
             consul_host=config.consul_host,
             consul_port=config.consul_port,
             service_host=config.service_host,
-        tags=["microservice", "wallet", "api"]
+            tags=["microservice", "wallet", "api"]
         )
-        
+
         if consul_registry.register():
             consul_registry.start_maintenance()
             app.state.consul_registry = consul_registry
             logger.info(f"{config.service_name} registered with Consul")
         else:
             logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+
     yield
-    
+
     # Cleanup
+    if event_bus:
+        await event_bus.close()
+        logger.info("Event bus closed")
+
     if config.consul_enabled and hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
-    
+
     await wallet_microservice.shutdown()
 
 
@@ -151,6 +295,8 @@ async def create_wallet(
         if not result.success:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.message)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -383,6 +529,8 @@ async def get_wallet_statistics(
         if not stats:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wallet not found")
         return stats
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 

@@ -19,6 +19,13 @@ from .models import (
     PaymentServiceRequest, WalletServiceRequest
 )
 from core.consul_registry import ConsulRegistry
+from core.nats_client import Event, EventType, ServiceSource
+
+# Import service clients for synchronous dependencies (architecture design)
+from microservices.payment_service.client import PaymentServiceClient
+from microservices.wallet_service.client import WalletServiceClient
+from microservices.account_service.client import AccountServiceClient
+from microservices.storage_service.client import StorageServiceClient
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +52,18 @@ class OrderService:
     Handles order lifecycle, payment integration, and wallet communication.
     """
 
-    def __init__(self):
+    def __init__(self, event_bus=None):
         self.order_repo = OrderRepository()
+        self.event_bus = event_bus
         self.consul = None
         self._init_consul()
+
+        # Initialize service clients for synchronous dependencies
+        self.payment_client = PaymentServiceClient()
+        self.wallet_client = WalletServiceClient()
+        self.account_client = AccountServiceClient()
+        self.storage_client = StorageServiceClient()
+        logger.info("Order Service initialized with all service clients")
 
     def _init_consul(self):
         """Initialize Consul registry for service discovery"""
@@ -80,17 +95,30 @@ class OrderService:
     async def create_order(self, request: OrderCreateRequest) -> OrderResponse:
         """
         Create a new order
-        
+
         Args:
             request: Order creation request
-            
+
         Returns:
             Order response with success/failure info
         """
         try:
             # Validate request
             self._validate_order_create_request(request)
-            
+
+            # Validate user exists via Account Service (synchronous dependency)
+            # Note: In production, you may want to enforce strict validation
+            try:
+                async with self.account_client as client:
+                    user_account = await client.get_account_profile(request.user_id)
+                    if not user_account:
+                        logger.warning(f"User {request.user_id} not found in Account Service - proceeding anyway (dev/test mode)")
+                    else:
+                        logger.info(f"User {request.user_id} validated via Account Service for order creation")
+            except Exception as e:
+                logger.warning(f"Failed to validate user via Account Service: {e}")
+                logger.info(f"Proceeding with order creation despite Account Service validation failure")
+
             # Calculate expiration time
             expires_at = None
             if request.expires_in_minutes:
@@ -109,9 +137,31 @@ class OrderService:
                 metadata=request.metadata,
                 expires_at=expires_at
             )
-            
+
+            # Publish ORDER_CREATED event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.ORDER_CREATED,
+                        source=ServiceSource.ORDER_SERVICE,
+                        data={
+                            "order_id": order.order_id,
+                            "user_id": request.user_id,
+                            "order_type": request.order_type.value,
+                            "total_amount": float(request.total_amount),
+                            "currency": request.currency,
+                            "payment_intent_id": request.payment_intent_id,
+                            "items": request.items,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published order.created event for order {order.order_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish order.created event: {e}")
+
             logger.info(f"Order created: {order.order_id} for user {request.user_id}")
-            
+
             return OrderResponse(
                 success=True,
                 order=order,
@@ -205,12 +255,34 @@ class OrderService:
             
             # Cancel the order
             success = await self.order_repo.cancel_order(order_id, request.reason)
-            
+
             if success:
                 # If there's a refund amount, process it through wallet service
                 if request.refund_amount and request.refund_amount > 0:
                     await self._process_refund(existing_order, request.refund_amount)
-                
+
+                # Publish ORDER_CANCELED event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.ORDER_CANCELED,
+                            source=ServiceSource.ORDER_SERVICE,
+                            data={
+                                "order_id": order_id,
+                                "user_id": existing_order.user_id,
+                                "order_type": existing_order.order_type.value,
+                                "total_amount": float(existing_order.total_amount),
+                                "currency": existing_order.currency,
+                                "reason": request.reason,
+                                "refund_amount": float(request.refund_amount) if request.refund_amount else 0,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published order.canceled event for order {order_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish order.canceled event: {e}")
+
                 logger.info(f"Order cancelled: {order_id}, reason: {request.reason}")
                 return OrderResponse(
                     success=True,
@@ -256,19 +328,42 @@ class OrderService:
                 order_id=order_id,
                 payment_intent_id=request.transaction_id
             )
-            
+
             if success:
                 # If this is a credit purchase, add credits to wallet
-                if (existing_order.order_type == OrderType.CREDIT_PURCHASE and 
+                if (existing_order.order_type == OrderType.CREDIT_PURCHASE and
                     existing_order.wallet_id and request.credits_added):
-                    
+
                     await self._add_credits_to_wallet(
                         user_id=existing_order.user_id,
                         wallet_id=existing_order.wallet_id,
                         amount=request.credits_added,
                         order_id=order_id
                     )
-                
+
+                # Publish ORDER_COMPLETED event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.ORDER_COMPLETED,
+                            source=ServiceSource.ORDER_SERVICE,
+                            data={
+                                "order_id": order_id,
+                                "user_id": existing_order.user_id,
+                                "order_type": existing_order.order_type.value,
+                                "total_amount": float(existing_order.total_amount),
+                                "currency": existing_order.currency,
+                                "transaction_id": request.transaction_id,
+                                "payment_confirmed": request.payment_confirmed,
+                                "credits_added": request.credits_added if request.credits_added else 0,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published order.completed event for order {order_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish order.completed event: {e}")
+
                 logger.info(f"Order completed: {order_id}")
                 return OrderResponse(
                     success=True,

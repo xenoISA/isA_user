@@ -1,0 +1,1413 @@
+{
+	"info": {
+		"_postman_id": "storage-service-staging-v1",
+		"name": "Storage Service API - Staging",
+		"description": "Smart Storage Microservice with Intelligence (RAG, Semantic Search)\n\nBase URL: http://localhost:8209\nEnvironment: Staging (Docker)\nVersion: 1.0.0\n\nCapabilities:\n- File upload/download/sharing\n- Storage quota management\n- Photo version management (AI-processed)\n- Album management with family sharing\n- **NEW:** Semantic search powered by isA_MCP\n- **NEW:** RAG Q&A with 6 modes (Simple, RAPTOR, Self-RAG, CRAG, Plan-RAG, HM-RAG)\n- **NEW:** Image intelligence (VLM-based descriptions, multimodal RAG)",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "1.0.0"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8209",
+			"type": "string",
+			"description": "Storage service base URL (port 8209 in staging)"
+		},
+		{
+			"key": "api_base",
+			"value": "{{base_url}}/api/v1",
+			"type": "string",
+			"description": "API base path"
+		},
+		{
+			"key": "user_id",
+			"value": "test_user_123",
+			"type": "string",
+			"description": "Test user ID"
+		},
+		{
+			"key": "organization_id",
+			"value": "org_test_123",
+			"type": "string",
+			"description": "Test organization ID"
+		},
+		{
+			"key": "file_id",
+			"value": "",
+			"type": "string",
+			"description": "File ID from upload response"
+		},
+		{
+			"key": "album_id",
+			"value": "",
+			"type": "string",
+			"description": "Album ID from create album response"
+		},
+		{
+			"key": "photo_id",
+			"value": "",
+			"type": "string",
+			"description": "Photo ID from upload response"
+		},
+		{
+			"key": "version_id",
+			"value": "",
+			"type": "string",
+			"description": "Photo version ID"
+		},
+		{
+			"key": "share_id",
+			"value": "",
+			"type": "string",
+			"description": "Share ID from share response"
+		}
+	],
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service is healthy', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"    pm.expect(jsonData.service).to.exist;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Health check endpoint\n\nReturns:\n- status: healthy\n- service: storage_service\n- port: 8209\n- version: 1.0.0"
+					},
+					"response": []
+				},
+				{
+					"name": "Service Info",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Has service information', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.eql('smart-storage-service');",
+									"    pm.expect(jsonData.capabilities).to.be.an('object');",
+									"    pm.expect(jsonData.capabilities.semantic_search).to.be.true;",
+									"    pm.expect(jsonData.capabilities.rag_qa).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/info",
+							"host": ["{{base_url}}"],
+							"path": ["info"]
+						},
+						"description": "Get storage service information\n\nReturns:\n- Service capabilities (upload, download, share, etc.)\n- Intelligence features (semantic search, RAG)\n- Available RAG modes\n- Endpoint list"
+					},
+					"response": []
+				},
+				{
+					"name": "MinIO Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/test/minio-status",
+							"host": ["{{api_base}}"],
+							"path": ["test", "minio-status"]
+						},
+						"description": "Check MinIO connection status\n\nReturns:\n- Connection status\n- Bucket information\n- Available buckets"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check and service information endpoints"
+		},
+		{
+			"name": "File Management",
+			"item": [
+				{
+					"name": "Upload File",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('File uploaded successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.file_id).to.be.a('string');",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"        ",
+									"        // Save file_id to collection variable",
+									"        pm.collectionVariables.set('file_id', jsonData.file_id);",
+									"        if (jsonData.content_type && jsonData.content_type.startsWith('image/')) {",
+									"            pm.collectionVariables.set('photo_id', jsonData.file_id);",
+									"        }",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"type": "text"
+								},
+								{
+									"key": "organization_id",
+									"value": "{{organization_id}}",
+									"type": "text"
+								},
+								{
+									"key": "access_level",
+									"value": "private",
+									"type": "text",
+									"description": "public/private/restricted/shared"
+								},
+								{
+									"key": "metadata",
+									"value": "{\"description\": \"Test file upload\", \"project\": \"isA_user\"}",
+									"type": "text"
+								},
+								{
+									"key": "tags",
+									"value": "test,demo,storage",
+									"type": "text"
+								},
+								{
+									"key": "enable_indexing",
+									"value": "true",
+									"type": "text",
+									"description": "Enable auto-indexing for intelligent search"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{api_base}}/files/upload",
+							"host": ["{{api_base}}"],
+							"path": ["files", "upload"]
+						},
+						"description": "Upload a file to storage\n\nForm Data:\n- **file**: File to upload (required)\n- **user_id**: User ID (required)\n- **organization_id**: Organization ID (optional)\n- **access_level**: Access level (public/private/restricted/shared)\n- **metadata**: JSON metadata (optional)\n- **tags**: Comma-separated tags (optional)\n- **enable_indexing**: Enable auto-indexing for semantic search (default: true)\n\nResponse:\n- file_id: Unique file identifier\n- file_name: Original filename\n- file_size: Size in bytes\n- content_type: MIME type\n- download_url: Pre-signed download URL"
+					},
+					"response": []
+				},
+				{
+					"name": "Test Upload",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('file_id', jsonData.result.file_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/test/upload?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["test", "upload"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							]
+						},
+						"description": "Test file upload (creates a test file automatically)\n\nUseful for quick testing without preparing a file"
+					},
+					"response": []
+				},
+				{
+					"name": "List Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/files?user_id={{user_id}}&organization_id={{organization_id}}&limit=50&offset=0",
+							"host": ["{{api_base}}"],
+							"path": ["files"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID (required)"
+								},
+								{
+									"key": "organization_id",
+									"value": "{{organization_id}}",
+									"description": "Organization ID (optional)"
+								},
+								{
+									"key": "prefix",
+									"value": "",
+									"description": "Filename prefix filter (optional)",
+									"disabled": true
+								},
+								{
+									"key": "status",
+									"value": "active",
+									"description": "File status filter (active/deleted)",
+									"disabled": true
+								},
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Results limit (1-1000)"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Pagination offset"
+								}
+							]
+						},
+						"description": "List user files with optional filters\n\nQuery Parameters:\n- user_id: User ID (required)\n- organization_id: Organization ID (optional)\n- prefix: Filename prefix filter\n- status: File status (active/deleted)\n- limit: Results limit (1-1000)\n- offset: Pagination offset"
+					},
+					"response": []
+				},
+				{
+					"name": "Get File Info",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/files/:file_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["files", ":file_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "file_id",
+									"value": "{{file_id}}"
+								}
+							]
+						},
+						"description": "Get detailed file information\n\nReturns:\n- File metadata\n- Storage information\n- Download URL\n- Tags and custom metadata"
+					},
+					"response": []
+				},
+				{
+					"name": "Download File",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/files/:file_id/download?user_id={{user_id}}&expires_minutes=60",
+							"host": ["{{api_base}}"],
+							"path": ["files", ":file_id", "download"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								},
+								{
+									"key": "expires_minutes",
+									"value": "60",
+									"description": "URL expiration time (1-1440)"
+								}
+							],
+							"variable": [
+								{
+									"key": "file_id",
+									"value": "{{file_id}}"
+								}
+							]
+						},
+						"description": "Get pre-signed download URL\n\nReturns:\n- download_url: Pre-signed S3 URL\n- expires_in: Seconds until expiration\n- file_name: Original filename\n- content_type: MIME type"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete File",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/files/:file_id?user_id={{user_id}}&permanent=false",
+							"host": ["{{api_base}}"],
+							"path": ["files", ":file_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								},
+								{
+									"key": "permanent",
+									"value": "false",
+									"description": "Permanent deletion (true/false)"
+								}
+							],
+							"variable": [
+								{
+									"key": "file_id",
+									"value": "{{file_id}}"
+								}
+							]
+						},
+						"description": "Delete a file\n\n- permanent=false: Soft delete (can be recovered)\n- permanent=true: Hard delete from storage"
+					},
+					"response": []
+				}
+			],
+			"description": "File upload, download, listing, and deletion endpoints"
+		},
+		{
+			"name": "File Sharing",
+			"item": [
+				{
+					"name": "Share File",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('share_id', jsonData.share_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "shared_by",
+									"value": "{{user_id}}",
+									"type": "text"
+								},
+								{
+									"key": "shared_with",
+									"value": "user_456",
+									"type": "text",
+									"description": "Target user ID (optional)"
+								},
+								{
+									"key": "shared_with_email",
+									"value": "friend@example.com",
+									"type": "text",
+									"description": "Target email (optional)"
+								},
+								{
+									"key": "view",
+									"value": "true",
+									"type": "text"
+								},
+								{
+									"key": "download",
+									"value": "true",
+									"type": "text"
+								},
+								{
+									"key": "delete",
+									"value": "false",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "",
+									"type": "text",
+									"description": "Optional password protection",
+									"disabled": true
+								},
+								{
+									"key": "expires_hours",
+									"value": "24",
+									"type": "text"
+								},
+								{
+									"key": "max_downloads",
+									"value": "10",
+									"type": "text",
+									"description": "Max download count (optional)"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{api_base}}/files/:file_id/share",
+							"host": ["{{api_base}}"],
+							"path": ["files", ":file_id", "share"],
+							"variable": [
+								{
+									"key": "file_id",
+									"value": "{{file_id}}"
+								}
+							]
+						},
+						"description": "Share a file with other users\n\nForm Data:\n- shared_by: Sharer user ID (required)\n- shared_with: Target user ID (optional)\n- shared_with_email: Target email (optional)\n- view/download/delete: Permission flags\n- password: Optional password protection\n- expires_hours: Share expiration (hours)\n- max_downloads: Maximum download count\n\nResponse:\n- share_id: Unique share identifier\n- share_url: Public share URL\n- token: Access token"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Shared File",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/shares/:share_id?token=&password=",
+							"host": ["{{api_base}}"],
+							"path": ["shares", ":share_id"],
+							"query": [
+								{
+									"key": "token",
+									"value": "",
+									"description": "Access token (optional)"
+								},
+								{
+									"key": "password",
+									"value": "",
+									"description": "Share password (if required)"
+								}
+							],
+							"variable": [
+								{
+									"key": "share_id",
+									"value": "{{share_id}}"
+								}
+							]
+						},
+						"description": "Access a shared file\n\nQuery Parameters:\n- token: Access token (optional)\n- password: Password if share is protected\n\nReturns file information and download URL"
+					},
+					"response": []
+				}
+			],
+			"description": "File sharing with permission control and expiration"
+		},
+		{
+			"name": "Storage Quota",
+			"item": [
+				{
+					"name": "Get Storage Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/storage/stats?user_id={{user_id}}&organization_id={{organization_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["storage", "stats"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID (one required)"
+								},
+								{
+									"key": "organization_id",
+									"value": "{{organization_id}}",
+									"description": "Organization ID (one required)"
+								}
+							]
+						},
+						"description": "Get storage statistics\n\nReturns:\n- Total files\n- Total size\n- File type breakdown\n- Recent activity"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Storage Quota",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/storage/quota?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["storage", "quota"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID (one required)"
+								},
+								{
+									"key": "organization_id",
+									"value": "",
+									"description": "Organization ID (one required)",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get storage quota information\n\nReturns:\n- total_quota_bytes: Total quota\n- used_bytes: Used storage\n- available_bytes: Available storage\n- file_count: Number of files\n- max_file_size: Max file size limit\n- allowed_extensions: Allowed file types"
+					},
+					"response": []
+				}
+			],
+			"description": "Storage quota and usage statistics"
+		},
+		{
+			"name": "Photo Versions",
+			"item": [
+				{
+					"name": "Save Photo Version",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('version_id', jsonData.version_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"photo_id\": \"{{photo_id}}\",\n  \"user_id\": \"{{user_id}}\",\n  \"ai_generated_url\": \"https://example.com/generated-image.jpg\",\n  \"version_type\": \"enhanced\",\n  \"operation_type\": \"ai_enhancement\",\n  \"operation_params\": {\n    \"model\": \"stable-diffusion\",\n    \"enhancement\": \"color_correction\"\n  },\n  \"metadata\": {\n    \"ai_provider\": \"stability.ai\",\n    \"processing_time\": 2.5\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/photos/versions/save",
+							"host": ["{{api_base}}"],
+							"path": ["photos", "versions", "save"]
+						},
+						"description": "Save an AI-processed photo version\n\nRequest Body:\n- photo_id: Original photo ID\n- user_id: User ID\n- ai_generated_url: URL of AI-generated image\n- version_type: Version type (enhanced/edited/filtered)\n- operation_type: AI operation type\n- operation_params: Operation parameters\n- metadata: Additional metadata\n\nResponse:\n- version_id: Version identifier\n- file_id: New file ID in storage\n- download_url: Pre-signed download URL"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Photo Versions",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/photos/:photo_id/versions?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["photos", ":photo_id", "versions"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "photo_id",
+									"value": "{{photo_id}}"
+								}
+							]
+						},
+						"description": "Get all versions of a photo\n\nReturns:\n- original_photo: Original photo info\n- versions: List of all versions\n- current_version: Currently displayed version"
+					},
+					"response": []
+				},
+				{
+					"name": "Switch Photo Version",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/photos/:photo_id/versions/:version_id/switch?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["photos", ":photo_id", "versions", ":version_id", "switch"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "photo_id",
+									"value": "{{photo_id}}"
+								},
+								{
+									"key": "version_id",
+									"value": "{{version_id}}"
+								}
+							]
+						},
+						"description": "Switch the currently displayed photo version\n\nChanges which version is shown as the primary photo"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Photo Version",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/photos/versions/:version_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["photos", "versions", ":version_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "version_id",
+									"value": "{{version_id}}"
+								}
+							]
+						},
+						"description": "Delete a photo version\n\nNote: Cannot delete the original version"
+					},
+					"response": []
+				}
+			],
+			"description": "Photo version management for AI-processed images"
+		},
+		{
+			"name": "Album Management",
+			"item": [
+				{
+					"name": "Create Album",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('album_id', jsonData.album_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Family Vacation 2024\",\n  \"description\": \"Summer vacation photos\",\n  \"user_id\": \"{{user_id}}\",\n  \"organization_id\": \"{{organization_id}}\",\n  \"auto_sync\": true,\n  \"is_shared\": true,\n  \"tags\": [\"vacation\", \"2024\", \"family\"]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/albums",
+							"host": ["{{api_base}}"],
+							"path": ["albums"]
+						},
+						"description": "Create a new album\n\nRequest Body:\n- name: Album name (required)\n- description: Album description\n- user_id: Creator user ID (required)\n- organization_id: Organization ID\n- cover_photo_id: Cover photo ID\n- auto_sync: Auto-sync to smart frames\n- is_shared: Shared album flag\n- tags: Album tags"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Album",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/albums/:album_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["albums", ":album_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "album_id",
+									"value": "{{album_id}}"
+								}
+							]
+						},
+						"description": "Get album details\n\nReturns:\n- Album metadata\n- Photo count\n- Sharing status\n- Sync status"
+					},
+					"response": []
+				},
+				{
+					"name": "List User Albums",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/albums?user_id={{user_id}}&limit=100&offset=0",
+							"host": ["{{api_base}}"],
+							"path": ["albums"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								},
+								{
+									"key": "limit",
+									"value": "100"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "List all albums for a user\n\nReturns paginated list of albums"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Album",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Family Vacation 2024 - Updated\",\n  \"description\": \"Amazing summer vacation\",\n  \"cover_photo_id\": \"{{photo_id}}\",\n  \"tags\": [\"vacation\", \"2024\", \"family\", \"summer\"]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/albums/:album_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["albums", ":album_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "album_id",
+									"value": "{{album_id}}"
+								}
+							]
+						},
+						"description": "Update album information\n\nAll fields are optional"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Album",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/albums/:album_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["albums", ":album_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "album_id",
+									"value": "{{album_id}}"
+								}
+							]
+						},
+						"description": "Delete an album\n\nNote: Photos are not deleted, only album metadata"
+					},
+					"response": []
+				},
+				{
+					"name": "Add Photos to Album",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"photo_ids\": [\"{{photo_id}}\"],\n  \"added_by\": \"{{user_id}}\",\n  \"is_featured\": false\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/albums/:album_id/photos",
+							"host": ["{{api_base}}"],
+							"path": ["albums", ":album_id", "photos"],
+							"variable": [
+								{
+									"key": "album_id",
+									"value": "{{album_id}}"
+								}
+							]
+						},
+						"description": "Add photos to an album\n\nRequest Body:\n- photo_ids: List of photo IDs\n- added_by: User ID adding photos\n- is_featured: Mark as featured photos"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Album Photos",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/albums/:album_id/photos?user_id={{user_id}}&limit=50&offset=0",
+							"host": ["{{api_base}}"],
+							"path": ["albums", ":album_id", "photos"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								},
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							],
+							"variable": [
+								{
+									"key": "album_id",
+									"value": "{{album_id}}"
+								}
+							]
+						},
+						"description": "Get all photos in an album\n\nReturns paginated list of photos with metadata"
+					},
+					"response": []
+				},
+				{
+					"name": "Share Album with Family",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"shared_with_members\": [\"user_456\", \"user_789\"],\n  \"share_with_all_family\": false,\n  \"default_permission\": \"viewer\",\n  \"custom_permissions\": {\n    \"user_456\": \"editor\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/albums/:album_id/share?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["albums", ":album_id", "share"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "album_id",
+									"value": "{{album_id}}"
+								}
+							]
+						},
+						"description": "Share album with family members\n\nRequest Body:\n- shared_with_members: List of user IDs\n- share_with_all_family: Share with all family\n- default_permission: Default permission level\n- custom_permissions: Per-user permissions\n\nPermission levels: viewer, editor, admin"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Album Sync Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/albums/:album_id/sync-status/:frame_id?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["albums", ":album_id", "sync-status", ":frame_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "album_id",
+									"value": "{{album_id}}"
+								},
+								{
+									"key": "frame_id",
+									"value": "frame_001"
+								}
+							]
+						},
+						"description": "Get album sync status for a smart frame\n\nReturns:\n- Sync status\n- Last sync time\n- Pending photos"
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger Album Sync",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/albums/:album_id/sync/:frame_id?user_id={{user_id}}&force=false",
+							"host": ["{{api_base}}"],
+							"path": ["albums", ":album_id", "sync", ":frame_id"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								},
+								{
+									"key": "force",
+									"value": "false",
+									"description": "Force full sync"
+								}
+							],
+							"variable": [
+								{
+									"key": "album_id",
+									"value": "{{album_id}}"
+								},
+								{
+									"key": "frame_id",
+									"value": "frame_001"
+								}
+							]
+						},
+						"description": "Trigger album sync to a smart frame\n\n- force=false: Incremental sync\n- force=true: Full sync"
+					},
+					"response": []
+				}
+			],
+			"description": "Album creation, management, and family sharing"
+		},
+		{
+			"name": "Intelligence - Semantic Search",
+			"item": [
+				{
+					"name": "Semantic Search Files",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"Find documents about machine learning and AI\",\n  \"top_k\": 5,\n  \"enable_rerank\": true,\n  \"min_score\": 0.5,\n  \"file_types\": [\"pdf\", \"txt\", \"md\"],\n  \"tags\": [\"ai\", \"ml\"]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/files/search",
+							"host": ["{{api_base}}"],
+							"path": ["files", "search"]
+						},
+						"description": "Semantic search across user files using natural language\n\n**Powered by isA_MCP digital_analytics_tools**\n\nRequest Body:\n- user_id: User ID (required)\n- query: Natural language search query (required)\n- top_k: Number of results (default: 5)\n- enable_rerank: Enable result reranking (default: false)\n- min_score: Minimum relevance score (default: 0.0)\n- file_types: Filter by file types (optional)\n- tags: Filter by tags (optional)\n\nResponse:\n- results: List of matching files with relevance scores\n- search_time: Query execution time\n- total_results: Total matching files"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Intelligence Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/intelligence/stats?user_id={{user_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["intelligence", "stats"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							]
+						},
+						"description": "Get user's intelligence service statistics\n\nReturns:\n- total_files: Total files\n- indexed_files: Indexed files count\n- total_chunks: Total document chunks\n- total_searches: Total searches performed\n- storage_size_bytes: Total storage size"
+					},
+					"response": []
+				}
+			],
+			"description": "Semantic search powered by isA_MCP"
+		},
+		{
+			"name": "Intelligence - RAG Q&A",
+			"item": [
+				{
+					"name": "RAG Query - Simple",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"What are the main concepts in my machine learning documents?\",\n  \"rag_mode\": \"simple\",\n  \"top_k\": 3,\n  \"enable_citations\": true,\n  \"max_tokens\": 500,\n  \"temperature\": 0.7\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/files/ask",
+							"host": ["{{api_base}}"],
+							"path": ["files", "ask"]
+						},
+						"description": "RAG Q&A - Simple Mode\n\nBasic retrieval-augmented generation for answering questions based on user files\n\n**Powered by isA_MCP digital_analytics_tools**"
+					},
+					"response": []
+				},
+				{
+					"name": "RAG Query - RAPTOR",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"Summarize the key findings across all my research documents\",\n  \"rag_mode\": \"raptor\",\n  \"top_k\": 5,\n  \"enable_citations\": true,\n  \"max_tokens\": 800,\n  \"temperature\": 0.7\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/files/ask",
+							"host": ["{{api_base}}"],
+							"path": ["files", "ask"]
+						},
+						"description": "RAG Q&A - RAPTOR Mode\n\nRecursive Abstractive Processing for Tree-Organized Retrieval\nBest for multi-document summarization and hierarchical understanding"
+					},
+					"response": []
+				},
+				{
+					"name": "RAG Query - Self-RAG",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"Analyze the methodology in my technical documents\",\n  \"rag_mode\": \"self_rag\",\n  \"top_k\": 4,\n  \"enable_citations\": true,\n  \"max_tokens\": 600,\n  \"temperature\": 0.6\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/files/ask",
+							"host": ["{{api_base}}"],
+							"path": ["files", "ask"]
+						},
+						"description": "RAG Q&A - Self-RAG Mode\n\nSelf-reflective RAG with quality assessment\nBest for critical analysis and high-accuracy requirements"
+					},
+					"response": []
+				},
+				{
+					"name": "RAG Query - CRAG",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"What are the latest trends mentioned in my documents?\",\n  \"rag_mode\": \"crag\",\n  \"top_k\": 3,\n  \"enable_citations\": true,\n  \"max_tokens\": 500,\n  \"temperature\": 0.7\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/files/ask",
+							"host": ["{{api_base}}"],
+							"path": ["files", "ask"]
+						},
+						"description": "RAG Q&A - CRAG Mode\n\nCorrective RAG with external knowledge integration\nBest for queries requiring up-to-date or external information"
+					},
+					"response": []
+				},
+				{
+					"name": "RAG Query - Plan-RAG",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"Create a step-by-step implementation plan based on my architecture documents\",\n  \"rag_mode\": \"plan_rag\",\n  \"top_k\": 5,\n  \"enable_citations\": true,\n  \"max_tokens\": 1000,\n  \"temperature\": 0.7\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/files/ask",
+							"host": ["{{api_base}}"],
+							"path": ["files", "ask"]
+						},
+						"description": "RAG Q&A - Plan-RAG Mode\n\nPlan-based RAG for complex multi-step queries\nBest for strategic planning and multi-document reasoning"
+					},
+					"response": []
+				},
+				{
+					"name": "RAG Query - HM-RAG",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"Continue our previous discussion about AI implementation strategies\",\n  \"rag_mode\": \"hm_rag\",\n  \"session_id\": \"conv_123\",\n  \"top_k\": 3,\n  \"enable_citations\": true,\n  \"max_tokens\": 500,\n  \"temperature\": 0.7\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/files/ask",
+							"host": ["{{api_base}}"],
+							"path": ["files", "ask"]
+						},
+						"description": "RAG Q&A - HM-RAG Mode\n\nHybrid Memory RAG with conversation context\nBest for multi-turn conversations requiring context awareness"
+					},
+					"response": []
+				}
+			],
+			"description": "RAG Q&A with 6 different modes powered by isA_MCP\n\nModes:\n- **simple**: Standard RAG\n- **raptor**: Recursive summaries for hierarchical understanding\n- **self_rag**: Self-reflective with quality assessment\n- **crag**: Corrective with external knowledge\n- **plan_rag**: Multi-step planning and reasoning\n- **hm_rag**: Conversation-aware with memory"
+		},
+		{
+			"name": "Intelligence - Image Processing",
+			"item": [
+				{
+					"name": "Store Image with VLM",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"image_path\": \"/path/to/image.jpg\",\n  \"metadata\": {\n    \"source\": \"user_upload\",\n    \"category\": \"vacation\"\n  },\n  \"description_prompt\": \"Describe this image in detail\",\n  \"model\": \"gpt-4o-mini\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/intelligence/image/store",
+							"host": ["{{api_base}}"],
+							"path": ["intelligence", "image", "store"]
+						},
+						"description": "Store image and extract VLM description\n\n**Uses Vision-Language Model (gpt-4o-mini) to automatically generate image descriptions**\n\nRequest Body:\n- user_id: User ID\n- image_path: Path to image file\n- metadata: Additional metadata\n- description_prompt: Custom prompt for VLM\n- model: VLM model (default: gpt-4o-mini)\n\nResponse:\n- description: AI-generated description\n- storage_id: Storage identifier\n- processing_time: VLM processing time"
+					},
+					"response": []
+				},
+				{
+					"name": "Search Images by Description",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"sunset on the beach with palm trees\",\n  \"top_k\": 5,\n  \"enable_rerank\": true,\n  \"search_mode\": \"semantic\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/intelligence/image/search",
+							"host": ["{{api_base}}"],
+							"path": ["intelligence", "image", "search"]
+						},
+						"description": "Search images using natural language\n\n**Semantic search across VLM-generated descriptions**\n\nRequest Body:\n- user_id: User ID\n- query: Natural language search query\n- top_k: Number of results\n- enable_rerank: Enable reranking\n- search_mode: Search mode (semantic/hybrid)\n\nResponse:\n- image_results: List of matching images\n- relevance_score: Similarity scores\n- total_images_found: Total matches"
+					},
+					"response": []
+				},
+				{
+					"name": "Multimodal RAG Query",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"query\": \"What vacation photos do I have from beach locations?\",\n  \"context_limit\": 5,\n  \"include_images\": true,\n  \"rag_mode\": \"simple\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/intelligence/image/rag",
+							"host": ["{{api_base}}"],
+							"path": ["intelligence", "image", "rag"]
+						},
+						"description": "Multimodal RAG combining images and text\n\n**Answer questions based on both image content and text documents**\n\nRequest Body:\n- user_id: User ID\n- query: User question\n- context_limit: Max context items\n- include_images: Include image results\n- rag_mode: RAG mode (simple/raptor/self_rag/etc.)\n\nResponse:\n- response: Generated answer\n- image_sources: Relevant images\n- text_sources: Relevant documents\n- context_items: Total context used"
+					},
+					"response": []
+				}
+			],
+			"description": "Image intelligence features:\n- VLM-based automatic image descriptions (gpt-4o-mini)\n- Semantic image search\n- Multimodal RAG (combining images and text)"
+		}
+	],
+	"auth": {
+		"type": "noauth"
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}

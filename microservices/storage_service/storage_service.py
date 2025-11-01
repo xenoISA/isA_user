@@ -10,16 +10,22 @@ import uuid
 import mimetypes
 import hashlib
 import logging
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, BinaryIO, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
-from minio import Minio
-from minio.error import S3Error
 from fastapi import UploadFile, HTTPException
 
+# Use isa-common's MinIOClient for gRPC service discovery
+from isa_common.minio_client import MinIOClient
+from isa_common.consul_client import ConsulRegistry as IsaCommonConsulRegistry
+
 from .storage_repository import StorageRepository
+# Import organization client from organization_service (provider pattern)
+from microservices.organization_service.client import OrganizationServiceClient
+from core.nats_client import Event, EventType, ServiceSource
 from .models import (
     StoredFile, FileShare, StorageQuota,
     FileStatus, StorageProvider, FileAccessLevel,
@@ -29,7 +35,10 @@ from .models import (
     StorageStatsResponse,
     PhotoVersionType, PhotoVersion, PhotoWithVersions,
     SavePhotoVersionRequest, SavePhotoVersionResponse,
-    SwitchPhotoVersionRequest, GetPhotoVersionsRequest
+    SwitchPhotoVersionRequest, GetPhotoVersionsRequest,
+    # Album models
+    CreateAlbumRequest, UpdateAlbumRequest, AddPhotosToAlbumRequest, ShareAlbumRequest,
+    AlbumResponse, AlbumListResponse, AlbumPhotosResponse, AlbumSyncResponse
 )
 from core.consul_registry import ConsulRegistry
 
@@ -39,27 +48,36 @@ logger = logging.getLogger(__name__)
 class StorageService:
     """存储服务业务逻辑层"""
 
-    def __init__(self, config):
+    def __init__(self, config, event_bus=None):
         """
         初始化存储服务
 
         Args:
             config: 配置对象
+            event_bus: 事件总线（可选）
         """
         self.repository = StorageRepository()
         self.config = config
-        self.consul = None
-        self._init_consul()
+        self.event_bus = event_bus
 
-        # MinIO配置
-        self.minio_client = Minio(
-            endpoint=getattr(config, 'minio_endpoint', 'localhost:9000'),
-            access_key=getattr(config, 'minio_access_key', 'minioadmin'),
-            secret_key=getattr(config, 'minio_secret_key', 'minioadmin'),
-            secure=getattr(config, 'minio_secure', False)
+        # Initialize Consul registry for MinIO service discovery
+        consul_host = getattr(config, 'consul_host', 'localhost')
+        consul_port = getattr(config, 'consul_port', 8500)
+
+        self.consul_registry = IsaCommonConsulRegistry(
+            consul_host=consul_host,
+            consul_port=consul_port
         )
-        
-        self.bucket_name = getattr(config, 'minio_bucket_name', 'isA-storage')
+
+        # Initialize MinIO client with Consul service discovery
+        # This will automatically find the minio-grpc-service endpoint
+        self.minio_client = MinIOClient(
+            user_id='storage_service',
+            consul_registry=self.consul_registry,
+            service_name_override='minio-grpc-service'
+        )
+
+        self.bucket_name = getattr(config, 'minio_bucket_name', 'isa-storage')
         
         # 文件配置
         self.allowed_types = [
@@ -85,49 +103,40 @@ class StorageService:
         # 确保bucket存在
         self._ensure_bucket_exists()
 
-    def _init_consul(self):
-        """Initialize Consul registry for service discovery"""
-        try:
-            from core.config_manager import ConfigManager
-            config_manager = ConfigManager("storage_service")
-            config = config_manager.get_service_config()
-
-            if config.consul_enabled:
-                self.consul = ConsulRegistry(
-                    service_name=config.service_name,
-                    service_port=config.service_port,
-                    consul_host=config.consul_host,
-                    consul_port=config.consul_port
-                )
-                logger.info("Consul service discovery initialized for storage service")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Consul: {e}, will use fallback URLs")
-
     def _get_service_url(self, service_name: str, fallback_port: int) -> str:
         """Get service URL via Consul discovery with fallback"""
         fallback_url = f"http://localhost:{fallback_port}"
-        if self.consul:
-            return self.consul.get_service_address(service_name, fallback_url=fallback_url)
+        try:
+            # Use isa-common Consul registry to get service URL
+            url = self.consul_registry.get_service_url(service_name)
+            if url:
+                return url
+        except Exception as e:
+            logger.warning(f"Consul lookup failed for {service_name}: {e}")
         return fallback_url
     
     def _ensure_bucket_exists(self):
         """确保MinIO bucket存在"""
         try:
             if not self.minio_client.bucket_exists(self.bucket_name):
-                self.minio_client.make_bucket(self.bucket_name)
-                logger.info(f"Created MinIO bucket: {self.bucket_name}")
-                
-                # 设置bucket策略允许公共读取（可选）
-                # self._set_bucket_policy()
+                result = self.minio_client.create_bucket(
+                    self.bucket_name,
+                    organization_id='isa-storage-org'
+                )
+                if result and result.get('success'):
+                    logger.info(f"Created MinIO bucket: {self.bucket_name}")
+                else:
+                    logger.error(f"Failed to create bucket: {self.bucket_name}")
+                    raise Exception(f"Failed to create bucket: {self.bucket_name}")
             else:
                 logger.info(f"MinIO bucket exists: {self.bucket_name}")
-        except S3Error as e:
+        except Exception as e:
             logger.error(f"Error ensuring bucket exists: {e}")
             raise
     
     def _generate_object_name(self, user_id: str, filename: str) -> str:
         """生成对象存储路径"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         year = now.strftime("%Y")
         month = now.strftime("%m")
         day = now.strftime("%d")
@@ -147,7 +156,7 @@ class StorageService:
     
     async def _check_quota(self, user_id: str, file_size: int) -> bool:
         """检查用户配额"""
-        quota = await self.repository.get_storage_quota(user_id=user_id)
+        quota = await self.repository.get_storage_quota(quota_type="user", entity_id=user_id)
         
         if not quota:
             # 如果没有配额记录，创建默认配额
@@ -217,28 +226,36 @@ class StorageService:
             object_name = self._generate_object_name(request.user_id, file.filename)
             checksum = self._calculate_checksum(file_content)
             
-            # 上传到MinIO
+            # 上传到MinIO (使用isa-common MinIOClient)
             file_stream = BytesIO(file_content)
-            result = self.minio_client.put_object(
+            upload_metadata = {
+                "file-id": file_id,
+                "user-id": request.user_id,
+                "original-name": file.filename,
+                "checksum": checksum,
+            }
+
+            # Add request metadata (convert all values to strings for MinIO)
+            if request.metadata:
+                for key, value in request.metadata.items():
+                    upload_metadata[key] = str(value) if value is not None else ""
+
+            success = self.minio_client.put_object(
                 bucket_name=self.bucket_name,
-                object_name=object_name,
+                object_key=object_name,
                 data=file_stream,
-                length=file_size,
-                content_type=content_type,
-                metadata={
-                    "file-id": file_id,
-                    "user-id": request.user_id,
-                    "original-name": file.filename,
-                    "checksum": checksum,
-                    **(request.metadata or {})
-                }
+                size=file_size,
+                metadata=upload_metadata
             )
-            
-            # 生成预签名下载URL（1小时有效）
-            download_url = self.minio_client.presigned_get_object(
+
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to upload file to storage")
+
+            # 生成预签名下载URL（1小时有效 = 3600秒）
+            download_url = self.minio_client.get_presigned_url(
                 bucket_name=self.bucket_name,
-                object_name=object_name,
-                expires=timedelta(hours=1)
+                object_key=object_name,
+                expiry_seconds=3600
             )
             
             # 保存文件记录到数据库
@@ -257,20 +274,21 @@ class StorageService:
                 status=FileStatus.AVAILABLE,
                 access_level=request.access_level,
                 checksum=checksum,
-                etag=result.etag,
-                version_id=result.version_id,
+                etag=None,  # isa-common MinIOClient handles etag internally
+                version_id=None,  # Version ID not needed for basic uploads
                 metadata=request.metadata,
                 tags=request.tags,
                 download_url=download_url,
-                download_url_expires_at=datetime.utcnow() + timedelta(hours=1),
-                uploaded_at=datetime.utcnow()
+                download_url_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                uploaded_at=datetime.now(timezone.utc)
             )
             
             await self.repository.create_file_record(stored_file)
             
             # 更新用户配额使用量
             await self.repository.update_storage_usage(
-                user_id=request.user_id,
+                quota_type="user",
+                entity_id=request.user_id,
                 bytes_delta=file_size,
                 file_count_delta=1
             )
@@ -279,19 +297,38 @@ class StorageService:
             if request.auto_delete_after_days:
                 # 这里应该创建一个定时任务来删除文件
                 pass
-            
+
+            # Publish file.uploaded event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.FILE_UPLOADED,
+                        source=ServiceSource.STORAGE_SERVICE,
+                        data={
+                            "file_id": file_id,
+                            "file_name": file.filename,
+                            "file_size": file_size,
+                            "content_type": content_type,
+                            "user_id": request.user_id,
+                            "organization_id": request.organization_id,
+                            "access_level": request.access_level,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published file.uploaded event for file {file_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish file.uploaded event: {e}")
+
             return FileUploadResponse(
                 file_id=file_id,
                 file_path=object_name,
                 download_url=download_url,
                 file_size=file_size,
                 content_type=content_type,
-                uploaded_at=datetime.utcnow()
+                uploaded_at=datetime.now(timezone.utc)
             )
             
-        except S3Error as e:
-            logger.error(f"MinIO error uploading file: {e}")
-            raise HTTPException(status_code=500, detail=f"Storage error: {str(e)}")
         except Exception as e:
             logger.error(f"Error uploading file: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -316,16 +353,16 @@ class StorageService:
             raise HTTPException(status_code=404, detail="File not found")
         
         # 检查下载URL是否过期，如果过期则重新生成
-        if not file.download_url or file.download_url_expires_at < datetime.utcnow():
+        if not file.download_url or file.download_url_expires_at < datetime.now(timezone.utc):
             try:
-                download_url = self.minio_client.presigned_get_object(
+                download_url = self.minio_client.get_presigned_url(
                     bucket_name=file.bucket_name,
-                    object_name=file.object_name,
-                    expires=timedelta(hours=1)
+                    object_key=file.object_name,
+                    expiry_seconds=3600
                 )
                 file.download_url = download_url
-                file.download_url_expires_at = datetime.utcnow() + timedelta(hours=1)
-            except S3Error:
+                file.download_url_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            except Exception:
                 file.download_url = None
         
         return FileInfoResponse(
@@ -368,15 +405,15 @@ class StorageService:
         response = []
         for file in files:
             # 检查并更新下载URL
-            if not file.download_url or file.download_url_expires_at < datetime.utcnow():
+            if not file.download_url or file.download_url_expires_at < datetime.now(timezone.utc):
                 try:
-                    download_url = self.minio_client.presigned_get_object(
+                    download_url = self.minio_client.get_presigned_url(
                         bucket_name=file.bucket_name,
-                        object_name=file.object_name,
-                        expires=timedelta(hours=1)
+                        object_key=file.object_name,
+                        expiry_seconds=3600
                     )
                     file.download_url = download_url
-                except S3Error:
+                except Exception:
                     file.download_url = None
             
             response.append(FileInfoResponse(
@@ -421,25 +458,46 @@ class StorageService:
         if permanent:
             # 从MinIO删除
             try:
-                self.minio_client.remove_object(
+                self.minio_client.delete_object(
                     bucket_name=file.bucket_name,
-                    object_name=file.object_name
+                    object_key=file.object_name
                 )
-            except S3Error as e:
+            except Exception as e:
                 logger.error(f"Error deleting file from MinIO: {e}")
                 # 继续处理，即使MinIO删除失败
         
         # 更新数据库状态
         success = await self.repository.delete_file(file_id, user_id)
-        
+
         if success:
             # 更新配额使用量
             await self.repository.update_storage_usage(
-                user_id=user_id,
+                quota_type="user",
+                entity_id=user_id,
                 bytes_delta=-file.file_size,
                 file_count_delta=-1
             )
-        
+
+            # Publish file.deleted event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.FILE_DELETED,
+                        source=ServiceSource.STORAGE_SERVICE,
+                        data={
+                            "file_id": file_id,
+                            "file_name": file.file_name,
+                            "file_size": file.file_size,
+                            "user_id": user_id,
+                            "permanent": permanent,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published file.deleted event for file {file_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish file.deleted event: {e}")
+
         return success
     
     async def share_file(
@@ -474,15 +532,41 @@ class StorageService:
             password=request.password,
             permissions=request.permissions,
             max_downloads=request.max_downloads,
-            expires_at=datetime.utcnow() + timedelta(hours=request.expires_hours)
+            download_count=0,
+            is_active=True,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=request.expires_hours)
         )
-        
+
+        logger.info(f"About to create file share: {share.share_id}")
         created_share = await self.repository.create_file_share(share)
+        logger.info(f"Created share result: {created_share}")
         
         # 生成分享URL
         base_url = self._get_service_url('wallet_service', 8209) if hasattr(self, '_get_service_url') else 'http://localhost:8209'
         share_url = f"{base_url}/api/shares/{created_share.share_id}?token={access_token}"
-        
+
+        # Publish file.shared event
+        if self.event_bus:
+            try:
+                event = Event(
+                    event_type=EventType.FILE_SHARED,
+                    source=ServiceSource.STORAGE_SERVICE,
+                    data={
+                        "share_id": created_share.share_id,
+                        "file_id": request.file_id,
+                        "file_name": file.file_name,
+                        "shared_by": request.shared_by,
+                        "shared_with": request.shared_with,
+                        "shared_with_email": request.shared_with_email,
+                        "expires_at": created_share.expires_at.isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                )
+                await self.event_bus.publish_event(event)
+                logger.info(f"Published file.shared event for file {request.file_id}")
+            except Exception as e:
+                logger.error(f"Failed to publish file.shared event: {e}")
+
         return FileShareResponse(
             share_id=created_share.share_id,
             share_url=share_url,
@@ -534,12 +618,12 @@ class StorageService:
         download_url = None
         if share.permissions.get("view") or share.permissions.get("download"):
             try:
-                download_url = self.minio_client.presigned_get_object(
+                download_url = self.minio_client.get_presigned_url(
                     bucket_name=file.bucket_name,
-                    object_name=file.object_name,
-                    expires=timedelta(minutes=15)  # 分享的URL有效期短一些
+                    object_key=file.object_name,
+                    expiry_seconds=900  # 15 minutes
                 )
-            except S3Error:
+            except Exception:
                 pass
         
         return FileInfoResponse(
@@ -573,7 +657,11 @@ class StorageService:
             StorageStatsResponse: 存储统计
         """
         # 获取配额信息
-        quota = await self.repository.get_storage_quota(user_id, organization_id)
+        if organization_id:
+            quota = await self.repository.get_storage_quota(quota_type="organization", entity_id=organization_id)
+        else:
+            quota = await self.repository.get_storage_quota(quota_type="user", entity_id=user_id)
+
         if not quota:
             # 使用默认配额
             quota = StorageQuota(
@@ -620,7 +708,7 @@ class StorageService:
         import os
         
         version_id = f"ver_{uuid.uuid4().hex[:12]}"
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         
         try:
             # 1. 下载AI生成的图片 (使用requests库，同步方式)
@@ -643,32 +731,38 @@ class StorageService:
             
             # 3. 上传到MinIO云存储
             bucket_name = "emoframe-photos"
-            
+
             # 确保bucket存在
             if not self.minio_client.bucket_exists(bucket_name):
-                self.minio_client.make_bucket(bucket_name)
-            
-            # 上传文件
-            self.minio_client.put_object(
+                result = self.minio_client.create_bucket(bucket_name, organization_id='emoframe-org')
+                if not result or not result.get('success'):
+                    raise HTTPException(status_code=500, detail=f"Failed to create bucket: {bucket_name}")
+
+            # 上传文件 (all metadata values must be strings for MinIO)
+            upload_metadata = {
+                'photo_id': str(request.photo_id),
+                'version_id': str(version_id),
+                'version_type': str(request.version_type.value),
+                'processing_mode': str(request.processing_mode or ''),
+                'created_at': timestamp.isoformat()
+            }
+
+            success = self.minio_client.put_object(
                 bucket_name=bucket_name,
-                object_name=object_name,
+                object_key=object_name,
                 data=BytesIO(image_data),
-                length=len(image_data),
-                content_type=content_type,
-                metadata={
-                    'photo_id': request.photo_id,
-                    'version_id': version_id,
-                    'version_type': request.version_type.value,
-                    'processing_mode': request.processing_mode or '',
-                    'created_at': timestamp.isoformat()
-                }
+                size=len(image_data),
+                metadata=upload_metadata
             )
-            
-            # 生成云端访问URL
-            cloud_url = self.minio_client.presigned_get_object(
+
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to upload photo version to storage")
+
+            # 生成云端访问URL (7天有效期 = 604800秒)
+            cloud_url = self.minio_client.get_presigned_url(
                 bucket_name=bucket_name,
-                object_name=object_name,
-                expires=timedelta(days=7)  # 7天有效期（最大允许值）
+                object_key=object_name,
+                expiry_seconds=604800  # 7 days
             )
             
             # 4. 如果需要保存到本地（相框端）
@@ -826,7 +920,7 @@ class StorageService:
         try:
             bucket_name = "emoframe-photos"
             object_name = version.cloud_url.split(bucket_name + "/")[-1].split("?")[0]
-            self.minio_client.remove_object(bucket_name, object_name)
+            self.minio_client.delete_object(bucket_name, object_name)
         except Exception as e:
             logger.warning(f"Failed to delete cloud file: {e}")
         
@@ -845,3 +939,869 @@ class StorageService:
             "version_id": version_id,
             "message": "Photo version deleted successfully"
         }
+
+    # ==================== Album Management Methods ====================
+
+    async def create_album(self, request: 'CreateAlbumRequest') -> 'AlbumResponse':
+        """创建相册 - 支持家庭共享集成"""
+        import uuid
+        from datetime import datetime
+        
+        album_id = f"album_{uuid.uuid4().hex[:12]}"
+        current_time = datetime.now(timezone.utc)
+        sharing_resource_id = None
+        
+        album_data = {
+            "album_id": album_id,
+            "name": request.name,
+            "description": request.description,
+            "user_id": request.user_id,
+            "organization_id": request.organization_id,
+            "cover_photo_id": request.cover_photo_id,
+            "photo_count": 0,
+            "auto_sync": request.auto_sync,
+            "is_family_shared": request.enable_family_sharing,
+            "sharing_resource_id": None,
+            "sync_frames": [],
+            "tags": request.tags,
+            "metadata": {},
+            "ai_metadata": {},
+            "created_at": current_time.isoformat(),
+            "updated_at": current_time.isoformat(),
+            "last_synced_at": None
+        }
+        
+        try:
+            # 1. 创建相册
+            created_album = await self.repository.create_album(album_data)
+            
+            # 2. 如果启用家庭共享，创建共享资源
+            if request.enable_family_sharing and request.organization_id:
+                async with OrganizationServiceClient() as org_client:
+                    sharing_result = await org_client.create_sharing(
+                        organization_id=request.organization_id,
+                        user_id=request.user_id,
+                        resource_type="album",
+                        resource_id=album_id,
+                        resource_name=request.name,
+                        share_with_all_members=True,
+                        default_permission="read_write"
+                    )
+                
+                if sharing_result:
+                    sharing_resource_id = sharing_result.get("sharing_id")
+                    # 更新相册的sharing_resource_id
+                    await self.repository.update_album(album_id, request.user_id, {
+                        "sharing_resource_id": sharing_resource_id
+                    })
+                    logger.info(f"Created family sharing for album {album_id}")
+                else:
+                    logger.warning(f"Failed to create family sharing for album {album_id}")
+            
+            from .models import AlbumResponse
+            return AlbumResponse(
+                album_id=album_id,
+                name=request.name,
+                description=request.description,
+                user_id=request.user_id,
+                cover_photo_id=request.cover_photo_id,
+                photo_count=0,
+                auto_sync=request.auto_sync,
+                is_family_shared=request.enable_family_sharing,
+                sharing_resource_id=sharing_resource_id,
+                sync_frames=[],
+                tags=request.tags,
+                created_at=current_time,
+                updated_at=current_time,
+                last_synced_at=None
+            )
+            
+        except Exception as e:
+            logger.error(f"Error creating album: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to create album: {str(e)}")
+
+    async def get_album(self, album_id: str, user_id: str) -> 'AlbumResponse':
+        """获取相册详情 - 支持家庭共享权限检查"""
+        try:
+            # 1. 尝试直接获取用户拥有的相册
+            album_data = await self.repository.get_album_by_id(album_id, user_id)
+            
+            # 2. 如果用户不是相册所有者，检查家庭共享权限
+            if not album_data:
+                has_shared_access = await self.check_family_album_access(album_id, user_id, "read")
+                if has_shared_access:
+                    # 通过共享访问，获取相册数据（使用相册所有者查询）
+                    album_data = await self.repository.get_album_by_id_any_user(album_id)
+                    if not album_data:
+                        raise HTTPException(status_code=404, detail="Album not found")
+                else:
+                    raise HTTPException(status_code=404, detail="Album not found")
+            
+            # 3. 获取家庭共享信息
+            family_sharing_info = None
+            if album_data.get("is_family_shared") and album_data.get("sharing_resource_id"):
+                async with OrganizationServiceClient() as org_client:
+                    family_sharing_info = await org_client.get_sharing(
+                        organization_id=album_data.get("organization_id"),
+                        sharing_id=album_data.get("sharing_resource_id"),
+                        user_id=user_id
+                    )
+            
+            from .models import AlbumResponse
+            return AlbumResponse(
+                album_id=album_data["album_id"],
+                name=album_data["name"],
+                description=album_data.get("description"),
+                user_id=album_data["user_id"],
+                cover_photo_id=album_data.get("cover_photo_id"),
+                photo_count=album_data.get("photo_count", 0),
+                auto_sync=album_data.get("auto_sync", True),
+                is_family_shared=album_data.get("is_family_shared", False),
+                sharing_resource_id=album_data.get("sharing_resource_id"),
+                sync_frames=album_data.get("sync_frames", []),
+                tags=album_data.get("tags", []),
+                created_at=datetime.fromisoformat(album_data["created_at"]) if album_data.get("created_at") else None,
+                updated_at=datetime.fromisoformat(album_data["updated_at"]) if album_data.get("updated_at") else None,
+                last_synced_at=datetime.fromisoformat(album_data["last_synced_at"]) if album_data.get("last_synced_at") else None,
+                family_sharing_info=family_sharing_info
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting album {album_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get album: {str(e)}")
+
+    async def check_family_album_access(self, album_id: str, user_id: str, required_permission: str = "read") -> bool:
+        """检查家庭共享相册访问权限"""
+        try:
+            async with OrganizationServiceClient() as org_client:
+                return await org_client.check_access(
+                    resource_type="album",
+                    resource_id=album_id,
+                    user_id=user_id,
+                    required_permission=required_permission
+                )
+        except Exception as e:
+            logger.error(f"Error checking family album access: {e}")
+            return False
+
+    async def list_user_albums(self, user_id: str, limit: int = 100, offset: int = 0) -> 'AlbumListResponse':
+        """获取用户相册列表"""
+        try:
+            albums_data = await self.repository.list_user_albums(user_id, limit, offset)
+            
+            from .models import AlbumResponse, AlbumListResponse
+            albums = []
+            
+            for album_data in albums_data:
+                album = AlbumResponse(
+                    album_id=album_data["album_id"],
+                    name=album_data["name"],
+                    description=album_data.get("description"),
+                    user_id=album_data["user_id"],
+                    cover_photo_id=album_data.get("cover_photo_id"),
+                    photo_count=album_data.get("photo_count", 0),
+                    auto_sync=album_data.get("auto_sync", True),
+                    is_family_shared=album_data.get("is_family_shared", False),
+                    sharing_resource_id=album_data.get("sharing_resource_id"),
+                    sync_frames=album_data.get("sync_frames", []),
+                    tags=album_data.get("tags", []),
+                    created_at=datetime.fromisoformat(album_data["created_at"]) if album_data.get("created_at") else None,
+                    updated_at=datetime.fromisoformat(album_data["updated_at"]) if album_data.get("updated_at") else None,
+                    last_synced_at=datetime.fromisoformat(album_data["last_synced_at"]) if album_data.get("last_synced_at") else None,
+                    family_sharing_info=None
+                )
+                albums.append(album)
+            
+            return AlbumListResponse(
+                albums=albums,
+                count=len(albums),
+                limit=limit,
+                offset=offset
+            )
+            
+        except Exception as e:
+            logger.error(f"Error listing albums for user {user_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to list albums: {str(e)}")
+
+    async def update_album(self, album_id: str, user_id: str, request: 'UpdateAlbumRequest') -> 'AlbumResponse':
+        """更新相册"""
+        try:
+            # 构建更新数据
+            updates = {}
+            if request.name is not None:
+                updates["name"] = request.name
+            if request.description is not None:
+                updates["description"] = request.description
+            if request.cover_photo_id is not None:
+                updates["cover_photo_id"] = request.cover_photo_id
+            if request.auto_sync is not None:
+                updates["auto_sync"] = request.auto_sync
+            if request.enable_family_sharing is not None:
+                updates["is_family_shared"] = request.enable_family_sharing
+            if request.tags is not None:
+                updates["tags"] = request.tags
+            
+            success = await self.repository.update_album(album_id, user_id, updates)
+            if not success:
+                raise HTTPException(status_code=404, detail="Album not found")
+            
+            # 返回更新后的相册
+            return await self.get_album(album_id, user_id)
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating album {album_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to update album: {str(e)}")
+
+    async def delete_album(self, album_id: str, user_id: str) -> Dict[str, Any]:
+        """删除相册"""
+        try:
+            success = await self.repository.delete_album(album_id, user_id)
+            if not success:
+                raise HTTPException(status_code=404, detail="Album not found")
+            
+            return {
+                "success": True,
+                "album_id": album_id,
+                "message": "Album deleted successfully"
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting album {album_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to delete album: {str(e)}")
+
+    async def add_photos_to_album(self, album_id: str, request: 'AddPhotosToAlbumRequest') -> Dict[str, Any]:
+        """添加照片到相册"""
+        try:
+            # 验证相册存在
+            album = await self.repository.get_album_by_id(album_id, request.added_by)
+            if not album:
+                raise HTTPException(status_code=404, detail="Album not found")
+            
+            # 验证照片存在
+            for photo_id in request.photo_ids:
+                file_info = await self.repository.get_file_by_id(photo_id, request.added_by)
+                if not file_info:
+                    raise HTTPException(status_code=404, detail=f"Photo {photo_id} not found")
+            
+            success = await self.repository.add_photos_to_album(
+                album_id, request.photo_ids, request.added_by
+            )
+            
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to add photos to album")
+            
+            return {
+                "success": True,
+                "album_id": album_id,
+                "added_photos": len(request.photo_ids),
+                "message": f"Successfully added {len(request.photo_ids)} photos to album"
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error adding photos to album {album_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to add photos: {str(e)}")
+
+    async def get_album_photos(self, album_id: str, user_id: str, limit: int = 50, offset: int = 0) -> 'AlbumPhotosResponse':
+        """获取相册照片列表"""
+        try:
+            # 验证用户有权限访问该相册
+            album = await self.repository.get_album_by_id(album_id, user_id)
+            if not album:
+                raise HTTPException(status_code=404, detail="Album not found")
+            
+            photos_data = await self.repository.get_album_photos(album_id, limit, offset)
+            
+            from .models import AlbumPhotosResponse
+            return AlbumPhotosResponse(
+                album_id=album_id,
+                photos=photos_data,
+                count=len(photos_data),
+                limit=limit,
+                offset=offset
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting photos for album {album_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get album photos: {str(e)}")
+
+    async def add_family_member(self, album_id: str, request: 'AddFamilyMemberRequest', user_id: str) -> Dict[str, Any]:
+        """添加家庭成员"""
+        import uuid
+        from datetime import datetime
+        
+        try:
+            # 验证相册存在且用户有权限
+            album = await self.repository.get_album_by_id(album_id, user_id)
+            if not album:
+                raise HTTPException(status_code=404, detail="Album not found")
+            
+            member_id = f"member_{uuid.uuid4().hex[:12]}"
+            current_time = datetime.now(timezone.utc)
+            
+            member_data = {
+                "member_id": member_id,
+                "album_id": album_id,
+                "user_id": request.user_id,
+                "name": request.name,
+                "relationship": request.relationship,
+                "avatar_photo_id": request.avatar_photo_id,
+                "face_encodings": None,
+                "face_photos": [],
+                "can_add_photos": request.can_add_photos,
+                "can_edit_album": request.can_edit_album,
+                "created_at": current_time.isoformat(),
+                "updated_at": current_time.isoformat()
+            }
+            
+            created_member = await self.repository.add_family_member(member_data)
+            
+            return {
+                "success": True,
+                "member_id": member_id,
+                "album_id": album_id,
+                "message": "Family member added successfully"
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error adding family member to album {album_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to add family member: {str(e)}")
+
+    async def get_album_sync_status(self, album_id: str, frame_id: str, user_id: str) -> 'AlbumSyncResponse':
+        """获取相册同步状态"""
+        try:
+            # 验证相册存在且用户有权限
+            album = await self.repository.get_album_by_id(album_id, user_id)
+            if not album:
+                raise HTTPException(status_code=404, detail="Album not found")
+            
+            sync_data = await self.repository.get_album_sync_status(album_id, frame_id)
+            
+            if not sync_data:
+                # 如果没有同步记录，创建一个默认的
+                sync_data = {
+                    "album_id": album_id,
+                    "frame_id": frame_id,
+                    "sync_status": "pending",
+                    "sync_version": 0,
+                    "total_photos": album.get("photo_count", 0),
+                    "synced_photos": 0,
+                    "pending_photos": album.get("photo_count", 0),
+                    "failed_photos": 0,
+                    "last_sync_timestamp": None
+                }
+            
+            from .models import AlbumSyncResponse
+            return AlbumSyncResponse(
+                album_id=album_id,
+                frame_id=frame_id,
+                sync_status=sync_data.get("sync_status", "pending"),
+                last_sync_timestamp=datetime.fromisoformat(sync_data["last_sync_timestamp"]) if sync_data.get("last_sync_timestamp") else None,
+                sync_version=sync_data.get("sync_version", 0),
+                progress={
+                    "total": sync_data.get("total_photos", 0),
+                    "synced": sync_data.get("synced_photos", 0),
+                    "pending": sync_data.get("pending_photos", 0),
+                    "failed": sync_data.get("failed_photos", 0)
+                }
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting sync status for album {album_id}, frame {frame_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get sync status: {str(e)}")
+
+    async def share_album_with_family(self, album_id: str, request: 'ShareAlbumRequest', user_id: str) -> Dict[str, Any]:
+        """创建或更新相册的家庭共享"""
+        try:
+            # 1. 验证相册存在且用户有权限
+            album = await self.repository.get_album_by_id(album_id, user_id)
+            if not album:
+                raise HTTPException(status_code=404, detail="Album not found")
+            
+            if not album.get("organization_id"):
+                raise HTTPException(status_code=400, detail="Album must be associated with an organization for family sharing")
+
+            async with OrganizationServiceClient() as org_client:
+                # 2. 检查是否已有共享设置
+                sharing_resource_id = album.get("sharing_resource_id")
+
+                if sharing_resource_id:
+                    # 更新现有共享设置
+                    sharing_updates = {}
+                    if request.shared_with_members is not None:
+                        sharing_updates["shared_with_members"] = request.shared_with_members
+                    if request.default_permission:
+                        sharing_updates["default_permission"] = request.default_permission
+                    if request.custom_permissions:
+                        sharing_updates["custom_permissions"] = request.custom_permissions
+
+                    sharing_updates["share_with_all_members"] = request.share_with_all_family
+
+                    updated = await org_client.update_sharing(
+                        organization_id=album.get("organization_id"),
+                        sharing_id=sharing_resource_id,
+                        user_id=user_id,
+                        updates=sharing_updates
+                    )
+                    success = updated is not None
+
+                    if success:
+                        # 更新相册的家庭共享状态
+                        await self.repository.update_album(album_id, user_id, {
+                            "is_family_shared": True
+                        })
+
+                        return {
+                            "success": True,
+                            "album_id": album_id,
+                            "sharing_resource_id": sharing_resource_id,
+                            "action": "updated",
+                            "message": "Album sharing updated successfully"
+                        }
+                    else:
+                        raise HTTPException(status_code=500, detail="Failed to update album sharing")
+                else:
+                    # 创建新的共享设置
+                    sharing_result = await org_client.create_sharing(
+                        organization_id=album["organization_id"],
+                        user_id=user_id,
+                        resource_type="album",
+                        resource_id=album_id,
+                        resource_name=album["name"],
+                        shared_with_members=request.shared_with_members,
+                        share_with_all_members=request.share_with_all_family,
+                        default_permission=request.default_permission,
+                        custom_permissions=request.custom_permissions
+                    )
+
+                    if sharing_result:
+                        new_sharing_resource_id = sharing_result.get("sharing_id")
+
+                        # 更新相册记录
+                        await self.repository.update_album(album_id, user_id, {
+                            "is_family_shared": True,
+                            "sharing_resource_id": new_sharing_resource_id
+                        })
+
+                        return {
+                            "success": True,
+                            "album_id": album_id,
+                            "sharing_resource_id": new_sharing_resource_id,
+                            "action": "created",
+                            "message": "Album sharing created successfully"
+                        }
+                    else:
+                        raise HTTPException(status_code=500, detail="Failed to create album sharing")
+                    
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error sharing album {album_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to share album: {str(e)}")
+
+    async def get_user_accessible_albums(self, user_id: str, include_shared: bool = True, limit: int = 100, offset: int = 0) -> 'AlbumListResponse':
+        """获取用户可访问的所有相册（包括共享相册）"""
+        try:
+            # 1. 获取用户拥有的相册
+            owned_albums = await self.repository.list_user_albums(user_id, limit, offset)
+            
+            # 2. 如果包含共享相册，获取通过家庭共享可访问的相册
+            shared_albums = []
+            if include_shared:
+                try:
+                    # Get user's organizations and their shared albums
+                    async with OrganizationServiceClient() as org_client:
+                        # For now, we need the organization_id to query shared resources
+                        # This would need to be refactored to get all orgs for user first
+                        shared_album_resources = []  # Placeholder - needs organization context
+                    
+                    # 获取共享相册的详细信息
+                    for resource in shared_album_resources:
+                        album_id = resource.get("resource_id")
+                        if album_id:
+                            album_data = await self.repository.get_album_by_id_any_user(album_id)
+                            if album_data and album_data["user_id"] != user_id:  # 排除自己的相册
+                                shared_albums.append(album_data)
+                except Exception as e:
+                    logger.warning(f"Failed to get shared albums for user {user_id}: {e}")
+            
+            # 3. 合并结果
+            all_albums_data = owned_albums + shared_albums
+            
+            from .models import AlbumResponse, AlbumListResponse
+            albums = []
+            
+            for album_data in all_albums_data:
+                album = AlbumResponse(
+                    album_id=album_data["album_id"],
+                    name=album_data["name"],
+                    description=album_data.get("description"),
+                    user_id=album_data["user_id"],
+                    cover_photo_id=album_data.get("cover_photo_id"),
+                    photo_count=album_data.get("photo_count", 0),
+                    auto_sync=album_data.get("auto_sync", True),
+                    is_family_shared=album_data.get("is_family_shared", False),
+                    sharing_resource_id=album_data.get("sharing_resource_id"),
+                    sync_frames=album_data.get("sync_frames", []),
+                    tags=album_data.get("tags", []),
+                    created_at=datetime.fromisoformat(album_data["created_at"]) if album_data.get("created_at") else None,
+                    updated_at=datetime.fromisoformat(album_data["updated_at"]) if album_data.get("updated_at") else None,
+                    last_synced_at=datetime.fromisoformat(album_data["last_synced_at"]) if album_data.get("last_synced_at") else None
+                )
+                albums.append(album)
+            
+            return AlbumListResponse(
+                albums=albums,
+                count=len(albums),
+                limit=limit,
+                offset=offset
+            )
+            
+        except Exception as e:
+            logger.error(f"Error getting accessible albums for user {user_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get accessible albums: {str(e)}")
+
+    # ==================== Gallery & Slideshow Features ====================
+    
+    async def create_playlist(self, request: 'CreatePlaylistRequest') -> Dict[str, Any]:
+        """创建幻灯片播放列表"""
+        try:
+            playlist_data = {
+                "name": request.name,
+                "description": request.description,
+                "user_id": request.user_id,
+                "playlist_type": request.playlist_type.value,
+                "photo_ids": json.dumps(request.photo_ids),
+                "album_ids": json.dumps(request.album_ids),
+                "smart_criteria": json.dumps(request.smart_criteria.dict()) if request.smart_criteria else None,
+                "rotation_type": request.rotation_type.value,
+                "transition_duration": request.transition_duration,
+                "photo_count": len(request.photo_ids)
+            }
+            
+            result = await self.repository.create_playlist(playlist_data)
+            if not result:
+                raise HTTPException(status_code=500, detail="Failed to create playlist")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error creating playlist: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def get_playlist_photos(self, playlist_id: str, user_id: str) -> Dict[str, Any]:
+        """获取播放列表的照片（含预加载URL）"""
+        try:
+            playlist = await self.repository.get_playlist(playlist_id)
+            if not playlist:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+            
+            # Get photos based on playlist type
+            photo_ids = json.loads(playlist.get("photo_ids", "[]"))
+            
+            if playlist["playlist_type"] == "album":
+                # Get photos from albums
+                album_ids = json.loads(playlist.get("album_ids", "[]"))
+                photos = []
+                for album_id in album_ids:
+                    album_photos = await self.repository.get_album_photos(album_id)
+                    photos.extend(album_photos)
+            elif playlist["playlist_type"] == "favorites":
+                # Get favorite photos
+                photos = await self.repository.get_favorite_photos(user_id, limit=100)
+            elif playlist["playlist_type"] == "smart":
+                # Smart selection based on criteria
+                photos = await self._smart_photo_selection(user_id, playlist.get("smart_criteria"))
+            else:
+                # Manual playlist - get specific photos
+                if photo_ids:
+                    photos = []
+                    for photo_id in photo_ids:
+                        file = await self.repository.get_file_by_id(photo_id, user_id)
+                        if file:
+                            photos.append(file)
+                else:
+                    photos = []
+            
+            # Generate download URLs for each photo
+            photo_list = []
+            for photo in photos:
+                download_url = await self.generate_download_url(photo.get("file_id"), user_id, expiry_hours=24)
+                photo_data = {
+                    **photo,
+                    "download_url": download_url
+                }
+                photo_list.append(photo_data)
+            
+            return {
+                "playlist_id": playlist_id,
+                "photos": photo_list,
+                "total": len(photo_list)
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting playlist photos: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def _smart_photo_selection(self, user_id: str, criteria: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """AI智能照片选择"""
+        try:
+            if not criteria:
+                # Default: recent high-quality photos
+                files = await self.repository.list_user_files(user_id, limit=50, offset=0)
+                return files
+            
+            # Parse criteria
+            criteria_obj = criteria if isinstance(criteria, dict) else json.loads(criteria)
+            
+            # Build query filters
+            query_filters = []
+            
+            # Get all user photos
+            all_photos = await self.repository.list_user_files(user_id, limit=500, offset=0)
+            
+            # Filter by criteria
+            filtered_photos = []
+            for photo in all_photos:
+                # Check if image type
+                if not photo.get("content_type", "").startswith("image/"):
+                    continue
+                
+                # Get metadata
+                metadata = await self.repository.get_photo_metadata(photo["file_id"])
+                
+                # Apply filters
+                if criteria_obj.get("favorites_only") and not (metadata and metadata.get("is_favorite")):
+                    continue
+                
+                if criteria_obj.get("min_quality_score") and metadata:
+                    if not metadata.get("quality_score") or metadata["quality_score"] < criteria_obj["min_quality_score"]:
+                        continue
+                
+                if criteria_obj.get("has_faces") is not None and metadata:
+                    if metadata.get("has_faces") != criteria_obj["has_faces"]:
+                        continue
+                
+                # Date range filter
+                if criteria_obj.get("date_range_days"):
+                    days_ago = datetime.now(timezone.utc) - timedelta(days=criteria_obj["date_range_days"])
+                    photo_date = datetime.fromisoformat(photo.get("uploaded_at", ""))
+                    if photo_date < days_ago:
+                        continue
+                
+                filtered_photos.append(photo)
+            
+            # Apply diversity and quality scoring
+            max_photos = criteria_obj.get("max_photos", 50)
+            if len(filtered_photos) > max_photos:
+                # Simple selection: take most recent
+                filtered_photos.sort(key=lambda x: x.get("uploaded_at", ""), reverse=True)
+                filtered_photos = filtered_photos[:max_photos]
+            
+            return filtered_photos
+            
+        except Exception as e:
+            logger.error(f"Error in smart photo selection: {e}")
+            return []
+    
+    async def get_random_photos(self, user_id: str, count: int = 10, criteria: Optional['SmartSelectionCriteria'] = None) -> Dict[str, Any]:
+        """获取随机照片用于幻灯片"""
+        try:
+            import random
+            
+            # Get photos based on criteria
+            if criteria:
+                photos = await self._smart_photo_selection(user_id, criteria.dict() if hasattr(criteria, 'dict') else criteria)
+            else:
+                # Get all user photos
+                photos = await self.repository.list_user_files(user_id, limit=500, offset=0)
+                # Filter to images only
+                photos = [p for p in photos if p.get("content_type", "").startswith("image/")]
+            
+            # Randomly select
+            if len(photos) > count:
+                selected_photos = random.sample(photos, count)
+            else:
+                selected_photos = photos
+            
+            # Generate download URLs
+            photo_list = []
+            for photo in selected_photos:
+                download_url = await self.generate_download_url(photo["file_id"], user_id, expiry_hours=24)
+                photo_data = {
+                    **photo,
+                    "download_url": download_url
+                }
+                photo_list.append(photo_data)
+            
+            return {
+                "photos": photo_list,
+                "count": len(photo_list),
+                "criteria_applied": criteria.dict() if criteria and hasattr(criteria, 'dict') else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting random photos: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def preload_images(self, request: 'PreloadImagesRequest') -> Dict[str, Any]:
+        """预加载图片到缓存"""
+        try:
+            cached_count = 0
+            failed_count = 0
+            
+            for photo_id in request.photo_ids:
+                # Get file info
+                file = await self.repository.get_file_by_id(photo_id, request.user_id)
+                if not file:
+                    failed_count += 1
+                    continue
+                
+                # Check if already cached
+                cache_entry = await self.repository.get_cache_entry(request.frame_id, photo_id)
+                
+                if cache_entry and cache_entry["status"] == "cached":
+                    # Already cached, increment hit count
+                    await self.repository.increment_cache_hit(cache_entry["cache_id"])
+                    cached_count += 1
+                    continue
+                
+                # Generate download URL
+                download_url = await self.generate_download_url(photo_id, request.user_id, expiry_hours=24)
+                
+                # Create cache entry
+                cache_data = {
+                    "photo_id": photo_id,
+                    "frame_id": request.frame_id,
+                    "user_id": request.user_id,
+                    "original_url": download_url,
+                    "cache_key": f"{request.frame_id}:{photo_id}",
+                    "status": "pending",
+                    "priority": request.priority,
+                    "file_size": file.get("file_size"),
+                    "content_type": file.get("content_type"),
+                    "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+                }
+                
+                result = await self.repository.create_cache_entry(cache_data)
+                if result:
+                    cached_count += 1
+                else:
+                    failed_count += 1
+            
+            return {
+                "frame_id": request.frame_id,
+                "requested": len(request.photo_ids),
+                "cached": cached_count,
+                "failed": failed_count,
+                "message": f"Preloaded {cached_count} photos, {failed_count} failed"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error preloading images: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def get_cache_stats(self, frame_id: str) -> Dict[str, Any]:
+        """获取设备缓存统计"""
+        try:
+            stats = await self.repository.get_frame_cache_stats(frame_id)
+            return stats
+        except Exception as e:
+            logger.error(f"Error getting cache stats: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def update_photo_metadata(self, request: 'UpdatePhotoMetadataRequest', user_id: str) -> Dict[str, Any]:
+        """更新照片元数据"""
+        try:
+            # Verify user owns the photo
+            file = await self.repository.get_file_by_id(request.file_id, user_id)
+            if not file:
+                raise HTTPException(status_code=404, detail="Photo not found")
+            
+            # Get existing metadata or create new
+            existing = await self.repository.get_photo_metadata(request.file_id)
+            
+            metadata = {
+                "file_id": request.file_id,
+                "is_favorite": request.is_favorite if request.is_favorite is not None else (existing.get("is_favorite", False) if existing else False),
+                "rating": request.rating if request.rating is not None else (existing.get("rating") if existing else None),
+                "tags": request.tags if request.tags is not None else (existing.get("tags", []) if existing else []),
+                "location_name": request.location_name if request.location_name is not None else (existing.get("location_name") if existing else None),
+                "latitude": request.latitude if request.latitude is not None else (existing.get("latitude") if existing else None),
+                "longitude": request.longitude if request.longitude is not None else (existing.get("longitude") if existing else None),
+            }
+            
+            result = await self.repository.upsert_photo_metadata(metadata)
+            return result
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating photo metadata: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def create_rotation_schedule(self, request: 'CreateRotationScheduleRequest') -> Dict[str, Any]:
+        """创建照片轮播计划"""
+        try:
+            # Verify playlist exists
+            playlist = await self.repository.get_playlist(request.playlist_id)
+            if not playlist:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+            
+            schedule_data = {
+                "playlist_id": request.playlist_id,
+                "frame_id": request.frame_id,
+                "user_id": request.user_id,
+                "start_time": request.start_time,
+                "end_time": request.end_time,
+                "days_of_week": json.dumps(request.days_of_week),
+                "interval_seconds": request.interval_seconds,
+                "shuffle": request.shuffle
+            }
+            
+            result = await self.repository.create_rotation_schedule(schedule_data)
+            if not result:
+                raise HTTPException(status_code=500, detail="Failed to create rotation schedule")
+            
+            return result
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating rotation schedule: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def get_frame_playlists(self, frame_id: str) -> List[Dict[str, Any]]:
+        """获取设备的播放列表"""
+        try:
+            schedules = await self.repository.get_frame_schedules(frame_id)
+            
+            playlists = []
+            for schedule in schedules:
+                playlist = await self.repository.get_playlist(schedule["playlist_id"])
+                if playlist:
+                    playlists.append({
+                        **playlist,
+                        "schedule": schedule
+                    })
+            
+            return playlists
+            
+        except Exception as e:
+            logger.error(f"Error getting frame playlists: {e}")
+            return []

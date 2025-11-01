@@ -6,7 +6,6 @@ Task Service Data Models
 
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from decimal import Decimal
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -30,6 +29,7 @@ class TaskType(str, Enum):
     NEWS_MONITOR = "news_monitor"
     WEATHER_ALERT = "weather_alert"
     PRICE_TRACKER = "price_tracker"
+    DATA_BACKUP = "data_backup"
     TODO = "todo"
     REMINDER = "reminder"
     CALENDAR_EVENT = "calendar_event"
@@ -53,7 +53,7 @@ class TaskCreateRequest(BaseModel):
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM)
     config: Dict[str, Any] = Field(default_factory=dict)
     schedule: Optional[Dict[str, Any]] = None
-    credits_per_run: Optional[Decimal] = Field(default=0)
+    credits_per_run: Optional[float] = Field(default=0.0)
     tags: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     due_date: Optional[datetime] = None
@@ -68,7 +68,7 @@ class TaskUpdateRequest(BaseModel):
     status: Optional[TaskStatus] = None
     config: Optional[Dict[str, Any]] = None
     schedule: Optional[Dict[str, Any]] = None
-    credits_per_run: Optional[Decimal] = None
+    credits_per_run: Optional[float] = None
     tags: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
     due_date: Optional[datetime] = None
@@ -95,22 +95,22 @@ class TaskResponse(BaseModel):
     priority: TaskPriority
     config: Dict[str, Any]
     schedule: Optional[Dict[str, Any]]
-    credits_per_run: Decimal
+    credits_per_run: float
     tags: List[str]
     metadata: Dict[str, Any]
-    
+
     # 执行相关
     next_run_time: Optional[datetime]
     last_run_time: Optional[datetime]
     last_success_time: Optional[datetime]
     last_error: Optional[str]
     last_result: Optional[Dict[str, Any]]
-    
+
     # 统计
     run_count: int
     success_count: int
     failure_count: int
-    total_credits_consumed: Decimal
+    total_credits_consumed: float
     
     # 时间相关
     due_date: Optional[datetime]
@@ -134,9 +134,9 @@ class TaskExecutionResponse(BaseModel):
     result: Optional[Dict[str, Any]]
     error_message: Optional[str]
     error_details: Optional[Dict[str, Any]]
-    
+
     # 资源消耗
-    credits_consumed: Decimal
+    credits_consumed: float
     tokens_used: Optional[int]
     api_calls_made: int
     duration_ms: Optional[int]
@@ -156,10 +156,13 @@ class TaskTemplateResponse(BaseModel):
     category: str
     task_type: TaskType
     default_config: Dict[str, Any]
-    required_fields: List[str]
-    optional_fields: List[str]
+    required_fields: Optional[List[str]] = []
+    optional_fields: Optional[List[str]] = []
+    config_schema: Optional[Dict[str, Any]] = {}
     required_subscription_level: str
-    credits_per_run: Decimal
+    credits_per_run: float
+    tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = {}
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -183,9 +186,9 @@ class TaskAnalyticsResponse(BaseModel):
     failed_executions: int
     success_rate: float
     average_execution_time: float  # 秒
-    
+
     # 资源消耗
-    total_credits_consumed: Decimal
+    total_credits_consumed: float
     total_tokens_used: int
     total_api_calls: int
     

@@ -68,9 +68,30 @@ class StructuredFormatter(logging.Formatter):
         return json.dumps(log_data, ensure_ascii=False)
 
 
+class ResilientLokiHandler(logging.Handler):
+    """Resilient wrapper around LokiHandler that won't crash the app"""
+
+    def __init__(self, loki_handler):
+        super().__init__()
+        self.loki_handler = loki_handler
+        self.failed = False
+
+    def emit(self, record):
+        """Emit a record, catching any exceptions"""
+        if self.failed:
+            return  # Already failed, don't try again
+
+        try:
+            self.loki_handler.emit(record)
+        except Exception as e:
+            self.failed = True
+            # Silently fail - don't crash the application
+            pass
+
+
 class HumanReadableFormatter(logging.Formatter):
     """人类可读的日志格式化器"""
-    
+
     def __init__(self, service_name: str, use_colors: bool = True):
         self.service_name = service_name
         self.use_colors = use_colors
@@ -247,20 +268,38 @@ class UnifiedLoggingConfig:
                 # 只发送 INFO 及以上级别到 Loki (减少网络流量)
                 loki_handler.setLevel(logging.INFO)
 
-                logger.addHandler(loki_handler)
+                # Wrap in resilient handler to prevent crashes
+                resilient_handler = ResilientLokiHandler(loki_handler)
+                resilient_handler.setLevel(logging.INFO)
+                logger.addHandler(resilient_handler)
 
-                # 只在主 logger 上记录一次成功信息
+                # 只在主 logger 上记录一次成功信息 - 使用console handler避免循环
                 if logger_component == "main":
-                    logger.info(f"✅ Centralized logging enabled | loki_url={self.loki_url}")
+                    # 直接使用console handler记录，避免触发loki handler造成循环
+                    console_logger = logging.getLogger(f"{self.service_name}_console")
+                    console_logger.setLevel(logging.INFO)
+                    if not console_logger.handlers:
+                        console_handler = logging.StreamHandler(sys.stdout)
+                        console_formatter = HumanReadableFormatter(self.service_name, use_colors=True)
+                        console_handler.setFormatter(console_formatter)
+                        console_logger.addHandler(console_handler)
+                    console_logger.info(f"✅ Centralized logging enabled | loki_url={self.loki_url}")
 
             except ImportError:
                 if self.service_name == "main" or "." not in self.service_name:
                     logger.warning("⚠️  python-logging-loki not installed. Logging to console/file only.")
             except Exception as e:
-                # Loki 不可用 - 不影响应用启动
-                if self.service_name == "main" or "." not in self.service_name:
-                    logger.warning(f"⚠️  Could not connect to Loki: {e}")
-                    logger.info("📝 Logging to console/file only")
+                # Loki 不可用 - 不影响应用启动，使用console输出避免循环
+                if logger_component == "main":
+                    console_logger = logging.getLogger(f"{self.service_name}_console")
+                    console_logger.setLevel(logging.INFO)
+                    if not console_logger.handlers:
+                        console_handler = logging.StreamHandler(sys.stdout)
+                        console_formatter = HumanReadableFormatter(self.service_name, use_colors=True)
+                        console_handler.setFormatter(console_formatter)
+                        console_logger.addHandler(console_handler)
+                    console_logger.warning(f"⚠️  Could not connect to Loki: {e}")
+                    console_logger.info("📝 Logging to console/file only")
 
         return logger
     

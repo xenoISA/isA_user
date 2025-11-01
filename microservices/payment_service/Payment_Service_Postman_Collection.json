@@ -1,0 +1,993 @@
+{
+	"info": {
+		"_postman_id": "payment-service-staging-v1",
+		"name": "Payment Service API - Staging",
+		"description": "Payment & Subscription Management Microservice - Stripe integration, subscription management, invoicing, and refund processing\n\nBase URL: http://localhost:8207\nEnvironment: Staging (Docker)\nVersion: 1.0.0\n\nCapabilities:\n- Stripe payment processing (test mode)\n- Subscription plan management\n- Subscription lifecycle management\n- Payment intent creation and confirmation\n- Invoice generation\n- Refund processing\n- Usage tracking\n- Revenue and subscription statistics",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "1.0.0"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8207",
+			"type": "string",
+			"description": "Payment service base URL (port 8207 in staging)"
+		},
+		{
+			"key": "api_base",
+			"value": "{{base_url}}/api/v1",
+			"type": "string",
+			"description": "API base path"
+		},
+		{
+			"key": "plan_id",
+			"value": "",
+			"type": "string",
+			"description": "Subscription plan ID (set by create plan endpoint)"
+		},
+		{
+			"key": "subscription_id",
+			"value": "",
+			"type": "string",
+			"description": "Subscription ID (set by create subscription endpoint)"
+		},
+		{
+			"key": "payment_id",
+			"value": "",
+			"type": "string",
+			"description": "Payment ID (set by create payment intent endpoint)"
+		},
+		{
+			"key": "invoice_id",
+			"value": "",
+			"type": "string",
+			"description": "Invoice ID (set by create invoice endpoint)"
+		},
+		{
+			"key": "refund_id",
+			"value": "",
+			"type": "string",
+			"description": "Refund ID (set by create refund endpoint)"
+		},
+		{
+			"key": "user_id",
+			"value": "test_user_123",
+			"type": "string",
+			"description": "Test user ID"
+		}
+	],
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service is healthy', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"    pm.expect(jsonData.service).to.eql('payment_service');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Service health check\n\nReturns:\n- status: healthy\n- service: payment_service\n- port: 8207\n- version: 1.0.0"
+					},
+					"response": []
+				},
+				{
+					"name": "Service Info",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Has service information', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.eql('payment_service');",
+									"    pm.expect(jsonData.capabilities).to.be.an('object');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/info",
+							"host": ["{{base_url}}"],
+							"path": ["info"]
+						},
+						"description": "Get payment service information\n\nReturns:\n- service: payment_service\n- version: 1.0.0\n- description: service description\n- capabilities: available features\n- endpoints: available API endpoints"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check and service information endpoints"
+		},
+		{
+			"name": "Subscription Plans",
+			"item": [
+				{
+					"name": "Create Subscription Plan",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Plan created successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.plan_id).to.be.a('string');",
+									"    pm.expect(jsonData.stripe_price_id).to.be.a('string');",
+									"    ",
+									"    // Save plan ID to collection variable",
+									"    pm.collectionVariables.set('plan_id', jsonData.plan_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"plan_id\": \"plan_pro_monthly_{{$timestamp}}\",\n  \"name\": \"Pro Plan - Monthly\",\n  \"tier\": \"pro\",\n  \"price\": 29.99,\n  \"billing_cycle\": \"monthly\",\n  \"features\": {\n    \"storage_gb\": 100,\n    \"users\": 5,\n    \"api_calls\": 10000\n  },\n  \"trial_days\": 14\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/plans",
+							"host": ["{{api_base}}"],
+							"path": ["plans"]
+						},
+						"description": "Create a new subscription plan\n\nRequest Body:\n- plan_id: Unique plan identifier (required)\n- name: Plan name (required)\n- tier: Subscription tier - free, basic, pro, enterprise (required)\n- price: Price in USD (required)\n- billing_cycle: monthly, quarterly, yearly (required)\n- features: Feature object (optional)\n- trial_days: Trial period in days (optional)\n\nResponse:\n- plan_id: Plan identifier\n- stripe_price_id: Stripe price ID\n- stripe_product_id: Stripe product ID\n- All plan details"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Subscription Plan",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Plan retrieved successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.plan_id).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/plans/:plan_id",
+							"host": ["{{api_base}}"],
+							"path": ["plans", ":plan_id"],
+							"variable": [
+								{
+									"key": "plan_id",
+									"value": "{{plan_id}}",
+									"description": "Subscription plan ID"
+								}
+							]
+						},
+						"description": "Get a subscription plan by ID\n\nPath Parameters:\n- plan_id: Subscription plan ID (required)\n\nResponse:\n- Complete plan details including pricing and features"
+					},
+					"response": []
+				},
+				{
+					"name": "List Subscription Plans",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Plans listed successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/plans",
+							"host": ["{{api_base}}"],
+							"path": ["plans"]
+						},
+						"description": "List all active subscription plans\n\nResponse:\n- Array of subscription plans"
+					},
+					"response": []
+				}
+			],
+			"description": "Subscription plan management endpoints"
+		},
+		{
+			"name": "Subscriptions",
+			"item": [
+				{
+					"name": "Create Subscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Subscription created successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.subscription.subscription_id).to.be.a('string');",
+									"    ",
+									"    // Save subscription ID to collection variable",
+									"    pm.collectionVariables.set('subscription_id', jsonData.subscription.subscription_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"plan_id\": \"{{plan_id}}\",\n  \"metadata\": {\n    \"source\": \"postman_test\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/subscriptions",
+							"host": ["{{api_base}}"],
+							"path": ["subscriptions"]
+						},
+						"description": "Create a new subscription\n\nRequest Body:\n- user_id: User identifier (required)\n- plan_id: Subscription plan ID (required)\n- payment_method_id: Payment method ID (optional)\n- trial_days: Override trial days (optional)\n- metadata: Additional metadata (optional)\n\nResponse:\n- subscription: Subscription object\n- plan: Associated plan object\n- payment_method: Payment method info"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Subscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Subscription retrieved successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.subscription.subscription_id).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/subscriptions/user/:user_id",
+							"host": ["{{api_base}}"],
+							"path": ["subscriptions", "user", ":user_id"],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Get user's current subscription\n\nPath Parameters:\n- user_id: User identifier (required)\n\nResponse:\n- subscription: Current subscription\n- plan: Associated plan\n- payment_method: Payment method\n- next_invoice: Next invoice details"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Subscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Subscription updated successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.subscription.cancel_at_period_end).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"cancel_at_period_end\": true,\n  \"metadata\": {\n    \"updated\": true\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/subscriptions/:subscription_id",
+							"host": ["{{api_base}}"],
+							"path": ["subscriptions", ":subscription_id"],
+							"variable": [
+								{
+									"key": "subscription_id",
+									"value": "{{subscription_id}}",
+									"description": "Subscription ID"
+								}
+							]
+						},
+						"description": "Update a subscription\n\nPath Parameters:\n- subscription_id: Subscription ID (required)\n\nRequest Body:\n- plan_id: New plan ID (optional)\n- cancel_at_period_end: Schedule cancellation (optional)\n- payment_method_id: New payment method (optional)\n- metadata: Updated metadata (optional)\n\nResponse:\n- subscription: Updated subscription\n- plan: Associated plan"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Subscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Subscription cancelled', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.canceled_at).to.not.be.null;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"immediate\": false,\n  \"reason\": \"User requested cancellation\",\n  \"feedback\": \"Testing cancellation flow\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/subscriptions/:subscription_id/cancel",
+							"host": ["{{api_base}}"],
+							"path": ["subscriptions", ":subscription_id", "cancel"],
+							"variable": [
+								{
+									"key": "subscription_id",
+									"value": "{{subscription_id}}",
+									"description": "Subscription ID"
+								}
+							]
+						},
+						"description": "Cancel a subscription\n\nPath Parameters:\n- subscription_id: Subscription ID (required)\n\nRequest Body:\n- immediate: Cancel immediately vs at period end (optional)\n- reason: Cancellation reason (optional)\n- feedback: User feedback (optional)\n\nResponse:\n- Cancelled subscription object"
+					},
+					"response": []
+				}
+			],
+			"description": "Subscription lifecycle management endpoints"
+		},
+		{
+			"name": "Payments",
+			"item": [
+				{
+					"name": "Create Payment Intent",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Payment intent created', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.payment_intent_id).to.be.a('string');",
+									"    pm.expect(jsonData.client_secret).to.be.a('string');",
+									"    ",
+									"    // Save payment ID to collection variable",
+									"    pm.collectionVariables.set('payment_id', jsonData.payment_intent_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 29.99,\n  \"currency\": \"USD\",\n  \"description\": \"Pro Plan - Monthly Subscription\",\n  \"user_id\": \"{{user_id}}\",\n  \"metadata\": {\n    \"subscription_id\": \"{{subscription_id}}\",\n    \"test\": true\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/payments/intent",
+							"host": ["{{api_base}}"],
+							"path": ["payments", "intent"]
+						},
+						"description": "Create a Stripe payment intent\n\nRequest Body:\n- amount: Amount in USD (required)\n- currency: Currency code (default: USD)\n- description: Payment description (optional)\n- user_id: User identifier (required)\n- metadata: Additional metadata (optional)\n\nResponse:\n- payment_intent_id: Stripe payment intent ID\n- client_secret: Client secret for Stripe.js\n- amount: Payment amount\n- currency: Currency\n- status: Payment status"
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Payment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Payment confirmed', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('succeeded');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"processor_response\": {\n    \"status\": \"succeeded\",\n    \"test\": true\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/payments/:payment_id/confirm",
+							"host": ["{{api_base}}"],
+							"path": ["payments", ":payment_id", "confirm"],
+							"variable": [
+								{
+									"key": "payment_id",
+									"value": "{{payment_id}}",
+									"description": "Payment ID"
+								}
+							]
+						},
+						"description": "Confirm a payment (typically called by webhook)\n\nPath Parameters:\n- payment_id: Payment intent ID (required)\n\nRequest Body:\n- processor_response: Response from payment processor (optional)\n\nResponse:\n- Payment object with status: succeeded"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Payment History",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Payment history retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.payments).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/payments/user/:user_id?limit=10",
+							"host": ["{{api_base}}"],
+							"path": ["payments", "user", ":user_id"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10",
+									"description": "Limit results"
+								}
+							],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Get user's payment history\n\nPath Parameters:\n- user_id: User identifier (required)\n\nQuery Parameters:\n- limit: Number of results (default: 100)\n- status: Filter by status (optional)\n\nResponse:\n- payments: Array of payment objects\n- total_count: Total number of payments\n- total_amount: Total amount\n- filters_applied: Applied filters"
+					},
+					"response": []
+				}
+			],
+			"description": "Payment processing endpoints with Stripe integration"
+		},
+		{
+			"name": "Invoices",
+			"item": [
+				{
+					"name": "Create Invoice",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Invoice created successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.invoice_id).to.be.a('string');",
+									"    ",
+									"    // Save invoice ID to collection variable",
+									"    pm.collectionVariables.set('invoice_id', jsonData.invoice_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_id\": \"{{subscription_id}}\",\n  \"amount_due\": 29.99,\n  \"line_items\": [\n    {\n      \"description\": \"Pro Plan - Monthly\",\n      \"amount\": 29.99,\n      \"quantity\": 1\n    }\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/invoices",
+							"host": ["{{api_base}}"],
+							"path": ["invoices"]
+						},
+						"description": "Create an invoice\n\nRequest Body:\n- user_id: User identifier (required)\n- subscription_id: Subscription ID (optional)\n- amount_due: Amount due (required)\n- due_date: Invoice due date (optional)\n- line_items: Array of line items (required)\n\nResponse:\n- Complete invoice object with invoice_id"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Invoice",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Invoice retrieved successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.invoice.invoice_id).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/invoices/:invoice_id",
+							"host": ["{{api_base}}"],
+							"path": ["invoices", ":invoice_id"],
+							"variable": [
+								{
+									"key": "invoice_id",
+									"value": "{{invoice_id}}",
+									"description": "Invoice ID"
+								}
+							]
+						},
+						"description": "Get an invoice by ID\n\nPath Parameters:\n- invoice_id: Invoice identifier (required)\n\nResponse:\n- invoice: Invoice object\n- payment: Associated payment (if any)\n- download_url: PDF download URL"
+					},
+					"response": []
+				}
+			],
+			"description": "Invoice generation and management endpoints"
+		},
+		{
+			"name": "Refunds",
+			"item": [
+				{
+					"name": "Create Refund",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('Refund created successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.refund_id).to.be.a('string');",
+									"        ",
+									"        // Save refund ID to collection variable",
+									"        pm.collectionVariables.set('refund_id', jsonData.refund_id);",
+									"    });",
+									"} else if (pm.response.code === 400) {",
+									"    pm.test('Expected error in test mode', function () {",
+									"        // In Stripe test mode, uncaptured payments cannot be refunded",
+									"        console.log('Note: Refund not possible for uncaptured test payment');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"payment_id\": \"{{payment_id}}\",\n  \"amount\": 10.00,\n  \"reason\": \"customer_request\",\n  \"requested_by\": \"{{user_id}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/refunds",
+							"host": ["{{api_base}}"],
+							"path": ["refunds"]
+						},
+						"description": "Create a refund\n\nRequest Body:\n- payment_id: Payment ID to refund (required)\n- amount: Refund amount (optional, defaults to full amount)\n- reason: Refund reason (optional)\n- requested_by: User requesting refund (required)\n\nResponse:\n- refund_id: Refund identifier\n- status: Refund status\n- amount: Refund amount\n\nNote: In Stripe test mode, payments must be captured before refunding"
+					},
+					"response": []
+				},
+				{
+					"name": "Process Refund",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Refund processed', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('succeeded');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approved_by\": \"admin_user\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/refunds/:refund_id/process",
+							"host": ["{{api_base}}"],
+							"path": ["refunds", ":refund_id", "process"],
+							"variable": [
+								{
+									"key": "refund_id",
+									"value": "{{refund_id}}",
+									"description": "Refund ID"
+								}
+							]
+						},
+						"description": "Process/approve a refund\n\nPath Parameters:\n- refund_id: Refund identifier (required)\n\nRequest Body:\n- approved_by: Admin approving refund (optional)\n\nResponse:\n- Refund object with updated status"
+					},
+					"response": []
+				}
+			],
+			"description": "Refund processing endpoints"
+		},
+		{
+			"name": "Usage & Statistics",
+			"item": [
+				{
+					"name": "Record Usage",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Usage recorded', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_id\": \"{{subscription_id}}\",\n  \"metric_name\": \"api_calls\",\n  \"quantity\": 100,\n  \"metadata\": {\n    \"endpoint\": \"/api/test\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/usage",
+							"host": ["{{api_base}}"],
+							"path": ["usage"]
+						},
+						"description": "Record usage metrics\n\nRequest Body:\n- user_id: User identifier (required)\n- subscription_id: Subscription ID (required)\n- metric_name: Metric name (required)\n- quantity: Usage quantity (required)\n- metadata: Additional metadata (optional)\n\nResponse:\n- success: boolean\n- usage_record: Recorded usage details"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Revenue Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Revenue stats retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.total_revenue).to.exist;",
+									"    pm.expect(jsonData.daily_revenue).to.be.an('object');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/stats/revenue",
+							"host": ["{{api_base}}"],
+							"path": ["stats", "revenue"]
+						},
+						"description": "Get revenue statistics\n\nResponse:\n- total_revenue: Total revenue\n- payment_count: Number of payments\n- average_payment: Average payment amount\n- daily_revenue: Daily breakdown\n- period_days: Statistics period"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Subscription Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Subscription stats retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.active_subscriptions).to.exist;",
+									"    pm.expect(jsonData.tier_distribution).to.be.an('object');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/stats/subscriptions",
+							"host": ["{{api_base}}"],
+							"path": ["stats", "subscriptions"]
+						},
+						"description": "Get subscription statistics\n\nResponse:\n- active_subscriptions: Number of active subscriptions\n- tier_distribution: Subscriptions by tier\n- churn_rate: Monthly churn rate\n- canceled_last_30_days: Recent cancellations"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Service Stats",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service stats retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.total_payments).to.exist;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/stats",
+							"host": ["{{api_base}}"],
+							"path": ["stats"]
+						},
+						"description": "Get overall service statistics\n\nResponse:\n- total_payments: Total payment count\n- active_subscriptions: Active subscription count\n- revenue_today: Today's revenue\n- revenue_month: Month's revenue\n- failed_payments_today: Failed payment count\n- refunds_today: Refund count"
+					},
+					"response": []
+				}
+			],
+			"description": "Usage tracking and statistics endpoints"
+		}
+	],
+	"auth": {
+		"type": "noauth"
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}

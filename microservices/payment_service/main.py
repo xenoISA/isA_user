@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger  # 使用新的日志模块
+from core.nats_client import get_event_bus
 
 from .payment_repository import PaymentRepository
 from .payment_service import PaymentService
@@ -52,22 +53,31 @@ SERVICE_PORT = config.service_port
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
     global payment_service
-    
+
+    # Initialize event bus for event-driven communication
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("payment_service")
+        logger.info("Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+
     # 初始化数据访问层
     repository = PaymentRepository()
-    
+
     # 初始化业务逻辑层
     # 获取 Stripe 配置
     stripe_key = config_manager.get("STRIPE_SECRET_KEY") or config_manager.get("PAYMENT_SERVICE_STRIPE_SECRET_KEY")
-    
+
     payment_service = PaymentService(
         repository=repository,
-        stripe_secret_key=stripe_key
+        stripe_secret_key=stripe_key,
+        event_bus=event_bus
     )
     
     # Register with Consul
     consul_registry = ConsulRegistry(
-        service_name="payment",
+        service_name="payment_service",
         service_port=SERVICE_PORT,
         consul_host=config.consul_host,
         consul_port=config.consul_port,
@@ -90,6 +100,9 @@ async def lifespan(app: FastAPI):
     if hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
+
+    if event_bus:
+        await event_bus.close()
 
     logger.info("Payment Service shutting down...")
 
@@ -158,15 +171,15 @@ async def get_service_stats():
     """获取服务统计信息"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    
+
     revenue_stats = await payment_service.get_revenue_stats()
     subscription_stats = await payment_service.get_subscription_stats()
-    
+
     return ServiceStats(
-        total_payments=subscription_stats.get("total_payments", 0),
+        total_payments=revenue_stats.get("payment_count", 0),
         active_subscriptions=subscription_stats.get("active_subscriptions", 0),
-        revenue_today=revenue_stats.get("daily_revenue", 0),
-        revenue_month=revenue_stats.get("monthly_revenue", 0),
+        revenue_today=revenue_stats.get("total_revenue", 0),
+        revenue_month=revenue_stats.get("total_revenue", 0),
         failed_payments_today=0,  # TODO: 实现失败支付统计
         refunds_today=0  # TODO: 实现退款统计
     )
@@ -467,12 +480,12 @@ async def create_refund(request: CreateRefundRequest):
 @app.post("/api/v1/refunds/{refund_id}/process", response_model=Refund)
 async def process_refund(
     refund_id: str,
-    approved_by: Optional[str] = Body(default=None)
+    approved_by: Optional[str] = Body(default=None, embed=True)
 ):
     """处理退款"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    
+
     try:
         refund = await payment_service.process_refund(refund_id, approved_by)
         return refund

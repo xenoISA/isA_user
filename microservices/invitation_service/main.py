@@ -17,7 +17,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
 from .invitation_service import InvitationService
+from .invitation_repository import InvitationRepository
+from .events import InvitationEventHandler
 from .models import (
     HealthResponse, ServiceInfo,
     InvitationCreateRequest, AcceptInvitationRequest,
@@ -61,11 +64,43 @@ def get_invitation_service() -> InvitationService:
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     global consul_registry, invitation_service
-    
+
     try:
+        # Initialize event bus
+        event_bus = None
+        try:
+            event_bus = await get_event_bus("invitation_service")
+            logger.info("✅ Event bus initialized successfully")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+            event_bus = None
+
         # 初始化服务
-        invitation_service = InvitationService()
+        invitation_service = InvitationService(event_bus=event_bus)
         logger.info("Invitation microservice initialized successfully")
+
+        # Set up event subscriptions if event bus is available
+        if event_bus:
+            try:
+                invitation_repo = InvitationRepository()
+                event_handler = InvitationEventHandler(invitation_repo)
+
+                # Subscribe to organization.deleted events
+                await event_bus.subscribe(
+                    subject="events.organization.deleted",
+                    callback=lambda msg: event_handler.handle_event(msg)
+                )
+                logger.info("✅ Subscribed to organization.deleted events")
+
+                # Subscribe to user.deleted events
+                await event_bus.subscribe(
+                    subject="events.user.deleted",
+                    callback=lambda msg: event_handler.handle_event(msg)
+                )
+                logger.info("✅ Subscribed to user.deleted events")
+
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
         
         # 注册到Consul
         if config.consul_enabled:
@@ -97,7 +132,15 @@ async def lifespan(app: FastAPI):
                 logger.info("Service deregistered from Consul")
             except Exception as e:
                 logger.error(f"Error deregistering from Consul: {e}")
-        
+
+        # Close event bus
+        if event_bus:
+            try:
+                await event_bus.close()
+                logger.info("Event bus closed")
+            except Exception as e:
+                logger.error(f"Error closing event bus: {e}")
+
         logger.info("Invitation microservice shutdown completed")
 
 
@@ -157,6 +200,7 @@ async def create_invitation(
         
         return {
             "invitation_id": invitation.invitation_id,
+            "invitation_token": invitation.invitation_token,
             "email": invitation.email,
             "role": invitation.role.value,
             "status": invitation.status.value,

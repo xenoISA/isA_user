@@ -21,16 +21,18 @@ from .models import (
     BatchOperationResult, BatchOperationSummary,
     PermissionAuditLog, AuthorizationError
 )
+from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
 
 class AuthorizationService:
     """Core authorization service with business logic"""
-    
-    def __init__(self):
+
+    def __init__(self, event_bus=None):
         self.repository = AuthorizationRepository()
-        
+        self.event_bus = event_bus
+
         # Subscription tier hierarchy for access control
         self.subscription_hierarchy = {
             SubscriptionTier.FREE: 0,
@@ -136,6 +138,26 @@ class AuthorizationService:
             
             # 5. Access denied
             await self._log_access_check(user_id, resource_type, resource_name, "deny", False, "Insufficient permissions")
+
+            # Publish access denied event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.ACCESS_DENIED,
+                        source=ServiceSource.AUTHORIZATION_SERVICE,
+                        data={
+                            "user_id": user_id,
+                            "resource_type": resource_type.value,
+                            "resource_name": resource_name,
+                            "required_access_level": required_level.value,
+                            "reason": "Insufficient permissions",
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish access.denied event: {e}")
+
             return ResourceAccessResponse(
                 has_access=False,
                 user_access_level=AccessLevel.NONE,
@@ -327,7 +349,28 @@ class AuthorizationService:
                     reason=request.reason,
                     success=True
                 )
-                
+
+                # Publish permission granted event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.PERMISSION_GRANTED,
+                            source=ServiceSource.AUTHORIZATION_SERVICE,
+                            data={
+                                "user_id": request.user_id,
+                                "resource_type": request.resource_type.value,
+                                "resource_name": request.resource_name,
+                                "access_level": request.access_level.value,
+                                "permission_source": request.permission_source.value,
+                                "granted_by_user_id": request.granted_by_user_id,
+                                "organization_id": request.organization_id,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                    except Exception as e:
+                        logger.error(f"Failed to publish permission.granted event: {e}")
+
                 logger.info(f"Granted permission: user={request.user_id}, resource={request.resource_type}:{request.resource_name}, level={request.access_level}")
                 return True
             
@@ -375,7 +418,27 @@ class AuthorizationService:
                     reason=request.reason,
                     success=True
                 )
-                
+
+                # Publish permission revoked event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.PERMISSION_REVOKED,
+                            source=ServiceSource.AUTHORIZATION_SERVICE,
+                            data={
+                                "user_id": request.user_id,
+                                "resource_type": request.resource_type.value,
+                                "resource_name": request.resource_name,
+                                "previous_access_level": current_permission.access_level.value if current_permission else "none",
+                                "revoked_by_user_id": request.revoked_by_user_id,
+                                "reason": request.reason,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                    except Exception as e:
+                        logger.error(f"Failed to publish permission.revoked event: {e}")
+
                 logger.info(f"Revoked permission: user={request.user_id}, resource={request.resource_type}:{request.resource_name}")
                 return True
             
@@ -658,7 +721,12 @@ class AuthorizationService:
     
     async def cleanup(self) -> None:
         """Service cleanup on shutdown"""
-        logger.info("Authorization service cleanup completed")
+        try:
+            # Cleanup repository resources (close service clients)
+            await self.repository.cleanup()
+            logger.info("Authorization service cleanup completed")
+        except Exception as e:
+            logger.error(f"Error during authorization service cleanup: {e}")
     
     # ====================
     # Helper Methods

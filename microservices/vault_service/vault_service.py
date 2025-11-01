@@ -24,6 +24,7 @@ from .models import (
     EncryptionMethod
 )
 from core.blockchain_client import BlockchainClient
+from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +47,10 @@ class VaultNotFoundError(VaultServiceError):
 class VaultService:
     """Vault service for secure credential management"""
 
-    def __init__(self, blockchain_client: Optional[BlockchainClient] = None):
+    def __init__(self, blockchain_client: Optional[BlockchainClient] = None, event_bus=None):
         self.repository = VaultRepository()
         self.encryption = VaultEncryption()
+        self.event_bus = event_bus
 
         # Initialize blockchain integration if client provided
         self.blockchain = BlockchainVaultIntegration(blockchain_client)
@@ -66,11 +68,14 @@ class VaultService:
     ) -> Tuple[bool, Optional[VaultItemResponse], str]:
         """Create a new secret"""
         try:
+            logger.info(f"Creating secret for user {user_id}, type: {request.secret_type}")
+
             # Encrypt the secret
             encrypted_data, dek_encrypted, kek_salt, nonce = self.encryption.encrypt_secret(
                 request.secret_value,
                 user_id
             )
+            logger.info(f"Secret encrypted successfully, encrypted_data length: {len(encrypted_data)}")
 
             # Create blockchain hash if requested
             blockchain_tx_hash = None
@@ -89,6 +94,7 @@ class VaultService:
             }
 
             # Create vault item
+            logger.info(f"Creating VaultItem model with provider: {request.provider}")
             vault_item = VaultItem(
                 user_id=user_id,
                 organization_id=request.organization_id,
@@ -106,8 +112,11 @@ class VaultService:
                 rotation_days=request.rotation_days,
                 blockchain_reference=blockchain_tx_hash
             )
+            logger.info("VaultItem model created successfully")
 
+            logger.info("Calling repository.create_vault_item")
             result = await self.repository.create_vault_item(vault_item)
+            logger.info(f"Repository create result: {result}")
 
             if not result:
                 await self._log_access(user_id, "temp", VaultAction.CREATE, False,
@@ -124,10 +133,32 @@ class VaultService:
             await self._log_access(user_id, result.vault_id, VaultAction.CREATE, True,
                                   ip_address, user_agent)
 
+            # Publish vault.secret.created event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.VAULT_SECRET_CREATED,
+                        source=ServiceSource.VAULT_SERVICE,
+                        data={
+                            "vault_id": result.vault_id,
+                            "user_id": user_id,
+                            "organization_id": request.organization_id,
+                            "secret_type": request.secret_type.value,
+                            "provider": request.provider,
+                            "name": request.name,
+                            "blockchain_verified": blockchain_tx_hash is not None,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.created event: {e}")
+
+            logger.info(f"Secret created successfully with vault_id: {result.vault_id}")
             return True, result, "Secret created successfully"
 
         except Exception as e:
-            logger.error(f"Error creating secret: {e}")
+            logger.error(f"Error creating secret: {e}", exc_info=True)
             return False, None, f"Failed to create secret: {str(e)}"
 
     async def get_secret(
@@ -199,6 +230,25 @@ class VaultService:
             # Log successful access
             await self._log_access(user_id, vault_id, VaultAction.READ, True,
                                   ip_address, user_agent)
+
+            # Publish vault.secret.accessed event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.VAULT_SECRET_ACCESSED,
+                        source=ServiceSource.VAULT_SERVICE,
+                        data={
+                            "vault_id": vault_id,
+                            "user_id": user_id,
+                            "secret_type": item['secret_type'],
+                            "decrypted": decrypt,
+                            "blockchain_verified": blockchain_verified,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.accessed event: {e}")
 
             response = VaultSecretResponse(
                 vault_id=vault_id,
@@ -292,6 +342,24 @@ class VaultService:
             await self._log_access(user_id, vault_id, VaultAction.UPDATE, True,
                                   ip_address, user_agent)
 
+            # Publish vault.secret.updated event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.VAULT_SECRET_UPDATED,
+                        source=ServiceSource.VAULT_SERVICE,
+                        data={
+                            "vault_id": vault_id,
+                            "user_id": user_id,
+                            "secret_value_updated": request.secret_value is not None,
+                            "metadata_updated": request.metadata is not None,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.updated event: {e}")
+
             return True, response, "Secret updated successfully"
 
         except Exception as e:
@@ -323,6 +391,23 @@ class VaultService:
 
             await self._log_access(user_id, vault_id, VaultAction.DELETE, True,
                                   ip_address, user_agent)
+
+            # Publish vault.secret.deleted event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.VAULT_SECRET_DELETED,
+                        source=ServiceSource.VAULT_SERVICE,
+                        data={
+                            "vault_id": vault_id,
+                            "user_id": user_id,
+                            "secret_type": item.get('secret_type'),
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.deleted event: {e}")
 
             return True, "Secret deleted successfully"
 
@@ -412,6 +497,25 @@ class VaultService:
                                   ip_address, user_agent,
                                   metadata={'shared_with': request.shared_with_user_id or request.shared_with_org_id})
 
+            # Publish vault.secret.shared event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.VAULT_SECRET_SHARED,
+                        source=ServiceSource.VAULT_SERVICE,
+                        data={
+                            "vault_id": vault_id,
+                            "owner_user_id": owner_user_id,
+                            "shared_with_user_id": request.shared_with_user_id,
+                            "shared_with_org_id": request.shared_with_org_id,
+                            "permission_level": request.permission_level.value,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.shared event: {e}")
+
             return True, result, "Secret shared successfully"
 
         except Exception as e:
@@ -470,7 +574,26 @@ class VaultService:
         try:
             # This is essentially an update with version increment
             request = VaultUpdateRequest(secret_value=new_secret_value)
-            return await self.update_secret(vault_id, user_id, request, ip_address, user_agent)
+            success, response, message = await self.update_secret(vault_id, user_id, request, ip_address, user_agent)
+
+            # Publish vault.secret.rotated event if successful
+            if success and self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.VAULT_SECRET_ROTATED,
+                        source=ServiceSource.VAULT_SERVICE,
+                        data={
+                            "vault_id": vault_id,
+                            "user_id": user_id,
+                            "new_version": response.version if response else None,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.rotated event: {e}")
+
+            return success, response, message
 
         except Exception as e:
             logger.error(f"Error rotating secret: {e}")

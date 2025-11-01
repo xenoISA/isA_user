@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
 
 # Import internal modules
 from .authorization_service import AuthorizationService
@@ -47,17 +48,46 @@ logger = app_logger  # for backward compatibility
 
 # Global service instance
 authorization_service = None
+event_bus = None  # NATS event bus
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
-    global authorization_service
-    
+    global authorization_service, event_bus
+
     # Startup
     logger.info("🚀 Authorization Service starting up...")
     try:
-        authorization_service = AuthorizationService()
-        
+        # Initialize NATS JetStream event bus
+        try:
+            event_bus = await get_event_bus("authorization_service")
+            logger.info("✅ Event bus initialized successfully")
+
+            # Initialize authorization service with event bus
+            authorization_service = AuthorizationService(event_bus=event_bus)
+
+            # Subscribe to events
+            from .events import AuthorizationEventHandlers
+            event_handlers = AuthorizationEventHandlers(authorization_service)
+            handler_map = event_handlers.get_event_handler_map()
+
+            for event_type, handler_func in handler_map.items():
+                # Subscribe to each event type
+                await event_bus.subscribe_to_events(
+                    pattern=f"*.{event_type}",
+                    handler=handler_func
+                )
+                logger.info(f"✅ Subscribed to {event_type} events")
+
+            logger.info(f"✅ Subscribed to {len(handler_map)} event types")
+
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+            event_bus = None
+
+            # Initialize authorization service without event bus
+            authorization_service = AuthorizationService(event_bus=None)
+
         # Initialize default permissions
         await authorization_service.initialize_default_permissions()
         
@@ -88,12 +118,20 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("🛑 Authorization Service shutting down...")
-    
+
+    # Close event bus
+    if event_bus:
+        try:
+            await event_bus.close()
+            logger.info("Authorization event bus closed")
+        except Exception as e:
+            logger.error(f"Error closing event bus: {e}")
+
     # Deregister from Consul
     if config.consul_enabled and hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
-    
+
     if authorization_service:
         await authorization_service.cleanup()
     logger.info("✅ Authorization Service shutdown completed")

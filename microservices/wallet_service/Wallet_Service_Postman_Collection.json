@@ -1,0 +1,856 @@
+{
+	"info": {
+		"_postman_id": "wallet-service-staging-v1",
+		"name": "Wallet Service API - Staging",
+		"description": "Wallet Microservice - Credit management, balance operations, and transaction tracking\n\nBase URL: http://localhost:8208\nEnvironment: Staging (Docker)\nVersion: 1.0.0\n\nCapabilities:\n- Wallet creation and management\n- Balance operations (deposit, withdraw, consume)\n- Transaction tracking and history\n- User and wallet statistics\n- Multi-currency support",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "1.0.0"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8208",
+			"type": "string",
+			"description": "Wallet service base URL (port 8208 in staging)"
+		},
+		{
+			"key": "api_base",
+			"value": "{{base_url}}/api/v1",
+			"type": "string",
+			"description": "API base path"
+		},
+		{
+			"key": "wallet_id",
+			"value": "",
+			"type": "string",
+			"description": "Wallet ID for testing (set by create wallet endpoint)"
+		},
+		{
+			"key": "user_id",
+			"value": "test_wallet_user_123",
+			"type": "string",
+			"description": "User ID for testing"
+		},
+		{
+			"key": "transaction_id",
+			"value": "",
+			"type": "string",
+			"description": "Transaction ID for testing (set by transaction endpoints)"
+		}
+	],
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Root Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has service name', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.exist;",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": ["{{base_url}}"],
+							"path": [""]
+						},
+						"description": "Root health check endpoint\n\nReturns:\n- service: wallet_microservice\n- status: healthy\n- version: 1.0.0\n- timestamp: ISO 8601 timestamp"
+					},
+					"response": []
+				},
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service is healthy', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Detailed service health check\n\nReturns:\n- status: healthy\n- service: wallet_microservice\n- port: 8208\n- version: 1.0.0\n- capabilities: [wallet_management, transactions, statistics]"
+					},
+					"response": []
+				},
+				{
+					"name": "Wallet Service Stats",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Has statistics', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('operational');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/wallet/stats",
+							"host": ["{{api_base}}"],
+							"path": ["wallet", "stats"]
+						},
+						"description": "Get wallet service statistics\n\nReturns:\n- Service status\n- Capabilities\n- Uptime\n- Endpoint count"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check and service information endpoints for monitoring and discovery"
+		},
+		{
+			"name": "Wallet Management",
+			"item": [
+				{
+					"name": "Create Wallet",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('Wallet created successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"        pm.expect(jsonData.wallet_id).to.be.a('string');",
+									"        ",
+									"        // Save wallet ID to collection variable",
+									"        pm.collectionVariables.set('wallet_id', jsonData.wallet_id);",
+									"    });",
+									"} else if (pm.response.code === 400) {",
+									"    pm.test('Wallet already exists', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.false;",
+									"        console.log('Wallet already exists for this user');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"wallet_type\": \"fiat\",\n  \"initial_balance\": 1000.00,\n  \"currency\": \"CREDIT\",\n  \"metadata\": {\n    \"purpose\": \"testing\",\n    \"environment\": \"test\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/wallets",
+							"host": ["{{api_base}}"],
+							"path": ["wallets"]
+						},
+						"description": "Create a new wallet for a user\n\nRequest Body:\n- user_id: User identifier (required)\n- wallet_type: Type of wallet (default: \"fiat\")\n- initial_balance: Starting balance (default: 0.00)\n- currency: Wallet currency (default: \"CREDIT\")\n- metadata: Additional wallet metadata (optional)\n\nResponse:\n- success: boolean\n- wallet_id: Generated wallet identifier\n- user_id: user identifier\n- balance: wallet balance\n- currency: wallet currency\n- created_at: creation timestamp\n\nNote: Wallet ID is automatically saved to {{wallet_id}} variable"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Wallet Details",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Wallet details retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.wallet_id).to.be.a('string');",
+									"    pm.expect(jsonData.user_id).to.be.a('string');",
+									"    pm.expect(jsonData.balance).to.exist;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/wallets/:wallet_id",
+							"host": ["{{api_base}}"],
+							"path": ["wallets", ":wallet_id"],
+							"variable": [
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Wallet ID"
+								}
+							]
+						},
+						"description": "Get detailed information about a specific wallet\n\nPath Parameters:\n- wallet_id: Wallet identifier (required)\n\nResponse:\n- wallet_id: wallet identifier\n- user_id: user identifier\n- wallet_type: wallet type\n- balance: current balance\n- currency: wallet currency\n- status: active/inactive\n- created_at: creation timestamp\n- updated_at: last update timestamp\n- metadata: wallet metadata"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Wallets",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('User wallets retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.wallets).to.be.an('array');",
+									"    pm.expect(jsonData.count).to.be.a('number');",
+									"    ",
+									"    // If wallet exists, save the first wallet ID",
+									"    if (jsonData.wallets.length > 0) {",
+									"        pm.collectionVariables.set('wallet_id', jsonData.wallets[0].wallet_id);",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/users/:user_id/wallets",
+							"host": ["{{api_base}}"],
+							"path": ["users", ":user_id", "wallets"],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Get all wallets for a specific user\n\nPath Parameters:\n- user_id: User identifier (required)\n\nResponse:\n- wallets: array of wallet objects\n  - wallet_id: wallet identifier\n  - wallet_type: wallet type\n  - balance: current balance\n  - currency: wallet currency\n  - status: active/inactive\n  - created_at: creation timestamp\n- count: number of wallets\n\nNote: First wallet ID is automatically saved to {{wallet_id}} variable"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Wallet Balance",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Balance retrieved successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.balance).to.be.a('number');",
+									"    pm.expect(jsonData.currency).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/wallets/:wallet_id/balance",
+							"host": ["{{api_base}}"],
+							"path": ["wallets", ":wallet_id", "balance"],
+							"variable": [
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Wallet ID"
+								}
+							]
+						},
+						"description": "Get the current balance of a wallet\n\nPath Parameters:\n- wallet_id: Wallet identifier (required)\n\nResponse:\n- success: boolean\n- wallet_id: wallet identifier\n- balance: current balance\n- currency: wallet currency\n- last_updated: last transaction timestamp"
+					},
+					"response": []
+				}
+			],
+			"description": "Wallet creation, retrieval, and management endpoints.\n\nFeatures:\n- Create wallets for users\n- View wallet details\n- Check balances\n- Support for multiple wallet types and currencies"
+		},
+		{
+			"name": "Transaction Operations",
+			"item": [
+				{
+					"name": "Deposit to Wallet",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Deposit successful', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.transaction_id).to.be.a('string');",
+									"    pm.expect(jsonData.balance).to.be.a('number');",
+									"    ",
+									"    // Save transaction ID to collection variable",
+									"    pm.collectionVariables.set('transaction_id', jsonData.transaction_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 500.00,\n  \"description\": \"Test deposit\",\n  \"reference_id\": \"test_deposit_001\",\n  \"metadata\": {\n    \"source\": \"test_suite\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/wallets/:wallet_id/deposit",
+							"host": ["{{api_base}}"],
+							"path": ["wallets", ":wallet_id", "deposit"],
+							"variable": [
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Wallet ID"
+								}
+							]
+						},
+						"description": "Deposit funds into a wallet\n\nPath Parameters:\n- wallet_id: Wallet identifier (required)\n\nRequest Body:\n- amount: Amount to deposit (required, must be positive)\n- description: Transaction description (required)\n- reference_id: External reference ID (optional)\n- metadata: Additional transaction metadata (optional)\n\nResponse:\n- success: boolean\n- transaction_id: transaction identifier\n- wallet_id: wallet identifier\n- amount: deposited amount\n- balance: new wallet balance\n- currency: wallet currency\n- timestamp: transaction timestamp\n\nNote: Transaction ID is automatically saved to {{transaction_id}} variable"
+					},
+					"response": []
+				},
+				{
+					"name": "Withdraw from Wallet",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Withdrawal successful', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.transaction_id).to.be.a('string');",
+									"    pm.expect(jsonData.balance).to.be.a('number');",
+									"    ",
+									"    // Save transaction ID to collection variable",
+									"    pm.collectionVariables.set('transaction_id', jsonData.transaction_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 50.00,\n  \"description\": \"Test withdrawal\",\n  \"destination\": \"test_bank_account\",\n  \"metadata\": {\n    \"purpose\": \"test_withdrawal\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/wallets/:wallet_id/withdraw",
+							"host": ["{{api_base}}"],
+							"path": ["wallets", ":wallet_id", "withdraw"],
+							"variable": [
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Wallet ID"
+								}
+							]
+						},
+						"description": "Withdraw funds from a wallet\n\nPath Parameters:\n- wallet_id: Wallet identifier (required)\n\nRequest Body:\n- amount: Amount to withdraw (required, must be positive)\n- description: Transaction description (required)\n- destination: Withdrawal destination (optional)\n- metadata: Additional transaction metadata (optional)\n\nResponse:\n- success: boolean\n- transaction_id: transaction identifier\n- wallet_id: wallet identifier\n- amount: withdrawn amount\n- balance: new wallet balance\n- currency: wallet currency\n- timestamp: transaction timestamp\n\nNote: Withdrawal will fail if insufficient balance. Transaction ID is automatically saved to {{transaction_id}} variable"
+					},
+					"response": []
+				},
+				{
+					"name": "Consume from Wallet",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Consumption successful', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.transaction_id).to.be.a('string');",
+									"    pm.expect(jsonData.balance).to.be.a('number');",
+									"    ",
+									"    // Save transaction ID to collection variable",
+									"    pm.collectionVariables.set('transaction_id', jsonData.transaction_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 100.00,\n  \"description\": \"Test consumption\",\n  \"metadata\": {\n    \"purpose\": \"test_usage\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/wallets/:wallet_id/consume",
+							"host": ["{{api_base}}"],
+							"path": ["wallets", ":wallet_id", "consume"],
+							"variable": [
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Wallet ID"
+								}
+							]
+						},
+						"description": "Consume credits from a wallet (e.g., for service usage)\n\nPath Parameters:\n- wallet_id: Wallet identifier (required)\n\nRequest Body:\n- amount: Amount to consume (required, must be positive)\n- description: Transaction description (required)\n- metadata: Additional transaction metadata (optional)\n\nResponse:\n- success: boolean\n- transaction_id: transaction identifier\n- wallet_id: wallet identifier\n- amount: consumed amount\n- balance: new wallet balance\n- currency: wallet currency\n- timestamp: transaction timestamp\n\nNote: Consumption will fail if insufficient balance. Transaction ID is automatically saved to {{transaction_id}} variable"
+					},
+					"response": []
+				},
+				{
+					"name": "Transfer Between Wallets",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Transfer successful', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.transaction_id).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"to_wallet_id\": \"destination_wallet_id_here\",\n  \"amount\": 50.00,\n  \"description\": \"Test transfer\",\n  \"metadata\": {\n    \"transfer_type\": \"peer_to_peer\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/wallets/:wallet_id/transfer",
+							"host": ["{{api_base}}"],
+							"path": ["wallets", ":wallet_id", "transfer"],
+							"variable": [
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Source Wallet ID"
+								}
+							]
+						},
+						"description": "Transfer funds from one wallet to another\n\nPath Parameters:\n- wallet_id: Source wallet identifier (required)\n\nRequest Body:\n- to_wallet_id: Destination wallet identifier (required)\n- amount: Amount to transfer (required, must be positive)\n- description: Transaction description (required)\n- metadata: Additional transaction metadata (optional)\n\nResponse:\n- success: boolean\n- transaction_id: transaction identifier\n- from_wallet_id: source wallet identifier\n- to_wallet_id: destination wallet identifier\n- amount: transferred amount\n- from_balance: new source wallet balance\n- to_balance: new destination wallet balance\n- timestamp: transaction timestamp\n\nNote: Transfer will fail if insufficient balance in source wallet"
+					},
+					"response": []
+				}
+			],
+			"description": "Transaction operation endpoints for managing wallet funds.\n\nSupported operations:\n- Deposit: Add funds to wallet\n- Withdraw: Remove funds from wallet\n- Consume: Deduct credits for service usage\n- Transfer: Move funds between wallets\n\nAll operations are atomic and maintain transaction history"
+		},
+		{
+			"name": "Transaction History",
+			"item": [
+				{
+					"name": "Get Wallet Transactions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Transactions retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.transactions).to.be.an('array');",
+									"    pm.expect(jsonData.count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/wallets/:wallet_id/transactions?limit=10&offset=0",
+							"host": ["{{api_base}}"],
+							"path": ["wallets", ":wallet_id", "transactions"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10",
+									"description": "Maximum number of transactions to return"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Number of transactions to skip"
+								},
+								{
+									"key": "transaction_type",
+									"value": "deposit",
+									"description": "Filter by transaction type (deposit, withdraw, consume, transfer)",
+									"disabled": true
+								},
+								{
+									"key": "start_date",
+									"value": "2024-01-01",
+									"description": "Filter transactions from this date (YYYY-MM-DD)",
+									"disabled": true
+								},
+								{
+									"key": "end_date",
+									"value": "2024-12-31",
+									"description": "Filter transactions until this date (YYYY-MM-DD)",
+									"disabled": true
+								}
+							],
+							"variable": [
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Wallet ID"
+								}
+							]
+						},
+						"description": "Get transaction history for a specific wallet\n\nPath Parameters:\n- wallet_id: Wallet identifier (required)\n\nQuery Parameters:\n- limit: Maximum number of transactions (default: 50)\n- offset: Number of transactions to skip (default: 0)\n- transaction_type: Filter by type (optional)\n- start_date: Filter from date (optional)\n- end_date: Filter until date (optional)\n\nResponse:\n- transactions: array of transaction objects\n  - transaction_id: transaction identifier\n  - wallet_id: wallet identifier\n  - transaction_type: deposit/withdraw/consume/transfer\n  - amount: transaction amount\n  - balance_after: balance after transaction\n  - description: transaction description\n  - status: completed/pending/failed\n  - created_at: transaction timestamp\n  - metadata: transaction metadata\n- count: number of transactions\n- limit: requested limit\n- offset: requested offset"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Transactions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('User transactions retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.transactions).to.be.an('array');",
+									"    pm.expect(jsonData.count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/users/:user_id/transactions?limit=20&offset=0",
+							"host": ["{{api_base}}"],
+							"path": ["users", ":user_id", "transactions"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20",
+									"description": "Maximum number of transactions to return"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Number of transactions to skip"
+								},
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Filter by specific wallet",
+									"disabled": true
+								},
+								{
+									"key": "transaction_type",
+									"value": "deposit",
+									"description": "Filter by transaction type",
+									"disabled": true
+								}
+							],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Get transaction history for all wallets belonging to a user\n\nPath Parameters:\n- user_id: User identifier (required)\n\nQuery Parameters:\n- limit: Maximum number of transactions (default: 50)\n- offset: Number of transactions to skip (default: 0)\n- wallet_id: Filter by specific wallet (optional)\n- transaction_type: Filter by type (optional)\n\nResponse:\n- transactions: array of transaction objects across all user wallets\n  - transaction_id: transaction identifier\n  - wallet_id: wallet identifier\n  - transaction_type: deposit/withdraw/consume/transfer\n  - amount: transaction amount\n  - balance_after: balance after transaction\n  - description: transaction description\n  - status: completed/pending/failed\n  - created_at: transaction timestamp\n  - metadata: transaction metadata\n- count: number of transactions\n- limit: requested limit\n- offset: requested offset"
+					},
+					"response": []
+				}
+			],
+			"description": "Transaction history and query endpoints.\n\nFeatures:\n- View wallet transaction history\n- View user transaction history across all wallets\n- Filter by transaction type, date range\n- Pagination support"
+		},
+		{
+			"name": "Statistics",
+			"item": [
+				{
+					"name": "Get Wallet Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Wallet statistics retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.wallet_id).to.be.a('string');",
+									"    pm.expect(jsonData.statistics).to.be.an('object');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/wallets/:wallet_id/statistics",
+							"host": ["{{api_base}}"],
+							"path": ["wallets", ":wallet_id", "statistics"],
+							"variable": [
+								{
+									"key": "wallet_id",
+									"value": "{{wallet_id}}",
+									"description": "Wallet ID"
+								}
+							]
+						},
+						"description": "Get statistical information for a specific wallet\n\nPath Parameters:\n- wallet_id: Wallet identifier (required)\n\nResponse:\n- wallet_id: wallet identifier\n- statistics:\n  - total_deposits: sum of all deposits\n  - total_withdrawals: sum of all withdrawals\n  - total_consumed: sum of all consumptions\n  - total_transferred_out: sum of transfers out\n  - total_transferred_in: sum of transfers in\n  - transaction_count: total number of transactions\n  - average_transaction_amount: average transaction size\n  - first_transaction: timestamp of first transaction\n  - last_transaction: timestamp of last transaction\n  - current_balance: current wallet balance"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('User statistics retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.user_id).to.be.a('string');",
+									"    pm.expect(jsonData.statistics).to.be.an('object');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/users/:user_id/statistics",
+							"host": ["{{api_base}}"],
+							"path": ["users", ":user_id", "statistics"],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Get statistical information for all wallets belonging to a user\n\nPath Parameters:\n- user_id: User identifier (required)\n\nResponse:\n- user_id: user identifier\n- statistics:\n  - total_wallets: number of wallets\n  - total_balance: sum of all wallet balances\n  - total_deposits: sum of all deposits across wallets\n  - total_withdrawals: sum of all withdrawals across wallets\n  - total_consumed: sum of all consumptions across wallets\n  - total_transactions: total number of transactions\n  - average_transaction_amount: average transaction size\n  - most_active_wallet: wallet with most transactions\n  - first_transaction: timestamp of first transaction\n  - last_transaction: timestamp of last transaction\n- wallets: array of wallet summaries"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Credit Balance (Legacy)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Credit balance retrieved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.balance).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/users/:user_id/credits/balance",
+							"host": ["{{api_base}}"],
+							"path": ["users", ":user_id", "credits", "balance"],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Get user credit balance (backward compatibility endpoint)\n\nPath Parameters:\n- user_id: User identifier (required)\n\nResponse:\n- success: boolean\n- user_id: user identifier\n- balance: credit balance\n- currency: wallet currency (CREDIT)\n- wallet_id: associated wallet identifier\n\nNote: This endpoint provides backward compatibility with legacy systems. For new integrations, use the standard wallet balance endpoints."
+					},
+					"response": []
+				}
+			],
+			"description": "Statistical and analytical endpoints for wallets and users.\n\nProvides insights on:\n- Transaction volumes and patterns\n- Balance history\n- Usage statistics\n- Wallet activity metrics"
+		}
+	],
+	"auth": {
+		"type": "noauth"
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}

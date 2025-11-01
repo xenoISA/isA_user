@@ -17,6 +17,7 @@ import sys
 import os
 from typing import Optional, List
 from datetime import datetime
+from decimal import Decimal
 
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -26,6 +27,7 @@ from .order_service import OrderService, OrderServiceError, OrderValidationError
 from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus, Event, EventType, ServiceSource
 from .models import (
     OrderCreateRequest, OrderUpdateRequest, OrderCancelRequest,
     OrderCompleteRequest, OrderResponse, OrderListResponse,
@@ -42,25 +44,126 @@ config = config_manager.get_service_config()
 app_logger = setup_service_logger("order_service")
 logger = app_logger  # for backward compatibility
 
+# Track processed event IDs for idempotency
+processed_event_ids = set()
+
+
+def is_event_processed(event_id: str) -> bool:
+    """Check if event has already been processed (idempotency)"""
+    return event_id in processed_event_ids
+
+
+def mark_event_processed(event_id: str):
+    """Mark event as processed"""
+    global processed_event_ids
+    processed_event_ids.add(event_id)
+    if len(processed_event_ids) > 10000:
+        processed_event_ids = set(list(processed_event_ids)[5000:])
+
+
+# ==================== Event Handlers ====================
+
+async def handle_payment_completed(event: Event):
+    """
+    Handle payment.completed event
+    Automatically complete order after successful payment
+    """
+    try:
+        if is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        payment_intent_id = event.data.get("payment_intent_id")
+        user_id = event.data.get("user_id")
+        amount = event.data.get("amount")
+
+        if not payment_intent_id:
+            logger.warning(f"payment.completed event missing payment_intent_id: {event.id}")
+            return
+
+        # Find order by payment_intent_id
+        order = await order_microservice.order_service.repository.get_order_by_payment_intent(payment_intent_id)
+        if not order:
+            logger.warning(f"No order found for payment_intent_id: {payment_intent_id}")
+            mark_event_processed(event.id)
+            return
+
+        # Update order status to completed
+        complete_request = OrderCompleteRequest(
+            payment_confirmed=True,
+            transaction_id=event.data.get("payment_id") or event.data.get("transaction_id"),
+            credits_added=Decimal(str(amount)) if amount else None
+        )
+
+        await order_microservice.order_service.complete_order(order.order_id, complete_request)
+
+        mark_event_processed(event.id)
+        logger.info(f"✅ Order {order.order_id} completed after payment success (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle payment.completed event {event.id}: {e}")
+
+
+async def handle_payment_failed(event: Event):
+    """
+    Handle payment.failed event
+    Mark order as payment failed
+    """
+    try:
+        if is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        payment_intent_id = event.data.get("payment_intent_id")
+
+        if not payment_intent_id:
+            logger.warning(f"payment.failed event missing payment_intent_id: {event.id}")
+            return
+
+        # Find order by payment_intent_id
+        order = await order_microservice.order_service.repository.get_order_by_payment_intent(payment_intent_id)
+        if not order:
+            logger.warning(f"No order found for payment_intent_id: {payment_intent_id}")
+            mark_event_processed(event.id)
+            return
+
+        # Update order status to failed
+        await order_microservice.order_service.repository.update_order_status(
+            order.order_id,
+            OrderStatus.FAILED,
+            payment_status=PaymentStatus.FAILED
+        )
+
+        mark_event_processed(event.id)
+        logger.info(f"✅ Order {order.order_id} marked as failed after payment failure (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle payment.failed event {event.id}: {e}")
+
 
 class OrderMicroservice:
     """Order microservice core class"""
-    
+
     def __init__(self):
         self.order_service = None
-    
-    async def initialize(self):
+        self.event_bus = None
+
+    async def initialize(self, event_bus=None):
         """Initialize the microservice"""
         try:
-            self.order_service = OrderService()
+            self.event_bus = event_bus
+            self.order_service = OrderService(event_bus=event_bus)
             logger.info("Order microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize order microservice: {e}")
             raise
-    
+
     async def shutdown(self):
         """Shutdown the microservice"""
         try:
+            if self.event_bus:
+                await self.event_bus.close()
+                logger.info("Event bus closed")
             logger.info("Order microservice shutdown completed")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -73,9 +176,40 @@ order_microservice = OrderMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    # Initialize microservice
-    await order_microservice.initialize()
-    
+    # Initialize event bus
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("order_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
+    # Initialize microservice with event bus
+    await order_microservice.initialize(event_bus=event_bus)
+
+    # Subscribe to events
+    if event_bus:
+        try:
+            # Subscribe to payment.completed from payment_service
+            await event_bus.subscribe_to_events(
+                pattern="payment_service.payment.completed",
+                handler=handle_payment_completed,
+                durable="order-payment-completed-consumer"
+            )
+            logger.info("✅ Subscribed to payment.completed events")
+
+            # Subscribe to payment.failed from payment_service
+            await event_bus.subscribe_to_events(
+                pattern="payment_service.payment.failed",
+                handler=handle_payment_failed,
+                durable="order-payment-failed-consumer"
+            )
+            logger.info("✅ Subscribed to payment.failed events")
+
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to subscribe to events: {e}")
+
     # Register with Consul
     if config.consul_enabled:
         consul_registry = ConsulRegistry(
@@ -86,21 +220,21 @@ async def lifespan(app: FastAPI):
             service_host=config.service_host,
             tags=["microservice", "order", "api"]
         )
-        
+
         if consul_registry.register():
             consul_registry.start_maintenance()
             app.state.consul_registry = consul_registry
             logger.info(f"{config.service_name} registered with Consul")
         else:
             logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+
     yield
-    
+
     # Cleanup
     if config.consul_enabled and hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
-    
+
     await order_microservice.shutdown()
 
 
@@ -341,15 +475,25 @@ async def get_orders_by_subscription(
 
 # Statistics endpoints
 
-@app.get("/api/v1/orders/statistics", response_model=OrderStatistics)
+@app.get("/api/v1/orders/statistics")
 async def get_order_statistics(
     order_service: OrderService = Depends(get_order_service)
 ):
     """Get order service statistics"""
     try:
-        return await order_service.get_order_statistics()
+        logger.info("Getting order statistics...")
+        result = await order_service.get_order_statistics()
+        logger.info(f"Statistics result: {result}")
+        # Convert to dict for JSON response
+        return result.dict() if hasattr(result, 'dict') else result
+    except OrderServiceError as e:
+        logger.error(f"OrderServiceError in get_order_statistics: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Service error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Unexpected error in get_order_statistics: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error: {str(e)}")
 
 
 # Service info endpoints
@@ -379,17 +523,29 @@ async def get_service_info():
 # Error handlers
 @app.exception_handler(OrderValidationError)
 async def validation_error_handler(request, exc):
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"detail": str(exc)}
+    )
 
 
 @app.exception_handler(OrderNotFoundError)
 async def not_found_error_handler(request, exc):
-    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"detail": str(exc)}
+    )
 
 
 @app.exception_handler(OrderServiceError)
 async def service_error_handler(request, exc):
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": str(exc)}
+    )
 
 
 if __name__ == "__main__":

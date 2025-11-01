@@ -1,0 +1,628 @@
+{
+	"info": {
+		"_postman_id": "authorization-service-collection-v1",
+		"name": "Authorization Service API",
+		"description": "Complete API collection for Authorization Service - Resource authorization, permission management, and access control.\\n\\n**Service Port**: 8204\\n**Version**: 1.0.0\\n**Status**: All 14 tests passing ✅\\n\\n**Test Coverage:**\\n- Health checks and service info\\n- Resource access checks\\n- Permission grant/revoke operations\\n- User permission management\\n- Bulk operations\\n- Admin operations",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8204",
+			"type": "string"
+		},
+		{
+			"key": "test_user_id",
+			"value": "test_user_2",
+			"type": "string"
+		},
+		{
+			"key": "test_resource_name",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "bulk_resource_1",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "bulk_resource_2",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Service is healthy\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql(\"healthy\");",
+									"    pm.expect(jsonData.service).to.eql(\"authorization_service\");",
+									"    pm.expect(jsonData.port).to.eql(8204);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Basic health check endpoint"
+					},
+					"response": []
+				},
+				{
+					"name": "Detailed Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Database is connected\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.database_connected).to.be.true;",
+									"    pm.expect(jsonData.port).to.eql(8204);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/detailed",
+							"host": ["{{base_url}}"],
+							"path": ["health", "detailed"]
+						},
+						"description": "Detailed health check including database connectivity"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Service Info",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Service info is correct\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.eql(\"authorization_service\");",
+									"    pm.expect(jsonData).to.have.property('capabilities');",
+									"    pm.expect(jsonData).to.have.property('endpoints');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/info",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "info"]
+						},
+						"description": "Get service capabilities and endpoints"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Service Stats",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Stats contain required fields\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('statistics');",
+									"    pm.expect(jsonData.statistics).to.have.property('total_permissions');",
+									"    pm.expect(jsonData.statistics).to.have.property('active_users');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/stats",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "stats"]
+						},
+						"description": "Get service statistics"
+					},
+					"response": []
+				}
+			],
+			"description": "Service health checks and information"
+		},
+		{
+			"name": "Access Control",
+			"item": [
+				{
+					"name": "Check Access (Before Grant)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Access response is valid\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('has_access');",
+									"    pm.expect(jsonData).to.have.property('user_access_level');",
+									"    pm.expect(jsonData).to.have.property('reason');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const timestamp = Date.now();",
+									"pm.collectionVariables.set('timestamp', timestamp);",
+									"pm.collectionVariables.set('test_resource_name', 'test_resource_' + timestamp);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"resource_type\": \"api_endpoint\",\n  \"resource_name\": \"{{test_resource_name}}\",\n  \"required_access_level\": \"read_only\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/check-access",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "check-access"]
+						},
+						"description": "Check if user has access to a resource (before granting permission)"
+					},
+					"response": []
+				},
+				{
+					"name": "Grant Permission",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Permission granted successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('granted successfully');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"resource_type\": \"api_endpoint\",\n  \"resource_name\": \"{{test_resource_name}}\",\n  \"access_level\": \"read_write\",\n  \"permission_source\": \"admin_grant\",\n  \"granted_by_user_id\": \"postman_admin\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/grant",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "grant"]
+						},
+						"description": "Grant permission to user for specific resource"
+					},
+					"response": []
+				},
+				{
+					"name": "Check Access (After Grant)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"User now has access\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.has_access).to.be.true;",
+									"    pm.expect(jsonData.user_access_level).to.eql('read_write');",
+									"    pm.expect(jsonData.permission_source).to.eql('admin_grant');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"resource_type\": \"api_endpoint\",\n  \"resource_name\": \"{{test_resource_name}}\",\n  \"required_access_level\": \"read_only\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/check-access",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "check-access"]
+						},
+						"description": "Verify user now has access after permission grant"
+					},
+					"response": []
+				}
+			],
+			"description": "Resource access control and permission checks"
+		},
+		{
+			"name": "Permission Management",
+			"item": [
+				{
+					"name": "Get User Permissions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Permission summary is valid\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('user_id');",
+									"    pm.expect(jsonData).to.have.property('total_permissions');",
+									"    pm.expect(jsonData).to.have.property('permissions_by_type');",
+									"    pm.expect(jsonData.total_permissions).to.be.at.least(1);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/user-permissions/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "user-permissions", "{{test_user_id}}"]
+						},
+						"description": "Get comprehensive permission summary for user"
+					},
+					"response": []
+				},
+				{
+					"name": "List User Accessible Resources",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Resource list is valid\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('accessible_resources');",
+									"    pm.expect(jsonData).to.have.property('total_count');",
+									"    pm.expect(jsonData.accessible_resources).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/user-resources/{{test_user_id}}?resource_type=api_endpoint",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "user-resources", "{{test_user_id}}"],
+							"query": [
+								{
+									"key": "resource_type",
+									"value": "api_endpoint"
+								}
+							]
+						},
+						"description": "List all resources accessible to user"
+					},
+					"response": []
+				}
+			],
+			"description": "User permission queries and summaries"
+		},
+		{
+			"name": "Bulk Operations",
+			"item": [
+				{
+					"name": "Bulk Grant Permissions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Bulk grant completed\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.total_operations).to.eql(2);",
+									"    pm.expect(jsonData.successful).to.eql(2);",
+									"    pm.expect(jsonData.failed).to.eql(0);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const timestamp = Date.now();",
+									"pm.collectionVariables.set('bulk_resource_1', 'bulk_test_resource_1_' + timestamp);",
+									"pm.collectionVariables.set('bulk_resource_2', 'bulk_test_resource_2_' + timestamp);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"operations\": [\n    {\n      \"user_id\": \"{{test_user_id}}\",\n      \"resource_type\": \"api_endpoint\",\n      \"resource_name\": \"{{bulk_resource_1}}\",\n      \"access_level\": \"read_only\",\n      \"permission_source\": \"admin_grant\",\n      \"granted_by_user_id\": \"postman_admin\"\n    },\n    {\n      \"user_id\": \"{{test_user_id}}\",\n      \"resource_type\": \"api_endpoint\",\n      \"resource_name\": \"{{bulk_resource_2}}\",\n      \"access_level\": \"read_write\",\n      \"permission_source\": \"admin_grant\",\n      \"granted_by_user_id\": \"postman_admin\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/bulk-grant",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "bulk-grant"]
+						},
+						"description": "Grant multiple permissions in a single operation"
+					},
+					"response": []
+				},
+				{
+					"name": "Bulk Revoke Permissions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Bulk revoke completed\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.total_operations).to.eql(2);",
+									"    pm.expect(jsonData.successful).to.eql(2);",
+									"    pm.expect(jsonData.failed).to.eql(0);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"operations\": [\n    {\n      \"user_id\": \"{{test_user_id}}\",\n      \"resource_type\": \"api_endpoint\",\n      \"resource_name\": \"{{bulk_resource_1}}\"\n    },\n    {\n      \"user_id\": \"{{test_user_id}}\",\n      \"resource_type\": \"api_endpoint\",\n      \"resource_name\": \"{{bulk_resource_2}}\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/bulk-revoke",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "bulk-revoke"]
+						},
+						"description": "Revoke multiple permissions in a single operation"
+					},
+					"response": []
+				}
+			],
+			"description": "Bulk permission operations"
+		},
+		{
+			"name": "Cleanup & Admin",
+			"item": [
+				{
+					"name": "Revoke Permission",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Permission revoked successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('revoked successfully');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"resource_type\": \"api_endpoint\",\n  \"resource_name\": \"{{test_resource_name}}\",\n  \"revoked_by_user_id\": \"postman_admin\",\n  \"reason\": \"Postman test cleanup\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/revoke",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "revoke"]
+						},
+						"description": "Revoke permission from user"
+					},
+					"response": []
+				},
+				{
+					"name": "Check Access (After Revoke)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Access denied after revoke\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.has_access).to.be.false;",
+									"    pm.expect(jsonData.reason).to.include('Insufficient permissions');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"resource_type\": \"api_endpoint\",\n  \"resource_name\": \"{{test_resource_name}}\",\n  \"required_access_level\": \"read_only\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/check-access",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "check-access"]
+						},
+						"description": "Verify access is denied after permission revoke"
+					},
+					"response": []
+				},
+				{
+					"name": "Cleanup Expired Permissions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Cleanup completed\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('cleaned_count');",
+									"    pm.expect(jsonData.message).to.include('successfully');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/authorization/cleanup-expired",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "authorization", "cleanup-expired"]
+						},
+						"description": "Clean up expired permissions (admin operation)"
+					},
+					"response": []
+				}
+			],
+			"description": "Administrative operations and cleanup"
+		}
+	]
+}

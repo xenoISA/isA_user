@@ -6,9 +6,11 @@ Organization Service
 
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .organization_repository import OrganizationRepository
+# Note: AccountServiceClient was removed as it was unused
+# If user validation is needed, implement via microservice communication
 from .models import (
     OrganizationCreateRequest, OrganizationUpdateRequest,
     OrganizationMemberAddRequest, OrganizationMemberUpdateRequest,
@@ -17,6 +19,8 @@ from .models import (
     OrganizationContextResponse, OrganizationStatsResponse,
     OrganizationUsageResponse, OrganizationRole, MemberStatus
 )
+# Import event bus components
+from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +47,10 @@ class OrganizationValidationError(OrganizationServiceError):
 
 class OrganizationService:
     """组织服务"""
-    
-    def __init__(self):
+
+    def __init__(self, event_bus=None):
         self.repository = OrganizationRepository()
+        self.event_bus = event_bus
     
     # ============ Organization Management ============
     
@@ -68,8 +73,29 @@ class OrganizationService:
             
             if not organization:
                 raise OrganizationServiceError("Failed to create organization")
-            
+
             logger.info(f"Organization created: {organization.organization_id} by user {owner_user_id}")
+
+            # Publish organization.created event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.ORG_CREATED,
+                        source=ServiceSource.ORG_SERVICE,
+                        data={
+                            "organization_id": organization.organization_id,
+                            "organization_name": organization.name,
+                            "owner_user_id": owner_user_id,
+                            "billing_email": organization.billing_email,
+                            "plan": organization.plan,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published organization.created event for organization {organization.organization_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish organization.created event: {e}")
+
             return organization
             
         except Exception as e:
@@ -85,8 +111,8 @@ class OrganizationService:
     ) -> OrganizationResponse:
         """获取组织信息"""
         try:
-            # 如果提供了user_id，验证访问权限
-            if user_id:
+            # 如果提供了user_id，验证访问权限（内部服务调用跳过检查）
+            if user_id and user_id != "internal-service":
                 has_access = await self.check_user_access(organization_id, user_id)
                 if not has_access:
                     raise OrganizationAccessDeniedError(f"User {user_id} does not have access to organization {organization_id}")
@@ -125,10 +151,29 @@ class OrganizationService:
             
             if not organization:
                 raise OrganizationNotFoundError(f"Organization {organization_id} not found")
-            
+
+            # Publish organization.updated event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.ORG_UPDATED,
+                        source=ServiceSource.ORG_SERVICE,
+                        data={
+                            "organization_id": organization_id,
+                            "organization_name": organization.name,
+                            "updated_by": user_id,
+                            "updated_fields": list(request.model_dump(exclude_none=True).keys()),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published organization.updated event for organization {organization_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish organization.updated event: {e}")
+
             logger.info(f"Organization {organization_id} updated by user {user_id}")
             return organization
-            
+
         except Exception as e:
             logger.error(f"Error updating organization {organization_id}: {e}")
             if isinstance(e, OrganizationServiceError):
@@ -147,12 +192,35 @@ class OrganizationService:
             if not is_owner:
                 raise OrganizationAccessDeniedError(f"User {user_id} is not the owner of organization {organization_id}")
             
+            # Get organization details before deletion for event
+            organization = await self.repository.get_organization_by_id(organization_id)
+            if not organization:
+                raise OrganizationNotFoundError(f"Organization {organization_id} not found")
+
             # 删除组织
             success = await self.repository.delete_organization(organization_id)
-            
+
             if success:
+                # Publish organization.deleted event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.ORG_DELETED,
+                            source=ServiceSource.ORG_SERVICE,
+                            data={
+                                "organization_id": organization_id,
+                                "organization_name": organization.name,
+                                "deleted_by": user_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published organization.deleted event for organization {organization_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish organization.deleted event: {e}")
+
                 logger.info(f"Organization {organization_id} deleted by user {user_id}")
-            
+
             return success
             
         except Exception as e:
@@ -196,15 +264,20 @@ class OrganizationService:
             is_admin = await self.check_admin_access(organization_id, requesting_user_id)
             if not is_admin:
                 raise OrganizationAccessDeniedError(f"User {requesting_user_id} does not have admin access")
-            
+
             # 验证请求
             if not request.user_id and not request.email:
                 raise OrganizationValidationError("Either user_id or email must be provided")
-            
+
             # 如果只有邮箱，需要先创建邀请（暂不实现）
             if not request.user_id:
                 raise OrganizationServiceError("User invitation not implemented yet. Please provide user_id of existing user.")
-            
+
+            # Validate member user exists in account service (fail-open for eventual consistency)
+            # Note: For synchronous validation in async context, we'd need to refactor.
+            # For now, we'll allow the operation (eventual consistency)
+            logger.info(f"Adding member {request.user_id} to organization {organization_id}")
+
             # 添加成员
             member = await self.repository.add_organization_member(
                 organization_id,
@@ -212,13 +285,34 @@ class OrganizationService:
                 request.role,
                 request.permissions
             )
-            
+
             if not member:
                 raise OrganizationServiceError("Failed to add member")
-            
+
             logger.info(f"Member {request.user_id} added to organization {organization_id} with role {request.role}")
+
+            # Publish organization.member_added event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type=EventType.ORG_MEMBER_ADDED,
+                        source=ServiceSource.ORG_SERVICE,
+                        data={
+                            "organization_id": organization_id,
+                            "user_id": request.user_id,
+                            "role": request.role.value if hasattr(request.role, 'value') else request.role,
+                            "added_by": requesting_user_id,
+                            "permissions": request.permissions or [],
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published organization.member_added event for user {request.user_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish organization.member_added event: {e}")
+
             return member
-            
+
         except Exception as e:
             logger.error(f"Error adding member to organization {organization_id}: {e}")
             if isinstance(e, OrganizationServiceError):
@@ -305,10 +399,28 @@ class OrganizationService:
             
             # 移除成员
             success = await self.repository.remove_organization_member(organization_id, member_user_id)
-            
+
             if success:
                 logger.info(f"Member {member_user_id} removed from organization {organization_id}")
-            
+
+                # Publish organization.member_removed event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.ORG_MEMBER_REMOVED,
+                            source=ServiceSource.ORG_SERVICE,
+                            data={
+                                "organization_id": organization_id,
+                                "user_id": member_user_id,
+                                "removed_by": requesting_user_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published organization.member_removed event for user {member_user_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish organization.member_removed event: {e}")
+
             return success
             
         except Exception as e:
@@ -327,10 +439,15 @@ class OrganizationService:
     ) -> OrganizationMemberListResponse:
         """获取组织成员列表"""
         try:
-            # 检查访问权限
-            has_access = await self.check_user_access(organization_id, user_id)
-            if not has_access:
-                raise OrganizationAccessDeniedError(f"User {user_id} does not have access to organization")
+            # 检查访问权限（内部服务调用跳过检查）
+
+            if user_id != "internal-service":
+
+                has_access = await self.check_user_access(organization_id, user_id)
+
+                if not has_access:
+
+                    raise OrganizationAccessDeniedError(f"User {user_id} does not have access to organization")
             
             members = await self.repository.get_organization_members(
                 organization_id,
@@ -408,10 +525,15 @@ class OrganizationService:
     ) -> OrganizationStatsResponse:
         """获取组织统计信息"""
         try:
-            # 检查访问权限
-            has_access = await self.check_user_access(organization_id, user_id)
-            if not has_access:
-                raise OrganizationAccessDeniedError(f"User {user_id} does not have access to organization")
+            # 检查访问权限（内部服务调用跳过检查）
+
+            if user_id != "internal-service":
+
+                has_access = await self.check_user_access(organization_id, user_id)
+
+                if not has_access:
+
+                    raise OrganizationAccessDeniedError(f"User {user_id} does not have access to organization")
             
             stats_data = await self.repository.get_organization_stats(organization_id)
             

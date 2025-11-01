@@ -166,7 +166,7 @@ class ConfigManager:
         env_config_map = {
             "development": ("dev", ".env"),
             "testing": ("test", ".env.test"),
-            "staging": ("staging", ".env.staging"),
+            "staging": ("staging/config", ".env.staging"),
             "production": ("production", ".env.production"),
             "local": ("dev", ".env")  # local uses dev environment
         }

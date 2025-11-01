@@ -16,7 +16,7 @@ from decimal import Decimal
 from .task_repository import TaskRepository
 from .models import (
     TaskCreateRequest, TaskUpdateRequest, TaskExecutionRequest,
-    TaskResponse, TaskExecutionResponse, TaskTemplateResponse, 
+    TaskResponse, TaskExecutionResponse, TaskTemplateResponse,
     TaskAnalyticsResponse, TaskListResponse,
     TaskStatus, TaskType, TaskPriority
 )
@@ -24,6 +24,7 @@ from .models import (
 # Service communication imports
 import httpx
 from core.consul_registry import ConsulRegistry
+from core.nats_client import Event, EventType, ServiceSource
 
 # Temporary ServiceError class until shared module is available
 class ServiceError(Exception):
@@ -44,8 +45,9 @@ class TaskExecutionError(Exception):
 class TaskService:
     """任务服务业务逻辑层"""
 
-    def __init__(self):
+    def __init__(self, event_bus=None):
         self.repository = TaskRepository()
+        self.event_bus = event_bus
         self.consul = None
         self._init_consul()
 
@@ -151,6 +153,8 @@ class TaskService:
     async def create_task(self, user_id: str, request: TaskCreateRequest) -> TaskResponse:
         """创建用户任务"""
         try:
+            logger.debug(f"Creating task for user {user_id}, type: {request.task_type.value}")
+            
             # 1. 获取用户信息和权限检查
             user_context = await self.orchestrator.get_user_context_with_permissions(user_id)
             if not user_context["success"]:
@@ -158,6 +162,7 @@ class TaskService:
             
             user = user_context["user"]
             subscription_level = user.get("subscription_level", "free")
+            logger.debug(f"User context retrieved, subscription: {subscription_level}")
             
             # 2. 检查任务创建权限
             perm_result = await self.communicator.check_user_permission(
@@ -173,19 +178,23 @@ class TaskService:
                     f"Permission denied for creating {request.task_type.value} task",
                     error_code="PERMISSION_DENIED"
                 )
+            logger.debug(f"Permission check passed")
             
             # 3. 检查任务数量限制
             await self._check_task_limits(user_id, subscription_level)
+            logger.debug(f"Task limits check passed")
             
             # 4. 验证任务配置
             await self._validate_task_config(request)
+            logger.debug(f"Task config validation passed")
             
             # 5. 处理调度信息
             task_data = request.dict()
             if request.schedule:
                 next_run_time = self._calculate_next_run_time(request.schedule)
-                task_data["next_run_time"] = next_run_time
+                task_data["next_run_time"] = next_run_time.isoformat() if isinstance(next_run_time, datetime) else next_run_time
                 task_data["status"] = TaskStatus.SCHEDULED.value
+            logger.debug(f"Task data prepared, calling repository")
             
             # 6. 创建任务
             task = await self.repository.create_task(user_id, task_data)
@@ -207,14 +216,37 @@ class TaskService:
                     "scheduled": bool(request.schedule)
                 }
             )
-            
+
+            # 9. Publish task.created event
+            if self.event_bus:
+                try:
+                    from datetime import timezone
+                    event = Event(
+                        event_type=EventType.TASK_CREATED,
+                        source=ServiceSource.TASK_SERVICE,
+                        data={
+                            "task_id": task.task_id,
+                            "user_id": user_id,
+                            "name": task.name,
+                            "task_type": task.task_type,
+                            "priority": task.priority,
+                            "status": task.status,
+                            "scheduled": bool(request.schedule),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published task.created event for task {task.task_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish task.created event: {e}")
+
             logger.info(f"Task created successfully: {task.task_id} for user {user_id}")
             return task
             
         except TaskExecutionError:
             raise
         except Exception as e:
-            logger.error(f"Failed to create task for user {user_id}: {e}")
+            logger.error(f"Failed to create task for user {user_id}: {e}", exc_info=True)
             raise TaskExecutionError(f"Task creation failed: {str(e)}", error_code="INTERNAL_ERROR")
     
     async def get_task(self, task_id: str, user_id: str) -> Optional[TaskResponse]:
@@ -282,10 +314,15 @@ class TaskService:
                 update_data["next_run_time"] = request.next_run_time
             
             # 执行更新
-            updated_task = await self.repository.update_task(task_id, user_id, update_data)
-            if not updated_task:
+            success = await self.repository.update_task(task_id, update_data, user_id)
+            if not success:
                 raise TaskExecutionError("Failed to update task", task_id=task_id, error_code="UPDATE_FAILED")
-            
+
+            # 获取更新后的任务
+            updated_task = await self.repository.get_task_by_id(task_id, user_id)
+            if not updated_task:
+                raise TaskExecutionError("Task not found after update", task_id=task_id, error_code="NOT_FOUND")
+
             # 记录审计事件
             await self.communicator.log_audit_event(
                 event_type="task_updated",
@@ -296,7 +333,26 @@ class TaskService:
                     "status_changed": "status" in update_data
                 }
             )
-            
+
+            # Publish task.updated event
+            if self.event_bus:
+                try:
+                    from datetime import timezone
+                    event = Event(
+                        event_type=EventType.TASK_UPDATED,
+                        source=ServiceSource.TASK_SERVICE,
+                        data={
+                            "task_id": task_id,
+                            "user_id": user_id,
+                            "updates": {k: str(v) for k, v in update_data.items()},
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published task.updated event for task {task_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish task.updated event: {e}")
+
             logger.info(f"Task updated successfully: {task_id}")
             return updated_task
             
@@ -322,8 +378,27 @@ class TaskService:
                     user_id=user_id,
                     event_data={"task_id": task_id}
                 )
+
+                # Publish task.cancelled event
+                if self.event_bus:
+                    try:
+                        from datetime import timezone
+                        event = Event(
+                            event_type=EventType.TASK_CANCELLED,
+                            source=ServiceSource.TASK_SERVICE,
+                            data={
+                                "task_id": task_id,
+                                "user_id": user_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published task.cancelled event for task {task_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish task.cancelled event: {e}")
+
                 logger.info(f"Task deleted successfully: {task_id}")
-            
+
             return success
             
         except Exception as e:
@@ -498,7 +573,28 @@ class TaskService:
                     "duration_ms": int((end_time - start_time).total_seconds() * 1000)
                 }
             )
-            
+
+            # Publish task.completed event
+            if self.event_bus:
+                try:
+                    from datetime import timezone as tz
+                    event = Event(
+                        event_type=EventType.TASK_COMPLETED,
+                        source=ServiceSource.TASK_SERVICE,
+                        data={
+                            "task_id": task.task_id,
+                            "user_id": task.user_id,
+                            "execution_id": execution_record.execution_id,
+                            "credits_consumed": credits_consumed,
+                            "duration_ms": int((end_time - start_time).total_seconds() * 1000),
+                            "timestamp": datetime.now(tz.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published task.completed event for task {task.task_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish task.completed event: {e}")
+
             logger.info(f"Task executed successfully: {task.task_id}")
             
         except Exception as e:
@@ -529,7 +625,27 @@ class TaskService:
                 task.user_id,
                 {"status": TaskStatus.FAILED.value}
             )
-            
+
+            # Publish task.failed event
+            if self.event_bus:
+                try:
+                    from datetime import timezone as tz
+                    event = Event(
+                        event_type=EventType.TASK_FAILED,
+                        source=ServiceSource.TASK_SERVICE,
+                        data={
+                            "task_id": task.task_id,
+                            "user_id": task.user_id,
+                            "execution_id": execution_record.execution_id,
+                            "error": str(e),
+                            "timestamp": datetime.now(tz.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published task.failed event for task {task.task_id}")
+                except Exception as ex:
+                    logger.error(f"Failed to publish task.failed event: {ex}")
+
             # 发送执行失败通知
             await self._send_execution_notification(task, execution_record, success=False, error=str(e))
             
@@ -754,7 +870,7 @@ class TaskService:
         except TaskExecutionError:
             raise
         except Exception as e:
-            logger.error(f"Task config validation failed: {e}")
+            logger.error(f"Task config validation failed: {e}", exc_info=True)
             raise TaskExecutionError(f"Invalid task configuration: {str(e)}", error_code="INVALID_CONFIG")
     
     def _validate_weather_config(self, config: Dict[str, Any]):

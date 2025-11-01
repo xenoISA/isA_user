@@ -21,6 +21,7 @@ from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.consul_registry import ConsulRegistry
 from core.blockchain_client import BlockchainClient
+from core.nats_client import get_event_bus
 
 # Import local components
 from .vault_service import VaultService, VaultServiceError, VaultAccessDeniedError, VaultNotFoundError
@@ -44,6 +45,7 @@ logger = app_logger
 vault_service = None
 consul_registry = None
 blockchain_client = None
+event_bus = None  # NATS event bus
 
 
 def get_user_id(request: Request) -> str:
@@ -78,7 +80,7 @@ def get_vault_service() -> VaultService:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    global consul_registry, vault_service, blockchain_client
+    global consul_registry, vault_service, blockchain_client, event_bus
 
     try:
         # Initialize blockchain client (optional)
@@ -93,8 +95,39 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Blockchain client initialization failed: {e}")
             blockchain_client = None
 
-        # Initialize vault service
-        vault_service = VaultService(blockchain_client=blockchain_client)
+        # Initialize NATS JetStream event bus
+        try:
+            event_bus = await get_event_bus("vault_service")
+            logger.info("✅ Event bus initialized successfully")
+
+            # Initialize vault service with event bus
+            vault_service = VaultService(blockchain_client=blockchain_client, event_bus=event_bus)
+
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+            event_bus = None
+
+            # Initialize vault service without event bus
+            vault_service = VaultService(blockchain_client=blockchain_client, event_bus=None)
+
+        # Subscribe to events
+        if event_bus and vault_service:
+            try:
+                from .events import VaultEventHandlers
+                event_handlers = VaultEventHandlers(vault_service)
+                handler_map = event_handlers.get_event_handler_map()
+
+                for event_type, handler_func in handler_map.items():
+                    await event_bus.subscribe_to_events(
+                        pattern=f"*.{event_type}",
+                        handler=handler_func
+                    )
+                    logger.info(f"✅ Subscribed to {event_type} events")
+
+                logger.info(f"✅ Subscribed to {len(handler_map)} event types")
+            except Exception as e:
+                logger.error(f"❌ Failed to subscribe to events: {e}", exc_info=True)
+
         logger.info("Vault microservice initialized successfully")
 
         # Register with Consul
@@ -121,6 +154,13 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # Cleanup resources
+        if event_bus:
+            try:
+                await event_bus.close()
+                logger.info("Vault event bus closed")
+            except Exception as e:
+                logger.error(f"Error closing event bus: {e}")
+
         if config.consul_enabled and consul_registry:
             try:
                 consul_registry.deregister()
@@ -191,25 +231,31 @@ async def create_secret(
 ):
     """Create a new secret"""
     try:
+        logger.info(f"[main.py] create_secret endpoint called for user header")
         user_id = get_user_id(request)
+        logger.info(f"[main.py] User ID: {user_id}")
         ip_address, user_agent = get_client_info(request)
 
+        logger.info(f"[main.py] Calling vault_service.create_secret")
         success, result, message = await vault_service.create_secret(
             user_id=user_id,
             request=request_data,
             ip_address=ip_address,
             user_agent=user_agent
         )
+        logger.info(f"[main.py] vault_service.create_secret returned: success={success}, message={message}")
 
         if not success:
+            logger.error(f"[main.py] Create failed with message: {message}")
             raise HTTPException(status_code=400, detail=message)
 
+        logger.info(f"[main.py] Returning success result")
         return result
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating secret: {e}")
+        logger.error(f"Error creating secret: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to create secret")
 
 

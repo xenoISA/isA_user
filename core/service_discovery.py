@@ -86,6 +86,27 @@ class ServiceDiscovery:
     def get_organization_service_url(self) -> str:
         """Get organization service URL"""
         return self.get_service_url("organization_service")
+    
+    # Infrastructure Services Discovery
+    def get_nats_url(self) -> str:
+        """Get NATS message queue URL"""
+        return self.get_service_url("nats")
+    
+    def get_redis_url(self) -> str:
+        """Get Redis cache URL"""
+        return self.get_service_url("redis")
+    
+    def get_loki_url(self) -> str:
+        """Get Loki logging service URL"""
+        return self.get_service_url("loki")
+    
+    def get_minio_endpoint(self) -> str:
+        """Get MinIO object storage endpoint"""
+        return self.get_service_url("minio")
+
+    def get_isa_model_url(self) -> str:
+        """Get ISA Model inference service URL"""
+        return self.get_service_url("isa-model")
 
 
 def get_service_discovery(app) -> ServiceDiscovery:

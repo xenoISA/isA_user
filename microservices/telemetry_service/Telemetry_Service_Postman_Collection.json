@@ -1,0 +1,1505 @@
+{
+	"info": {
+		"_postman_id": "telemetry-service-staging-v1",
+		"name": "Telemetry Service API - Staging",
+		"description": "IoT Telemetry Microservice - Device data collection, monitoring, alerts, and analytics\n\nBase URL: http://localhost:8225\nEnvironment: Staging (Docker)\nVersion: 1.0.0\n\nCapabilities:\n- Real-time telemetry data ingestion\n- Time-series data storage and queries\n- Metric definition management\n- Alert rule management and triggering\n- Real-time data streaming via WebSocket\n- Statistical analysis and reporting\n- CSV data export",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "1.0.0"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8225",
+			"type": "string",
+			"description": "Telemetry service base URL (port 8225 in staging)"
+		},
+		{
+			"key": "api_base",
+			"value": "{{base_url}}/api/v1",
+			"type": "string",
+			"description": "API base path"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"type": "string",
+			"description": "JWT token for authentication (get from Auth Service)"
+		},
+		{
+			"key": "test_device_id",
+			"value": "test_device_telemetry_001",
+			"type": "string",
+			"description": "Test device ID for telemetry operations"
+		},
+		{
+			"key": "metric_name",
+			"value": "temperature",
+			"type": "string",
+			"description": "Test metric name"
+		},
+		{
+			"key": "alert_rule_id",
+			"value": "",
+			"type": "string",
+			"description": "Alert rule ID (set by create alert rule endpoint)"
+		},
+		{
+			"key": "subscription_id",
+			"value": "",
+			"type": "string",
+			"description": "Real-time subscription ID (set by subscribe endpoint)"
+		}
+	],
+	"item": [
+		{
+			"name": "Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service is healthy', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"    pm.expect(jsonData.service).to.eql('telemetry_service');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Basic health check endpoint\n\nReturns:\n- status: healthy\n- service: telemetry_service\n- port: 8225\n- version: 1.0.0"
+					},
+					"response": []
+				},
+				{
+					"name": "Detailed Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service has detailed health info', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"    pm.expect(jsonData.components).to.be.an('object');",
+									"    pm.expect(jsonData.performance).to.be.an('object');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/detailed",
+							"host": ["{{base_url}}"],
+							"path": ["health", "detailed"]
+						},
+						"description": "Detailed health check with component status\n\nReturns:\n- status: healthy\n- components: data_ingestion, time_series_db, alert_engine, real_time_stream\n- performance: ingestion_rate, query_latency, storage_usage"
+					},
+					"response": []
+				},
+				{
+					"name": "Service Stats",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service stats available', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.eql('telemetry_service');",
+									"    pm.expect(jsonData.endpoints).to.be.an('object');",
+									"    pm.expect(jsonData.features).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/service/stats",
+							"host": ["{{api_base}}"],
+							"path": ["service", "stats"]
+						},
+						"description": "Get service capabilities and statistics\n\nReturns:\n- service: telemetry_service\n- version: 1.0.0\n- endpoints: count by category\n- features: array of supported features"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check and service information endpoints"
+		},
+		{
+			"name": "Metric Management",
+			"item": [
+				{
+					"name": "Create Metric Definition",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Metric definition created', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.metric_id).to.be.a('string');",
+									"    pm.expect(jsonData.name).to.eql('temperature');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"temperature\",\n  \"description\": \"Temperature sensor reading in Celsius\",\n  \"data_type\": \"numeric\",\n  \"metric_type\": \"gauge\",\n  \"unit\": \"celsius\",\n  \"min_value\": -40.0,\n  \"max_value\": 85.0,\n  \"retention_days\": 90,\n  \"aggregation_interval\": 60,\n  \"tags\": [\"sensor\", \"environment\"],\n  \"metadata\": {\n    \"sensor_type\": \"DHT22\",\n    \"precision\": 0.1\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/metrics",
+							"host": ["{{api_base}}"],
+							"path": ["metrics"]
+						},
+						"description": "Create a new metric definition with validation rules\n\nRequest Body:\n- name: Metric name (required, max 100 chars)\n- description: Metric description (optional, max 500 chars)\n- data_type: numeric|string|boolean|json|binary|geolocation|timestamp\n- metric_type: gauge|counter|histogram|summary (default: gauge)\n- unit: Measurement unit (optional, max 20 chars)\n- min_value: Minimum allowed value (optional)\n- max_value: Maximum allowed value (optional)\n- retention_days: Data retention period (1-3650, default: 90)\n- aggregation_interval: Aggregation interval in seconds (1-86400, default: 60)\n- tags: Array of tag strings (optional)\n- metadata: Additional metadata object (optional)\n\nResponse:\n- metric_id: Generated metric identifier\n- name, description, data_type, metric_type, unit\n- min_value, max_value, retention_days, aggregation_interval\n- tags, metadata\n- created_at, updated_at, created_by"
+					},
+					"response": []
+				},
+				{
+					"name": "List Metric Definitions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Metrics list returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.metrics).to.be.an('array');",
+									"    pm.expect(jsonData.count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/metrics?limit=100&offset=0",
+							"host": ["{{api_base}}"],
+							"path": ["metrics"],
+							"query": [
+								{
+									"key": "data_type",
+									"value": "numeric",
+									"description": "Filter by data type",
+									"disabled": true
+								},
+								{
+									"key": "metric_type",
+									"value": "gauge",
+									"description": "Filter by metric type",
+									"disabled": true
+								},
+								{
+									"key": "limit",
+									"value": "100",
+									"description": "Max items to return (1-500)"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Number of items to skip"
+								}
+							]
+						},
+						"description": "List all metric definitions with optional filters\n\nQuery Parameters:\n- data_type: Filter by data type (optional)\n- metric_type: Filter by metric type (optional)\n- limit: Max items to return (1-500, default: 100)\n- offset: Number of items to skip (default: 0)\n\nResponse:\n- metrics: Array of metric definition objects\n- count: Number of metrics returned\n- limit: Applied limit\n- offset: Applied offset\n- filters: Applied filters"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Metric Definition",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Metric definition details returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.name).to.eql('temperature');",
+									"    pm.expect(jsonData.metric_id).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/metrics/{{metric_name}}",
+							"host": ["{{api_base}}"],
+							"path": ["metrics", "{{metric_name}}"]
+						},
+						"description": "Get detailed metric definition by name\n\nPath Parameters:\n- metric_name: Metric name (required)\n\nResponse:\n- Full metric definition object with all fields"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Metric Definition",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Metric deleted successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('deleted');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/metrics/:metric_name",
+							"host": ["{{api_base}}"],
+							"path": ["metrics", ":metric_name"],
+							"variable": [
+								{
+									"key": "metric_name",
+									"value": "test_metric",
+									"description": "Metric name to delete"
+								}
+							]
+						},
+						"description": "Delete a metric definition\n\nPath Parameters:\n- metric_name: Metric name (required)\n\nResponse:\n- message: Confirmation message"
+					},
+					"response": []
+				}
+			],
+			"description": "Metric definition management endpoints for defining data types, validation rules, and retention policies"
+		},
+		{
+			"name": "Data Ingestion",
+			"item": [
+				{
+					"name": "Ingest Single Data Point",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Data point ingested successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.device_id).to.eql(pm.collectionVariables.get('test_device_id'));",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"metric_name\": \"temperature\",\n  \"value\": 25.5,\n  \"unit\": \"celsius\",\n  \"timestamp\": \"{{$isoTimestamp}}\",\n  \"tags\": {\n    \"location\": \"living_room\",\n    \"sensor_type\": \"dht22\"\n  },\n  \"metadata\": {\n    \"quality\": 100,\n    \"battery_level\": 85\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/devices/{{test_device_id}}/telemetry",
+							"host": ["{{api_base}}"],
+							"path": ["devices", "{{test_device_id}}", "telemetry"]
+						},
+						"description": "Ingest a single telemetry data point for a device\n\nPath Parameters:\n- device_id: Device identifier (required)\n\nRequest Body:\n- metric_name: Metric name (required, max 100 chars)\n- value: Metric value (required - number, string, boolean, or object)\n- unit: Measurement unit (optional, max 20 chars)\n- timestamp: ISO 8601 timestamp (required)\n- tags: Key-value tags for filtering (optional)\n- metadata: Additional metadata (optional)\n\nResponse:\n- success: boolean\n- message: confirmation message\n- device_id: device identifier\n- metric_name: metric name"
+					},
+					"response": []
+				},
+				{
+					"name": "Batch Data Ingestion",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Batch ingested successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.ingested_count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"data_points\": [\n    {\n      \"metric_name\": \"temperature\",\n      \"value\": 25.5,\n      \"unit\": \"celsius\",\n      \"timestamp\": \"{{$isoTimestamp}}\",\n      \"tags\": {\"location\": \"living_room\"}\n    },\n    {\n      \"metric_name\": \"humidity\",\n      \"value\": 65.0,\n      \"unit\": \"percent\",\n      \"timestamp\": \"{{$isoTimestamp}}\",\n      \"tags\": {\"location\": \"living_room\"}\n    },\n    {\n      \"metric_name\": \"cpu_usage\",\n      \"value\": 45.2,\n      \"unit\": \"percent\",\n      \"timestamp\": \"{{$isoTimestamp}}\",\n      \"tags\": {\"component\": \"main_processor\"}\n    }\n  ],\n  \"compression\": null,\n  \"batch_id\": \"batch_001\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/devices/{{test_device_id}}/telemetry/batch",
+							"host": ["{{api_base}}"],
+							"path": ["devices", "{{test_device_id}}", "telemetry", "batch"]
+						},
+						"description": "Ingest multiple telemetry data points in a single request (up to 1000 points)\n\nPath Parameters:\n- device_id: Device identifier (required)\n\nRequest Body:\n- data_points: Array of data point objects (1-1000 items, required)\n- compression: Compression method - gzip, lz4 (optional)\n- batch_id: Batch identifier for deduplication (optional)\n\nResponse:\n- success: boolean\n- ingested_count: number of successfully ingested points\n- failed_count: number of failed points\n- total_count: total points in batch\n- errors: array of error messages (first 10)"
+					},
+					"response": []
+				},
+				{
+					"name": "Bulk Multi-Device Ingestion",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Bulk ingestion results returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.results).to.be.an('object');",
+									"    pm.expect(jsonData.total_devices).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_001\": [\n    {\n      \"metric_name\": \"temperature\",\n      \"value\": 22.5,\n      \"unit\": \"celsius\",\n      \"timestamp\": \"{{$isoTimestamp}}\",\n      \"tags\": {}\n    }\n  ],\n  \"device_002\": [\n    {\n      \"metric_name\": \"temperature\",\n      \"value\": 24.0,\n      \"unit\": \"celsius\",\n      \"timestamp\": \"{{$isoTimestamp}}\",\n      \"tags\": {}\n    }\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/telemetry/bulk",
+							"host": ["{{api_base}}"],
+							"path": ["telemetry", "bulk"]
+						},
+						"description": "Ingest telemetry data for multiple devices in a single request\n\nRequest Body:\nObject with device_id as keys and arrays of data points as values\n\nExample:\n{\n  \"device_001\": [<data_points>],\n  \"device_002\": [<data_points>]\n}\n\nResponse:\n- results: Object with device_id as keys and ingestion results as values\n- total_devices: Number of devices processed"
+					},
+					"response": []
+				}
+			],
+			"description": "Data ingestion endpoints for single, batch, and multi-device telemetry data"
+		},
+		{
+			"name": "Data Queries",
+			"item": [
+				{
+					"name": "Query Telemetry Data",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Query results returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data_points).to.be.an('array');",
+									"    pm.expect(jsonData.count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"devices\": [\"{{test_device_id}}\"],\n  \"metrics\": [\"temperature\", \"humidity\"],\n  \"start_time\": \"2025-10-13T00:00:00Z\",\n  \"end_time\": \"2025-10-14T23:59:59Z\",\n  \"aggregation\": \"avg\",\n  \"interval\": 300,\n  \"filters\": {\n    \"location\": \"living_room\"\n  },\n  \"limit\": 1000,\n  \"offset\": 0\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/query",
+							"host": ["{{api_base}}"],
+							"path": ["query"]
+						},
+						"description": "Query telemetry data with flexible filters and aggregation\n\nRequest Body:\n- devices: Array of device IDs (optional, empty = all devices)\n- metrics: Array of metric names (required, min 1)\n- start_time: Query start time (ISO 8601, required)\n- end_time: Query end time (ISO 8601, required)\n- aggregation: avg|min|max|sum|count|median|p95|p99 (optional)\n- interval: Aggregation interval in seconds (60-86400, optional)\n- filters: Tag filters object (optional)\n- limit: Max data points to return (1-10000, default: 1000)\n- offset: Number of points to skip (default: 0)\n\nResponse:\n- device_id: Device ID or 'multiple'\n- metric_name: Metric name or 'multiple'\n- data_points: Array of data point objects\n- count: Number of points returned\n- aggregation: Applied aggregation type\n- interval: Applied interval\n- start_time, end_time: Query time range"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Latest Value",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Latest value returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.device_id).to.eql(pm.collectionVariables.get('test_device_id'));",
+									"    pm.expect(jsonData.metric_name).to.be.a('string');",
+									"    pm.expect(jsonData.value).to.exist;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/devices/{{test_device_id}}/metrics/{{metric_name}}/latest",
+							"host": ["{{api_base}}"],
+							"path": ["devices", "{{test_device_id}}", "metrics", "{{metric_name}}", "latest"]
+						},
+						"description": "Get the latest value for a specific metric\n\nPath Parameters:\n- device_id: Device identifier (required)\n- metric_name: Metric name (required)\n\nResponse:\n- device_id: Device identifier\n- metric_name: Metric name\n- value: Latest metric value\n- unit: Measurement unit\n- timestamp: ISO 8601 timestamp\n- tags: Associated tags\n- metadata: Associated metadata"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Device Metrics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Metrics array returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/devices/{{test_device_id}}/metrics",
+							"host": ["{{api_base}}"],
+							"path": ["devices", "{{test_device_id}}", "metrics"]
+						},
+						"description": "Get all metric names for a specific device\n\nPath Parameters:\n- device_id: Device identifier (required)\n\nResponse:\n- Array of metric name strings"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Metric Range",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Time range data returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data_points).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/devices/{{test_device_id}}/metrics/{{metric_name}}/range?time_range=24h&aggregation=avg&interval=300",
+							"host": ["{{api_base}}"],
+							"path": ["devices", "{{test_device_id}}", "metrics", "{{metric_name}}", "range"],
+							"query": [
+								{
+									"key": "time_range",
+									"value": "24h",
+									"description": "Time range: 1h|6h|24h|7d|30d|90d (required)"
+								},
+								{
+									"key": "aggregation",
+									"value": "avg",
+									"description": "Aggregation type (optional)"
+								},
+								{
+									"key": "interval",
+									"value": "300",
+									"description": "Aggregation interval in seconds (60-86400, optional)"
+								}
+							]
+						},
+						"description": "Get metric data for a predefined time range\n\nPath Parameters:\n- device_id: Device identifier (required)\n- metric_name: Metric name (required)\n\nQuery Parameters:\n- time_range: 1h|6h|24h|7d|30d|90d (required)\n- aggregation: avg|min|max|sum|count|median|p95|p99 (optional)\n- interval: Aggregation interval in seconds (60-86400, optional)\n\nResponse:\n- Same format as Query endpoint"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Aggregated Data",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Aggregated data returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data_points).to.be.an('array');",
+									"    pm.expect(jsonData.aggregation_type).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/aggregated?metric_name=temperature&aggregation_type=avg&interval=300&start_time=2025-10-13T00:00:00Z&end_time=2025-10-14T23:59:59Z&device_id={{test_device_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["aggregated"],
+							"query": [
+								{
+									"key": "metric_name",
+									"value": "temperature",
+									"description": "Metric name (required)"
+								},
+								{
+									"key": "aggregation_type",
+									"value": "avg",
+									"description": "Aggregation type (required)"
+								},
+								{
+									"key": "interval",
+									"value": "300",
+									"description": "Interval in seconds (60-86400, required)"
+								},
+								{
+									"key": "start_time",
+									"value": "2025-10-13T00:00:00Z",
+									"description": "Start time ISO 8601 (required)"
+								},
+								{
+									"key": "end_time",
+									"value": "2025-10-14T23:59:59Z",
+									"description": "End time ISO 8601 (required)"
+								},
+								{
+									"key": "device_id",
+									"value": "{{test_device_id}}",
+									"description": "Device ID (optional, omit for multi-device aggregation)"
+								}
+							]
+						},
+						"description": "Get aggregated data with specific intervals\n\nQuery Parameters:\n- metric_name: Metric name (required)\n- aggregation_type: avg|min|max|sum|count|median|p95|p99 (required)\n- interval: Interval in seconds (60-86400, required)\n- start_time: ISO 8601 timestamp (required)\n- end_time: ISO 8601 timestamp (required)\n- device_id: Device ID (optional, omit for multi-device aggregation)\n\nResponse:\n- device_id: Device ID or null for multi-device\n- metric_name: Metric name\n- aggregation_type: Applied aggregation\n- interval: Applied interval\n- data_points: Array of {timestamp, value} objects\n- start_time, end_time: Query range\n- count: Number of data points"
+					},
+					"response": []
+				}
+			],
+			"description": "Time-series data query endpoints with flexible filtering and aggregation"
+		},
+		{
+			"name": "Alert Management",
+			"item": [
+				{
+					"name": "Create Alert Rule",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Alert rule created', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.rule_id).to.be.a('string');",
+									"    pm.expect(jsonData.name).to.be.a('string');",
+									"    ",
+									"    // Save rule ID",
+									"    pm.collectionVariables.set('alert_rule_id', jsonData.rule_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"High Temperature Alert\",\n  \"description\": \"Alert when temperature exceeds 30C\",\n  \"metric_name\": \"temperature\",\n  \"condition\": \"greater_than\",\n  \"threshold_value\": 30.0,\n  \"evaluation_window\": 300,\n  \"trigger_count\": 2,\n  \"level\": \"warning\",\n  \"device_ids\": [\"{{test_device_id}}\"],\n  \"device_groups\": [],\n  \"device_filters\": {},\n  \"notification_channels\": [\"email\", \"sms\"],\n  \"cooldown_minutes\": 15,\n  \"auto_resolve\": true,\n  \"auto_resolve_timeout\": 3600,\n  \"enabled\": true,\n  \"tags\": [\"temperature\", \"critical\"]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/alerts/rules",
+							"host": ["{{api_base}}"],
+							"path": ["alerts", "rules"]
+						},
+						"description": "Create a new alert rule\n\nRequest Body:\n- name: Rule name (required, max 200 chars)\n- description: Rule description (optional, max 1000 chars)\n- metric_name: Metric to monitor (required, max 100 chars)\n- condition: Condition string (required, e.g., '> 80', '< 10', \"== 'error'\")\n- threshold_value: Threshold value (required - number or string)\n- evaluation_window: Evaluation window in seconds (60-3600, default: 300)\n- trigger_count: Consecutive triggers needed (1-100, default: 1)\n- level: info|warning|error|critical|emergency (default: warning)\n- device_ids: Array of device IDs to monitor (optional)\n- device_groups: Array of device groups (optional)\n- device_filters: Filter criteria object (optional)\n- notification_channels: Array of channel names (optional)\n- cooldown_minutes: Cooldown period (1-1440, default: 15)\n- auto_resolve: Auto-resolve when condition clears (default: true)\n- auto_resolve_timeout: Auto-resolve timeout in seconds (300-86400, default: 3600)\n- enabled: Enable rule (default: true)\n- tags: Array of tag strings (optional)\n\nResponse:\n- rule_id: Generated rule identifier\n- All rule fields\n- total_triggers: 0\n- last_triggered: null\n- created_at, updated_at, created_by"
+					},
+					"response": []
+				},
+				{
+					"name": "List Alert Rules",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Alert rules list returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.rules).to.be.an('array');",
+									"    pm.expect(jsonData.count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/alerts/rules?limit=100&offset=0",
+							"host": ["{{api_base}}"],
+							"path": ["alerts", "rules"],
+							"query": [
+								{
+									"key": "enabled",
+									"value": "true",
+									"description": "Filter by enabled status",
+									"disabled": true
+								},
+								{
+									"key": "level",
+									"value": "warning",
+									"description": "Filter by alert level",
+									"disabled": true
+								},
+								{
+									"key": "metric_name",
+									"value": "temperature",
+									"description": "Filter by metric name",
+									"disabled": true
+								},
+								{
+									"key": "limit",
+									"value": "100",
+									"description": "Max items to return (1-500)"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Number of items to skip"
+								}
+							]
+						},
+						"description": "List all alert rules with optional filters\n\nQuery Parameters:\n- enabled: Filter by enabled status (optional)\n- level: Filter by alert level (optional)\n- metric_name: Filter by metric name (optional)\n- limit: Max items (1-500, default: 100)\n- offset: Skip count (default: 0)\n\nResponse:\n- rules: Array of alert rule objects\n- count: Number of rules returned\n- total: Total matching rules\n- limit, offset: Applied pagination\n- filters: Applied filters"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Alert Rule Details",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Alert rule details returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.rule_id).to.be.a('string');",
+									"    pm.expect(jsonData.name).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/alerts/rules/{{alert_rule_id}}",
+							"host": ["{{api_base}}"],
+							"path": ["alerts", "rules", "{{alert_rule_id}}"]
+						},
+						"description": "Get detailed alert rule information\n\nPath Parameters:\n- rule_id: Alert rule identifier (required)\n\nResponse:\n- Full alert rule object with all fields"
+					},
+					"response": []
+				},
+				{
+					"name": "Enable/Disable Alert Rule",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Rule status updated', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('successfully');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": false\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/alerts/rules/:rule_id/enable",
+							"host": ["{{api_base}}"],
+							"path": ["alerts", "rules", ":rule_id", "enable"],
+							"variable": [
+								{
+									"key": "rule_id",
+									"value": "{{alert_rule_id}}",
+									"description": "Alert rule ID"
+								}
+							]
+						},
+						"description": "Enable or disable an alert rule\n\nPath Parameters:\n- rule_id: Alert rule identifier (required)\n\nRequest Body:\n- enabled: true or false (required)\n\nResponse:\n- message: Confirmation message"
+					},
+					"response": []
+				},
+				{
+					"name": "List Alerts",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Alerts list returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.alerts).to.be.an('array');",
+									"    pm.expect(jsonData.count).to.be.a('number');",
+									"    pm.expect(jsonData.active_count).to.be.a('number');",
+									"    pm.expect(jsonData.critical_count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/alerts?limit=100&offset=0",
+							"host": ["{{api_base}}"],
+							"path": ["alerts"],
+							"query": [
+								{
+									"key": "status",
+									"value": "active",
+									"description": "Filter by status (active|acknowledged|resolved|suppressed)",
+									"disabled": true
+								},
+								{
+									"key": "level",
+									"value": "warning",
+									"description": "Filter by level",
+									"disabled": true
+								},
+								{
+									"key": "device_id",
+									"value": "{{test_device_id}}",
+									"description": "Filter by device ID",
+									"disabled": true
+								},
+								{
+									"key": "start_time",
+									"value": "2025-10-13T00:00:00Z",
+									"description": "Filter by start time",
+									"disabled": true
+								},
+								{
+									"key": "end_time",
+									"value": "2025-10-14T23:59:59Z",
+									"description": "Filter by end time",
+									"disabled": true
+								},
+								{
+									"key": "limit",
+									"value": "100",
+									"description": "Max items (1-500)"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Skip count"
+								}
+							]
+						},
+						"description": "List alerts with optional filters\n\nQuery Parameters:\n- status: active|acknowledged|resolved|suppressed (optional)\n- level: Filter by alert level (optional)\n- device_id: Filter by device (optional)\n- start_time: Filter by trigger time start (optional)\n- end_time: Filter by trigger time end (optional)\n- limit: Max items (1-500, default: 100)\n- offset: Skip count (default: 0)\n\nResponse:\n- alerts: Array of alert objects\n- count: Number of alerts returned\n- active_count: Number of active alerts\n- critical_count: Number of critical alerts\n- filters: Applied filters\n- limit, offset: Applied pagination"
+					},
+					"response": []
+				},
+				{
+					"name": "Acknowledge Alert",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Alert acknowledged', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('acknowledged');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"note\": \"Investigating the issue\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/alerts/:alert_id/acknowledge",
+							"host": ["{{api_base}}"],
+							"path": ["alerts", ":alert_id", "acknowledge"],
+							"variable": [
+								{
+									"key": "alert_id",
+									"value": "alert_123",
+									"description": "Alert ID"
+								}
+							]
+						},
+						"description": "Acknowledge an alert\n\nPath Parameters:\n- alert_id: Alert identifier (required)\n\nRequest Body:\n- note: Acknowledgment note (optional)\n\nResponse:\n- message: Confirmation message"
+					},
+					"response": []
+				},
+				{
+					"name": "Resolve Alert",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Alert resolved', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('resolved');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"note\": \"Issue resolved - HVAC system repaired\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/alerts/:alert_id/resolve",
+							"host": ["{{api_base}}"],
+							"path": ["alerts", ":alert_id", "resolve"],
+							"variable": [
+								{
+									"key": "alert_id",
+									"value": "alert_123",
+									"description": "Alert ID"
+								}
+							]
+						},
+						"description": "Resolve an alert\n\nPath Parameters:\n- alert_id: Alert identifier (required)\n\nRequest Body:\n- note: Resolution note (optional)\n\nResponse:\n- message: Confirmation message"
+					},
+					"response": []
+				}
+			],
+			"description": "Alert rule management and alert lifecycle endpoints"
+		},
+		{
+			"name": "Statistics",
+			"item": [
+				{
+					"name": "Get Device Telemetry Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Device stats returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.device_id).to.eql(pm.collectionVariables.get('test_device_id'));",
+									"    pm.expect(jsonData.total_metrics).to.be.a('number');",
+									"    pm.expect(jsonData.data_points_count).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/devices/{{test_device_id}}/stats",
+							"host": ["{{api_base}}"],
+							"path": ["devices", "{{test_device_id}}", "stats"]
+						},
+						"description": "Get telemetry statistics for a specific device\n\nPath Parameters:\n- device_id: Device identifier (required)\n\nResponse:\n- device_id: Device identifier\n- total_metrics: Total number of metrics\n- active_metrics: Number of metrics with data\n- data_points_count: Total data points stored\n- last_update: Last update timestamp\n- storage_size: Estimated storage size in bytes\n- avg_frequency: Average data points per minute\n- last_24h_points: Data points in last 24 hours\n- last_24h_alerts: Alerts in last 24 hours\n- metrics_by_type: Breakdown by metric type\n- top_metrics: Most active metrics"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Service Telemetry Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service stats returned', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.total_devices).to.be.a('number');",
+									"    pm.expect(jsonData.total_data_points).to.be.a('number');",
+									"    pm.expect(jsonData.points_per_second).to.be.a('number');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/stats",
+							"host": ["{{api_base}}"],
+							"path": ["stats"]
+						},
+						"description": "Get service-wide telemetry statistics\n\nResponse:\n- total_devices: Total devices with telemetry\n- active_devices: Active devices\n- total_metrics: Total metrics tracked\n- total_data_points: Total data points stored\n- storage_size: Total storage size in bytes\n- points_per_second: Data ingestion rate\n- avg_latency: Average query latency in ms\n- error_rate: Error rate percentage\n- last_24h_points: Points in last 24 hours\n- last_24h_devices: Active devices in last 24 hours\n- last_24h_alerts: Alerts in last 24 hours\n- devices_by_type: Device distribution\n- metrics_by_type: Metric distribution\n- data_by_hour: Hourly data breakdown"
+					},
+					"response": []
+				}
+			],
+			"description": "Statistical analysis endpoints for device and service-wide telemetry"
+		},
+		{
+			"name": "Real-time Streaming",
+			"item": [
+				{
+					"name": "Create Real-time Subscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Subscription created', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.subscription_id).to.be.a('string');",
+									"    pm.expect(jsonData.websocket_url).to.be.a('string');",
+									"    ",
+									"    // Save subscription ID",
+									"    pm.collectionVariables.set('subscription_id', jsonData.subscription_id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_ids\": [\"{{test_device_id}}\"],\n  \"metric_names\": [\"temperature\", \"humidity\"],\n  \"tags\": {\n    \"location\": \"living_room\"\n  },\n  \"filter_condition\": null,\n  \"max_frequency\": 1000\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/subscribe",
+							"host": ["{{api_base}}"],
+							"path": ["subscribe"]
+						},
+						"description": "Create a real-time data subscription for WebSocket streaming\n\nRequest Body:\n- device_ids: Array of device IDs to monitor (optional, empty = all)\n- metric_names: Array of metric names to monitor (optional, empty = all)\n- tags: Tag filters object (optional)\n- filter_condition: Custom filter expression (optional)\n- max_frequency: Max update frequency in ms (100-10000, default: 1000)\n\nResponse:\n- subscription_id: Generated subscription identifier\n- message: Confirmation message\n- websocket_url: WebSocket URL to connect to\n\nNote: Connect to websocket_url to start receiving real-time data"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Subscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Subscription cancelled', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('cancelled');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/subscribe/:subscription_id",
+							"host": ["{{api_base}}"],
+							"path": ["subscribe", ":subscription_id"],
+							"variable": [
+								{
+									"key": "subscription_id",
+									"value": "{{subscription_id}}",
+									"description": "Subscription ID"
+								}
+							]
+						},
+						"description": "Cancel a real-time data subscription\n\nPath Parameters:\n- subscription_id: Subscription identifier (required)\n\nResponse:\n- message: Confirmation message"
+					},
+					"response": []
+				}
+			],
+			"description": "Real-time data streaming via WebSocket subscriptions.\n\nNote: After creating a subscription, connect to the WebSocket URL to receive real-time telemetry data as it arrives."
+		},
+		{
+			"name": "Data Export",
+			"item": [
+				{
+					"name": "Export CSV",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('CSV file returned', function () {",
+									"    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv');",
+									"    pm.expect(pm.response.text()).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Internal-Call",
+								"value": "true",
+								"description": "Bypass auth for testing"
+							}
+						],
+						"url": {
+							"raw": "{{api_base}}/export/csv?device_ids={{test_device_id}}&metric_names=temperature&metric_names=humidity&start_time=2025-10-13T00:00:00Z&end_time=2025-10-14T23:59:59Z",
+							"host": ["{{api_base}}"],
+							"path": ["export", "csv"],
+							"query": [
+								{
+									"key": "device_ids",
+									"value": "{{test_device_id}}",
+									"description": "Device ID (can specify multiple)"
+								},
+								{
+									"key": "metric_names",
+									"value": "temperature",
+									"description": "Metric name (can specify multiple)"
+								},
+								{
+									"key": "metric_names",
+									"value": "humidity",
+									"description": "Additional metric name"
+								},
+								{
+									"key": "start_time",
+									"value": "2025-10-13T00:00:00Z",
+									"description": "Start time ISO 8601 (required)"
+								},
+								{
+									"key": "end_time",
+									"value": "2025-10-14T23:59:59Z",
+									"description": "End time ISO 8601 (required)"
+								}
+							]
+						},
+						"description": "Export telemetry data as CSV file\n\nQuery Parameters:\n- device_ids: Array of device IDs (required, can specify multiple)\n- metric_names: Array of metric names (required, can specify multiple)\n- start_time: ISO 8601 timestamp (required)\n- end_time: ISO 8601 timestamp (required)\n\nResponse:\n- CSV file with columns: timestamp, device_id, metric_name, value, unit, tags\n- Content-Type: text/csv\n- Content-Disposition: attachment; filename=telemetry_data.csv"
+					},
+					"response": []
+				}
+			],
+			"description": "Data export endpoints for exporting telemetry data in various formats"
+		}
+	],
+	"auth": {
+		"type": "noauth"
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Pre-request script for all requests",
+					"// Can be used to set common headers, variables, etc."
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Common test script for all requests",
+					"// Can be used for logging, debugging, etc."
+				]
+			}
+		}
+	]
+}

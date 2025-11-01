@@ -84,6 +84,7 @@ class SessionMemory(BaseModel):
 class SessionCreateRequest(BaseModel):
     """Session create request"""
     user_id: str = Field(..., description="User ID")
+    session_id: Optional[str] = Field(None, description="Optional session ID (auto-generated if not provided)")
     conversation_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Initial conversation data")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Session metadata")
 

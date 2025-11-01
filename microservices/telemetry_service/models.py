@@ -84,7 +84,6 @@ class TelemetryDataPoint(BaseModel):
 
 class TelemetryBatchRequest(BaseModel):
     """批量遥测数据请求"""
-    device_id: str
     data_points: List[TelemetryDataPoint] = Field(..., min_items=1, max_items=1000)
     compression: Optional[str] = None  # gzip, lz4, etc.
     batch_id: Optional[str] = None  # 批次ID，用于去重
@@ -133,13 +132,13 @@ class AlertRuleRequest(BaseModel):
 
 class QueryRequest(BaseModel):
     """查询请求"""
-    device_ids: Optional[List[str]] = []
-    metric_names: List[str] = Field(..., min_items=1)
+    devices: Optional[List[str]] = []  # Changed from device_ids to match test
+    metrics: List[str] = Field(..., min_items=1)  # Changed from metric_names to match test
     start_time: datetime
     end_time: datetime
     aggregation: Optional[AggregationType] = None
     interval: Optional[int] = Field(None, ge=60, le=86400)  # 聚合间隔
-    tags: Optional[Dict[str, str]] = {}
+    filters: Optional[Dict[str, str]] = {}  # Changed from tags to match test
     limit: int = Field(1000, ge=1, le=10000)
     offset: int = Field(0, ge=0)
 

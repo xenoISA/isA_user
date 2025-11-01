@@ -24,12 +24,9 @@ class SubscriptionStatus(str, Enum):
 class User(BaseModel):
     """User model for account service"""
     user_id: str
-    auth0_id: Optional[str] = None
     email: Optional[str] = None
     name: Optional[str] = None
     subscription_status: SubscriptionStatus = SubscriptionStatus.FREE
-    credits_remaining: float = 1000.0
-    credits_total: float = 1000.0
     is_active: bool = True
     preferences: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
@@ -51,12 +48,12 @@ class User(BaseModel):
 # Account Service Specific Request Models
 
 class AccountEnsureRequest(BaseModel):
-    """Account ensure request - extends UserEnsureRequest"""
-    auth0_id: str = Field(..., description="Auth0 user ID")
+    """Account ensure request"""
+    user_id: str = Field(..., description="User ID (from auth service)")
     email: EmailStr = Field(..., description="User email")
     name: str = Field(..., description="User name")
     subscription_plan: Optional[SubscriptionStatus] = Field(
-        SubscriptionStatus.FREE, 
+        SubscriptionStatus.FREE,
         description="Initial subscription plan"
     )
 
@@ -88,12 +85,9 @@ class AccountStatusChangeRequest(BaseModel):
 class AccountProfileResponse(BaseModel):
     """Detailed account profile response"""
     user_id: str
-    auth0_id: Optional[str]
     email: Optional[str] = None
     name: Optional[str] = None
     subscription_status: SubscriptionStatus
-    credits_remaining: float
-    credits_total: float
     is_active: bool
     preferences: Dict[str, Any] = {}
     created_at: Optional[datetime]
@@ -141,7 +135,7 @@ class AccountServiceStatus(BaseModel):
     """Account service status response"""
     service: str = "account_service"
     status: str = "operational"
-    port: int = 8201
+    port: int = 8202
     version: str = "1.0.0"
     database_connected: bool
     timestamp: datetime

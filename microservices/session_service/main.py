@@ -4,8 +4,8 @@ Session Microservice
 Responsibilities:
 - Session management (CRUD operations)
 - Session message management
-- Session memory management
 - Session statistics and analytics
+Note: Session memory is handled by dedicated memory_service
 """
 
 from fastapi import FastAPI, HTTPException, Depends, status, Query
@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 # Import ConfigManager
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
 
 # Import local components
 from .session_service import (
@@ -49,22 +50,27 @@ logger = app_logger  # for backward compatibility
 
 class SessionMicroservice:
     """Session microservice core class"""
-    
+
     def __init__(self):
         self.session_service = None
-    
-    async def initialize(self):
+        self.event_bus = None
+
+    async def initialize(self, event_bus=None):
         """Initialize the microservice"""
         try:
-            self.session_service = SessionService()
+            self.event_bus = event_bus
+            self.session_service = SessionService(event_bus=event_bus)
             logger.info("Session microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize session microservice: {e}")
             raise
-    
+
     async def shutdown(self):
         """Shutdown the microservice"""
         try:
+            if self.event_bus:
+                await self.event_bus.close()
+                logger.info("Event bus closed")
             logger.info("Session microservice shutdown completed")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -77,9 +83,37 @@ session_microservice = SessionMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    # Initialize microservice
-    await session_microservice.initialize()
-    
+    # Initialize event bus
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("session_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
+    # Initialize microservice with event bus
+    await session_microservice.initialize(event_bus=event_bus)
+
+    # Subscribe to events if event bus is available
+    if event_bus and session_microservice.session_service:
+        try:
+            from .events import SessionEventHandlers
+            event_handlers = SessionEventHandlers(session_microservice.session_service)
+            handler_map = event_handlers.get_event_handler_map()
+
+            for event_type, handler_func in handler_map.items():
+                # Subscribe to each event type
+                await event_bus.subscribe_to_events(
+                    pattern=f"*.{event_type}",
+                    handler=handler_func
+                )
+                logger.info(f"✅ Subscribed to {event_type} events")
+
+            logger.info(f"✅ Subscribed to {len(handler_map)} event types")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to subscribe to events: {e}")
+
     # Register with Consul
     consul_registry = ConsulRegistry(
         service_name=config.service_name,
@@ -315,37 +349,8 @@ async def get_session_messages(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-# Memory management endpoints
-
-@app.post("/api/v1/sessions/{session_id}/memory", response_model=MemoryResponse)
-async def create_session_memory(
-    session_id: str,
-    request: MemoryCreateRequest,
-    user_id: Optional[str] = Query(None, description="User ID for authorization"),
-    session_service: SessionService = Depends(get_session_service)
-):
-    """Create or update session memory"""
-    try:
-        return await session_service.create_session_memory(session_id, request, user_id)
-    except SessionNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except SessionServiceError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@app.get("/api/v1/sessions/{session_id}/memory", response_model=Optional[MemoryResponse])
-async def get_session_memory(
-    session_id: str,
-    user_id: Optional[str] = Query(None, description="User ID for authorization"),
-    session_service: SessionService = Depends(get_session_service)
-):
-    """Get session memory"""
-    try:
-        return await session_service.get_session_memory(session_id, user_id)
-    except SessionNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except SessionServiceError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+# Note: Memory management is handled by dedicated memory_service
+# See microservices/memory_service for session memory functionality
 
 
 # Moved stats route to before session_id route to avoid conflicts
