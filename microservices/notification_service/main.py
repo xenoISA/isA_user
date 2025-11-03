@@ -91,23 +91,23 @@ async def lifespan(app: FastAPI):
         try:
             event_handlers = NotificationEventHandlers(service)
 
-        # Subscribe to events
-        handler_map = event_handlers.get_event_handler_map()
-        for event_type, handler_func in handler_map.items():
-            # Subscribe to each event type
-            # Convert event type like "user.logged_in" to subscription pattern "*.*user.logged_in"
-            await event_bus.subscribe_to_events(
-                pattern=f"*.{event_type}",
-                handler=handler_func
-            )
-            logger.info(f"Subscribed to {event_type} events")
+            # Subscribe to events
+            handler_map = event_handlers.get_event_handler_map()
+            for event_type, handler_func in handler_map.items():
+                # Subscribe to each event type
+                # Convert event type like "user.logged_in" to subscription pattern "*.*user.logged_in"
+                await event_bus.subscribe_to_events(
+                    pattern=f"*.{event_type}",
+                    handler=handler_func
+                )
+                logger.info(f"Subscribed to {event_type} events")
 
-        logger.info(f"Subscribed to {len(handler_map)} event types")
+            logger.info(f"Subscribed to {len(handler_map)} event types")
 
-    except Exception as e:
-        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event subscriptions.")
-        event_bus = None
-        event_handlers = None
+        except Exception as e:
+            logger.warning(f"Failed to initialize event bus: {e}. Continuing without event subscriptions.")
+            event_bus = None
+            event_handlers = None
     
     # Register with Consul
     if config.consul_enabled:
