@@ -59,6 +59,7 @@ class EventType(Enum):
 
     # Storage Events
     FILE_UPLOADED = "file.uploaded"
+    FILE_UPLOADED_WITH_AI = "file.uploaded.with_ai"  # 🆕 新增：带 AI 元数据的文件上传事件
     FILE_SHARED = "file.shared"
     FILE_DELETED = "file.deleted"
     FILE_INDEXING_REQUESTED = "file.indexing.requested"
@@ -203,6 +204,27 @@ class EventType(Enum):
     WEATHER_DATA_FETCHED = "weather.data.fetched"
     WEATHER_ALERT_CREATED = "weather.alert.created"
 
+    # Location Service Events
+    LOCATION_UPDATED = "location.updated"
+    LOCATION_BATCH_UPDATED = "location.batch.updated"
+    GEOFENCE_CREATED = "location.geofence.created"
+    GEOFENCE_UPDATED = "location.geofence.updated"
+    GEOFENCE_DELETED = "location.geofence.deleted"
+    GEOFENCE_ACTIVATED = "location.geofence.activated"
+    GEOFENCE_DEACTIVATED = "location.geofence.deactivated"
+    GEOFENCE_ENTERED = "location.geofence.entered"
+    GEOFENCE_EXITED = "location.geofence.exited"
+    GEOFENCE_DWELL = "location.geofence.dwell"
+    DEVICE_STARTED_MOVING = "location.device.started_moving"
+    DEVICE_STOPPED = "location.device.stopped"
+    SIGNIFICANT_MOVEMENT = "location.significant_movement"
+    LOW_BATTERY_AT_LOCATION = "location.low_battery"
+    PLACE_CREATED = "location.place.created"
+    PLACE_UPDATED = "location.place.updated"
+    PLACE_DELETED = "location.place.deleted"
+    ROUTE_STARTED = "location.route.started"
+    ROUTE_ENDED = "location.route.ended"
+
 
 class ServiceSource(Enum):
     """Service sources matching Go implementation"""
@@ -233,6 +255,7 @@ class ServiceSource(Enum):
     CALENDAR_SERVICE = "calendar_service"
     COMPLIANCE_SERVICE = "compliance_service"
     WEATHER_SERVICE = "weather_service"
+    LOCATION_SERVICE = "location_service"
     GATEWAY = "api_gateway"
 
 

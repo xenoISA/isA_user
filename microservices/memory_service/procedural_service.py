@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 class ProceduralMemoryService:
     """Procedural memory service with AI-powered procedure extraction"""
 
-    def __init__(self, repository: Optional[ProceduralMemoryRepository] = None, consul_registry=None):
+    def __init__(self, repository: Optional[ProceduralMemoryRepository] = None):
         """Initialize procedural memory service"""
         self.repository = repository or ProceduralMemoryRepository()
-        self.consul_registry = consul_registry
+        self.consul_registry = None  # Service discovery handled by ConfigManager now
         self.model_url = self._get_model_url()
 
         # Initialize Qdrant client for vector storage

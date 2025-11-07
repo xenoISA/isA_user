@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 class AuditService:
     """审计服务核心业务逻辑"""
 
-    def __init__(self):
-        self.repository = AuditRepository()
+    def __init__(self, config=None):
+        self.repository = AuditRepository(config=config)
         self.processed_event_ids = set()  # For idempotency
         
         # 风险评分配置

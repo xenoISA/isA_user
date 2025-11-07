@@ -24,13 +24,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 # Import local components
 from .session_service import (
     SessionService, SessionServiceError, SessionValidationError,
     SessionNotFoundError, MessageNotFoundError, MemoryNotFoundError
 )
-from core.consul_registry import ConsulRegistry
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     SessionCreateRequest, SessionUpdateRequest, MessageCreateRequest,
     MemoryCreateRequest, MemoryUpdateRequest, SessionResponse,
@@ -54,12 +55,13 @@ class SessionMicroservice:
     def __init__(self):
         self.session_service = None
         self.event_bus = None
+        self.consul_registry = None
 
     async def initialize(self, event_bus=None):
         """Initialize the microservice"""
         try:
             self.event_bus = event_bus
-            self.session_service = SessionService(event_bus=event_bus)
+            self.session_service = SessionService(event_bus=event_bus, config=config_manager)
             logger.info("Session microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize session microservice: {e}")
@@ -68,6 +70,14 @@ class SessionMicroservice:
     async def shutdown(self):
         """Shutdown the microservice"""
         try:
+            # Consul deregistration
+            if self.consul_registry:
+                try:
+                    self.consul_registry.deregister()
+                    logger.info("✅ Session service deregistered from Consul")
+                except Exception as e:
+                    logger.error(f"❌ Failed to deregister from Consul: {e}")
+
             if self.event_bus:
                 await self.event_bus.close()
                 logger.info("Event bus closed")
@@ -114,30 +124,37 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️  Failed to subscribe to events: {e}")
 
-    # Register with Consul
-    consul_registry = ConsulRegistry(
-        service_name=config.service_name,
-        service_port=config.service_port,
-        consul_host=config.consul_host,
-        consul_port=config.consul_port,
-        service_host=config.service_host,
-        tags=["microservice", "sessions", "api"]
-    )
-    
-    if config.consul_enabled and consul_registry.register():
-        consul_registry.start_maintenance()
-        app.state.consul_registry = consul_registry
-        logger.info(f"{config.service_name} registered with Consul")
-    elif config.consul_enabled:
-        logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+    # Consul service registration
+    if config.consul_enabled:
+        try:
+            # Get route metadata
+            route_meta = get_routes_for_consul()
+
+            # Merge service metadata
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            session_microservice.consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            session_microservice.consul_registry.register()
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            session_microservice.consul_registry = None
+
     yield
-    
+
     # Cleanup
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-    
     await session_microservice.shutdown()
 
 

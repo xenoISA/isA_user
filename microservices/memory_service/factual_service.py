@@ -22,16 +22,15 @@ logger = logging.getLogger(__name__)
 class FactualMemoryService:
     """Factual memory service with AI-powered fact extraction"""
 
-    def __init__(self, repository: Optional[FactualMemoryRepository] = None, consul_registry=None):
+    def __init__(self, repository: Optional[FactualMemoryRepository] = None):
         """
         Initialize factual memory service
 
         Args:
             repository: Optional repository instance for dependency injection
-            consul_registry: Optional ConsulRegistry for service discovery
         """
         self.repository = repository or FactualMemoryRepository()
-        self.consul_registry = consul_registry
+        self.consul_registry = None  # Service discovery handled by ConfigManager now
 
         # Get ISA Model URL via Consul service discovery or fallback
         self.model_url = self._get_model_url()
@@ -113,26 +112,27 @@ class FactualMemoryService:
             # Store each extracted fact
             for fact in facts_data.get('facts', []):
                 if self._is_valid_fact(fact):
-                    # Check for duplicate
-                    existing = await self.repository.find_duplicate_fact(
-                        user_id=user_id,
-                        subject=str(fact.get('subject', '')),
-                        predicate=str(fact.get('predicate', ''))
-                    )
-
-                    if existing:
-                        logger.info(f"Duplicate fact found, skipping: {fact.get('subject')}")
-                        continue
-
-                    # Create fact memory
-                    memory_id = str(uuid.uuid4())
-
-                    # Handle object_value (might be list or string)
+                    # Handle object_value first (might be list or string)
                     object_value = fact.get('object_value', '')
                     if isinstance(object_value, list):
                         object_value = ', '.join(str(item) for item in object_value)
                     else:
                         object_value = str(object_value)
+
+                    # Check for duplicate with object_value included
+                    existing = await self.repository.find_duplicate_fact(
+                        user_id=user_id,
+                        subject=str(fact.get('subject', '')),
+                        predicate=str(fact.get('predicate', '')),
+                        object_value=object_value
+                    )
+
+                    if existing:
+                        logger.info(f"Duplicate fact found, skipping: {fact.get('subject')} {fact.get('predicate')} {object_value}")
+                        continue
+
+                    # Create fact memory
+                    memory_id = str(uuid.uuid4())
 
                     # Generate embedding for the fact content
                     fact_content = self._create_fact_content(fact)

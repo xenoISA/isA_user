@@ -22,10 +22,9 @@ logger = logging.getLogger(__name__)
 class SemanticMemoryService:
     """Semantic memory service with AI-powered concept extraction"""
 
-    def __init__(self, repository: Optional[SemanticMemoryRepository] = None, consul_registry=None):
+    def __init__(self, repository: Optional[SemanticMemoryRepository] = None):
         """Initialize semantic memory service"""
         self.repository = repository or SemanticMemoryRepository()
-        self.consul_registry = consul_registry
         self.model_url = self._get_model_url()
 
         # Initialize Qdrant client for vector storage
@@ -39,18 +38,10 @@ class SemanticMemoryService:
         logger.info(f"Semantic Memory Service initialized with ISA Model URL: {self.model_url}")
 
     def _get_model_url(self) -> str:
-        """Get ISA Model service URL via Consul or environment variable"""
+        """Get ISA Model service URL from environment variable"""
         env_url = os.getenv('ISA_MODEL_URL')
         if env_url:
             return env_url
-        if self.consul_registry:
-            try:
-                service_url = self.consul_registry.get_service_endpoint("model_service")
-                if service_url:
-                    logger.info(f"Discovered model_service via Consul: {service_url}")
-                    return service_url
-            except Exception as e:
-                logger.warning(f"Failed to discover model_service via Consul: {e}")
         return "http://localhost:8082"
 
     def _ensure_collection(self):

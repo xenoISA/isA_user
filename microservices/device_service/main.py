@@ -15,11 +15,11 @@ import os
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.service_discovery import get_service_discovery
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 from .models import (
     DeviceRegistrationRequest, DeviceUpdateRequest, DeviceAuthRequest,
     DeviceCommandRequest, BulkCommandRequest, DeviceGroupRequest,
@@ -28,6 +28,7 @@ from .models import (
     DeviceStatus, DeviceType, ConnectivityType
 )
 from .device_service import DeviceService
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from microservices.organization_service.client import OrganizationServiceClient
 from microservices.auth_service.client import AuthServiceClient
 from microservices.telemetry_service.client import TelemetryServiceClient
@@ -45,6 +46,7 @@ class DeviceMicroservice:
     def __init__(self):
         self.service = None
         self.event_bus = None
+        self.consul_registry = None
 
     async def initialize(self):
         # Initialize event bus for event-driven communication
@@ -55,10 +57,18 @@ class DeviceMicroservice:
             logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
             self.event_bus = None
 
-        self.service = DeviceService(event_bus=self.event_bus)
+        self.service = DeviceService(event_bus=self.event_bus, config=config_manager)
         logger.info("Device service initialized")
 
     async def shutdown(self):
+        # Consul deregistration
+        if self.consul_registry:
+            try:
+                self.consul_registry.deregister()
+                logger.info("✅ Device service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
+
         if self.event_bus:
             await self.event_bus.close()
         logger.info("Device service shutting down")
@@ -103,32 +113,37 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to subscribe to events: {e}")
 
-    # Consul注册
+    # Consul service registration
     if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "iot", "device", "management", "api", "v1"]
-        )
-        
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul")
-    
+        try:
+            # Get route metadata
+            route_meta = get_routes_for_consul()
+
+            # Merge service metadata
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            microservice.consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            microservice.consul_registry.register()
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            microservice.consul_registry = None
+
     yield
-    
+
     # Shutdown
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
-    
     await microservice.shutdown()
 
 # Create FastAPI application
@@ -255,6 +270,65 @@ async def register_device(
         raise HTTPException(status_code=400, detail="Failed to register device")
     except Exception as e:
         logger.error(f"Error registering device: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/devices/stats", response_model=DeviceStatsResponse)
+async def get_device_stats(
+    user_context: Dict[str, Any] = Depends(get_user_context)
+):
+    """获取设备统计信息"""
+    try:
+        stats = await microservice.service.get_device_stats(user_context["user_id"])
+        if stats:
+            return stats
+        raise HTTPException(status_code=404, detail="No stats available")
+    except Exception as e:
+        logger.error(f"Error getting device stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/devices/frames")
+async def list_smart_frames(
+    limit: int = Query(100, ge=1, le=500, description="Max items to return"),
+    offset: int = Query(0, ge=0, description="Number of items to skip"),
+    user_context: Dict[str, Any] = Depends(get_user_context)
+):
+    """获取智能相框列表 - 过滤现有设备API，包含家庭共享权限"""
+    try:
+        # Use existing device list API, filter for smart frames
+        devices_response = await list_devices(
+            device_type=DeviceType.SMART_FRAME,
+            limit=limit,
+            offset=offset,
+            user_context=user_context
+        )
+
+        # Get organization service client for access checks
+        org_client = OrganizationServiceClient()
+
+        # Filter devices based on family sharing permissions
+        accessible_frames = []
+        for device in devices_response.devices:
+            # Check if user has access via ownership or family sharing
+            if device.user_id == user_context["user_id"]:
+                accessible_frames.append(device)
+            else:
+                # TODO: Check family sharing permissions via organization service
+                # has_access = await org_client.check_smart_frame_access(
+                #     device.device_id, user_context["user_id"], "read"
+                # )
+                # if has_access:
+                #     accessible_frames.append(device)
+                pass
+
+        await org_client.close()
+
+        return {
+            "frames": accessible_frames,
+            "count": len(accessible_frames),
+            "message": "Smart frames retrieved with family sharing permissions"
+        }
+    except Exception as e:
+        logger.error(f"Error listing smart frames: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/devices/{device_id}", response_model=DeviceResponse)
@@ -461,20 +535,6 @@ async def get_device_health(
         logger.error(f"Error getting device health: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/stats", response_model=DeviceStatsResponse)
-async def get_device_stats(
-    user_context: Dict[str, Any] = Depends(get_user_context)
-):
-    """获取设备统计信息"""
-    try:
-        stats = await microservice.service.get_device_stats(user_context["user_id"])
-        if stats:
-            return stats
-        raise HTTPException(status_code=404, detail="No stats available")
-    except Exception as e:
-        logger.error(f"Error getting device stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 # ======================
 # Device Groups
 # ======================
@@ -567,48 +627,6 @@ async def bulk_send_commands(
 # ======================
 # Smart Frame Convenience Endpoints (using existing device infrastructure)
 # ======================
-
-@app.get("/api/v1/devices/frames")
-async def list_smart_frames(
-    user_context: Dict[str, Any] = Depends(get_user_context)
-):
-    """获取智能相框列表 - 过滤现有设备API，包含家庭共享权限"""
-    try:
-        # Use existing device list API, filter for smart frames
-        devices_response = await list_devices(
-            device_type=DeviceType.SMART_FRAME,
-            user_context=user_context
-        )
-
-        # Get organization service client for access checks
-        org_client = OrganizationServiceClient()
-
-        # Filter devices based on family sharing permissions
-        accessible_frames = []
-        for device in devices_response.devices:
-            # Check if user has access via ownership or family sharing
-            if device.user_id == user_context["user_id"]:
-                accessible_frames.append(device)
-            else:
-                # TODO: Check family sharing permissions via organization service
-                # has_access = await org_client.check_smart_frame_access(
-                #     device.device_id, user_context["user_id"], "read"
-                # )
-                # if has_access:
-                #     accessible_frames.append(device)
-                pass
-
-        await org_client.close()
-
-        return {
-            "frames": accessible_frames,
-            "count": len(accessible_frames),
-            "message": "Smart frames retrieved with family sharing permissions"
-        }
-    except Exception as e:
-        logger.error(f"Error listing smart frames: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/v1/devices/frames/{frame_id}/display")
 async def control_frame_display(

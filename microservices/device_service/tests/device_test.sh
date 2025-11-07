@@ -50,7 +50,7 @@ echo "POST ${AUTH_URL}/dev-token"
 TOKEN_PAYLOAD='{
   "user_id": "test_user_device_123",
   "email": "devicetest@example.com",
-  "organization_id": "org_test_123",
+  "organization_id": "org_test_001",
   "role": "admin",
   "expires_in": 3600
 }'
@@ -104,29 +104,31 @@ fi
 # Test 2: Register Device
 print_section "Test 2: Register Device"
 DEVICE_ID=""
+# Generate unique serial number with timestamp
+SERIAL_NUMBER="SN_TEST_$(date +%s)"
 echo "POST ${API_BASE}"
-REGISTER_PAYLOAD='{
-  "device_name": "Test Smart Frame 001",
-  "device_type": "smart_frame",
-  "manufacturer": "TestCorp",
-  "model": "SF-2024",
-  "serial_number": "SN123456789TEST",
-  "firmware_version": "1.0.0",
-  "hardware_version": "1.0",
-  "mac_address": "AA:BB:CC:DD:EE:FF",
-  "connectivity_type": "wifi",
-  "security_level": "standard",
-  "location": {
-    "latitude": 39.9042,
-    "longitude": 116.4074,
-    "address": "Beijing Test Location"
+REGISTER_PAYLOAD="{
+  \"device_name\": \"Test Smart Frame 001\",
+  \"device_type\": \"smart_frame\",
+  \"manufacturer\": \"TestCorp\",
+  \"model\": \"SF-2024\",
+  \"serial_number\": \"$SERIAL_NUMBER\",
+  \"firmware_version\": \"1.0.0\",
+  \"hardware_version\": \"1.0\",
+  \"mac_address\": \"AA:BB:CC:DD:EE:FF\",
+  \"connectivity_type\": \"wifi\",
+  \"security_level\": \"standard\",
+  \"location\": {
+    \"latitude\": 39.9042,
+    \"longitude\": 116.4074,
+    \"address\": \"Beijing Test Location\"
   },
-  "metadata": {
-    "test": true,
-    "environment": "testing"
+  \"metadata\": {
+    \"test\": true,
+    \"environment\": \"testing\"
   },
-  "tags": ["test", "smart_frame", "automated"]
-}'
+  \"tags\": [\"test\", \"smart_frame\", \"automated\"]
+}"
 echo "Request Body:"
 echo "$REGISTER_PAYLOAD" | jq '.'
 

@@ -18,12 +18,13 @@ from fastapi.responses import JSONResponse
 
 # Add parent directory to path for consul_registry
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 from .audit_service import AuditService
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     AuditEventCreateRequest, AuditEventResponse, AuditQueryRequest, AuditQueryResponse,
     UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest,
@@ -42,18 +43,19 @@ logger = app_logger  # for backward compatibility
 # 全局服务实例
 audit_service: Optional[AuditService] = None
 event_bus = None
+consul_registry = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global audit_service, event_bus
+    global audit_service, event_bus, consul_registry
 
     logger.info("🚀 Audit Service starting up...")
 
     try:
         # 初始化服务
-        audit_service = AuditService()
+        audit_service = AuditService(config=config_manager)
 
         # 检查数据库连接
         if await audit_service.repository.check_connection():
@@ -76,45 +78,57 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️ Failed to initialize event bus: {e}. Continuing without event subscriptions.")
             event_bus = None
-        
-        # Register with Consul
+
+        # Consul service registration
         if config.consul_enabled:
-            consul_registry = ConsulRegistry(
-                service_name=config.service_name,
-                service_port=config.service_port,
-                consul_host=config.consul_host,
-                consul_port=config.consul_port,
-                service_host=config.service_host,
-                tags=["microservice", "audit", "api"]
-            )
-            
-            if consul_registry.register():
-                consul_registry.start_maintenance()
-                app.state.consul_registry = consul_registry
-                logger.info(f"{config.service_name} registered with Consul")
-            else:
-                logger.warning("Failed to register with Consul, continuing without service discovery")
-        
+            try:
+                # Get route metadata
+                route_meta = get_routes_for_consul()
+
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
+                )
+                consul_registry.register()
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                consul_registry = None
+
         logger.info("✅ Audit Service started successfully")
-        
+
     except Exception as e:
         logger.error(f"❌ Audit Service startup failed: {e}")
         audit_service = None
-    
+
     yield
-    
+
     logger.info("🛑 Audit Service shutting down...")
+
+    # Consul deregistration
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("✅ Service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"❌ Failed to deregister from Consul: {e}")
 
     # Close event bus
     if event_bus:
         await event_bus.close()
         logger.info("✅ Event bus closed")
-
-    # Deregister from Consul
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-
     if audit_service:
         logger.info("✅ Audit Service cleanup completed")
 

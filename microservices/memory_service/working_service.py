@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 class WorkingMemoryService:
     """Working memory service for temporary task-related memories"""
 
-    def __init__(self, repository: Optional[WorkingMemoryRepository] = None, consul_registry=None):
+    def __init__(self, repository: Optional[WorkingMemoryRepository] = None):
         """Initialize working memory service"""
         self.repository = repository or WorkingMemoryRepository()
-        self.consul_registry = consul_registry
+        self.consul_registry = None  # Service discovery handled by ConfigManager now
         self.model_url = self._get_model_url()
 
         # Initialize Qdrant client for vector storage

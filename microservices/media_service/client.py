@@ -6,6 +6,7 @@ Handles photo versions, metadata, playlists, rotation schedules, and photo cachi
 """
 
 import httpx
+from core.service_discovery import get_service_discovery
 import logging
 from typing import Optional, List, Dict, Any
 
@@ -27,7 +28,6 @@ class MediaServiceClient:
         else:
             # Use service discovery
             try:
-                from core.service_discovery import get_service_discovery
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("media_service")
             except Exception as e:

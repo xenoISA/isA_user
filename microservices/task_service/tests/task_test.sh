@@ -59,6 +59,7 @@ echo "POST ${AUTH_BASE}/dev-token"
 TOKEN_PAYLOAD="{
   \"user_id\": \"${TEST_USER_ID}\",
   \"email\": \"${TEST_USER_ID}@example.com\",
+  \"subscription_level\": \"basic\",
   \"expires_in\": 3600
 }"
 
@@ -417,9 +418,17 @@ if [ -n "$TEMPLATE_ID" ]; then
     TEMPLATE_TASK_PAYLOAD="{
       \"template_id\": \"${TEMPLATE_ID}\",
       \"customization\": {
-        \"name\": \"My Custom Task from Template\",
+        \"name\": \"My Custom Team Meeting\",
         \"config\": {
-          \"custom_setting\": \"test_value\"
+          \"event_title\": \"Weekly Team Standup\",
+          \"event_time\": \"2025-11-10T10:00:00Z\",
+          \"location\": \"Conference Room A\",
+          \"recurring\": true
+        },
+        \"schedule\": {
+          \"type\": \"weekly\",
+          \"weekday\": 1,
+          \"run_time\": \"10:00\"
         }
       }
     }"

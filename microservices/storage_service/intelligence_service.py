@@ -14,6 +14,7 @@ import os
 from typing import List, Optional, Dict, Any
 
 from .intelligence_repository import IntelligenceRepository
+from core.config_manager import ConfigManager
 from .intelligence_models import (
     IndexedDocument, SearchResult, DocumentStatus, ChunkingStrategy,
     SemanticSearchRequest, SemanticSearchResponse,
@@ -27,8 +28,8 @@ logger = logging.getLogger(__name__)
 class IntelligenceService:
     """智能文档分析服务 - 通过MCP调用isA_MCP的digital_analytics_tools"""
 
-    def __init__(self):
-        self.repository = IntelligenceRepository()
+    def __init__(self, config: Optional[ConfigManager] = None):
+        self.repository = IntelligenceRepository(config=config)
 
         # isA_MCP服务端点 (default port is 8081)
         self.mcp_endpoint = os.getenv("MCP_ENDPOINT", "http://localhost:8081")
@@ -36,15 +37,46 @@ class IntelligenceService:
     # ==================== Helper Method for SSE Parsing ====================
 
     def _parse_sse_response(self, response_text: str) -> Optional[Dict[str, Any]]:
-        """Parse Server-Sent Events (SSE) response format"""
+        """
+        Parse Server-Sent Events (SSE) response format
+
+        SSE 格式: data: {jsonrpc response}
+        提取 result.content[0].text 并解析为最终数据
+
+        注意: MCP 会先发送 notifications/message 进度通知，需要跳过这些，找到真正的 result
+
+        Returns:
+            解析后的响应数据（已从 MCP wrapper 中提取）
+        """
         lines = response_text.strip().split('\n')
         for line in lines:
             if line.startswith('data: '):
                 try:
-                    data = json.loads(line[6:])
-                    return data
+                    # 解析 SSE data 行
+                    sse_data = json.loads(line[6:])
+
+                    # 跳过 MCP 通知消息 (method: notifications/message)
+                    if sse_data.get('method') == 'notifications/message':
+                        logger.debug(f"Skipping MCP notification: {sse_data.get('params', {}).get('data')}")
+                        continue
+
+                    # MCP 响应格式: {result: {content: [{text: "..."}]}}
+                    if 'result' in sse_data and 'content' in sse_data['result']:
+                        content = sse_data['result']['content']
+                        if content and len(content) > 0:
+                            # 提取 text 内容并解析为 JSON
+                            text_content = content[0].get('text', '{}')
+                            return json.loads(text_content)
+
+                    # 如果不是 MCP 格式，直接返回
+                    if 'result' in sse_data or 'error' in sse_data:
+                        return sse_data
+
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse SSE data: {e}")
+                    continue
+
+        logger.error("No valid result found in SSE response")
         return None
 
     # ==================== 文档索引 ====================
@@ -133,7 +165,7 @@ class IntelligenceService:
         try:
             # Use the exact pattern from how_to_mcp.md
             response = requests.post(
-                f"{self.mcp_endpoint}/mcp/tools/call",
+                f"{self.mcp_endpoint}/mcp",
                 headers={
                     'Content-Type': 'application/json',
                     'Accept': 'application/json, text/event-stream'
@@ -261,7 +293,7 @@ class IntelligenceService:
         try:
             # Use the exact pattern from how_to_mcp.md
             response = requests.post(
-                f"{self.mcp_endpoint}/mcp/tools/call",
+                f"{self.mcp_endpoint}/mcp",
                 headers={
                     'Content-Type': 'application/json',
                     'Accept': 'application/json, text/event-stream'
@@ -391,7 +423,7 @@ class IntelligenceService:
                 # Stream the response to handle SSE properly
                 async with client.stream(
                     "POST",
-                    f"{self.mcp_endpoint}/mcp/tools/call",
+                    f"{self.mcp_endpoint}/mcp",
                     headers={
                         'Content-Type': 'application/json',
                         'Accept': 'application/json, text/event-stream'
@@ -486,23 +518,40 @@ class IntelligenceService:
         description_prompt: Optional[str] = None,
         model: str = "gpt-4o-mini"
     ) -> Dict[str, Any]:
-        """通过MCP调用store_image"""
-        try:
-            # 构建参数，只包含非None值
-            arguments = {
-                "user_id": user_id,
-                "image_path": image_path,
-                "metadata": metadata or {},
-                "model": model
-            }
+        """
+        通过MCP调用store_knowledge存储图片
 
-            # 只有当description_prompt不为None时才添加
-            if description_prompt is not None:
-                arguments["description_prompt"] = description_prompt
+        使用新的统一工具: store_knowledge
+        content_type="image" 会自动触发VLM分析
+
+        Returns:
+            {
+                "success": True,
+                "chunks_stored": 1,
+                "ai_metadata": {
+                    "ai_categories": ["landscape"],
+                    "ai_tags": ["mountains", "sunset"],
+                    "ai_mood": "peaceful",
+                    "ai_dominant_colors": ["blue", "orange"],
+                    "ai_quality_score": 0.9,
+                    ...
+                },
+                "operation_id": "uuid"
+            }
+        """
+        try:
+            # 准备元数据
+            store_metadata = metadata or {}
+            if description_prompt:
+                store_metadata["description_prompt"] = description_prompt
+            if model:
+                store_metadata["model"] = model
+
+            logger.info(f"Storing image via MCP: user={user_id}, path={image_path[:50]}...")
 
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
-                    f"{self.mcp_endpoint}/mcp/tools/call",
+                    f"{self.mcp_endpoint}/mcp",
                     headers={
                         'Content-Type': 'application/json',
                         'Accept': 'application/json, text/event-stream'
@@ -512,29 +561,71 @@ class IntelligenceService:
                         "id": 1,
                         "method": "tools/call",
                         "params": {
-                            "name": "store_image",
-                            "arguments": arguments
+                            "name": "store_knowledge",
+                            "arguments": {
+                                "user_id": user_id,
+                                "content": image_path,
+                                "content_type": "image",
+                                "metadata": store_metadata
+                            }
                         }
                     }
                 )
 
                 if response.status_code == 200:
-                    logger.debug(f"MCP store_image response: {response.text[:500]}")
+                    logger.info(f"MCP store_knowledge response: {response.text[:1000]}")
                     result = self._parse_sse_response(response.text)
-                    if result and 'result' in result:
-                        content = result['result'].get('content', [])
-                        if content:
-                            data = json.loads(content[0].get('text', '{}'))
-                            return data.get('data', {})
 
-                    logger.error(f"MCP store_image parse failed. Result: {result}")
+                    if result and 'data' in result:
+                        data = result['data']
+                        logger.info(f"Parsed data keys: {list(data.keys())}")
+                        logger.info(f"Full metadata structure: {json.dumps(data.get('metadata', {}), indent=2)[:500]}")
+
+                        if not data.get('success'):
+                            error_msg = data.get('error', 'Unknown error')
+                            logger.error(f"store_knowledge failed: {error_msg}")
+                            raise Exception(f"store_knowledge failed: {error_msg}")
+
+                        # 提取AI元数据
+                        metadata_info = data.get('metadata', {})
+                        # AI metadata is nested under ai_metadata key
+                        ai_metadata = metadata_info.get('ai_metadata', {})
+                        chunks_stored = metadata_info.get('chunks_processed', 0)
+                        operation_id = data.get('operation_id', 'unknown')
+
+                        logger.info(f"✅ Image stored: {chunks_stored} chunks, operation_id={operation_id}")
+                        logger.info(f"metadata_info keys: {list(metadata_info.keys())}")
+                        logger.info(f"AI metadata keys: {list(ai_metadata.keys())}")
+                        if ai_metadata:
+                            logger.info(f"AI categories: {ai_metadata.get('ai_categories')}")
+                            logger.info(f"AI tags: {ai_metadata.get('ai_tags', [])[:5]}")
+
+                        # 从 chunks 中提取描述文本（如果有的话）
+                        description_text = ""
+                        if chunks_stored > 0:
+                            # 描述文本通常存储在第一个 chunk 的 text 中
+                            description_text = f"AI-generated description (len={metadata_info.get('text_length', 0)})"
+
+                        return {
+                            "success": True,
+                            "description": description_text,  # VLM描述文本
+                            "description_length": metadata_info.get('text_length', 0),
+                            "metadata": ai_metadata,
+                            "operation_id": operation_id,
+                            "chunks_stored": chunks_stored,
+                            # 兼容旧格式
+                            "vlm_model": store_metadata.get("model", "gpt-4o-mini"),
+                            "storage_id": operation_id
+                        }
+
+                    logger.error(f"MCP store_knowledge parse failed. Result: {result}")
                     raise Exception(f"Failed to parse MCP response")
 
-                logger.error(f"MCP store_image failed: {response.status_code} - {response.text}")
-                raise Exception(f"MCP store_image failed: {response.status_code}")
+                logger.error(f"MCP store_knowledge failed: {response.status_code} - {response.text}")
+                raise Exception(f"MCP store_knowledge failed: {response.status_code}")
 
         except Exception as e:
-            logger.error(f"Error calling MCP store_image: {e}")
+            logger.error(f"Error calling MCP store_knowledge: {e}")
             raise
 
     async def _search_images_via_mcp(
@@ -545,11 +636,42 @@ class IntelligenceService:
         enable_rerank: bool = False,
         search_mode: str = "semantic"
     ) -> Dict[str, Any]:
-        """通过MCP调用search_images"""
+        """
+        通过MCP调用search_knowledge搜索图片
+
+        使用新的统一工具: search_knowledge
+        指定 content_types=["image"] 来只搜索图片
+
+        Returns:
+            {
+                "success": True,
+                "total_results": 3,
+                "results": [
+                    {
+                        "text": "VLM描述...",
+                        "score": 0.92,
+                        "metadata": {
+                            "file_id": "...",
+                            "ai_categories": [...],
+                            "ai_tags": [...],
+                            ...
+                        }
+                    }
+                ]
+            }
+        """
         try:
+            logger.info(f"Searching images via MCP: user={user_id}, query='{query}', top_k={top_k}")
+
+            # 准备搜索选项
+            search_options = {
+                "top_k": top_k,
+                "content_types": ["image"]  # 只搜索图片
+            }
+
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
-                    f"{self.mcp_endpoint}/mcp/tools/call",
+                    f"{self.mcp_endpoint}/mcp",
                     headers={
                         'Content-Type': 'application/json',
                         'Accept': 'application/json, text/event-stream'
@@ -559,13 +681,11 @@ class IntelligenceService:
                         "id": 1,
                         "method": "tools/call",
                         "params": {
-                            "name": "search_images",
+                            "name": "search_knowledge",
                             "arguments": {
                                 "user_id": user_id,
                                 "query": query,
-                                "top_k": top_k,
-                                "enable_rerank": enable_rerank,
-                                "search_mode": search_mode
+                                "search_options": search_options
                             }
                         }
                     }
@@ -573,17 +693,52 @@ class IntelligenceService:
 
                 if response.status_code == 200:
                     result = self._parse_sse_response(response.text)
-                    if result and 'result' in result:
-                        content = result['result'].get('content', [])
-                        if content:
-                            data = json.loads(content[0].get('text', '{}'))
-                            return data.get('data', {})
 
-                logger.error(f"MCP search_images failed: {response.status_code}")
-                raise Exception(f"MCP search_images failed: {response.status_code}")
+                    if result and 'data' in result:
+                        data = result['data']
+
+                        if not data.get('success'):
+                            error_msg = data.get('error', 'Unknown error')
+                            logger.error(f"search_knowledge failed: {error_msg}")
+                            return {
+                                "success": False,
+                                "error": error_msg,
+                                "image_results": []
+                            }
+
+                        total_results = data.get('total_results', 0)
+                        results = data.get('results', [])
+
+                        logger.info(f"✅ Found {total_results} images")
+
+                        # 转换为旧格式（兼容性）
+                        image_results = []
+                        for item in results:
+                            metadata = item.get('metadata', {})
+                            image_results.append({
+                                "knowledge_id": metadata.get('chunk_id', ''),
+                                "image_path": metadata.get('image_path', ''),
+                                "description": item.get('text', ''),
+                                "relevance_score": item.get('score', 0.0),
+                                "metadata": metadata,
+                                "search_method": "semantic_vector"
+                            })
+
+                        return {
+                            "success": True,
+                            "total_images_found": total_results,
+                            "image_results": image_results,
+                            "search_method": "search_knowledge"
+                        }
+
+                    logger.error(f"MCP search_knowledge parse failed. Result: {result}")
+                    raise Exception(f"Failed to parse MCP response")
+
+                logger.error(f"MCP search_knowledge failed: {response.status_code}")
+                raise Exception(f"MCP search_knowledge failed: {response.status_code}")
 
         except Exception as e:
-            logger.error(f"Error calling MCP search_images: {e}")
+            logger.error(f"Error calling MCP search_knowledge: {e}")
             raise
 
     async def _generate_image_rag_via_mcp(
@@ -594,23 +749,39 @@ class IntelligenceService:
         include_images: bool = True,
         rag_mode: Optional[str] = None
     ) -> Dict[str, Any]:
-        """通过MCP调用generate_image_rag_response"""
-        try:
-            # 构建参数，只包含非None值
-            arguments = {
-                "user_id": user_id,
-                "query": query,
-                "context_limit": context_limit,
-                "include_images": include_images
-            }
+        """
+        通过MCP调用knowledge_response生成RAG响应
 
-            # 只有当rag_mode不为None时才添加
-            if rag_mode is not None:
-                arguments["rag_mode"] = rag_mode
+        使用新的统一工具: knowledge_response
+        自动检索相关内容并生成回答
+
+        Returns:
+            {
+                "success": True,
+                "response": "回答内容...",
+                "sources": [
+                    {
+                        "text": "来源内容",
+                        "score": 0.92,
+                        "metadata": {...}
+                    }
+                ],
+                "citations": [...]
+            }
+        """
+        try:
+            logger.info(f"Generating RAG response: user={user_id}, query='{query}'")
+
+            # 准备响应选项
+            response_options = {
+                "rag_mode": rag_mode or "simple",
+                "context_limit": context_limit,
+                "enable_citations": True
+            }
 
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
-                    f"{self.mcp_endpoint}/mcp/tools/call",
+                    f"{self.mcp_endpoint}/mcp",
                     headers={
                         'Content-Type': 'application/json',
                         'Accept': 'application/json, text/event-stream'
@@ -620,27 +791,54 @@ class IntelligenceService:
                         "id": 1,
                         "method": "tools/call",
                         "params": {
-                            "name": "generate_image_rag_response",
-                            "arguments": arguments
+                            "name": "knowledge_response",
+                            "arguments": {
+                                "user_id": user_id,
+                                "query": query,
+                                "response_options": response_options
+                            }
                         }
                     }
                 )
 
                 if response.status_code == 200:
-                    logger.debug(f"MCP image RAG response: {response.text[:500]}")
+                    logger.debug(f"MCP knowledge_response response: {response.text[:500]}")
                     result = self._parse_sse_response(response.text)
-                    if result and 'result' in result:
-                        content = result['result'].get('content', [])
-                        if content:
-                            data = json.loads(content[0].get('text', '{}'))
-                            return data.get('data', {})
 
-                    logger.error(f"MCP image RAG parse failed. Result: {result}")
+                    if result and 'data' in result:
+                        data = result['data']
+
+                        if not data.get('success'):
+                            error_msg = data.get('error', 'Unknown error')
+                            logger.error(f"knowledge_response failed: {error_msg}")
+                            return {
+                                "success": False,
+                                "error": error_msg,
+                                "response": ""
+                            }
+
+                        response_text = data.get('response', '')
+                        sources = data.get('sources', [])
+                        citations = data.get('citations', [])
+
+                        logger.info(f"✅ Generated RAG response ({len(response_text)} chars, {len(sources)} sources)")
+
+                        return {
+                            "success": True,
+                            "response": response_text,
+                            "answer": response_text,  # 兼容旧格式
+                            "sources": sources,
+                            "context": sources,  # 兼容旧格式
+                            "citations": citations,
+                            "total_sources": len(sources)
+                        }
+
+                    logger.error(f"MCP knowledge_response parse failed. Result: {result}")
                     raise Exception(f"Failed to parse MCP response")
 
-                logger.error(f"MCP image RAG failed: {response.status_code} - {response.text}")
-                raise Exception(f"MCP image RAG failed: {response.status_code}")
+                logger.error(f"MCP knowledge_response failed: {response.status_code} - {response.text}")
+                raise Exception(f"MCP knowledge_response failed: {response.status_code}")
 
         except Exception as e:
-            logger.error(f"Error calling MCP image RAG: {e}")
+            logger.error(f"Error calling MCP knowledge_response: {e}")
             raise

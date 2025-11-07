@@ -3,7 +3,7 @@
 # PCI-DSS Compliance Test Script
 # Test credit card data detection
 
-BASE_URL="http://localhost:8250"
+BASE_URL="http://localhost:8226"
 
 echo "=========================================="
 echo "PCI-DSS Compliance Test Script"
@@ -17,7 +17,7 @@ NC='\033[0m'
 
 # Test 1: Visa Card Detection
 echo "Test 1: Visa Card Detection"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/pci/card-data-check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/pci/card-data-check" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "My Visa card is 4532-1234-5678-9010",
@@ -33,7 +33,7 @@ echo ""
 
 # Test 2: Mastercard Detection
 echo "Test 2: Mastercard Detection"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/pci/card-data-check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/pci/card-data-check" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "Mastercard: 5412-3456-7890-1234",
@@ -49,7 +49,7 @@ echo ""
 
 # Test 3: Amex Detection
 echo "Test 3: American Express Detection"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/pci/card-data-check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/pci/card-data-check" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "My Amex: 3782 822463 10005",
@@ -65,7 +65,7 @@ echo ""
 
 # Test 4: Clean Content (No Card)
 echo "Test 4: Clean Content (No Card)"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/pci/card-data-check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/pci/card-data-check" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "This is a normal message without card data",
@@ -81,7 +81,7 @@ echo ""
 
 # Test 5: Multiple Cards
 echo "Test 5: Multiple Cards Detection"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/pci/card-data-check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/pci/card-data-check" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "I have two cards: 4532-1234-5678-9010 and 5412-3456-7890-1234",

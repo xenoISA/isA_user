@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 class ComplianceService:
     """合规服务核心业务逻辑"""
 
-    def __init__(self, event_bus=None):
-        self.repository = ComplianceRepository()
+    def __init__(self, event_bus=None, config=None):
+        self.repository = ComplianceRepository(config=config)
         self.event_bus = event_bus
         
         # 配置

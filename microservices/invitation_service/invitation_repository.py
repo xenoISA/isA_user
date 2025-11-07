@@ -15,6 +15,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     InvitationStatus, OrganizationRole,
     InvitationResponse, InvitationDetailResponse
@@ -26,12 +27,24 @@ logger = logging.getLogger(__name__)
 class InvitationRepository:
     """邀请数据仓库 - PostgreSQL"""
 
-    def __init__(self):
-        self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
-            user_id="invitation_service"
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # 使用 config_manager 进行服务发现
+        if config is None:
+            config = ConfigManager("invitation_service")
+
+        # 发现 PostgreSQL 服务
+        # 优先级：环境变量 → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_GRPC_HOST',
+            env_port_key='POSTGRES_GRPC_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id="invitation_service")
+
         self.schema = "invitation"
         self.invitations_table = "organization_invitations"
 

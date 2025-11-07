@@ -16,7 +16,6 @@ from .models import (
     SubscriptionUsage, ProductUsageRecord,
     ProductType, PricingType, SubscriptionStatus, BillingCycle, Currency
 )
-from core.consul_registry import ConsulRegistry
 from core.nats_client import Event, EventType, ServiceSource
 # ServiceClients not yet implemented
 # from .client import ServiceClients
@@ -36,22 +35,8 @@ class ProductService:
         self._init_service_clients()
 
     def _init_consul(self):
-        """Initialize Consul registry for service discovery"""
-        try:
-            from core.config_manager import ConfigManager
-            config_manager = ConfigManager("product_service")
-            config = config_manager.get_service_config()
-
-            if config.consul_enabled:
-                self.consul = ConsulRegistry(
-                    service_name=config.service_name,
-                    service_port=config.service_port,
-                    consul_host=config.consul_host,
-                    consul_port=config.consul_port
-                )
-                logger.info("Consul service discovery initialized for product service")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Consul: {e}, will use fallback URLs")
+        """Service discovery via Consul agent sidecar"""
+        logger.info("Service discovery via Consul agent sidecar")
 
     def _init_service_clients(self):
         """Initialize service clients for inter-service communication"""
@@ -101,7 +86,7 @@ class ProductService:
         """获取产品列表"""
         try:
             return await self.repository.get_products(
-                category_id=category_id,
+                category=category_id,
                 product_type=product_type,
                 is_active=is_active
             )
@@ -199,7 +184,7 @@ class ProductService:
                 user_id=user_id,
                 organization_id=organization_id,
                 plan_id=plan_id,
-                plan_tier=service_plan.plan_tier,
+                plan_tier=service_plan.get("plan_tier", "basic"),
                 status=SubscriptionStatus.ACTIVE,
                 current_period_start=datetime.utcnow(),
                 current_period_end=self._calculate_period_end(billing_cycle),

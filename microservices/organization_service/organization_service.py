@@ -21,6 +21,7 @@ from .models import (
 )
 # Import event bus components
 from core.nats_client import Event, EventType, ServiceSource
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,8 @@ class OrganizationValidationError(OrganizationServiceError):
 class OrganizationService:
     """组织服务"""
 
-    def __init__(self, event_bus=None):
-        self.repository = OrganizationRepository()
+    def __init__(self, event_bus=None, config: Optional[ConfigManager] = None):
+        self.repository = OrganizationRepository(config=config)
         self.event_bus = event_bus
     
     # ============ Organization Management ============
@@ -193,7 +194,7 @@ class OrganizationService:
                 raise OrganizationAccessDeniedError(f"User {user_id} is not the owner of organization {organization_id}")
             
             # Get organization details before deletion for event
-            organization = await self.repository.get_organization_by_id(organization_id)
+            organization = await self.repository.get_organization(organization_id)
             if not organization:
                 raise OrganizationNotFoundError(f"Organization {organization_id} not found")
 

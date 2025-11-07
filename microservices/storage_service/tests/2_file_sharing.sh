@@ -34,32 +34,15 @@ echo -e "${CYAN}       STORAGE SERVICE - FILE SHARING TEST${NC}"
 echo -e "${CYAN}======================================================================${NC}"
 echo ""
 
-# Auto-discover test user
-echo -e "${CYAN}Fetching test user from database...${NC}"
-TEST_USER=$(docker exec user-staging python3 -c "
-import sys
-sys.path.insert(0, '/app')
-from core.database.supabase_client import get_supabase_client
-
-try:
-    client = get_supabase_client()
-    result = client.table('users').select('user_id, email').eq('is_active', True).limit(1).execute()
-    if result.data and len(result.data) > 0:
-        user = result.data[0]
-        print(f\"{user['user_id']}|{user.get('email', 'test@example.com')}\")
-except Exception as e:
-    print(f'ERROR: {e}', file=sys.stderr)
-" 2>&1)
-
-if echo "$TEST_USER" | grep -q "ERROR"; then
-    TEST_USER_ID="test_user_001"
-    TEST_USER_EMAIL="test@example.com"
-else
-    TEST_USER_ID=$(echo "$TEST_USER" | cut -d'|' -f1)
-    TEST_USER_EMAIL=$(echo "$TEST_USER" | cut -d'|' -f2)
-fi
+# Use test data from seed files
+echo -e "${CYAN}Using test user from seed data...${NC}"
+TEST_USER_ID="user_test_001"
+TEST_USER_EMAIL="test1@example.com"
+TEST_ORG_ID="org_test_001"
 
 echo -e "${GREEN}✓ Using test user: $TEST_USER_ID${NC}"
+echo -e "${GREEN}✓ Using test org: $TEST_ORG_ID${NC}"
+echo -e "${YELLOW}Note: Using test data from seed_test_data.sql${NC}"
 echo ""
 
 # Create a test file to share
@@ -68,7 +51,7 @@ echo "This file is for testing sharing functionality" > "$TEST_FILE"
 
 # Test 1: Upload File for Sharing
 echo -e "${YELLOW}Test 1: Upload File for Sharing${NC}"
-UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/files/upload" \
+UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/files/upload" \
   -F "file=@${TEST_FILE}" \
   -F "user_id=${TEST_USER_ID}" \
   -F "access_level=private" \
@@ -90,8 +73,8 @@ echo ""
 # Test 2: Create Public Share Link
 if [ -n "$FILE_ID" ]; then
     echo -e "${YELLOW}Test 2: Create Public Share Link${NC}"
-    echo "POST /api/v1/files/${FILE_ID}/share"
-    SHARE_RESPONSE=$(curl -s -X POST "${API_BASE}/files/${FILE_ID}/share" \
+    echo "POST /api/v1/storage/files/${FILE_ID}/share"
+    SHARE_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/files/${FILE_ID}/share" \
       -F "shared_by=${TEST_USER_ID}" \
       -F "view=true" \
       -F "download=true" \
@@ -121,8 +104,8 @@ fi
 # Test 3: Access Shared File (Public)
 if [ -n "$SHARE_ID" ]; then
     echo -e "${YELLOW}Test 3: Access Shared File (Public)${NC}"
-    echo "GET /api/v1/shares/${SHARE_ID}"
-    RESPONSE=$(curl -s "${API_BASE}/shares/${SHARE_ID}")
+    echo "GET /api/v1/storage/shares/${SHARE_ID}"
+    RESPONSE=$(curl -s "${API_BASE}/storage/shares/${SHARE_ID}")
     echo "$RESPONSE" | python3 -m json.tool
 
     if echo "$RESPONSE" | grep -q '"file_id"'; then
@@ -140,7 +123,7 @@ fi
 if [ -n "$FILE_ID" ]; then
     echo -e "${YELLOW}Test 4: Create Password-Protected Share${NC}"
     SHARE_PASSWORD="test1234"
-    SHARE_RESPONSE_PWD=$(curl -s -X POST "${API_BASE}/files/${FILE_ID}/share" \
+    SHARE_RESPONSE_PWD=$(curl -s -X POST "${API_BASE}/storage/files/${FILE_ID}/share" \
       -F "shared_by=${TEST_USER_ID}" \
       -F "view=true" \
       -F "download=true" \
@@ -166,8 +149,8 @@ fi
 # Test 5: Access Protected Share Without Password (Should Fail)
 if [ -n "$SHARE_ID_PWD" ]; then
     echo -e "${YELLOW}Test 5: Access Protected Share Without Password (Should Fail)${NC}"
-    echo "GET /api/v1/shares/${SHARE_ID_PWD}"
-    RESPONSE=$(curl -s "${API_BASE}/shares/${SHARE_ID_PWD}")
+    echo "GET /api/v1/storage/shares/${SHARE_ID_PWD}"
+    RESPONSE=$(curl -s "${API_BASE}/storage/shares/${SHARE_ID_PWD}")
     echo "$RESPONSE" | python3 -m json.tool
 
     # Should fail or return error
@@ -187,8 +170,8 @@ fi
 # Test 6: Access Protected Share With Correct Password
 if [ -n "$SHARE_ID_PWD" ]; then
     echo -e "${YELLOW}Test 6: Access Protected Share With Correct Password${NC}"
-    echo "GET /api/v1/shares/${SHARE_ID_PWD}?password=${SHARE_PASSWORD}"
-    RESPONSE=$(curl -s "${API_BASE}/shares/${SHARE_ID_PWD}?password=${SHARE_PASSWORD}")
+    echo "GET /api/v1/storage/shares/${SHARE_ID_PWD}?password=${SHARE_PASSWORD}"
+    RESPONSE=$(curl -s "${API_BASE}/storage/shares/${SHARE_ID_PWD}?password=${SHARE_PASSWORD}")
     echo "$RESPONSE" | python3 -m json.tool
 
     if echo "$RESPONSE" | grep -q '"file_id"'; then
@@ -207,7 +190,7 @@ fi
 if [ -n "$FILE_ID" ]; then
     echo -e "${YELLOW}Test 7: Create Share with Specific User${NC}"
     SHARED_WITH_EMAIL="recipient@example.com"
-    SHARE_RESPONSE_USER=$(curl -s -X POST "${API_BASE}/files/${FILE_ID}/share" \
+    SHARE_RESPONSE_USER=$(curl -s -X POST "${API_BASE}/storage/files/${FILE_ID}/share" \
       -F "shared_by=${TEST_USER_ID}" \
       -F "shared_with_email=${SHARED_WITH_EMAIL}" \
       -F "view=true" \
@@ -233,7 +216,7 @@ fi
 # Test 8: Create Share with Max Downloads Limit
 if [ -n "$FILE_ID" ]; then
     echo -e "${YELLOW}Test 8: Create Share with Download Limit${NC}"
-    SHARE_RESPONSE_LIMIT=$(curl -s -X POST "${API_BASE}/files/${FILE_ID}/share" \
+    SHARE_RESPONSE_LIMIT=$(curl -s -X POST "${API_BASE}/storage/files/${FILE_ID}/share" \
       -F "shared_by=${TEST_USER_ID}" \
       -F "view=true" \
       -F "download=true" \

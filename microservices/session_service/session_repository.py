@@ -17,6 +17,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import Session, SessionMessage
 
 logger = logging.getLogger(__name__)
@@ -30,12 +31,26 @@ class SessionNotFoundException(Exception):
 class SessionRepository:
     """Session数据访问层"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """初始化session仓库"""
-        # TODO: Use Consul service discovery to get postgres-grpc host
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("session_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variable → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
+            host=host,
+            port=port,
             user_id='session_service'
         )
         self.schema = "session"
@@ -257,12 +272,26 @@ class SessionRepository:
 class SessionMessageRepository:
     """Session消息数据访问层"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """初始化消息仓库"""
-        # TODO: Use Consul service discovery to get postgres-grpc host
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("session_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variable → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"SessionMessageRepository connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
+            host=host,
+            port=port,
             user_id='session_service'
         )
         self.schema = "session"

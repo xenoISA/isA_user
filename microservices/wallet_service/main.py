@@ -23,10 +23,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 # Import local components
 from .wallet_service import WalletService
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus, Event, EventType, ServiceSource
+from isa_common.consul_client import ConsulRegistry
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     WalletCreate, WalletUpdate, WalletBalance, WalletResponse,
     DepositRequest, WithdrawRequest, ConsumeRequest, TransferRequest,
@@ -155,12 +156,13 @@ class WalletMicroservice:
     def __init__(self):
         self.wallet_service = None
         self.event_bus = None
+        self.consul_registry = None
 
     async def initialize(self, event_bus=None):
         """Initialize the microservice"""
         try:
             self.event_bus = event_bus
-            self.wallet_service = WalletService(event_bus=event_bus)
+            self.wallet_service = WalletService(event_bus=event_bus, config=config_manager)
             logger.info("Wallet microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize wallet microservice: {e}")
@@ -169,6 +171,14 @@ class WalletMicroservice:
     async def shutdown(self):
         """Shutdown the microservice"""
         try:
+            # Consul deregistration
+            if self.consul_registry:
+                try:
+                    self.consul_registry.deregister()
+                    logger.info("✅ Wallet service deregistered from Consul")
+                except Exception as e:
+                    logger.error(f"❌ Failed to deregister from Consul: {e}")
+
             logger.info("Wallet microservice shutdown completed")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -215,23 +225,33 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️  Failed to subscribe to events: {e}")
 
-    # Register with Consul
+    # Consul service registration
     if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "wallet", "api"]
-        )
+        try:
+            # Get route metadata
+            route_meta = get_routes_for_consul()
 
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
+            # Merge service metadata
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            wallet_microservice.consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            wallet_microservice.consul_registry.register()
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            wallet_microservice.consul_registry = None
 
     yield
 
@@ -239,10 +259,6 @@ async def lifespan(app: FastAPI):
     if event_bus:
         await event_bus.close()
         logger.info("Event bus closed")
-
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
 
     await wallet_microservice.shutdown()
 

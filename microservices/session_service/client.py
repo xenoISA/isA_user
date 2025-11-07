@@ -5,6 +5,7 @@ Client library for other microservices to interact with session service
 """
 
 import httpx
+from core.service_discovery import get_service_discovery
 import logging
 from typing import Optional, List, Dict, Any
 
@@ -26,7 +27,6 @@ class SessionServiceClient:
         else:
             # Use service discovery
             try:
-                from core.service_discovery import get_service_discovery
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("session_service")
             except Exception as e:
@@ -549,44 +549,4 @@ class SessionServiceClient:
             return False
 
 
-class SimpleAccountClient:
-    """Simple Account Service client for user validation"""
-
-    def __init__(self):
-        """Initialize simple account client"""
-        self.base_url = "http://localhost:8202"  # Account service default URL
-
-    def check_user_exists(self, user_id: str) -> bool:
-        """
-        Check if user exists (fail-open for availability)
-
-        Args:
-            user_id: User ID to check
-
-        Returns:
-            True (fail-open if account service unavailable)
-        """
-        try:
-            import requests
-            response = requests.get(
-                f"{self.base_url}/api/v1/accounts/{user_id}",
-                timeout=2
-            )
-            return response.status_code == 200
-        except Exception as e:
-            logger.warning(f"Account service unavailable, failing open: {e}")
-            # Fail open - allow operation if account service is unavailable
-            return True
-
-
-def get_account_client() -> SimpleAccountClient:
-    """
-    Get account service client instance
-
-    Returns:
-        SimpleAccountClient instance
-    """
-    return SimpleAccountClient()
-
-
-__all__ = ["SessionServiceClient", "SimpleAccountClient", "get_account_client"]
+__all__ = ["SessionServiceClient"]

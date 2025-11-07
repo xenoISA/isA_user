@@ -34,33 +34,11 @@ echo -e "${CYAN}       STORAGE SERVICE - FILE OPERATIONS TEST${NC}"
 echo -e "${CYAN}======================================================================${NC}"
 echo ""
 
-# Auto-discover test user from database
-echo -e "${CYAN}Fetching test user from database...${NC}"
-TEST_USER=$(docker exec user-staging python3 -c "
-import sys
-sys.path.insert(0, '/app')
-from core.database.supabase_client import get_supabase_client
-
-try:
-    client = get_supabase_client()
-    result = client.table('users').select('user_id, name, email').eq('is_active', True).limit(1).execute()
-    if result.data and len(result.data) > 0:
-        user = result.data[0]
-        print(f\"{user['user_id']}|{user.get('name', 'Test User')}|{user.get('email', 'test@example.com')}\")
-except Exception as e:
-    print(f'ERROR: {e}', file=sys.stderr)
-" 2>&1)
-
-if echo "$TEST_USER" | grep -q "ERROR"; then
-    echo -e "${RED}✗ Failed to fetch test user, using default${NC}"
-    TEST_USER_ID="test_user_001"
-else
-    TEST_USER_ID=$(echo "$TEST_USER" | cut -d'|' -f1)
-    TEST_USER_NAME=$(echo "$TEST_USER" | cut -d'|' -f2)
-    echo -e "${GREEN}✓ Using test user:${NC}"
-    echo -e "  ID: ${CYAN}$TEST_USER_ID${NC}"
-    echo -e "  Name: ${CYAN}$TEST_USER_NAME${NC}"
-fi
+# Use test user from seed_test_data.sql
+# See: microservices/storage_service/migrations/seed_test_data.sql
+TEST_USER_ID="test_user_001"
+echo -e "${GREEN}Using test user: ${CYAN}$TEST_USER_ID${NC}"
+echo -e "${CYAN}(Defined in migrations/seed_test_data.sql)${NC}"
 echo ""
 
 # Test 1: Health Check
@@ -89,8 +67,8 @@ echo ""
 
 # Test 3: Check MinIO Status
 echo -e "${YELLOW}Test 3: Check MinIO Connection Status${NC}"
-echo "GET /api/v1/test/minio-status"
-RESPONSE=$(curl -s "${API_BASE}/test/minio-status")
+echo "GET /api/v1/storage/test/minio-status"
+RESPONSE=$(curl -s "${API_BASE}/storage/test/minio-status")
 echo "$RESPONSE" | python3 -m json.tool
 if echo "$RESPONSE" | grep -q '"status":"connected"'; then
     test_result 0
@@ -131,8 +109,8 @@ echo ""
 
 # Test 5: List Files
 echo -e "${YELLOW}Test 5: List User Files${NC}"
-echo "GET /api/v1/files?user_id=${TEST_USER_ID}"
-RESPONSE=$(curl -s "${API_BASE}/files?user_id=${TEST_USER_ID}&limit=10")
+echo "GET /api/v1/storage/files?user_id=${TEST_USER_ID}"
+RESPONSE=$(curl -s "${API_BASE}/storage/files?user_id=${TEST_USER_ID}&limit=10")
 echo "$RESPONSE" | python3 -m json.tool | head -50
 if echo "$RESPONSE" | grep -q '\['; then
     FILE_COUNT=$(echo "$RESPONSE" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
@@ -223,8 +201,8 @@ echo ""
 
 # Test 9: List Files with Filters
 echo -e "${YELLOW}Test 9: List Files with Filters${NC}"
-echo "GET /api/v1/files?user_id=${TEST_USER_ID}&prefix=storage&status=available"
-RESPONSE=$(curl -s "${API_BASE}/files?user_id=${TEST_USER_ID}&prefix=storage&status=available&limit=5")
+echo "GET /api/v1/storage/files?user_id=${TEST_USER_ID}&prefix=storage&status=available"
+RESPONSE=$(curl -s "${API_BASE}/storage/files?user_id=${TEST_USER_ID}&prefix=storage&status=available&limit=5")
 echo "$RESPONSE" | python3 -m json.tool | head -30
 if echo "$RESPONSE" | grep -q '\['; then
     test_result 0

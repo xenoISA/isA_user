@@ -15,11 +15,10 @@ import requests
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.service_discovery import get_service_discovery
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 from .models import (
     FirmwareUploadRequest, UpdateCampaignRequest, DeviceUpdateRequest, UpdateApprovalRequest,
     FirmwareResponse, UpdateCampaignResponse, DeviceUpdateResponse,
@@ -29,6 +28,7 @@ from .models import (
 from .ota_service import OTAService
 from .ota_repository import OTARepository
 from .events import OTAEventHandler
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from datetime import datetime
 
 # Initialize configuration
@@ -45,9 +45,9 @@ class OTAMicroservice:
         self.service = None
         self.event_bus = None
 
-    async def initialize(self, event_bus=None):
+    async def initialize(self, event_bus=None, config=None):
         self.event_bus = event_bus
-        self.service = OTAService(event_bus=event_bus)
+        self.service = OTAService(event_bus=event_bus, config=config)
         logger.info("OTA service initialized")
 
     async def shutdown(self):
@@ -66,6 +66,8 @@ microservice = OTAMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    consul_registry = None
+
     # Initialize event bus
     event_bus = None
     try:
@@ -76,12 +78,12 @@ async def lifespan(app: FastAPI):
         event_bus = None
 
     # Startup
-    await microservice.initialize(event_bus=event_bus)
+    await microservice.initialize(event_bus=event_bus, config=config_manager)
 
     # Set up event subscriptions
     if event_bus:
         try:
-            ota_repo = OTARepository()
+            ota_repo = OTARepository(config=config_manager)
             event_handler = OTAEventHandler(ota_repo)
 
             await event_bus.subscribe(
@@ -92,33 +94,51 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 
-    # Consul注册
+    # Consul service registration
     if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "iot", "ota", "firmware", "update", "api", "v1"]
-        )
+        try:
+            # Get route metadata
+            route_meta = get_routes_for_consul()
 
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
+            # Merge service metadata
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            consul_registry.register()
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            consul_registry = None
+
+    logger.info(f"✅ OTA Service started on port {config.service_port}")
 
     yield
-    
+
     # Shutdown
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
-    
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("✅ OTA service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"❌ Failed to deregister from Consul: {e}")
+
+    if event_bus:
+        await event_bus.close()
+
     await microservice.shutdown()
+    logger.info("OTA Service shutting down...")
 
 # Create FastAPI application
 app = FastAPI(
@@ -198,13 +218,15 @@ async def get_user_context(
         raise HTTPException(status_code=401, detail="Authentication required")
     
     try:
-        # Use Consul service discovery
-        if not hasattr(app.state, 'consul_registry') or not app.state.consul_registry:
-            raise HTTPException(status_code=503, detail="Service discovery not available")
-        
-        auth_service_url = app.state.consul_registry.get_service_endpoint("auth_service")
-        if not auth_service_url:
-            raise HTTPException(status_code=503, detail="Auth service not available")
+        # Use ConfigManager for service discovery
+        auth_host, auth_port = config_manager.discover_service(
+            service_name='auth_service',
+            default_host='localhost',
+            default_port=8201,
+            env_host_key='AUTH_SERVICE_HOST',
+            env_port_key='AUTH_SERVICE_PORT'
+        )
+        auth_service_url = f"http://{auth_host}:{auth_port}"
         
         if authorization:
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
@@ -614,6 +636,8 @@ async def get_update_progress(
         if progress:
             return progress
         raise HTTPException(status_code=404, detail="Update not found")
+    except HTTPException:
+        raise  # Re-raise HTTPException without catching
     except Exception as e:
         logger.error(f"Error getting update progress: {e}")
         raise HTTPException(status_code=500, detail=str(e))

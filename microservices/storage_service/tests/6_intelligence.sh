@@ -34,24 +34,14 @@ echo -e "${CYAN}       STORAGE SERVICE - INTELLIGENCE FEATURES TEST${NC}"
 echo -e "${CYAN}======================================================================${NC}"
 echo ""
 
-# Auto-discover test user
-echo -e "${CYAN}Fetching test user from database...${NC}"
-TEST_USER=$(docker exec user-staging python3 -c "
-import sys
-sys.path.insert(0, '/app')
-from core.database.supabase_client import get_supabase_client
+# Use test data from seed files
+echo -e "${CYAN}Using test user from seed data...${NC}"
+TEST_USER_ID="user_test_001"
+TEST_ORG_ID="org_test_001"
 
-try:
-    client = get_supabase_client()
-    result = client.table('users').select('user_id').eq('is_active', True).limit(1).execute()
-    if result.data and len(result.data) > 0:
-        print(result.data[0]['user_id'])
-except Exception as e:
-    print('test_user_001', file=sys.stderr)
-" 2>&1)
-
-TEST_USER_ID="$TEST_USER"
 echo -e "${GREEN}✓ Using test user: $TEST_USER_ID${NC}"
+echo -e "${GREEN}✓ Using test org: $TEST_ORG_ID${NC}"
+echo -e "${YELLOW}Note: Using test data from seed_test_data.sql${NC}"
 echo ""
 
 # Upload test documents for intelligence testing
@@ -77,7 +67,7 @@ The storage service integrates with our microservices architecture
 and provides RESTful APIs for all operations.
 EOF
 
-UPLOAD_1=$(curl -s -X POST "${API_BASE}/files/upload" \
+UPLOAD_1=$(curl -s -X POST "${API_BASE}/storage/files/upload" \
   -F "file=@${TEST_DOC_1}" \
   -F "user_id=${TEST_USER_ID}" \
   -F "access_level=private" \
@@ -108,7 +98,7 @@ for intelligent search and retrieval.
 You can organize files into albums and share them with family members.
 EOF
 
-UPLOAD_2=$(curl -s -X POST "${API_BASE}/files/upload" \
+UPLOAD_2=$(curl -s -X POST "${API_BASE}/storage/files/upload" \
   -F "file=@${TEST_DOC_2}" \
   -F "user_id=${TEST_USER_ID}" \
   -F "access_level=private" \
@@ -127,7 +117,7 @@ echo ""
 
 # Test 1: Semantic Search
 echo -e "${YELLOW}Test 1: Semantic Search - Basic Query${NC}"
-echo "POST /api/v1/files/search"
+echo "POST /api/v1/storage/files/search"
 
 SEARCH_REQUEST=$(cat <<EOF
 {
@@ -140,7 +130,7 @@ SEARCH_REQUEST=$(cat <<EOF
 EOF
 )
 
-SEARCH_RESPONSE=$(curl -s -X POST "${API_BASE}/files/search" \
+SEARCH_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/files/search" \
   -H "Content-Type: application/json" \
   -d "$SEARCH_REQUEST")
 
@@ -170,7 +160,7 @@ SEARCH_REQUEST_2=$(cat <<EOF
 EOF
 )
 
-SEARCH_RESPONSE_2=$(curl -s -X POST "${API_BASE}/files/search" \
+SEARCH_RESPONSE_2=$(curl -s -X POST "${API_BASE}/storage/files/search" \
   -H "Content-Type: application/json" \
   -d "$SEARCH_REQUEST_2")
 
@@ -198,7 +188,7 @@ SEARCH_REQUEST_3=$(cat <<EOF
 EOF
 )
 
-SEARCH_RESPONSE_3=$(curl -s -X POST "${API_BASE}/files/search" \
+SEARCH_RESPONSE_3=$(curl -s -X POST "${API_BASE}/storage/files/search" \
   -H "Content-Type: application/json" \
   -d "$SEARCH_REQUEST_3")
 
@@ -214,7 +204,7 @@ echo ""
 
 # Test 4: RAG Query - Simple Mode
 echo -e "${YELLOW}Test 4: RAG Query - Simple Mode${NC}"
-echo "POST /api/v1/files/ask"
+echo "POST /api/v1/storage/files/ask"
 
 RAG_REQUEST=$(cat <<EOF
 {
@@ -229,7 +219,7 @@ RAG_REQUEST=$(cat <<EOF
 EOF
 )
 
-RAG_RESPONSE=$(curl -s -X POST "${API_BASE}/files/ask" \
+RAG_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/files/ask" \
   -H "Content-Type: application/json" \
   -d "$RAG_REQUEST")
 
@@ -259,7 +249,7 @@ RAG_REQUEST_2=$(cat <<EOF
 EOF
 )
 
-RAG_RESPONSE_2=$(curl -s -X POST "${API_BASE}/files/ask" \
+RAG_RESPONSE_2=$(curl -s -X POST "${API_BASE}/storage/files/ask" \
   -H "Content-Type: application/json" \
   -d "$RAG_REQUEST_2")
 
@@ -289,7 +279,7 @@ RAG_REQUEST_3=$(cat <<EOF
 EOF
 )
 
-RAG_RESPONSE_3=$(curl -s -X POST "${API_BASE}/files/ask" \
+RAG_RESPONSE_3=$(curl -s -X POST "${API_BASE}/storage/files/ask" \
   -H "Content-Type: application/json" \
   -d "$RAG_REQUEST_3")
 
@@ -308,7 +298,7 @@ EOF
 )
 
 echo -e "${CYAN}Follow-up question in same session...${NC}"
-RAG_RESPONSE_4=$(curl -s -X POST "${API_BASE}/files/ask" \
+RAG_RESPONSE_4=$(curl -s -X POST "${API_BASE}/storage/files/ask" \
   -H "Content-Type: application/json" \
   -d "$RAG_REQUEST_4")
 
@@ -324,9 +314,9 @@ echo ""
 
 # Test 7: Get Intelligence Stats
 echo -e "${YELLOW}Test 7: Get Intelligence Statistics${NC}"
-echo "GET /api/v1/intelligence/stats?user_id=${TEST_USER_ID}"
+echo "GET /api/v1/storage/intelligence/stats?user_id=${TEST_USER_ID}"
 
-STATS_RESPONSE=$(curl -s "${API_BASE}/intelligence/stats?user_id=${TEST_USER_ID}")
+STATS_RESPONSE=$(curl -s "${API_BASE}/storage/intelligence/stats?user_id=${TEST_USER_ID}")
 
 echo "$STATS_RESPONSE" | python3 -m json.tool
 
@@ -342,7 +332,7 @@ echo ""
 
 # Test 8: Image Intelligence - Store Image (Mock)
 echo -e "${YELLOW}Test 8: Image Intelligence - Store Image${NC}"
-echo "POST /api/v1/intelligence/image/store"
+echo "POST /api/v1/storage/intelligence/image/store"
 
 # Note: This test may fail if MCP service is not available
 IMAGE_STORE_REQUEST=$(cat <<EOF
@@ -359,7 +349,7 @@ IMAGE_STORE_REQUEST=$(cat <<EOF
 EOF
 )
 
-IMAGE_STORE_RESPONSE=$(curl -s -X POST "${API_BASE}/intelligence/image/store" \
+IMAGE_STORE_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/intelligence/image/store" \
   -H "Content-Type: application/json" \
   -d "$IMAGE_STORE_REQUEST")
 
@@ -391,7 +381,7 @@ IMAGE_SEARCH_REQUEST=$(cat <<EOF
 EOF
 )
 
-IMAGE_SEARCH_RESPONSE=$(curl -s -X POST "${API_BASE}/intelligence/image/search" \
+IMAGE_SEARCH_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/intelligence/image/search" \
   -H "Content-Type: application/json" \
   -d "$IMAGE_SEARCH_REQUEST")
 
@@ -423,7 +413,7 @@ MULTIMODAL_RAG_REQUEST=$(cat <<EOF
 EOF
 )
 
-MULTIMODAL_RESPONSE=$(curl -s -X POST "${API_BASE}/intelligence/image/rag" \
+MULTIMODAL_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/intelligence/image/rag" \
   -H "Content-Type: application/json" \
   -d "$MULTIMODAL_RAG_REQUEST")
 
@@ -445,11 +435,11 @@ echo ""
 rm -f "$TEST_DOC_1" "$TEST_DOC_2"
 
 if [ -n "$DOC_ID_1" ]; then
-    curl -s -X DELETE "${API_BASE}/files/${DOC_ID_1}?user_id=${TEST_USER_ID}&permanent=true" > /dev/null
+    curl -s -X DELETE "${API_BASE}/storage/files/${DOC_ID_1}?user_id=${TEST_USER_ID}&permanent=true" > /dev/null
 fi
 
 if [ -n "$DOC_ID_2" ]; then
-    curl -s -X DELETE "${API_BASE}/files/${DOC_ID_2}?user_id=${TEST_USER_ID}&permanent=true" > /dev/null
+    curl -s -X DELETE "${API_BASE}/storage/files/${DOC_ID_2}?user_id=${TEST_USER_ID}&permanent=true" > /dev/null
 fi
 
 # Print summary

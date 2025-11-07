@@ -30,13 +30,13 @@ logger = logging.getLogger("ota_service")
 class OTAService:
     """OTA更新服务"""
 
-    def __init__(self, event_bus=None):
+    def __init__(self, event_bus=None, config=None):
         self.storage_path = "/var/ota/firmware"  # 固件存储路径 (legacy)
         self.max_file_size = 500 * 1024 * 1024  # 500MB
         self.supported_formats = ['.bin', '.hex', '.elf', '.tar.gz', '.zip']
 
         # Initialize repository and clients
-        self.repository = OTARepository()
+        self.repository = OTARepository(config=config)
         self.device_client = None  # Will be initialized with async context
         self.storage_client = None
         self.notification_client = None
@@ -243,38 +243,40 @@ class OTAService:
                 return None
 
             # Return UpdateCampaignResponse
+            # Note: DB table has limited fields, use defaults for missing ones
+            target_devices_list = db_result.get("target_devices") or campaign_data.get("target_devices", [])
             campaign = UpdateCampaignResponse(
                 campaign_id=db_result["campaign_id"],
                 name=db_result["name"],
-                description=db_result["description"],
+                description=db_result.get("description"),
                 firmware=firmware,
                 status=UpdateStatus(db_result["status"]),
-                deployment_strategy=DeploymentStrategy(db_result["deployment_strategy"]),
-                priority=Priority(db_result["priority"]),
-                target_device_count=db_result["target_device_count"],
-                targeted_devices=db_result["targeted_devices"] or [],
-                targeted_groups=db_result["targeted_groups"] or [],
-                rollout_percentage=db_result["rollout_percentage"],
-                max_concurrent_updates=db_result["max_concurrent_updates"],
-                batch_size=db_result["batch_size"],
-                total_devices=db_result["total_devices"],
-                pending_devices=db_result["pending_devices"],
-                in_progress_devices=db_result["in_progress_devices"],
-                completed_devices=db_result["completed_devices"],
-                failed_devices=db_result["failed_devices"],
-                cancelled_devices=db_result["cancelled_devices"],
-                scheduled_start=datetime.fromisoformat(db_result["scheduled_start"].replace('Z', '+00:00')) if db_result.get("scheduled_start") and isinstance(db_result["scheduled_start"], str) else db_result.get("scheduled_start"),
-                scheduled_end=datetime.fromisoformat(db_result["scheduled_end"].replace('Z', '+00:00')) if db_result.get("scheduled_end") and isinstance(db_result["scheduled_end"], str) else db_result.get("scheduled_end"),
+                deployment_strategy=DeploymentStrategy(db_result.get("deployment_strategy", "staged")),
+                priority=Priority(db_result.get("priority", "normal")),
+                target_device_count=len(target_devices_list),  # Calculate from target_devices
+                targeted_devices=target_devices_list,
+                targeted_groups=campaign_data.get("target_groups", []),  # Not in DB
+                rollout_percentage=db_result.get("rollout_percentage", 100),
+                max_concurrent_updates=campaign_data.get("max_concurrent_updates", 10),  # Not in DB
+                batch_size=campaign_data.get("batch_size", 50),  # Not in DB
+                total_devices=len(target_devices_list),
+                pending_devices=len(target_devices_list),
+                in_progress_devices=0,
+                completed_devices=0,
+                failed_devices=0,
+                cancelled_devices=0,
+                scheduled_start=datetime.fromisoformat(db_result["start_time"].replace('Z', '+00:00')) if db_result.get("start_time") and isinstance(db_result["start_time"], str) else db_result.get("start_time"),
+                scheduled_end=datetime.fromisoformat(db_result["end_time"].replace('Z', '+00:00')) if db_result.get("end_time") and isinstance(db_result["end_time"], str) else db_result.get("end_time"),
                 actual_start=None,
                 actual_end=None,
-                timeout_minutes=db_result["timeout_minutes"],
-                auto_rollback=db_result["auto_rollback"],
-                failure_threshold_percent=db_result["failure_threshold_percent"],
-                rollback_triggers=db_result["rollback_triggers"] or [],
-                requires_approval=db_result.get("requires_approval", False),
-                approved=db_result.get("approved"),
-                approved_by=db_result.get("approved_by"),
-                approval_comment=db_result.get("approval_comment"),
+                timeout_minutes=campaign_data.get("timeout_minutes", 60),  # Not in DB
+                auto_rollback=db_result.get("auto_rollback", True),
+                failure_threshold_percent=db_result.get("rollback_threshold", 10.0),  # DB uses rollback_threshold
+                rollback_triggers=campaign_data.get("rollback_triggers", []),  # Not in DB
+                requires_approval=campaign_data.get("requires_approval", False),  # Not in DB
+                approved=None,
+                approved_by=None,
+                approval_comment=None,
                 created_at=datetime.fromisoformat(db_result["created_at"].replace('Z', '+00:00')) if isinstance(db_result["created_at"], str) else db_result["created_at"],
                 updated_at=datetime.fromisoformat(db_result["updated_at"].replace('Z', '+00:00')) if isinstance(db_result["updated_at"], str) else db_result["updated_at"],
                 created_by=db_result["created_by"]
@@ -484,7 +486,7 @@ class OTAService:
                 status=UpdateStatus(data['status']),
                 priority=Priority.NORMAL,  # Default priority (not in current schema)
                 progress_percentage=float(data.get('progress', 0.0)),
-                current_phase=None,  # Not in current schema
+                current_phase="scheduled",  # Default phase
                 from_version=None,  # Not in current schema
                 to_version=firmware.version,
                 scheduled_at=data.get('scheduled_at'),
@@ -495,8 +497,8 @@ class OTAService:
                 error_message=data.get('error_message'),
                 retry_count=data.get('retry_count', 0),
                 max_retries=3,  # Default
-                download_size=None,  # Not in current schema
-                download_progress=None,  # Not in current schema
+                download_size=firmware.file_size,  # Use firmware file size
+                download_progress=0.0,  # Default to 0.0 instead of None
                 download_speed=None,  # Not in current schema
                 signature_verified=None,  # Not in current schema
                 checksum_verified=None,  # Not in current schema

@@ -52,12 +52,9 @@ stripe>=7.8.0
 # Configuration
 python-dotenv>=1.0.0
 
-# Service Discovery
-python-consul>=1.1.0
-
-# Shared Infrastructure Library (includes Consul service discovery)
-# Updated to latest version with fixed imports
-isa-common
+# Shared Infrastructure Library
+# Updated to latest version with Consul client support
+isa-common==0.1.8
 
 # ISA Model Client (cloud version for AI-powered memory extraction)
 isa-model[cloud]

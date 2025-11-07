@@ -15,6 +15,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import ListValue, Struct
 
@@ -30,12 +31,22 @@ logger = logging.getLogger(__name__)
 class VaultRepository:
     """Repository for vault operations using PostgresClient"""
 
-    def __init__(self):
-        self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
-            user_id="vault_service"
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("vault_service")
+
+        # Discover PostgreSQL service
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id="vault_service")
         self.schema = "vault"
         self.vault_table = "vault_items"
         self.access_log_table = "vault_access_logs"

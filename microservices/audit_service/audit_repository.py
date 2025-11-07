@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     AuditEvent, UserActivity, SecurityEvent, ComplianceReport,
     EventType, EventSeverity, EventStatus, AuditCategory
@@ -24,10 +25,25 @@ logger = logging.getLogger(__name__)
 class AuditRepository:
     """审计数据访问仓库 - PostgreSQL"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("audit_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variables → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
+            host=host,
+            port=port,
             user_id="audit_service"
         )
         self.schema = "audit"
@@ -60,18 +76,19 @@ class AuditRepository:
             '''
             
             params = [
-                event.event_id, event.event_type.value, event.event_category.value,
-                event.event_severity.value, event.event_status.value,
+                event.id, event.event_type.value, event.category.value,
+                event.severity.value, event.status.value,
                 event.user_id, event.organization_id, event.session_id,
                 event.ip_address, event.user_agent, event.action,
                 event.resource_type, event.resource_id, event.resource_name,
-                event.status_code, event.error_message,
-                json.dumps(event.changes_made) if event.changes_made else "{}",
-                event.risk_score,
-                json.dumps(event.threat_indicators) if event.threat_indicators else "[]",
+                None,  # status_code - not in model
+                event.error_message,
+                "{}",  # changes_made - not in model
+                0.0,  # risk_score - not in model
+                "[]",  # threat_indicators - not in model
                 json.dumps(event.compliance_flags) if event.compliance_flags else "[]",
                 json.dumps(event.metadata) if event.metadata else "{}",
-                event.tags, event.event_timestamp, datetime.now(timezone.utc)
+                event.tags, event.timestamp, datetime.now(timezone.utc)
             ]
 
             with self.db:
@@ -209,6 +226,165 @@ class AuditRepository:
         except Exception as e:
             logger.error(f"Error getting audit statistics: {e}")
             return {"total_events": 0, "critical_events": 0, "error_events": 0, "failed_events": 0}
+
+
+    async def query_audit_events(self, query: Dict[str, Any]) -> List[AuditEvent]:
+        """查询审计事件 (别名方法)"""
+        return await self.get_audit_events(
+            user_id=query.get('user_id'),
+            organization_id=query.get('organization_id'),
+            event_type=query.get('event_type'),
+            start_time=query.get('start_time'),
+            end_time=query.get('end_time'),
+            limit=query.get('limit', 100),
+            offset=query.get('offset', 0)
+        )
+
+    async def get_user_activities(
+        self,
+        user_id: str,
+        days: int = 30,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """获取用户活动"""
+        try:
+            from datetime import timedelta
+            start_time = datetime.now(timezone.utc) - timedelta(days=days)
+
+            query = f'''
+                SELECT * FROM {self.schema}.{self.audit_events_table}
+                WHERE user_id = $1 AND event_timestamp >= $2
+                ORDER BY event_timestamp DESC
+                LIMIT $3
+            '''
+
+            with self.db:
+                results = self.db.query(query, [user_id, start_time, limit], schema=self.schema)
+
+            return results if results else []
+
+        except Exception as e:
+            logger.error(f"Error getting user activities: {e}")
+            return []
+
+    async def get_user_activity_summary(
+        self,
+        user_id: str,
+        days: int = 30
+    ) -> Dict[str, Any]:
+        """获取用户活动摘要"""
+        try:
+            from datetime import timedelta
+            start_time = datetime.now(timezone.utc) - timedelta(days=days)
+
+            query = f'''
+                SELECT
+                    COUNT(*) as total_activities,
+                    COUNT(CASE WHEN event_status = 'success' THEN 1 END) as success_count,
+                    COUNT(CASE WHEN event_status = 'failure' THEN 1 END) as failure_count,
+                    MAX(event_timestamp) as last_activity
+                FROM {self.schema}.{self.audit_events_table}
+                WHERE user_id = $1 AND event_timestamp >= $2
+            '''
+
+            with self.db:
+                results = self.db.query(query, [user_id, start_time], schema=self.schema)
+
+            if results and len(results) > 0:
+                return results[0]
+            return {}
+
+        except Exception as e:
+            logger.error(f"Error getting user activity summary: {e}")
+            return {}
+
+    async def create_security_event(self, security_event: 'SecurityEvent') -> Optional['SecurityEvent']:
+        """创建安全事件 (转换为审计事件)"""
+        try:
+            # 转换为AuditEvent
+            audit_event = AuditEvent(
+                event_type=EventType.SECURITY_ALERT,
+                category=AuditCategory.SECURITY,
+                severity=EventSeverity.HIGH,
+                action="security_alert",
+                description=getattr(security_event, 'description', None),
+                metadata=getattr(security_event, 'metadata', None),
+                tags=getattr(security_event, 'tags', None)
+            )
+
+            created = await self.create_audit_event(audit_event)
+            return security_event if created else None
+
+        except Exception as e:
+            logger.error(f"Error creating security event: {e}")
+            return None
+
+    async def get_security_events(
+        self,
+        days: int = 7,
+        severity: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """获取安全事件"""
+        try:
+            from datetime import timedelta
+            start_time = datetime.now(timezone.utc) - timedelta(days=days)
+
+            conditions = ["event_type = $1", "event_timestamp >= $2"]
+            params = [EventType.SECURITY_ALERT.value, start_time]
+            param_count = 2
+
+            if severity:
+                param_count += 1
+                conditions.append(f"event_severity = ${param_count}")
+                params.append(severity)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f'''
+                SELECT * FROM {self.schema}.{self.audit_events_table}
+                WHERE {where_clause}
+                ORDER BY event_timestamp DESC
+                LIMIT 100
+            '''
+
+            with self.db:
+                results = self.db.query(query, params, schema=self.schema)
+
+            return results if results else []
+
+        except Exception as e:
+            logger.error(f"Error getting security events: {e}")
+            return []
+
+    async def get_event_statistics(self, days: int = 30) -> Dict[str, Any]:
+        """获取事件统计 (别名方法)"""
+        from datetime import timedelta
+        start_time = datetime.now(timezone.utc) - timedelta(days=days)
+        return await self.get_audit_statistics(
+            organization_id=None,
+            start_time=start_time,
+            end_time=None
+        )
+
+    async def cleanup_old_events(self, retention_days: int = 365) -> int:
+        """清理旧事件"""
+        try:
+            from datetime import timedelta
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+
+            query = f'''
+                DELETE FROM {self.schema}.{self.audit_events_table}
+                WHERE event_timestamp < $1
+            '''
+
+            with self.db:
+                count = self.db.execute(query, [cutoff_date], schema=self.schema)
+
+            return count if count else 0
+
+        except Exception as e:
+            logger.error(f"Error cleaning up old events: {e}")
+            return 0
 
 
 __all__ = ["AuditRepository"]

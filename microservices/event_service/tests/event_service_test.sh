@@ -4,7 +4,7 @@
 # Tests event creation, querying, statistics, and subscriptions
 
 BASE_URL="http://localhost:8230"
-API_BASE="${BASE_URL}/api"
+API_BASE="${BASE_URL}/api/v1"
 
 # Colors for output
 GREEN='\033[0;32m'

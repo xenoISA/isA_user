@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 class EpisodicMemoryService:
     """Episodic memory service with AI-powered episode extraction"""
 
-    def __init__(self, repository: Optional[EpisodicMemoryRepository] = None, consul_registry=None):
+    def __init__(self, repository: Optional[EpisodicMemoryRepository] = None):
         """Initialize episodic memory service"""
         self.repository = repository or EpisodicMemoryRepository()
-        self.consul_registry = consul_registry
+        self.consul_registry = None  # Service discovery handled by ConfigManager now
         self.model_url = self._get_model_url()
 
         # Initialize Qdrant client for vector storage

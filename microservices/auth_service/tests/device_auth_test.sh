@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # Device Authentication Testing Script
@@ -23,53 +24,21 @@ echo "Device Authentication Service Tests"
 echo "======================================================================"
 echo ""
 
-# Get organization ID - either from command line or fetch from database
+# Get organization ID - either from command line or use test data
 if [ -n "$1" ]; then
     ORG_ID="$1"
     echo -e "${CYAN}Using provided organization: $ORG_ID${NC}"
 else
-    echo -e "${CYAN}Fetching available organizations from database...${NC}"
-
-    # Query database for organizations using docker exec
-    ORGS=$(docker exec user-staging python3 -c "
-import sys
-sys.path.insert(0, '/app')
-from core.database.supabase_client import get_supabase_client
-
-try:
-    client = get_supabase_client()
-    result = client.table('organizations').select('organization_id, name').limit(10).execute()
-    if result.data:
-        for org in result.data:
-            print(f\"{org.get('organization_id')}|{org.get('name', 'N/A')}\")
-except Exception as e:
-    print(f'ERROR: {e}', file=sys.stderr)
-" 2>&1)
-
-    if echo "$ORGS" | grep -q "ERROR"; then
-        echo -e "${RED}Failed to fetch organizations from database${NC}"
-        echo -e "${YELLOW}Using default: org_test_001 (from seed data)${NC}"
-        ORG_ID="org_test_001"
-    elif [ -z "$ORGS" ]; then
-        echo -e "${RED}No organizations found in database${NC}"
-        echo -e "${YELLOW}Using default: org_test_001 (from seed data)${NC}"
-        ORG_ID="org_test_001"
-    else
-        echo -e "${GREEN}Available organizations:${NC}"
-        echo "$ORGS" | nl -w2 -s'. '
-        echo ""
-
-        # Use the first organization by default
-        ORG_ID=$(echo "$ORGS" | head -n1 | cut -d'|' -f1)
-        ORG_NAME=$(echo "$ORGS" | head -n1 | cut -d'|' -f2)
-
-        echo -e "${GREEN}✓ Using first organization:${NC}"
-        echo -e "  ID: ${CYAN}$ORG_ID${NC}"
-        echo -e "  Name: ${CYAN}$ORG_NAME${NC}"
-        echo ""
-        echo -e "${YELLOW}Tip: To test with a different org, run:${NC}"
-        echo -e "${YELLOW}  ./device_auth.sh <organization_id>${NC}"
-    fi
+    # Use test data from seed_test_data.sql
+    ORG_ID="org_test_001"
+    echo -e "${CYAN}Using default test organization: $ORG_ID${NC}"
+    echo -e "${YELLOW}Available test organizations (from seed data):${NC}"
+    echo -e "  ${CYAN}org_test_001${NC} - Test Organization 1 (free plan)"
+    echo -e "  ${CYAN}org_test_002${NC} - Test Organization 2 (professional plan)"
+    echo -e "  ${CYAN}org_test_003${NC} - Test Organization 3 (enterprise plan)"
+    echo ""
+    echo -e "${YELLOW}Tip: To test with a different org, run:${NC}"
+    echo -e "${YELLOW}  ./device_auth_test.sh <organization_id>${NC}"
 fi
 
 # Generate unique device ID for this test run

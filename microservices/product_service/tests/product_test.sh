@@ -4,7 +4,7 @@
 # Tests product catalog, subscriptions, pricing, usage tracking, and statistics
 
 BASE_URL="http://localhost:8215"
-API_BASE="${BASE_URL}/api/v1"
+API_BASE="${BASE_URL}/api/v1/product"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -62,8 +62,8 @@ fi
 
 # Test 2: Get Service Info
 print_section "Test 2: Get Service Info"
-echo "GET ${API_BASE}/info"
-INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/info")
+echo "GET ${BASE_URL}/api/v1/product/info"
+INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/api/v1/product/info")
 HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$INFO_RESPONSE" | sed '$d')
 

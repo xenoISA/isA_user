@@ -38,17 +38,17 @@ class MemoryService:
         Initialize memory service with all service instances
 
         Args:
-            consul_registry: Optional ConsulRegistry for service discovery
+            consul_registry: Optional ConsulRegistry for service discovery (deprecated - not used)
             event_bus: Optional NATS event bus for publishing events
         """
         self.consul_registry = consul_registry
         self.event_bus = event_bus
-        self.factual_service = FactualMemoryService(consul_registry=consul_registry)
-        self.procedural_service = ProceduralMemoryService(consul_registry=consul_registry)
-        self.episodic_service = EpisodicMemoryService(consul_registry=consul_registry)
-        self.semantic_service = SemanticMemoryService(consul_registry=consul_registry)
-        self.working_service = WorkingMemoryService(consul_registry=consul_registry)
-        self.session_service = SessionMemoryService(consul_registry=consul_registry)
+        self.factual_service = FactualMemoryService()
+        self.procedural_service = ProceduralMemoryService()
+        self.episodic_service = EpisodicMemoryService()
+        self.semantic_service = SemanticMemoryService()
+        self.working_service = WorkingMemoryService()
+        self.session_service = SessionMemoryService()
 
         logger.info("Memory service initialized with AI capabilities")
 

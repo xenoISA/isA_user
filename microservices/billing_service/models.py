@@ -99,7 +99,11 @@ class BillingRecord(BaseModel):
     
     # 元数据
     billing_metadata: Dict[str, Any] = Field(default_factory=dict)
-    
+
+    # 计费周期 (optional for future use)
+    billing_period_start: Optional[datetime] = None
+    billing_period_end: Optional[datetime] = None
+
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -118,16 +122,19 @@ class BillingEvent(BaseModel):
     organization_id: Optional[str] = None
     subscription_id: Optional[str] = None
     billing_record_id: Optional[str] = None
-    
+
     # 事件数据
+    service_type: Optional[ServiceType] = None
     event_data: Dict[str, Any] = Field(default_factory=dict)
     amount: Optional[Decimal] = None
     currency: Optional[Currency] = None
-    
+
     # 处理状态
     is_processed: bool = False
     processed_at: Optional[datetime] = None
-    
+
+    # 时间戳
+    event_timestamp: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
 
@@ -151,6 +158,7 @@ class UsageAggregation(BaseModel):
     # 聚合数据
     total_usage_count: int = Field(default=0, ge=0)
     total_usage_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    total_usage: Decimal = Field(default=Decimal("0"), ge=0)  # For compatibility
     total_cost: Decimal = Field(default=Decimal("0"), ge=0)
     
     # 服务详细使用量
@@ -184,6 +192,7 @@ class BillingQuota(BaseModel):
     # 配额设置
     quota_limit: Decimal = Field(..., ge=0, description="配额限制")
     quota_used: Decimal = Field(default=Decimal("0"), ge=0, description="已使用配额")
+    quota_remaining: Decimal = Field(default=Decimal("0"), ge=0, description="剩余配额")
     quota_period: str = Field(default="monthly", description="配额周期")
     
     # 重置设置

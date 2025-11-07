@@ -5,6 +5,7 @@ Client library for other microservices to interact with audit service
 """
 
 import httpx
+from core.service_discovery import get_service_discovery
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -27,7 +28,6 @@ class AuditServiceClient:
         else:
             # Use service discovery
             try:
-                from core.service_discovery import get_service_discovery
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("audit_service")
             except Exception as e:

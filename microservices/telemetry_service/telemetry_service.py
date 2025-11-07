@@ -28,9 +28,9 @@ logger = logging.getLogger("telemetry_service")
 class TelemetryService:
     """遥测服务"""
 
-    def __init__(self, event_bus=None):
+    def __init__(self, event_bus=None, config=None):
         # Initialize repository for PostgreSQL storage
-        self.repository = TelemetryRepository()
+        self.repository = TelemetryRepository(config=config)
 
         # Event bus for publishing events
         self.event_bus = event_bus

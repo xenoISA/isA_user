@@ -20,6 +20,7 @@ from .models import (
 )
 from .event_repository import EventRepository
 from core.nats_client import Event as NATSEvent, EventType, ServiceSource
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,9 @@ logger = logging.getLogger(__name__)
 class EventService:
     """事件服务核心类"""
 
-    def __init__(self, event_bus=None):
-        self.repository = EventRepository()
+    def __init__(self, event_bus=None, config_manager: Optional[ConfigManager] = None):
+        self.config_manager = config_manager if config_manager else ConfigManager("event_service")
+        self.repository = EventRepository(config=self.config_manager)
         self.event_bus = event_bus
         self.processors: Dict[str, EventProcessor] = {}
         self.subscriptions: Dict[str, EventSubscription] = {}

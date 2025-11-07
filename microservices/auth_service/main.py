@@ -34,10 +34,15 @@ from .auth_repository import AuthRepository
 from .device_auth_service import DeviceAuthService
 from .device_auth_repository import DeviceAuthRepository
 # Database connection now handled by repositories directly
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus, NATSEventBus
+
+# Import isa-common Consul client for service registration and discovery
+from isa_common.consul_client import ConsulRegistry
+
+# Import route registry for Consul metadata
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # 初始化配置
 config_manager = ConfigManager("auth_service")
@@ -60,6 +65,8 @@ class TokenVerificationResponse(BaseModel):
     provider: Optional[str] = None
     user_id: Optional[str] = None
     email: Optional[str] = None
+    subscription_level: Optional[str] = None
+    organization_id: Optional[str] = None
     expires_at: Optional[datetime] = None
     error: Optional[str] = None
 
@@ -81,6 +88,7 @@ class DevTokenRequest(BaseModel):
     user_id: str = Field(..., description="User ID")
     email: str = Field(..., description="User email")
     expires_in: int = Field(3600, description="Expiration time in seconds")
+    subscription_level: Optional[str] = Field("free", description="User subscription level (free, basic, pro, enterprise)")
     organization_id: Optional[str] = Field(None, description="Organization ID")
     permissions: Optional[List[str]] = Field(None, description="Permission list")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
@@ -169,11 +177,43 @@ class AuthMicroservice:
         self.device_auth_repository = None
         self.event_bus: Optional[NATSEventBus] = None
         self.organization_service_client = None
+        self.consul_registry: Optional[ConsulRegistry] = None
 
     async def initialize(self):
         """初始化服务"""
         try:
             logger.info("Initializing authentication microservice...")
+
+            # Initialize Consul service registration and discovery
+            if config.consul_enabled:
+                try:
+                    # Get route metadata from registry
+                    route_meta = get_routes_for_consul()
+
+                    # Merge with service metadata
+                    consul_meta = {
+                        'version': SERVICE_METADATA['version'],
+                        'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                        **route_meta
+                    }
+
+                    self.consul_registry = ConsulRegistry(
+                        service_name=SERVICE_METADATA['service_name'],
+                        service_port=config.service_port,
+                        consul_host=config.consul_host,
+                        consul_port=config.consul_port,
+                        tags=SERVICE_METADATA['tags'],
+                        meta=consul_meta,
+                        health_check_type='http'
+                    )
+                    self.consul_registry.register()
+                    logger.info(f"Service registered with Consul: {len(route_meta.get('all_routes', '').split('|'))} routes registered")
+                    logger.info(f"Consul address: {config.consul_host}:{config.consul_port}")
+                except Exception as e:
+                    logger.warning(f"Failed to register with Consul: {e}. Continuing without service registration.")
+                    self.consul_registry = None
+            else:
+                logger.info("Consul service registration disabled")
 
             # Initialize event bus for event-driven communication
             try:
@@ -192,13 +232,15 @@ class AuthMicroservice:
                 logger.warning(f"Failed to initialize organization service client: {e}")
                 self.organization_service_client = None
 
-            # 初始化repository (they now handle their own connections)
+            # 初始化repository (they now handle their own connections with service discovery)
             self.api_key_repository = ApiKeyRepository(
-                organization_service_client=self.organization_service_client
+                organization_service_client=self.organization_service_client,
+                config=config_manager
             )
-            self.auth_repository = AuthRepository()
+            self.auth_repository = AuthRepository(config=config_manager)
             self.device_auth_repository = DeviceAuthRepository(
-                organization_service_client=self.organization_service_client
+                organization_service_client=self.organization_service_client,
+                config=config_manager
             )
 
             # 初始化services with config and event bus
@@ -216,6 +258,14 @@ class AuthMicroservice:
     
     async def shutdown(self):
         """关闭服务"""
+        # Deregister from Consul
+        if self.consul_registry:
+            try:
+                self.consul_registry.deregister()
+                logger.info("Service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"Failed to deregister from Consul: {e}")
+
         if self.auth_service:
             await self.auth_service.close()
         if self.event_bus:
@@ -232,32 +282,10 @@ async def lifespan(app: FastAPI):
     """Application lifecycle management"""
     # Initialize microservice
     await auth_microservice.initialize()
-    
-    # Register with Consul
-    if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "auth", "api"]
-        )
-        
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+
     yield
-    
+
     # Cleanup
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-    
     await auth_microservice.shutdown()
 
 # Create FastAPI application
@@ -349,11 +377,17 @@ async def verify_token(
             provider=request.provider
         )
 
+        # Extract subscription_level from metadata if present
+        metadata = result.get("metadata", {})
+        subscription_level = metadata.get("subscription_level") if isinstance(metadata, dict) else None
+
         return TokenVerificationResponse(
             valid=result.get("valid", False),
             provider=result.get("provider"),
             user_id=result.get("user_id"),
             email=result.get("email"),
+            subscription_level=subscription_level,
+            organization_id=result.get("organization_id"),
             expires_at=result.get("expires_at"),
             error=result.get("error") if not result.get("valid") else None
         )
@@ -434,13 +468,17 @@ async def generate_dev_token(
 ):
     """Generate development token (access token only)"""
     try:
+        # Include subscription_level in metadata
+        metadata = request.metadata or {}
+        metadata["subscription_level"] = request.subscription_level
+
         result = await auth_service.generate_dev_token(
             user_id=request.user_id,
             email=request.email,
             expires_in=request.expires_in,
             organization_id=request.organization_id,
             permissions=request.permissions,
-            metadata=request.metadata
+            metadata=metadata
         )
 
         if not result.get("success"):

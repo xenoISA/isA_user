@@ -109,17 +109,27 @@ class ServiceDiscovery:
         return self.get_service_url("isa-model")
 
 
-def get_service_discovery(app) -> ServiceDiscovery:
+def get_service_discovery(app=None) -> ServiceDiscovery:
     """
-    Get service discovery helper from FastAPI app state
-    
+    Get service discovery helper
+
     Args:
-        app: FastAPI app instance
-        
+        app: (Optional) FastAPI app instance - kept for backward compatibility but not used
+
     Returns:
         ServiceDiscovery instance
     """
-    if hasattr(app.state, 'consul_registry') and app.state.consul_registry:
-        return ServiceDiscovery(app.state.consul_registry)
-    
-    raise ValueError("No Consul registry found in app state. Service discovery is not available.")
+    # Create a new ConsulRegistry for service discovery
+    # Registration is handled by Consul agent sidecar, we only need discovery
+    from .consul_registry import ConsulRegistry
+    import os
+
+    consul_host = os.getenv('CONSUL_HOST', 'localhost')
+    consul_port = int(os.getenv('CONSUL_PORT', 8500))
+
+    consul_registry = ConsulRegistry(
+        consul_host=consul_host,
+        consul_port=consul_port
+    )
+
+    return ServiceDiscovery(consul_registry)

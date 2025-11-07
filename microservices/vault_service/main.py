@@ -19,12 +19,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 # Import core components
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.consul_registry import ConsulRegistry
 from core.blockchain_client import BlockchainClient
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 # Import local components
 from .vault_service import VaultService, VaultServiceError, VaultAccessDeniedError, VaultNotFoundError
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     VaultCreateRequest, VaultUpdateRequest, VaultShareRequest, VaultTestRequest,
     VaultItemResponse, VaultSecretResponse, VaultListResponse,
@@ -43,9 +44,9 @@ logger = app_logger
 
 # Global service instances
 vault_service = None
-consul_registry = None
 blockchain_client = None
 event_bus = None  # NATS event bus
+consul_registry = None  # Consul registry
 
 
 def get_user_id(request: Request) -> str:
@@ -101,14 +102,14 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Event bus initialized successfully")
 
             # Initialize vault service with event bus
-            vault_service = VaultService(blockchain_client=blockchain_client, event_bus=event_bus)
+            vault_service = VaultService(blockchain_client=blockchain_client, event_bus=event_bus, config=config_manager)
 
         except Exception as e:
             logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
             event_bus = None
 
             # Initialize vault service without event bus
-            vault_service = VaultService(blockchain_client=blockchain_client, event_bus=None)
+            vault_service = VaultService(blockchain_client=blockchain_client, event_bus=None, config=config_manager)
 
         # Subscribe to events
         if event_bus and vault_service:
@@ -132,20 +133,33 @@ async def lifespan(app: FastAPI):
 
         # Register with Consul
         if config.consul_enabled:
-            consul_registry = ConsulRegistry(
-                service_name=config.service_name,
-                service_port=config.service_port,
-                consul_host=config.consul_host,
-                consul_port=config.consul_port,
-                service_host=config.service_host,
-                tags=["microservice", "vault", "security", "api"]
-            )
+            try:
+                # Get route metadata
+                route_meta = get_routes_for_consul()
 
-            if consul_registry.register():
-                consul_registry.start_maintenance()
-                logger.info(f"{config.service_name} registered with Consul")
-            else:
-                logger.warning("Failed to register with Consul, continuing without service discovery")
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
+                )
+                consul_registry.register()
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                consul_registry = None
+
+        logger.info(f"✅ Vault Service started on port {config.service_port}")
 
         yield
 
@@ -161,14 +175,14 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error closing event bus: {e}")
 
-        if config.consul_enabled and consul_registry:
+        if consul_registry:
             try:
                 consul_registry.deregister()
-                logger.info("Service deregistered from Consul")
+                logger.info("✅ Vault service deregistered from Consul")
             except Exception as e:
-                logger.error(f"Error deregistering from Consul: {e}")
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
 
-        logger.info("Vault microservice shutdown completed")
+        logger.info("Vault Service shutting down...")
 
 
 # Create FastAPI application

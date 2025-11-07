@@ -18,6 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from isa_common.postgres_client import PostgresClient
 from google.protobuf.json_format import MessageToDict
+from core.config_manager import ConfigManager
 from .models import (
     ResourcePermission, UserPermissionRecord, OrganizationPermission,
     ResourceType, AccessLevel, PermissionSource, SubscriptionTier,
@@ -36,10 +37,25 @@ logger = logging.getLogger(__name__)
 class AuthorizationRepository:
     """Repository for authorization data operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("authorization_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variable → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
+            host=host,
+            port=port,
             user_id='authorization_service'
         )
         self.schema = "authz"

@@ -23,8 +23,8 @@ from .models import (
 
 # Service communication imports
 import httpx
-from core.consul_registry import ConsulRegistry
 from core.nats_client import Event, EventType, ServiceSource
+from core.config_manager import ConfigManager
 
 # Temporary ServiceError class until shared module is available
 class ServiceError(Exception):
@@ -45,9 +45,17 @@ class TaskExecutionError(Exception):
 class TaskService:
     """任务服务业务逻辑层"""
 
-    def __init__(self, event_bus=None):
-        self.repository = TaskRepository()
+    def __init__(self, event_bus=None, config_manager: Optional[ConfigManager] = None):
+        """
+        Initialize task service.
+
+        Args:
+            event_bus: Event bus for publishing events
+            config_manager: ConfigManager instance for service discovery
+        """
+        self.repository = TaskRepository(config=config_manager)
         self.event_bus = event_bus
+        self.config_manager = config_manager if config_manager else ConfigManager("task_service")
         self.consul = None
         self._init_consul()
 
@@ -78,28 +86,12 @@ class TaskService:
         self.orchestrator = self._create_temp_orchestrator()
 
     def _init_consul(self):
-        """Initialize Consul registry for service discovery"""
-        try:
-            from core.config_manager import ConfigManager
-            config_manager = ConfigManager("task_service")
-            config = config_manager.get_service_config()
-
-            if config.consul_enabled:
-                self.consul = ConsulRegistry(
-                    service_name=config.service_name,
-                    service_port=config.service_port,
-                    consul_host=config.consul_host,
-                    consul_port=config.consul_port
-                )
-                logger.info("Consul service discovery initialized for task service")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Consul: {e}, will use fallback URLs")
+        """Service discovery via Consul agent sidecar"""
+        logger.info("Service discovery via Consul agent sidecar")
 
     def _get_service_url(self, service_name: str, fallback_port: int) -> str:
-        """Get service URL via Consul discovery with fallback"""
+        """Get service URL from environment or use fallback"""
         fallback_url = f"http://localhost:{fallback_port}"
-        if self.consul:
-            return self.consul.get_service_address(service_name, fallback_url=fallback_url)
         return fallback_url
     
     def _create_temp_communicator(self):

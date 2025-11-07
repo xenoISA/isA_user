@@ -14,10 +14,10 @@ import os
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 from .models import (
     WeatherCurrentRequest, WeatherForecastRequest, LocationSaveRequest,
     WeatherCurrentResponse, WeatherForecastResponse,
@@ -25,6 +25,7 @@ from .models import (
 )
 from .weather_service import WeatherService
 from .weather_repository import WeatherRepository
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize config
 config_manager = ConfigManager("weather_service")
@@ -40,6 +41,7 @@ class WeatherMicroservice:
         self.service = None
         self.repository = None
         self.event_bus = None
+        self.consul_registry = None
 
     async def initialize(self):
         # Initialize event bus
@@ -50,11 +52,47 @@ class WeatherMicroservice:
             logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
             self.event_bus = None
 
-        self.repository = WeatherRepository()
+        self.repository = WeatherRepository(config=config_manager)
         self.service = WeatherService(event_bus=self.event_bus)
         logger.info("Weather service initialized")
 
+        # Consul service registration
+        if config.consul_enabled:
+            try:
+                # Get route metadata
+                route_meta = get_routes_for_consul()
+
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                self.consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
+                )
+                self.consul_registry.register()
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                self.consul_registry = None
+
     async def shutdown(self):
+        # Consul deregistration
+        if self.consul_registry:
+            try:
+                self.consul_registry.deregister()
+                logger.info("✅ Service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
+
         if self.event_bus:
             try:
                 await self.event_bus.close()
@@ -74,32 +112,10 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # Startup
     await microservice.initialize()
-    
-    # Consul registration
-    consul_registry = ConsulRegistry(
-        service_name="weather_service",
-        service_port=config.service_port,
-        consul_host=config.consul_host,
-        consul_port=config.consul_port,
-        service_host=config.service_host,
-        tags=["microservice", "weather", "api", "v1"]
-    )
-    
-    if consul_registry.register():
-        consul_registry.start_maintenance()
-        app.state.consul_registry = consul_registry
-        logger.info("Successfully registered with Consul")
-    else:
-        logger.warning("Failed to register with Consul")
-    
+
     yield
-    
+
     # Shutdown
-    if hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
-    
     await microservice.shutdown()
 
 # Create FastAPI application

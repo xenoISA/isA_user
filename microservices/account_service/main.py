@@ -27,10 +27,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Import local components
 from .account_service import AccountService, AccountServiceError, AccountValidationError, AccountNotFoundError
-from core.consul_registry import ConsulRegistry
 from .models import (
     AccountEnsureRequest, AccountUpdateRequest, AccountPreferencesRequest,
     AccountStatusChangeRequest, AccountProfileResponse, AccountSummaryResponse,
@@ -54,12 +55,43 @@ class AccountMicroservice:
     def __init__(self):
         self.account_service = None
         self.event_bus = None
+        self.consul_registry: Optional[ConsulRegistry] = None
 
     async def initialize(self, event_bus=None):
         """Initialize the microservice"""
         try:
+            logger.info("Initializing account microservice...")
+
+            # Consul 服务注册
+            if config.consul_enabled:
+                try:
+                    # 获取路由元数据
+                    route_meta = get_routes_for_consul()
+
+                    # 合并服务元数据
+                    consul_meta = {
+                        'version': SERVICE_METADATA['version'],
+                        'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                        **route_meta
+                    }
+
+                    self.consul_registry = ConsulRegistry(
+                        service_name=SERVICE_METADATA['service_name'],
+                        service_port=config.service_port,
+                        consul_host=config.consul_host,
+                        consul_port=config.consul_port,
+                        tags=SERVICE_METADATA['tags'],
+                        meta=consul_meta,
+                        health_check_type='http'
+                    )
+                    self.consul_registry.register()
+                    logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+                except Exception as e:
+                    logger.warning(f"Failed to register with Consul: {e}")
+                    self.consul_registry = None
+
             self.event_bus = event_bus
-            self.account_service = AccountService(event_bus=event_bus)
+            self.account_service = AccountService(event_bus=event_bus, config=config_manager)
             logger.info("Account microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize account microservice: {e}")
@@ -68,6 +100,14 @@ class AccountMicroservice:
     async def shutdown(self):
         """Shutdown the microservice"""
         try:
+            # Consul 注销
+            if self.consul_registry:
+                try:
+                    self.consul_registry.deregister()
+                    logger.info("Service deregistered from Consul")
+                except Exception as e:
+                    logger.error(f"Failed to deregister from Consul: {e}")
+
             if self.event_bus:
                 await self.event_bus.close()
                 logger.info("Event bus closed")
@@ -95,30 +135,12 @@ async def lifespan(app: FastAPI):
     # Initialize microservice with event bus
     await account_microservice.initialize(event_bus=event_bus)
 
-    # Register with Consul
-    consul_registry = ConsulRegistry(
-        service_name=config.service_name,
-        service_port=config.service_port,
-        consul_host=config.consul_host,
-        consul_port=config.consul_port,
-        service_host=config.service_host,
-        tags=["microservice", "accounts", "api"]
-    )
-
-    if config.consul_enabled and consul_registry.register():
-        consul_registry.start_maintenance()
-        app.state.consul_registry = consul_registry
-        logger.info(f"{config.service_name} registered with Consul")
-    elif config.consul_enabled:
-        logger.warning("Failed to register with Consul, continuing without service discovery")
+    # Service discovery via Consul agent sidecar (no programmatic registration needed)
+    logger.info("Service discovery via Consul agent sidecar")
 
     yield
 
     # Cleanup
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-
     await account_microservice.shutdown()
 
 

@@ -1,4 +1,4 @@
-# Notification Service 使用指南
+ni# Notification Service 使用指南
 
 ## 服务概述
 Notification Service 提供全面的通知管理功能，支持邮件、推送通知、应用内通知、Webhook和批量发送。

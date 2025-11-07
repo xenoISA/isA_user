@@ -18,11 +18,10 @@ from datetime import datetime, timedelta, timezone
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.service_discovery import get_service_discovery
 from core.nats_client import get_event_bus, Event, EventType, ServiceSource
+from isa_common.consul_client import ConsulRegistry
 from .models import (
     TelemetryDataPoint, TelemetryBatchRequest, MetricDefinitionRequest,
     AlertRuleRequest, QueryRequest, RealTimeSubscriptionRequest,
@@ -34,6 +33,7 @@ from .models import (
 from .telemetry_service import TelemetryService
 from .telemetry_repository import TelemetryRepository
 from .events.handlers import TelemetryEventHandler
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize configuration
 config_manager = ConfigManager("telemetry_service")
@@ -48,13 +48,50 @@ class TelemetryMicroservice:
     def __init__(self):
         self.service = None
         self.event_bus = None
+        self.consul_registry = None
 
     async def initialize(self, event_bus=None):
         self.event_bus = event_bus
-        self.service = TelemetryService(event_bus=event_bus)
+        self.service = TelemetryService(event_bus=event_bus, config=config_manager)
         logger.info("Telemetry service initialized")
 
+        # Consul service registration
+        if config.consul_enabled:
+            try:
+                # Get route metadata
+                route_meta = get_routes_for_consul()
+
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                self.consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
+                )
+                self.consul_registry.register()
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                self.consul_registry = None
+
     async def shutdown(self):
+        # Consul deregistration
+        if self.consul_registry:
+            try:
+                self.consul_registry.deregister()
+                logger.info("✅ Service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
+
         if self.event_bus:
             try:
                 await self.event_bus.close()
@@ -98,32 +135,9 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 
-    # Consul注册
-    if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "iot", "telemetry", "monitoring", "timeseries", "api", "v1"]
-        )
-
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
-
     yield
 
     # Shutdown
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
-
     await microservice.shutdown()
 
 # Create FastAPI application
@@ -194,37 +208,39 @@ async def get_user_context(
 
     if not authorization and not x_api_key:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     try:
-        # Use Consul service discovery
-        if not hasattr(app.state, 'consul_registry') or not app.state.consul_registry:
-            raise HTTPException(status_code=503, detail="Service discovery not available")
-        
-        auth_service_url = app.state.consul_registry.get_service_endpoint("auth_service")
-        if not auth_service_url:
-            raise HTTPException(status_code=503, detail="Auth service not available")
-        
+        # Use ConfigManager for service discovery
+        auth_host, auth_port = config_manager.discover_service(
+            service_name='auth_service',
+            default_host='localhost',
+            default_port=8201,
+            env_host_key='AUTH_SERVICE_HOST',
+            env_port_key='AUTH_SERVICE_PORT'
+        )
+        auth_service_url = f"http://{auth_host}:{auth_port}"
+
         if authorization:
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             logger.info(f"Verifying token with auth service")
-            
+
             response = requests.post(
                 f"{auth_service_url}/api/v1/auth/verify-token",
                 json={"token": token}
             )
             if response.status_code != 200:
                 raise HTTPException(status_code=401, detail="Invalid token")
-            
+
             auth_data = response.json()
             if not auth_data.get("valid"):
                 raise HTTPException(status_code=401, detail="Token verification failed")
-            
+
             return {
                 "user_id": auth_data.get("user_id", "unknown"),
                 "organization_id": auth_data.get("organization_id"),
                 "role": auth_data.get("role", "user")
             }
-        
+
         elif x_api_key:
             response = requests.post(
                 f"{auth_service_url}/api/v1/auth/verify-api-key",
@@ -232,21 +248,21 @@ async def get_user_context(
             )
             if response.status_code != 200:
                 raise HTTPException(status_code=401, detail="Invalid API key")
-            
+
             auth_data = response.json()
             if not auth_data.get("valid"):
                 raise HTTPException(status_code=401, detail="API key verification failed")
-            
+
             return {
                 "user_id": auth_data.get("user_id", "unknown"),
                 "organization_id": auth_data.get("organization_id"),
                 "role": auth_data.get("role", "user")
             }
-    
+
     except requests.RequestException as e:
         logger.error(f"Auth service communication error: {e}")
         raise HTTPException(status_code=503, detail="Authentication service unavailable")
-    
+
     raise HTTPException(status_code=401, detail="Authentication required")
 
 # ======================

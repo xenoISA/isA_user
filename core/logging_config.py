@@ -137,8 +137,11 @@ class UnifiedLoggingConfig:
         self.service_log_dir = self.log_dir
 
         # Loki 配置 (从环境变量读取)
-        self.loki_url = os.getenv("LOKI_URL", "http://localhost:3100")
-        self.loki_enabled = os.getenv("LOKI_ENABLED", "true").lower() == "true"
+        # 优先级: 环境变量 > Consul > localhost
+        self.loki_grpc_host = os.getenv("LOKI_GRPC_HOST", "localhost")
+        self.loki_grpc_port = int(os.getenv("LOKI_GRPC_PORT", "50054"))
+        self.loki_url = f"http://{self.loki_grpc_host}:{self.loki_grpc_port}"  # Fallback for HTTP-based handlers
+        self.loki_enabled = os.getenv("LOKI_ENABLED", "false").lower() == "true"
 
     def setup_logging(self,
                      level: LogLevel = LogLevel.INFO,

@@ -16,6 +16,7 @@ from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct, ListValue
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     FirmwareResponse, UpdateCampaignResponse, DeviceUpdateResponse,
     RollbackResponse, UpdateStatsResponse,
@@ -42,13 +43,23 @@ def _convert_protobuf_to_native(value: Any) -> Any:
 class OTARepository:
     """OTA data access layer"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize OTA repository"""
-        self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
-            user_id="ota_service"
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("ota_service")
+
+        # Discover PostgreSQL service
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id="ota_service")
         self.schema = "ota"
         self.firmware_table = "firmware"
         self.campaigns_table = "update_campaigns"
@@ -272,13 +283,40 @@ class OTARepository:
             query = f'''
                 INSERT INTO {self.schema}.{self.campaigns_table} (
                     campaign_id, name, description, firmware_id, status,
-                    start_time, end_time, target_devices, target_criteria,
+                    deployment_strategy, start_time, end_time, target_devices, target_criteria,
                     rollout_percentage, auto_rollback, rollback_threshold,
                     force_update, priority, tags, metadata, created_by,
                     created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
                 RETURNING *
             '''
+
+            # Map the field names from service layer to database schema
+            # Service uses: scheduled_start, scheduled_end, targeted_devices, targeted_groups
+            # Database uses: start_time, end_time, target_devices, target_criteria
+            target_devices = campaign_data.get("targeted_devices", [])
+            if not target_devices:
+                target_devices = campaign_data.get("target_devices", [])
+
+            # Combine target_groups and target_filters into target_criteria JSON
+            target_criteria = campaign_data.get("target_criteria", {})
+            if not target_criteria:
+                target_criteria = {}
+            if campaign_data.get("targeted_groups"):
+                target_criteria["groups"] = campaign_data.get("targeted_groups")
+            if campaign_data.get("target_filters"):
+                target_criteria["filters"] = campaign_data.get("target_filters")
+
+            # Map time fields
+            start_time = campaign_data.get("scheduled_start") or campaign_data.get("start_time")
+            end_time = campaign_data.get("scheduled_end") or campaign_data.get("end_time")
+
+            # Keep priority as string (database column is VARCHAR)
+            priority = campaign_data.get("priority", "normal")
+            if not isinstance(priority, str):
+                # Convert int to string if needed: 0=low, 1=normal, 2=high, 3=critical, 4=emergency
+                priority_map = {0: "low", 1: "normal", 2: "high", 3: "critical", 4: "emergency"}
+                priority = priority_map.get(priority, "normal")
 
             params = [
                 campaign_data["campaign_id"],
@@ -286,15 +324,16 @@ class OTARepository:
                 campaign_data.get("description"),
                 campaign_data["firmware_id"],
                 campaign_data.get("status", "created"),
-                campaign_data.get("start_time"),
-                campaign_data.get("end_time"),
-                campaign_data.get("target_devices", []),
-                campaign_data.get("target_criteria", {}),
+                campaign_data.get("deployment_strategy", "staged"),
+                start_time,
+                end_time,
+                target_devices,
+                target_criteria,
                 campaign_data.get("rollout_percentage", 100),
                 campaign_data.get("auto_rollback", True),
-                campaign_data.get("rollback_threshold", 10.0),
+                campaign_data.get("rollback_threshold") or campaign_data.get("failure_threshold_percent", 10.0),
                 campaign_data.get("force_update", False),
-                campaign_data.get("priority", 0),
+                priority,
                 campaign_data.get("tags", []),
                 campaign_data.get("metadata", {}),
                 campaign_data["created_by"],
@@ -472,6 +511,11 @@ class OTARepository:
         try:
             now = datetime.now(timezone.utc)
 
+            # campaign_id is NOT NULL in schema, so use empty string as default
+            campaign_id = update_data.get("campaign_id")
+            if campaign_id is None:
+                campaign_id = ""  # Use empty string instead of NULL
+
             query = f'''
                 INSERT INTO {self.schema}.{self.device_updates_table} (
                     update_id, device_id, campaign_id, firmware_id, status,
@@ -485,7 +529,7 @@ class OTARepository:
             params = [
                 update_data["update_id"],
                 update_data["device_id"],
-                update_data["campaign_id"],
+                campaign_id,
                 update_data["firmware_id"],
                 update_data.get("status", "pending"),
                 update_data.get("progress", 0.0),

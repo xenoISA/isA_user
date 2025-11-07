@@ -14,10 +14,10 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 from .invitation_service import InvitationService
 from .invitation_repository import InvitationRepository
 from .events import InvitationEventHandler
@@ -27,6 +27,7 @@ from .models import (
     InvitationDetailResponse, InvitationListResponse, AcceptInvitationResponse,
     OrganizationRole
 )
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize configuration
 config_manager = ConfigManager("invitation_service")
@@ -38,9 +39,7 @@ logger = app_logger  # for backward compatibility
 
 # 全局服务实例
 invitation_service = None
-consul_registry = None
-
-
+consul_registry: Optional[ConsulRegistry] = None
 def get_user_id(request: Request) -> str:
     """从请求头获取用户ID"""
     x_user_id = request.headers.get("X-User-Id")
@@ -101,24 +100,35 @@ async def lifespan(app: FastAPI):
 
             except Exception as e:
                 logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
-        
-        # 注册到Consul
+
+        # Consul 服务注册
         if config.consul_enabled:
-            consul_registry = ConsulRegistry(
-                service_name=config.service_name,
-                service_port=config.service_port,
-                consul_host=config.consul_host,
-                consul_port=config.consul_port,
-                service_host=config.service_host,
-                tags=["microservice", "invitation", "api"]
-            )
-            
-            if consul_registry.register():
-                consul_registry.start_maintenance()
-                logger.info(f"{config.service_name} registered with Consul")
-            else:
-                logger.warning("Failed to register with Consul, continuing without service discovery")
-        
+            try:
+                # 获取路由元数据
+                route_meta = get_routes_for_consul()
+
+                # 合并服务元数据
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
+                )
+                consul_registry.register()
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                consul_registry = None
+
         yield
         
     except Exception as e:
@@ -126,12 +136,13 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # 清理资源
-        if config.consul_enabled and consul_registry:
+        # Consul 注销
+        if consul_registry:
             try:
                 consul_registry.deregister()
-                logger.info("Service deregistered from Consul")
+                logger.info("✅ Service deregistered from Consul")
             except Exception as e:
-                logger.error(f"Error deregistering from Consul: {e}")
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
 
         # Close event bus
         if event_bus:
@@ -170,6 +181,7 @@ async def health_check():
 
 
 @app.get("/info", response_model=ServiceInfo)
+@app.get("/api/v1/invitations/info", response_model=ServiceInfo)
 async def service_info():
     """服务信息"""
     return ServiceInfo()
@@ -177,7 +189,7 @@ async def service_info():
 
 # ============ Invitation Management Endpoints ============
 
-@app.post("/api/v1/organizations/{organization_id}/invitations", response_model=dict)
+@app.post("/api/v1/invitations/organizations/{organization_id}", response_model=dict)
 async def create_invitation(
     organization_id: str,
     request_data: InvitationCreateRequest,
@@ -271,7 +283,7 @@ async def accept_invitation(
         raise HTTPException(status_code=500, detail="Failed to accept invitation")
 
 
-@app.get("/api/v1/organizations/{organization_id}/invitations", response_model=InvitationListResponse)
+@app.get("/api/v1/invitations/organizations/{organization_id}", response_model=InvitationListResponse)
 async def get_organization_invitations(
     organization_id: str,
     request: Request,

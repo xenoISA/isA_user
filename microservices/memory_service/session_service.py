@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 class SessionMemoryService:
     """Session memory service for conversation context"""
 
-    def __init__(self, repository: Optional[SessionMemoryRepository] = None, consul_registry=None):
+    def __init__(self, repository: Optional[SessionMemoryRepository] = None):
         """Initialize session memory service"""
         self.repository = repository or SessionMemoryRepository()
-        self.consul_registry = consul_registry
+        self.consul_registry = None  # Service discovery handled by ConfigManager now
         self.model_url = self._get_model_url()
 
         # Initialize Qdrant client for vector storage

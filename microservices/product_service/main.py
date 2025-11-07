@@ -14,10 +14,11 @@ from datetime import datetime
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from core.consul_registry import ConsulRegistry
+from isa_common.consul_client import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 from .product_repository import ProductRepository
 from .product_service import ProductService
@@ -51,8 +52,8 @@ async def lifespan(app: FastAPI):
     global product_service, repository, consul_registry, event_bus
 
     try:
-        # 初始化数据库连接
-        repository = ProductRepository()
+        # 初始化数据库连接 with config_manager
+        repository = ProductRepository(config=config_manager)
         await repository.initialize()
 
         # Initialize NATS JetStream event bus
@@ -69,23 +70,36 @@ async def lifespan(app: FastAPI):
 
             # 初始化业务服务 without event bus
             product_service = ProductService(repository, event_bus=None)
-        
-        # 注册到 Consul（如果启用）
+
+        # Register with Consul
         if config.consul_enabled:
-            consul_registry = ConsulRegistry(
-                service_name="product_service",
-                service_port=SERVICE_PORT,
-                consul_host=config.consul_host,
-                consul_port=config.consul_port,
-                service_host=config.service_host,
-                tags=["microservice", "product", "api"]
-            )
-            if consul_registry.register():
-                consul_registry.start_maintenance()
-                logger.info("Product service registered with Consul")
-            else:
-                logger.error("Failed to register product service with Consul")
-        
+            try:
+                # Get route metadata for Consul
+                route_meta = get_routes_for_consul()
+
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities'][:5]),  # Limit capabilities
+                    **route_meta
+                }
+
+                consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=SERVICE_PORT,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
+                )
+                consul_registry.register()
+                logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+            except Exception as e:
+                logger.warning(f"Failed to register with Consul: {e}")
+                consul_registry = None
+
+        logger.info("Service discovery via Consul agent sidecar")
         logger.info(f"Product service started on port {SERVICE_PORT}")
         yield
         
@@ -94,17 +108,20 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # 清理资源
+        # Deregister from Consul
+        if consul_registry:
+            try:
+                consul_registry.deregister()
+                logger.info("Service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"Failed to deregister from Consul: {e}")
+
         if event_bus:
             try:
                 await event_bus.close()
                 logger.info("Product event bus closed")
             except Exception as e:
                 logger.error(f"Error closing event bus: {e}")
-
-        if consul_registry:
-            consul_registry.stop_maintenance()
-            consul_registry.deregister()
-            logger.info("Product service deregistered from Consul")
 
         if repository:
             await repository.close()
@@ -139,18 +156,18 @@ async def get_product_service() -> ProductService:
 async def health_check():
     """健康检查"""
     dependencies = {}
-    
+
     # 检查数据库连接
     try:
-        if repository and repository.client:
-            # Simple test query to check database connection
-            repository.client.table("product_categories").select("count", count="exact").limit(1).execute()
-            dependencies["database"] = "healthy"
+        if repository and repository.db:
+            # Use PostgresClient health check method
+            is_healthy = repository.db.health_check()
+            dependencies["database"] = "healthy" if is_healthy else "unhealthy"
         else:
             dependencies["database"] = "unhealthy"
     except Exception:
         dependencies["database"] = "unhealthy"
-    
+
     return {
         "status": "healthy" if all(v == "healthy" for v in dependencies.values()) else "degraded",
         "service": "product_service",
@@ -160,7 +177,7 @@ async def health_check():
     }
 
 
-@app.get("/api/v1/info")
+@app.get("/api/v1/product/info")
 async def get_service_info():
     """获取服务信息"""
     return {
@@ -194,7 +211,7 @@ async def get_service_info():
 # 产品目录API
 # ====================
 
-@app.get("/api/v1/categories", response_model=List[ProductCategory])
+@app.get("/api/v1/product/categories", response_model=List[ProductCategory])
 async def get_product_categories(
     service: ProductService = Depends(get_product_service)
 ):
@@ -206,7 +223,7 @@ async def get_product_categories(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/products", response_model=List[Product])
+@app.get("/api/v1/product/products", response_model=List[Product])
 async def get_products(
     category_id: Optional[str] = Query(None, description="产品类别ID"),
     product_type: Optional[str] = Query(None, description="产品类型"),
@@ -228,7 +245,7 @@ async def get_products(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/products/{product_id}", response_model=Product)
+@app.get("/api/v1/product/products/{product_id}", response_model=Product)
 async def get_product(
     product_id: str,
     service: ProductService = Depends(get_product_service)
@@ -246,7 +263,7 @@ async def get_product(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/products/{product_id}/pricing")
+@app.get("/api/v1/product/products/{product_id}/pricing")
 async def get_product_pricing(
     product_id: str,
     user_id: Optional[str] = Query(None, description="用户ID"),
@@ -270,7 +287,7 @@ async def get_product_pricing(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/products/{product_id}/availability")
+@app.get("/api/v1/product/products/{product_id}/availability")
 async def check_product_availability(
     product_id: str,
     user_id: str = Query(..., description="用户ID"),
@@ -294,7 +311,7 @@ async def check_product_availability(
 # 订阅管理API
 # ====================
 
-@app.get("/api/v1/subscriptions/user/{user_id}", response_model=List[UserSubscription])
+@app.get("/api/v1/product/subscriptions/user/{user_id}", response_model=List[UserSubscription])
 async def get_user_subscriptions(
     user_id: str,
     status: Optional[str] = Query(None, description="订阅状态过滤"),
@@ -314,7 +331,7 @@ async def get_user_subscriptions(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/subscriptions/{subscription_id}", response_model=UserSubscription)
+@app.get("/api/v1/product/subscriptions/{subscription_id}", response_model=UserSubscription)
 async def get_subscription(
     subscription_id: str,
     service: ProductService = Depends(get_product_service)
@@ -332,7 +349,7 @@ async def get_subscription(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.post("/api/v1/subscriptions", response_model=UserSubscription)
+@app.post("/api/v1/product/subscriptions", response_model=UserSubscription)
 async def create_subscription(
     user_id: str = Body(...),
     plan_id: str = Body(...),
@@ -369,7 +386,7 @@ async def create_subscription(
 # 使用量记录API
 # ====================
 
-@app.post("/api/v1/usage/record")
+@app.post("/api/v1/product/usage/record")
 async def record_product_usage(
     user_id: str = Body(...),
     product_id: str = Body(...),
@@ -402,7 +419,7 @@ async def record_product_usage(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/usage/records", response_model=List[ProductUsageRecord])
+@app.get("/api/v1/product/usage/records", response_model=List[ProductUsageRecord])
 async def get_usage_records(
     user_id: Optional[str] = Query(None, description="用户ID"),
     organization_id: Optional[str] = Query(None, description="组织ID"),
@@ -435,7 +452,7 @@ async def get_usage_records(
 # 统计和分析API
 # ====================
 
-@app.get("/api/v1/statistics/usage")
+@app.get("/api/v1/product/statistics/usage")
 async def get_usage_statistics(
     user_id: Optional[str] = Query(None, description="用户ID"),
     organization_id: Optional[str] = Query(None, description="组织ID"),
@@ -458,7 +475,7 @@ async def get_usage_statistics(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/statistics/service")
+@app.get("/api/v1/product/statistics/service")
 async def get_service_statistics(
     service: ProductService = Depends(get_product_service)
 ):

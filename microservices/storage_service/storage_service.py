@@ -11,6 +11,7 @@ import mimetypes
 import hashlib
 import logging
 import json
+import html
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, BinaryIO, Any
 from datetime import datetime, timedelta, timezone
@@ -18,14 +19,14 @@ from io import BytesIO
 
 from fastapi import UploadFile, HTTPException
 
-# Use isa-common's MinIOClient for gRPC service discovery
+# Use isa-common's MinIOClient for gRPC
 from isa_common.minio_client import MinIOClient
-from isa_common.consul_client import ConsulRegistry as IsaCommonConsulRegistry
 
 from .storage_repository import StorageRepository
 # Import organization client from organization_service (provider pattern)
 from microservices.organization_service.client import OrganizationServiceClient
 from core.nats_client import Event, EventType, ServiceSource
+from core.config_manager import ConfigManager
 from .models import (
     StoredFile, FileShare, StorageQuota,
     FileStatus, StorageProvider, FileAccessLevel,
@@ -40,7 +41,6 @@ from .models import (
     CreateAlbumRequest, UpdateAlbumRequest, AddPhotosToAlbumRequest, ShareAlbumRequest,
     AlbumResponse, AlbumListResponse, AlbumPhotosResponse, AlbumSyncResponse
 )
-from core.consul_registry import ConsulRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -48,33 +48,36 @@ logger = logging.getLogger(__name__)
 class StorageService:
     """存储服务业务逻辑层"""
 
-    def __init__(self, config, event_bus=None):
+    def __init__(self, config, event_bus=None, config_manager: Optional[ConfigManager] = None):
         """
         初始化存储服务
 
         Args:
             config: 配置对象
             event_bus: 事件总线（可选）
+            config_manager: ConfigManager 实例（可选）
         """
-        self.repository = StorageRepository()
+        self.repository = StorageRepository(config=config_manager)
         self.config = config
+        self.config_manager = config_manager
         self.event_bus = event_bus
 
-        # Initialize Consul registry for MinIO service discovery
-        consul_host = getattr(config, 'consul_host', 'localhost')
-        consul_port = getattr(config, 'consul_port', 8500)
-
-        self.consul_registry = IsaCommonConsulRegistry(
-            consul_host=consul_host,
-            consul_port=consul_port
+        # Discover MinIO gRPC service using config_manager (same as PostgresClient pattern)
+        # Priority: Environment variables (MINIO_GRPC_HOST/PORT) → Consul → fallback
+        minio_host, minio_port = config_manager.discover_service(
+            service_name='minio_grpc_service',
+            default_host='isa-minio-grpc',
+            default_port=50051,
+            env_host_key='MINIO_GRPC_HOST',
+            env_port_key='MINIO_GRPC_PORT'
         )
 
-        # Initialize MinIO client with Consul service discovery
-        # This will automatically find the minio-grpc-service endpoint
+        logger.info(f"Connecting to MinIO gRPC at {minio_host}:{minio_port}")
+        # Initialize MinIO client directly with discovered endpoint (no consul_registry needed)
         self.minio_client = MinIOClient(
             user_id='storage_service',
-            consul_registry=self.consul_registry,
-            service_name_override='minio-grpc-service'
+            host=minio_host,
+            port=minio_port
         )
 
         self.bucket_name = getattr(config, 'minio_bucket_name', 'isa-storage')
@@ -103,18 +106,6 @@ class StorageService:
         # 确保bucket存在
         self._ensure_bucket_exists()
 
-    def _get_service_url(self, service_name: str, fallback_port: int) -> str:
-        """Get service URL via Consul discovery with fallback"""
-        fallback_url = f"http://localhost:{fallback_port}"
-        try:
-            # Use isa-common Consul registry to get service URL
-            url = self.consul_registry.get_service_url(service_name)
-            if url:
-                return url
-        except Exception as e:
-            logger.warning(f"Consul lookup failed for {service_name}: {e}")
-        return fallback_url
-    
     def _ensure_bucket_exists(self):
         """确保MinIO bucket存在"""
         try:
@@ -156,10 +147,13 @@ class StorageService:
     
     async def _check_quota(self, user_id: str, file_size: int) -> bool:
         """检查用户配额"""
+        logger.info(f"_check_quota called: user_id={user_id}, file_size={file_size}")
         quota = await self.repository.get_storage_quota(quota_type="user", entity_id=user_id)
-        
+        logger.info(f"Retrieved quota: {quota}")
+
         if not quota:
             # 如果没有配额记录，创建默认配额
+            logger.debug("No quota found, using defaults")
             quota = StorageQuota(
                 user_id=user_id,
                 total_quota_bytes=self.default_quota_bytes,
@@ -169,14 +163,20 @@ class StorageService:
             )
             # 这里应该创建配额记录，但简化处理
             return True
-        
-        # 检查配额
-        if quota.used_bytes + file_size > quota.total_quota_bytes:
+
+        # 检查配额（处理 None 值）
+        used_bytes = quota.used_bytes if quota.used_bytes is not None else 0
+        logger.info(f"Quota check: used_bytes={used_bytes}, total_quota={quota.total_quota_bytes}, max_file_size={quota.max_file_size}")
+
+        if used_bytes + file_size > quota.total_quota_bytes:
+            logger.debug(f"Quota exceeded: {used_bytes + file_size} > {quota.total_quota_bytes}")
             return False
-        
+
         if quota.max_file_size and file_size > quota.max_file_size:
+            logger.debug(f"File too large: {file_size} > {quota.max_file_size}")
             return False
-        
+
+        logger.debug("Quota check passed")
         return True
     
     async def upload_file(
@@ -208,18 +208,26 @@ class StorageService:
                 )
             
             # 验证文件大小
+            logger.info(f"Checking file size: {file_size} vs max {self.max_file_size}")
             if file_size > self.max_file_size:
                 raise HTTPException(
                     status_code=400,
                     detail=f"File too large. Maximum size: {self.max_file_size / (1024*1024):.1f}MB"
                 )
-            
+
             # 检查配额
-            if not await self._check_quota(request.user_id, file_size):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Storage quota exceeded"
-                )
+            logger.info(f"Checking quota for user {request.user_id}, file_size={file_size}")
+            try:
+                quota_ok = await self._check_quota(request.user_id, file_size)
+                logger.debug(f"Quota check result: {quota_ok}")
+                if not quota_ok:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Storage quota exceeded"
+                    )
+            except Exception as e:
+                logger.error(f"Error in quota check: {e}", exc_info=True)
+                raise
             
             # 生成文件信息
             file_id = f"file_{uuid.uuid4().hex}"
@@ -298,27 +306,156 @@ class StorageService:
                 # 这里应该创建一个定时任务来删除文件
                 pass
 
-            # Publish file.uploaded event
+            # 🆕 自动 AI 提取（仅图片）
+            ai_metadata = None
+            chunk_id = None
+            if content_type.startswith('image/'):
+                try:
+                    logger.info(f"Starting AI extraction for image {file_id}")
+
+                    # 导入 Intelligence Service
+                    from .intelligence_service import IntelligenceService
+                    intelligence_service = IntelligenceService()
+
+                    # Unescape HTML entities in URL (fix &amp; -> &)
+                    clean_download_url = html.unescape(html.unescape(download_url))
+                    logger.info(f"Presigned URL: {clean_download_url[:100]}...")
+
+                    # Temporary solution: Download image and convert to base64
+                    # OpenAI Vision API cannot access internal Docker network URLs
+                    try:
+                        logger.info(f"Downloading image from MinIO for base64 encoding...")
+                        import httpx
+                        import base64
+
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            img_response = await client.get(clean_download_url)
+                            img_response.raise_for_status()
+
+                            # Convert to base64
+                            img_bytes = img_response.content
+                            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+
+                            # Add data URI prefix for image type
+                            img_data_uri = f"data:{content_type};base64,{img_base64}"
+
+                            logger.info(f"Image downloaded and encoded to base64 ({len(img_bytes)} bytes)")
+
+                            # 调用 MCP store_knowledge 进行 AI 提取 (使用 base64)
+                            ai_result = await intelligence_service._store_image_via_mcp(
+                                user_id=request.user_id,
+                                image_path=img_data_uri,  # 使用 base64 data URI
+                                metadata={
+                                    "file_id": file_id,
+                                    "file_name": file.filename,
+                                    "bucket_name": self.bucket_name,
+                                    "object_name": object_name
+                                }
+                            )
+                    except Exception as download_error:
+                        logger.error(f"Failed to download/encode image: {download_error}")
+                        # Fallback: try with URL anyway
+                        ai_result = await intelligence_service._store_image_via_mcp(
+                            user_id=request.user_id,
+                            image_path=clean_download_url,
+                            metadata={
+                                "file_id": file_id,
+                                "file_name": file.filename,
+                                "bucket_name": self.bucket_name,
+                                "object_name": object_name
+                            }
+                        )
+
+                    if ai_result.get('success'):
+                        ai_metadata = ai_result.get('metadata', {})
+                        chunk_id = ai_result.get('operation_id')  # Qdrant 中的 chunk ID
+                        logger.info(f"✅ AI extraction completed for {file_id}, chunk_id={chunk_id}")
+                        logger.info(f"AI metadata: categories={ai_metadata.get('ai_categories')}, tags={ai_metadata.get('ai_tags', [])[:3]}")
+
+                        # 🔗 保存 chunk_id → file_id 关联到数据库
+                        try:
+                            from .intelligence_repository import IntelligenceRepository
+                            from .intelligence_models import IndexedDocument, DocumentStatus, ChunkingStrategy
+
+                            intel_repo = IntelligenceRepository(config=None)
+                            doc_data = IndexedDocument(
+                                doc_id=f"doc_{file_id}",
+                                file_id=file_id,
+                                user_id=request.user_id,
+                                organization_id=request.organization_id,
+                                title=file.filename,
+                                content_preview=f"AI-extracted: {ai_metadata.get('ai_tags', [])[:5]}",
+                                status=DocumentStatus.INDEXED,
+                                chunking_strategy=ChunkingStrategy.SEMANTIC,
+                                chunk_count=1,
+                                metadata={
+                                    "chunk_id": chunk_id,  # 🔗 关键：存储 Qdrant chunk ID
+                                    "ai_metadata": ai_metadata,
+                                    "bucket_name": self.bucket_name,
+                                    "object_name": object_name
+                                },
+                                tags=ai_metadata.get('ai_tags', [])[:10]
+                            )
+                            await intel_repo.create_index_record(doc_data)
+                            logger.info(f"✅ Saved chunk_id mapping: {chunk_id} → {file_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to save chunk_id mapping: {e}")
+                    else:
+                        logger.warning(f"AI extraction returned success=False for {file_id}")
+
+                except Exception as e:
+                    logger.error(f"AI extraction failed for {file_id}: {e}")
+                    # 不阻塞上传流程，继续执行
+
+            # Publish enhanced event
+            logger.info(f"Checking event_bus: {self.event_bus is not None}")
             if self.event_bus:
                 try:
+                    logger.info(f"Event bus exists, preparing to publish event")
+                    # 基础事件数据
+                    event_data = {
+                        "file_id": file_id,
+                        "file_name": file.filename,
+                        "file_size": file_size,
+                        "content_type": content_type,
+                        "user_id": request.user_id,
+                        "organization_id": request.organization_id,
+                        "access_level": request.access_level,
+                        "download_url": download_url,
+                        "bucket_name": self.bucket_name,
+                        "object_name": object_name,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+
+                    # 如果有 AI 元数据，发布增强事件
+                    logger.info(f"Event decision: ai_metadata={ai_metadata is not None}, chunk_id={chunk_id}")
+                    if ai_metadata and chunk_id:
+                        event_data.update({
+                            "has_ai_data": True,
+                            "chunk_id": chunk_id,  # 🔗 关联：Qdrant chunk_id
+                            "ai_metadata": ai_metadata
+                        })
+                        event_type = EventType.FILE_UPLOADED_WITH_AI
+                        logger.info(f"Publishing FILE_UPLOADED_WITH_AI event for {file_id}")
+                    else:
+                        event_data["has_ai_data"] = False
+                        event_type = EventType.FILE_UPLOADED
+                        logger.info(f"Publishing FILE_UPLOADED event for {file_id} (ai_metadata={bool(ai_metadata)}, chunk_id={bool(chunk_id)})")
+
                     event = Event(
-                        event_type=EventType.FILE_UPLOADED,
+                        event_type=event_type,
                         source=ServiceSource.STORAGE_SERVICE,
-                        data={
-                            "file_id": file_id,
-                            "file_name": file.filename,
-                            "file_size": file_size,
-                            "content_type": content_type,
-                            "user_id": request.user_id,
-                            "organization_id": request.organization_id,
-                            "access_level": request.access_level,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                        data=event_data
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published file.uploaded event for file {file_id}")
+                    logger.info(f"About to publish event: {event_type}, event.type={event.type}")
+                    result = await self.event_bus.publish_event(event)
+                    logger.info(f"Publish result: {result}")
+                    if result:
+                        logger.info(f"✅ Published {event_type} event for file {file_id}")
+                    else:
+                        logger.error(f"❌ Failed to publish event (returned False)")
                 except Exception as e:
-                    logger.error(f"Failed to publish file.uploaded event: {e}")
+                    logger.error(f"❌ Failed to publish event: {e}", exc_info=True)
 
             return FileUploadResponse(
                 file_id=file_id,
@@ -541,9 +678,16 @@ class StorageService:
         created_share = await self.repository.create_file_share(share)
         logger.info(f"Created share result: {created_share}")
         
-        # 生成分享URL
-        base_url = self._get_service_url('wallet_service', 8209) if hasattr(self, '_get_service_url') else 'http://localhost:8209'
-        share_url = f"{base_url}/api/shares/{created_share.share_id}?token={access_token}"
+        # 生成分享URL - 使用服务发现获取 storage_service 的地址
+        storage_host, storage_port = self.config_manager.discover_service(
+            service_name='storage_service',
+            default_host='localhost',
+            default_port=8209,
+            env_host_key='STORAGE_SERVICE_HOST',
+            env_port_key='STORAGE_SERVICE_PORT'
+        )
+        base_url = f"http://{storage_host}:{storage_port}"
+        share_url = f"{base_url}/api/v1/storage/shares/{created_share.share_id}?token={access_token}"
 
         # Publish file.shared event
         if self.event_bus:
@@ -674,16 +818,20 @@ class StorageService:
         
         # 获取统计信息
         stats = await self.repository.get_storage_stats(user_id, organization_id)
-        
+
+        # 处理 None 值
+        used_bytes = quota.used_bytes if quota.used_bytes is not None else 0
+        total_quota_bytes = quota.total_quota_bytes if quota.total_quota_bytes is not None else self.default_quota_bytes
+
         # 计算使用百分比
-        usage_percentage = (quota.used_bytes / quota.total_quota_bytes * 100) if quota.total_quota_bytes > 0 else 0
-        
+        usage_percentage = (used_bytes / total_quota_bytes * 100) if total_quota_bytes > 0 else 0
+
         return StorageStatsResponse(
             user_id=user_id,
             organization_id=organization_id,
-            total_quota_bytes=quota.total_quota_bytes,
-            used_bytes=quota.used_bytes,
-            available_bytes=quota.total_quota_bytes - quota.used_bytes,
+            total_quota_bytes=total_quota_bytes,
+            used_bytes=used_bytes,
+            available_bytes=total_quota_bytes - used_bytes,
             usage_percentage=usage_percentage,
             file_count=stats.get("file_count", 0),
             by_type=stats.get("by_type", {}),

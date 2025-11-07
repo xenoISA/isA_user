@@ -16,6 +16,7 @@ import uuid
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     BillingRecord, BillingEvent, UsageAggregation, BillingQuota,
     BillingStatus, BillingMethod, EventType, ServiceType, Currency
@@ -27,10 +28,25 @@ logger = logging.getLogger(__name__)
 class BillingRepository:
     """计费服务数据仓库 - PostgreSQL"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("billing_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variable → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
+            host=host,
+            port=port,
             user_id="billing_service"
         )
         self.schema = "billing"
@@ -132,7 +148,7 @@ class BillingRepository:
         failure_reason: Optional[str] = None,
         wallet_transaction_id: Optional[str] = None,
         payment_transaction_id: Optional[str] = None
-    ) -> bool:
+    ) -> Optional[BillingRecord]:
         """更新计费记录状态"""
         try:
             query = f'''
@@ -143,6 +159,7 @@ class BillingRepository:
                     payment_transaction_id = COALESCE($4, payment_transaction_id),
                     updated_at = $5
                 WHERE billing_id = $6
+                RETURNING *
             '''
 
             params = [
@@ -155,9 +172,11 @@ class BillingRepository:
             ]
 
             with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+                results = self.db.query(query, params, schema=self.schema)
 
-            return count is not None and count > 0
+            if results and len(results) > 0:
+                return self._row_to_billing_record(results[0])
+            return None
 
         except Exception as e:
             logger.error(f"Error updating billing record status: {e}")
@@ -169,6 +188,7 @@ class BillingRepository:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         status: Optional[BillingStatus] = None,
+        service_type: Optional[ServiceType] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[BillingRecord]:
@@ -192,6 +212,11 @@ class BillingRepository:
                 param_count += 1
                 conditions.append(f"billing_status = ${param_count}")
                 params.append(status.value)
+
+            if service_type:
+                param_count += 1
+                conditions.append(f"service_type = ${param_count}")
+                params.append(service_type.value)
 
             where_clause = " AND ".join(conditions)
 
@@ -233,13 +258,13 @@ class BillingRepository:
             params = [
                 event_id,
                 billing_event.event_type.value,
-                billing_event.billing_id,
+                billing_event.billing_record_id,  # Maps to billing_id column
                 billing_event.user_id,
                 billing_event.organization_id,
                 json.dumps(billing_event.event_data) if billing_event.event_data else "{}",
                 billing_event.service_type.value if billing_event.service_type else None,
                 float(billing_event.amount) if billing_event.amount else None,
-                billing_event.event_timestamp,
+                billing_event.event_timestamp or datetime.now(timezone.utc),
                 datetime.now(timezone.utc)
             ]
 
@@ -355,7 +380,9 @@ class BillingRepository:
         self,
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
-        service_type: Optional[ServiceType] = None
+        subscription_id: Optional[str] = None,
+        service_type: Optional[ServiceType] = None,
+        product_id: Optional[str] = None
     ) -> Optional[BillingQuota]:
         """获取计费配额"""
         try:
@@ -373,10 +400,20 @@ class BillingRepository:
                 conditions.append(f"organization_id = ${param_count}")
                 params.append(organization_id)
 
+            if subscription_id:
+                param_count += 1
+                conditions.append(f"subscription_id = ${param_count}")
+                params.append(subscription_id)
+
             if service_type:
                 param_count += 1
                 conditions.append(f"service_type = ${param_count}")
                 params.append(service_type.value)
+
+            if product_id:
+                param_count += 1
+                conditions.append(f"product_id = ${param_count}")
+                params.append(product_id)
 
             # Add current period filter
             now = datetime.now(timezone.utc)
@@ -474,21 +511,29 @@ class BillingRepository:
             if results and len(results) > 0:
                 row = results[0]
                 return {
-                    "total_records": row.get("total_records", 0),
-                    "completed_count": row.get("completed_count", 0),
-                    "failed_count": row.get("failed_count", 0),
-                    "pending_count": row.get("pending_count", 0),
-                    "total_amount": float(row.get("total_amount", 0)),
-                    "completed_amount": float(row.get("completed_amount", 0))
+                    "total_billing_records": row.get("total_records", 0),
+                    "completed_billing_records": row.get("completed_count", 0),
+                    "failed_billing_records": row.get("failed_count", 0),
+                    "pending_billing_records": row.get("pending_count", 0),
+                    "total_revenue": float(row.get("completed_amount", 0)),
+                    "revenue_by_service": {},
+                    "revenue_by_method": {},
+                    "active_users": 0,
+                    "period_start": start_date if start_date else datetime.now() - timedelta(days=30),
+                    "period_end": end_date if end_date else datetime.now()
                 }
 
             return {
-                "total_records": 0,
-                "completed_count": 0,
-                "failed_count": 0,
-                "pending_count": 0,
-                "total_amount": 0.0,
-                "completed_amount": 0.0
+                "total_billing_records": 0,
+                "completed_billing_records": 0,
+                "failed_billing_records": 0,
+                "pending_billing_records": 0,
+                "total_revenue": 0.0,
+                "revenue_by_service": {},
+                "revenue_by_method": {},
+                "active_users": 0,
+                "period_start": start_date if start_date else datetime.now() - timedelta(days=30),
+                "period_end": end_date if end_date else datetime.now()
             }
 
         except Exception as e:
@@ -539,12 +584,14 @@ class BillingRepository:
             id=row.get("id"),
             event_id=row.get("event_id"),
             event_type=EventType(row.get("event_type")),
-            billing_id=row.get("billing_id"),
+            event_source="billing_service",  # Default source
+            billing_record_id=row.get("billing_id"),  # billing_id maps to billing_record_id in model
             user_id=row.get("user_id"),
             organization_id=row.get("organization_id"),
-            event_data=row.get("event_data", {}),
             service_type=ServiceType(row.get("service_type")) if row.get("service_type") else None,
+            event_data=row.get("event_data", {}),
             amount=Decimal(str(row.get("amount"))) if row.get("amount") is not None else None,
+            currency=None,  # Not stored in billing schema
             event_timestamp=row.get("event_timestamp"),
             created_at=row.get("created_at")
         )

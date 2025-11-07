@@ -34,13 +34,13 @@ except ImportError:
 class DeviceService:
     """设备管理服务 - 带数据库持久化"""
 
-    def __init__(self, event_bus=None):
+    def __init__(self, event_bus=None, config=None):
         self.secret_key = "device_service_secret_key_2024"  # 实际应从环境变量读取
         self.token_expiry = 86400  # 24小时
         self.event_bus = event_bus
 
-        # Initialize repository
-        self.device_repo = DeviceRepository()
+        # Initialize repository with config for service discovery
+        self.device_repo = DeviceRepository(config=config)
 
         # Initialize MQTT command client
         self.mqtt_command_client = None
@@ -59,6 +59,7 @@ class DeviceService:
             device_dict = {
                 "device_id": device_id,
                 "user_id": user_id,
+                "organization_id": device_data.get("organization_id"),
                 "device_name": device_data["device_name"],
                 "device_type": device_data["device_type"],
                 "manufacturer": device_data["manufacturer"],

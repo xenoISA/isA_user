@@ -11,6 +11,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +19,24 @@ logger = logging.getLogger(__name__)
 class FamilySharingRepository:
     """家庭共享数据访问层"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """初始化 repository"""
-        self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
-            user_id='organization_service'
+        # 使用 config_manager 进行服务发现
+        if config is None:
+            config = ConfigManager("organization_service")
+
+        # 发现 PostgreSQL 服务
+        # 优先级：环境变量 → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id='organization_service')
         self.schema = "organization"
         self.sharing_table = "family_sharing_resources"
         self.permissions_table = "family_sharing_member_permissions"

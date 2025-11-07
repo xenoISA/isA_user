@@ -13,6 +13,7 @@ import logging
 import re
 import asyncio
 
+from core.config_manager import ConfigManager
 from .notification_repository import NotificationRepository
 from .models import (
     Notification, NotificationTemplate, InAppNotification,
@@ -32,8 +33,15 @@ logger = logging.getLogger(__name__)
 class NotificationService:
     """通知服务业务逻辑层"""
 
-    def __init__(self, event_bus=None):
-        self.repository = NotificationRepository()
+    def __init__(self, event_bus=None, config_manager: Optional[ConfigManager] = None):
+        """
+        Initialize notification service.
+
+        Args:
+            event_bus: Event bus for publishing events
+            config_manager: ConfigManager instance for service discovery
+        """
+        self.repository = NotificationRepository(config=config_manager)
         self.event_bus = event_bus
 
         # Resend API配置

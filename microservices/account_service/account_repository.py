@@ -13,6 +13,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 from .models import User, SubscriptionStatus
 
@@ -34,12 +35,23 @@ class AccountRepository:
     Database operations for account management using PostgresClient with gRPC.
     """
 
-    def __init__(self):
-        self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
-            user_id='account_service'
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # 使用 config_manager 进行服务发现
+        if config is None:
+            config = ConfigManager("account_service")
+
+        # 发现 PostgreSQL 服务
+        # 优先级：环境变量 → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id='account_service')
         self.schema = "account"
         self.users_table = "users"
 

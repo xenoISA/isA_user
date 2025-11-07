@@ -1,4 +1,4 @@
--- Auth Service Test Data Seed Script
+y-- Auth Service Test Data Seed Script
 -- Creates sample data for testing auth_service functionality
 -- Run: docker exec staging-postgres psql -U postgres -d isa_platform -f /path/to/seed_test_data.sql
 

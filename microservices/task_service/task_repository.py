@@ -13,6 +13,7 @@ from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct, ListValue
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     TaskStatus, TaskType, TaskPriority,
     TaskResponse, TaskExecutionResponse, TaskTemplateResponse, TaskAnalyticsResponse
@@ -38,10 +39,31 @@ def _convert_protobuf_to_native(value: Any) -> Any:
 class TaskRepository:
     """任务数据访问层"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
+        """
+        Initialize task repository with service discovery.
+
+        Args:
+            config: ConfigManager instance for service discovery
+        """
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("task_service")
+
+        # Discover PostgreSQL service
+        # Priority: Environment variables → Consul → localhost fallback
+        postgres_host, postgres_port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_GRPC_HOST',
+            env_port_key='POSTGRES_GRPC_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
         self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
+            host=postgres_host,
+            port=postgres_port,
             user_id="task_service"
         )
         self.schema = "task"
@@ -527,9 +549,24 @@ class TaskRepository:
 
             if subscription_level:
                 # Filter templates based on subscription level hierarchy
-                param_count += 1
-                conditions.append(f"required_subscription_level = ${param_count}")
-                params.append(subscription_level)
+                # Users can access templates at or below their subscription level
+                subscription_hierarchy = {
+                    'free': ['free'],
+                    'basic': ['free', 'basic'],
+                    'pro': ['free', 'basic', 'pro'],
+                    'enterprise': ['free', 'basic', 'pro', 'enterprise']
+                }
+                allowed_levels = subscription_hierarchy.get(subscription_level, ['free'])
+
+                # Build IN clause for allowed levels
+                level_placeholders = []
+                for level in allowed_levels:
+                    param_count += 1
+                    level_placeholders.append(f"${param_count}")
+                    params.append(level)
+
+                if level_placeholders:
+                    conditions.append(f"required_subscription_level IN ({', '.join(level_placeholders)})")
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
             query = f'''

@@ -46,6 +46,35 @@ echo "Factual Memory Service Tests"
 echo "======================================================================"
 echo ""
 
+# Cleanup: Delete existing test data for test_user_123
+echo -e "${YELLOW}Cleaning up existing test data for test_user_123...${NC}"
+CLEANUP_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}?user_id=test_user_123&memory_type=factual&limit=100")
+CLEANUP_HTTP_CODE=$(echo "$CLEANUP_RESPONSE" | tail -n1)
+CLEANUP_BODY=$(echo "$CLEANUP_RESPONSE" | sed '$d')
+
+if [ "$CLEANUP_HTTP_CODE" = "200" ]; then
+    # Extract memory IDs and delete them
+    if command -v jq &> /dev/null; then
+        MEMORY_IDS=$(echo "$CLEANUP_BODY" | jq -r '.memories[].id')
+    else
+        MEMORY_IDS=$(echo "$CLEANUP_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print('\n'.join([m['id'] for m in data.get('memories', [])]))" 2>/dev/null)
+    fi
+
+    DELETED_COUNT=0
+    for MID in $MEMORY_IDS; do
+        if [ -n "$MID" ] && [ "$MID" != "null" ]; then
+            DELETE_RESULT=$(curl -s -X DELETE "${API_BASE}/factual/${MID}?user_id=test_user_123" -w "%{http_code}")
+            if [[ "$DELETE_RESULT" == *"200" ]]; then
+                ((DELETED_COUNT++))
+            fi
+        fi
+    done
+    echo -e "${GREEN}Deleted $DELETED_COUNT existing test memories${NC}"
+else
+    echo -e "${YELLOW}Could not retrieve existing memories (HTTP $CLEANUP_HTTP_CODE)${NC}"
+fi
+echo ""
+
 # Function to print test result
 print_result() {
     if [ $1 -eq 0 ]; then

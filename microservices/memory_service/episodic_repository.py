@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from .base_repository import BaseMemoryRepository
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,9 @@ logger = logging.getLogger(__name__)
 class EpisodicMemoryRepository(BaseMemoryRepository):
     """Repository for episodic memory operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize episodic memory repository"""
-        super().__init__(schema="memory", table_name="episodic_memories")
+        super().__init__(schema="memory", table_name="episodic_memories", config=config)
 
     async def search_by_timeframe(
         self,

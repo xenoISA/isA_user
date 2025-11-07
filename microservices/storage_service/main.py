@@ -23,10 +23,11 @@ from contextlib import asynccontextmanager
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus, Event, EventType, ServiceSource
+from isa_common.consul_client import ConsulRegistry
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 from .models import (
     FileUploadRequest, FileUploadResponse,
@@ -67,6 +68,7 @@ logger = app_logger  # for backward compatibility
 storage_service = None
 intelligence_service = None
 event_bus = None
+consul_registry = None
 
 
 # ==================== Event Handlers ====================
@@ -99,11 +101,13 @@ async def handle_file_indexing_request(event: Event):
 
         # Download file content from MinIO
         try:
-            response = storage_service.minio_client.get_object(
+            file_bytes = storage_service.minio_client.get_object(
                 bucket_name,
                 object_name
             )
-            file_bytes = response.read()
+            # isa_common MinIOClient returns bytes directly, not a response object
+            if file_bytes is None:
+                raise Exception("File not found in MinIO")
             file_content = file_bytes.decode('utf-8', errors='ignore')
         except Exception as e:
             logger.error(f"Failed to download file {file_id} from MinIO: {e}")
@@ -175,9 +179,37 @@ async def handle_file_indexing_request(event: Event):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global storage_service, intelligence_service, event_bus
+    global storage_service, intelligence_service, event_bus, consul_registry
 
     logger.info("Starting Storage Service with Intelligence capabilities...")
+
+    # Consul 服务注册
+    if service_config.consul_enabled:
+        try:
+            # 获取路由元数据
+            route_meta = get_routes_for_consul()
+
+            # 合并服务元数据
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=service_config.service_port,
+                consul_host=service_config.consul_host,
+                consul_port=service_config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            consul_registry.register()
+            logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+        except Exception as e:
+            logger.warning(f"Failed to register with Consul: {e}")
+            consul_registry = None
 
     # Initialize event bus
     try:
@@ -188,8 +220,8 @@ async def lifespan(app: FastAPI):
         event_bus = None
 
     # 初始化服务 (使用 ConfigManager 的 service_config)
-    storage_service = StorageService(service_config, event_bus=event_bus)
-    intelligence_service = IntelligenceService()
+    storage_service = StorageService(service_config, event_bus=event_bus, config_manager=config_manager)
+    intelligence_service = IntelligenceService(config=config_manager)
 
     # Subscribe to file indexing events
     if event_bus:
@@ -210,40 +242,40 @@ async def lifespan(app: FastAPI):
     
     # Register with Consul
     if service_config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=service_config.service_name,
-            service_port=service_config.service_port,
-            consul_host=service_config.consul_host,
-            consul_port=service_config.consul_port,
-            service_host=service_config.service_host,
-            tags=["microservice", "storage", "api"]
-        )
+        # 优先从环境变量读取端口，如果环境变量不存在则使用配置中的端口
+        # 这样可以支持通过 uvicorn --port 命令行参数启动的情况
+        # 注意：如果通过 uvicorn --port 启动，需要设置环境变量 STORAGE_SERVICE_PORT 或 PORT
+        actual_port = int(os.getenv("STORAGE_SERVICE_PORT", 
+                                     os.getenv("PORT", 
+                                              str(service_config.service_port))))
         
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{service_config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
+        # 记录端口信息用于调试
+        logger.info(f"Service port: config_port={service_config.service_port}, "
+                   f"env_port={os.getenv('STORAGE_SERVICE_PORT', os.getenv('PORT', 'not set'))}, "
+                   f"actual_port={actual_port}")
+
+        # Service discovery via Consul agent sidecar
+        logger.info("Service discovery via Consul agent sidecar")
     
     logger.info("Storage Service started successfully on port 8209")
     
     yield
-    
+
     # 清理
     logger.info("Shutting down Storage Service...")
+
+    # Consul 注销
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("Service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"Failed to deregister from Consul: {e}")
 
     # Close event bus
     if event_bus:
         await event_bus.close()
         logger.info("Event bus closed")
-
-    # Deregister from Consul
-    if service_config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-
-
 # 创建FastAPI应用
 app = FastAPI(
     title="Smart Storage Service",
@@ -251,6 +283,29 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+
+# Add exception handler for debugging
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler to log full stack traces"""
+    import traceback
+    error_trace = traceback.format_exc()
+    logger.error("="*80)
+    logger.error(f"EXCEPTION CAUGHT: {type(exc).__name__}: {exc}")
+    logger.error(f"Request URL: {request.url}")
+    logger.error(f"Request method: {request.method}")
+    logger.error("Full Traceback:")
+    logger.error(error_trace)
+    logger.error("="*80)
+
+    # Also print to stderr for immediate visibility
+    print(f"\n\n{'='*80}\nEXCEPTION: {exc}\n{error_trace}\n{'='*80}\n\n", file=sys.stderr)
+
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)}
+    )
 
 
 # ==================== 健康检查 ====================
@@ -297,12 +352,12 @@ async def service_info():
             "download": "/api/v1/files/{file_id}/download",
             "list": "/api/v1/files",
             "share": "/api/v1/files/{file_id}/share",
-            "quota": "/api/v1/storage/quota",
-            "stats": "/api/v1/storage/stats",
+            "quota": "/api/v1/files/quota",
+            "stats": "/api/v1/files/stats",
             # NEW: Intelligent endpoints
             "semantic_search": "/api/v1/files/search",
             "rag_query": "/api/v1/files/ask",
-            "intelligence_stats": "/api/v1/intelligence/stats"
+            "intelligence_stats": "/api/v1/storage/intelligence/stats"
         }
     }
 
@@ -352,30 +407,36 @@ async def upload_file(
     result = await storage_service.upload_file(file, request)
 
     # Publish event for async indexing if enabled
+    # Note: Images are processed synchronously during upload (see storage_service.py:318-380)
+    # Only publish indexing event for non-image files (text, documents, etc.)
     if event_bus and request.enable_indexing:
         try:
-            # Get file record to retrieve MinIO details
-            file_record = await storage_service.repository.get_file_by_id(result.file_id, user_id)
-            if file_record:
-                # Publish FILE_INDEXING_REQUESTED event
-                indexing_event = Event(
-                    event_type=EventType.FILE_INDEXING_REQUESTED,
-                    source=ServiceSource.STORAGE_SERVICE,
-                    data={
-                        "file_id": result.file_id,
-                        "user_id": user_id,
-                        "organization_id": organization_id,
-                        "file_name": file.filename,
-                        "file_type": file.content_type,
-                        "file_size": result.file_size,
-                        "metadata": parsed_metadata,
-                        "tags": parsed_tags,
-                        "bucket_name": file_record.bucket_name,
-                        "object_name": file_record.object_name
-                    }
-                )
-                await event_bus.publish_event(indexing_event)
-                logger.info(f"Published indexing request event for file {result.file_id}")
+            # Skip async indexing for images - they're already processed synchronously
+            if not file.content_type.startswith('image/'):
+                # Get file record to retrieve MinIO details
+                file_record = await storage_service.repository.get_file_by_id(result.file_id, user_id)
+                if file_record:
+                    # Publish FILE_INDEXING_REQUESTED event for non-image files
+                    indexing_event = Event(
+                        event_type=EventType.FILE_INDEXING_REQUESTED,
+                        source=ServiceSource.STORAGE_SERVICE,
+                        data={
+                            "file_id": result.file_id,
+                            "user_id": user_id,
+                            "organization_id": organization_id,
+                            "file_name": file.filename,
+                            "file_type": file.content_type,
+                            "file_size": result.file_size,
+                            "metadata": parsed_metadata,
+                            "tags": parsed_tags,
+                            "bucket_name": file_record.bucket_name,
+                            "object_name": file_record.object_name
+                        }
+                    )
+                    await event_bus.publish_event(indexing_event)
+                    logger.info(f"Published indexing request event for file {result.file_id}")
+            else:
+                logger.info(f"Skipping async indexing event for image file {result.file_id} (already processed synchronously)")
         except Exception as e:
             # Don't fail upload if event publishing fails
             logger.error(f"Failed to publish indexing event for file {result.file_id}: {e}")
@@ -417,6 +478,76 @@ async def list_files(
     )
     
     return await storage_service.list_files(request)
+
+
+# ==================== 存储统计 & 配额 (must be before {file_id}) ====================
+
+@app.get("/api/v1/storage/files/stats", response_model=StorageStatsResponse)
+async def get_storage_stats(
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None
+):
+    """
+    获取存储统计信息
+
+    - **user_id**: 用户ID（可选）
+    - **organization_id**: 组织ID（可选）
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+
+    if not user_id and not organization_id:
+        raise HTTPException(status_code=400, detail="Either user_id or organization_id required")
+
+    return await storage_service.get_storage_stats(user_id, organization_id)
+
+
+@app.get("/api/v1/storage/files/quota")
+async def get_storage_quota(
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None
+):
+    """
+    获取存储配额信息
+
+    - **user_id**: 用户ID（可选）
+    - **organization_id**: 组织ID（可选）
+    """
+    if not storage_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+
+    if not user_id and not organization_id:
+        raise HTTPException(status_code=400, detail="Either user_id or organization_id required")
+
+    # Determine quota type and entity_id based on what was provided
+    if user_id:
+        quota = await storage_service.repository.get_storage_quota("user", user_id)
+    else:
+        quota = await storage_service.repository.get_storage_quota("organization", organization_id)
+
+    if not quota:
+        # 返回默认配额
+        return {
+            "total_quota_bytes": storage_service.default_quota_bytes,
+            "used_bytes": 0,
+            "available_bytes": storage_service.default_quota_bytes,
+            "file_count": 0,
+            "max_file_size": storage_service.max_file_size,
+            "is_active": True
+        }
+
+    return {
+        "total_quota_bytes": quota.total_quota_bytes,
+        "used_bytes": quota.used_bytes,
+        "available_bytes": quota.total_quota_bytes - quota.used_bytes,
+        "file_count": quota.file_count,
+        "max_file_size": quota.max_file_size,
+        "max_file_count": quota.max_file_count,
+        "allowed_extensions": quota.allowed_extensions,
+        "blocked_extensions": quota.blocked_extensions,
+        "is_active": quota.is_active,
+        "updated_at": quota.updated_at
+    }
 
 
 # ==================== 文件信息 ====================
@@ -561,77 +692,9 @@ async def get_shared_file(
     return await storage_service.get_shared_file(share_id, token, password)
 
 
-# ==================== 存储统计 ====================
-
-@app.get("/api/v1/storage/stats", response_model=StorageStatsResponse)
-async def get_storage_stats(
-    user_id: Optional[str] = None,
-    organization_id: Optional[str] = None
-):
-    """
-    获取存储统计信息
-    
-    - **user_id**: 用户ID（可选）
-    - **organization_id**: 组织ID（可选）
-    """
-    if not storage_service:
-        raise HTTPException(status_code=503, detail="Service not initialized")
-    
-    if not user_id and not organization_id:
-        raise HTTPException(status_code=400, detail="Either user_id or organization_id required")
-    
-    return await storage_service.get_storage_stats(user_id, organization_id)
-
-
-# ==================== 存储配额 ====================
-
-@app.get("/api/v1/storage/quota")
-async def get_storage_quota(
-    user_id: Optional[str] = None,
-    organization_id: Optional[str] = None
-):
-    """
-    获取存储配额信息
-    
-    - **user_id**: 用户ID（可选）
-    - **organization_id**: 组织ID（可选）
-    """
-    if not storage_service:
-        raise HTTPException(status_code=503, detail="Service not initialized")
-    
-    if not user_id and not organization_id:
-        raise HTTPException(status_code=400, detail="Either user_id or organization_id required")
-    
-    quota = await storage_service.repository.get_storage_quota(user_id, organization_id)
-    
-    if not quota:
-        # 返回默认配额
-        return {
-            "total_quota_bytes": storage_service.default_quota_bytes,
-            "used_bytes": 0,
-            "available_bytes": storage_service.default_quota_bytes,
-            "file_count": 0,
-            "max_file_size": storage_service.max_file_size,
-            "is_active": True
-        }
-    
-    return {
-        "total_quota_bytes": quota.total_quota_bytes,
-        "used_bytes": quota.used_bytes,
-        "available_bytes": quota.total_quota_bytes - quota.used_bytes,
-        "file_count": quota.file_count,
-        "max_file_size": quota.max_file_size,
-        "max_file_count": quota.max_file_count,
-        "allowed_extensions": quota.allowed_extensions,
-        "blocked_extensions": quota.blocked_extensions,
-        "is_active": quota.is_active,
-        "updated_at": quota.updated_at
-    }
-
-
 # ==================== 测试端点 ====================
 
-@app.post("/api/v1/test/upload")
+@app.post("/api/v1/storage/test/upload")
 async def test_upload(user_id: str = "test_user"):
     """测试文件上传（创建测试文件）"""
     if not storage_service:
@@ -666,7 +729,7 @@ async def test_upload(user_id: str = "test_user"):
     }
 
 
-@app.get("/api/v1/test/minio-status")
+@app.get("/api/v1/storage/test/minio-status")
 async def check_minio_status():
     """检查MinIO连接状态"""
     if not storage_service:
@@ -831,7 +894,7 @@ async def rag_query_files(
     return await intelligence_service.rag_query(request, storage_service.repository)
 
 
-@app.get("/api/v1/intelligence/stats", response_model=IntelligenceStats)
+@app.get("/api/v1/storage/intelligence/stats", response_model=IntelligenceStats)
 async def get_intelligence_stats(
     user_id: str
 ):
@@ -879,7 +942,7 @@ async def general_exception_handler(request, exc):
 
 # ==================== 智能索引与搜索 ====================
 
-@app.post("/api/v1/intelligence/search", response_model=SemanticSearchResponse)
+@app.post("/api/v1/storage/intelligence/search", response_model=SemanticSearchResponse)
 async def semantic_search(
     request: SemanticSearchRequest
 ):
@@ -903,7 +966,7 @@ async def semantic_search(
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
-@app.post("/api/v1/intelligence/rag", response_model=RAGQueryResponse)
+@app.post("/api/v1/storage/intelligence/rag", response_model=RAGQueryResponse)
 async def rag_query(
     request: RAGQueryRequest
 ):
@@ -933,7 +996,7 @@ async def rag_query(
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 
-@app.get("/api/v1/intelligence/stats")
+@app.get("/api/v1/storage/intelligence/stats")
 async def get_intelligence_stats(
     user_id: str = Query(..., description="用户ID")
 ):
@@ -959,7 +1022,7 @@ async def get_intelligence_stats(
 
 # ==================== 图片智能处理 ====================
 
-@app.post("/api/v1/intelligence/image/store", response_model=StoreImageResponse)
+@app.post("/api/v1/storage/intelligence/image/store", response_model=StoreImageResponse)
 async def store_image(
     request: StoreImageRequest
 ):
@@ -1000,7 +1063,7 @@ async def store_image(
         raise HTTPException(status_code=500, detail=f"Store image failed: {str(e)}")
 
 
-@app.post("/api/v1/intelligence/image/search", response_model=ImageSearchResponse)
+@app.post("/api/v1/storage/intelligence/image/search", response_model=ImageSearchResponse)
 async def search_images(
     request: ImageSearchRequest
 ):
@@ -1048,7 +1111,7 @@ async def search_images(
         raise HTTPException(status_code=500, detail=f"Image search failed: {str(e)}")
 
 
-@app.post("/api/v1/intelligence/image/rag", response_model=ImageRAGResponse)
+@app.post("/api/v1/storage/intelligence/image/rag", response_model=ImageRAGResponse)
 async def image_rag_query(
     request: ImageRAGRequest
 ):

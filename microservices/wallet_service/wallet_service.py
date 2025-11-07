@@ -19,7 +19,6 @@ from .models import (
 )
 from .wallet_repository import WalletRepository
 from microservices.account_service.client import AccountServiceClient
-from core.consul_registry import ConsulRegistry
 from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
@@ -28,8 +27,8 @@ logger = logging.getLogger(__name__)
 class WalletService:
     """Main wallet service for managing digital assets"""
 
-    def __init__(self, event_bus=None):
-        self.repository = WalletRepository()
+    def __init__(self, event_bus=None, config=None):
+        self.repository = WalletRepository(config=config)
         self.account_client = AccountServiceClient()
         self.event_bus = event_bus
 

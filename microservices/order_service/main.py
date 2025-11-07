@@ -24,10 +24,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 # Import local components
 from .order_service import OrderService, OrderServiceError, OrderValidationError, OrderNotFoundError
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus, Event, EventType, ServiceSource
+from isa_common.consul_client import ConsulRegistry
 from .models import (
     OrderCreateRequest, OrderUpdateRequest, OrderCancelRequest,
     OrderCompleteRequest, OrderResponse, OrderListResponse,
@@ -35,6 +35,7 @@ from .models import (
     OrderSearchParams, Order, OrderStatus, OrderType, PaymentStatus,
     OrderServiceStatus
 )
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize configuration
 config_manager = ConfigManager("order_service")
@@ -171,11 +172,14 @@ class OrderMicroservice:
 
 # Global microservice instance
 order_microservice = OrderMicroservice()
+consul_registry: Optional[ConsulRegistry] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
+    global consul_registry
+
     # Initialize event bus
     event_bus = None
     try:
@@ -210,30 +214,44 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️  Failed to subscribe to events: {e}")
 
-    # Register with Consul
+    # Consul 服务注册
     if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "order", "api"]
-        )
+        try:
+            # 获取路由元数据
+            route_meta = get_routes_for_consul()
 
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
+            # 合并服务元数据
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            consul_registry.register()
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            consul_registry = None
 
     yield
 
     # Cleanup
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
+    # Consul 注销
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("✅ Service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"❌ Failed to deregister from Consul: {e}")
 
     await order_microservice.shutdown()
 
@@ -303,6 +321,53 @@ async def create_order(
         return await order_service.create_order(request)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.get("/api/v1/orders/search")
+async def search_orders(
+    query: str = Query(..., description="Search query"),
+    limit: int = Query(50, ge=1, le=100, description="Maximum results"),
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    include_cancelled: bool = Query(False, description="Include cancelled orders"),
+    order_service: OrderService = Depends(get_order_service)
+):
+    """Search orders"""
+    try:
+        search_params = OrderSearchParams(
+            query=query,
+            user_id=user_id,
+            limit=limit,
+            include_cancelled=include_cancelled
+        )
+        orders = await order_service.search_orders(search_params)
+        return {
+            "orders": orders,
+            "count": len(orders),
+            "query": query
+        }
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.get("/api/v1/orders/statistics")
+async def get_order_statistics(
+    order_service: OrderService = Depends(get_order_service)
+):
+    """Get order service statistics"""
+    try:
+        logger.info("Getting order statistics...")
+        result = await order_service.get_order_statistics()
+        logger.info(f"Statistics result: {result}")
+        # Convert to dict for JSON response
+        return result.dict() if hasattr(result, 'dict') else result
+    except OrderServiceError as e:
+        logger.error(f"OrderServiceError in get_order_statistics: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Service error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in get_order_statistics: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error: {str(e)}")
 
 
 @app.get("/api/v1/orders/{order_id}")
@@ -410,32 +475,6 @@ async def get_user_orders(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/orders/search")
-async def search_orders(
-    query: str = Query(..., description="Search query"),
-    limit: int = Query(50, ge=1, le=100, description="Maximum results"),
-    user_id: Optional[str] = Query(None, description="Filter by user ID"),
-    include_cancelled: bool = Query(False, description="Include cancelled orders"),
-    order_service: OrderService = Depends(get_order_service)
-):
-    """Search orders"""
-    try:
-        search_params = OrderSearchParams(
-            query=query,
-            user_id=user_id,
-            limit=limit,
-            include_cancelled=include_cancelled
-        )
-        orders = await order_service.search_orders(search_params)
-        return {
-            "orders": orders,
-            "count": len(orders),
-            "query": query
-        }
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-
 # Integration endpoints
 
 @app.get("/api/v1/payments/{payment_intent_id}/orders")
@@ -471,29 +510,6 @@ async def get_orders_by_subscription(
         }
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-# Statistics endpoints
-
-@app.get("/api/v1/orders/statistics")
-async def get_order_statistics(
-    order_service: OrderService = Depends(get_order_service)
-):
-    """Get order service statistics"""
-    try:
-        logger.info("Getting order statistics...")
-        result = await order_service.get_order_statistics()
-        logger.info(f"Statistics result: {result}")
-        # Convert to dict for JSON response
-        return result.dict() if hasattr(result, 'dict') else result
-    except OrderServiceError as e:
-        logger.error(f"OrderServiceError in get_order_statistics: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Service error: {str(e)}")
-    except Exception as e:
-        logger.error(f"Unexpected error in get_order_statistics: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error: {str(e)}")
 
 
 # Service info endpoints

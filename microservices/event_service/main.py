@@ -34,10 +34,11 @@ from .models import (
 )
 from .event_service import EventService
 from .event_repository import EventRepository
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from core.config_manager import ConfigManager
-from core.consul_registry import ConsulRegistry
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 
 # ==================== 配置 ====================
@@ -58,6 +59,7 @@ event_repository: Optional[EventRepository] = None
 nats_client: Optional[NATS] = None
 js: Optional[JetStreamContext] = None
 event_bus = None  # Centralized NATS event bus
+consul_registry: Optional[ConsulRegistry] = None
 
 
 # ==================== 生命周期管理 ====================
@@ -65,7 +67,7 @@ event_bus = None  # Centralized NATS event bus
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global event_service, event_repository, nats_client, js, event_bus
+    global event_service, event_repository, nats_client, js, event_bus, consul_registry
 
     try:
         # Initialize centralized NATS event bus first
@@ -78,7 +80,7 @@ async def lifespan(app: FastAPI):
 
         # 初始化事件服务（EventService 会自己初始化 repository）
         print(f"[event-service] Initializing event service...")
-        event_service = EventService(event_bus=event_bus)
+        event_service = EventService(event_bus=event_bus, config_manager=config_manager)
         event_repository = event_service.repository
         await event_repository.initialize()
         
@@ -131,22 +133,33 @@ async def lifespan(app: FastAPI):
         batch_size = int(config.get("batch_size", 100))
         asyncio.create_task(process_pending_events(batch_size))
 
-        # 注册到Consul
-        consul_registry = ConsulRegistry(
-            service_name="event_service",
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "event", "api"]
-        )
+        # Consul 服务注册
+        if config.consul_enabled:
+            try:
+                # 获取路由元数据
+                route_meta = get_routes_for_consul()
 
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info("Event service registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
+                # 合并服务元数据
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
+                )
+                consul_registry.register()
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                consul_registry = None
 
         print(f"[event-service] Service started successfully on port {config.service_port}")
 
@@ -164,10 +177,13 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error closing event bus: {e}")
 
-        # 注销Consul
-        if hasattr(app.state, 'consul_registry'):
-            app.state.consul_registry.stop_maintenance()
-            app.state.consul_registry.deregister()
+        # Consul 注销
+        if consul_registry:
+            try:
+                consul_registry.deregister()
+                logger.info("✅ Service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
 
         if nats_client:
             await nats_client.close()
@@ -223,7 +239,7 @@ async def health_check():
     }
 
 
-@app.post("/api/events/create", response_model=EventResponse)
+@app.post("/api/v1/events/create", response_model=EventResponse)
 async def create_event(
     request: EventCreateRequest = Body(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
@@ -255,7 +271,7 @@ async def create_event(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/events/batch", response_model=List[EventResponse])
+@app.post("/api/v1/events/batch", response_model=List[EventResponse])
 async def create_batch_events(
     requests: List[EventCreateRequest] = Body(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
@@ -292,7 +308,7 @@ async def create_batch_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/events/statistics", response_model=EventStatistics)
+@app.get("/api/v1/events/statistics", response_model=EventStatistics)
 async def get_statistics(
     user_id: Optional[str] = Query(None),
     service: EventService = Depends(get_event_service)
@@ -307,7 +323,7 @@ async def get_statistics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/events/subscriptions", response_model=EventSubscription)
+@app.post("/api/v1/events/subscriptions", response_model=EventSubscription)
 async def create_subscription(
     subscription: EventSubscription = Body(...),
     service: EventService = Depends(get_event_service)
@@ -320,7 +336,7 @@ async def create_subscription(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/events/subscriptions", response_model=List[EventSubscription])
+@app.get("/api/v1/events/subscriptions", response_model=List[EventSubscription])
 async def list_subscriptions(
     service: EventService = Depends(get_event_service)
 ):
@@ -332,7 +348,7 @@ async def list_subscriptions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/events/subscriptions/{subscription_id}")
+@app.delete("/api/v1/events/subscriptions/{subscription_id}")
 async def delete_subscription(
     subscription_id: str,
     service: EventService = Depends(get_event_service)
@@ -345,7 +361,7 @@ async def delete_subscription(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/events/{event_id}", response_model=EventResponse)
+@app.get("/api/v1/events/{event_id}", response_model=EventResponse)
 async def get_event(
     event_id: str,
     service: EventService = Depends(get_event_service)
@@ -373,7 +389,7 @@ async def get_event(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/events/query", response_model=EventListResponse)
+@app.post("/api/v1/events/query", response_model=EventListResponse)
 async def query_events(
     query: EventQueryRequest = Body(...),
     service: EventService = Depends(get_event_service)
@@ -387,7 +403,7 @@ async def query_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/events/stream/{{stream_id}}")
+@app.get("/api/v1/events/stream/{{stream_id}}")
 async def get_event_stream(
     stream_id: str,
     from_version: Optional[int] = Query(None),
@@ -405,7 +421,7 @@ async def get_event_stream(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/events/replay")
+@app.post("/api/v1/events/replay")
 async def replay_events(
     request: EventReplayRequest = Body(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
@@ -428,7 +444,7 @@ async def replay_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/events/projections/{{entity_type}}/{{entity_id}}")
+@app.get("/api/v1/events/projections/{{entity_type}}/{{entity_id}}")
 async def get_projection(
     entity_type: str,
     entity_id: str,
@@ -489,7 +505,7 @@ async def rudderstack_webhook(
 
 # ==================== 处理器管理端点 ====================
 
-@app.post("/api/events/processors", response_model=EventProcessor)
+@app.post("/api/v1/events/processors", response_model=EventProcessor)
 async def register_processor(
     processor: EventProcessor = Body(...),
     service: EventService = Depends(get_event_service)
@@ -502,7 +518,7 @@ async def register_processor(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/events/processors", response_model=List[EventProcessor])
+@app.get("/api/v1/events/processors", response_model=List[EventProcessor])
 async def list_processors(
     service: EventService = Depends(get_event_service)
 ):
@@ -514,7 +530,7 @@ async def list_processors(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/events/processors/{{processor_id}}/toggle")
+@app.put("/api/v1/events/processors/{{processor_id}}/toggle")
 async def toggle_processor(
     processor_id: str,
     enabled: bool = Query(...),
@@ -641,7 +657,7 @@ class FrontendEventBatch(BaseModel):
     events: List[FrontendEvent]
     client_info: Optional[Dict[str, Any]] = {}
 
-@app.post("/api/frontend/events", response_model=Dict[str, Any])
+@app.post("/api/v1/frontend/events", response_model=Dict[str, Any])
 async def collect_frontend_event(
     event: FrontendEvent,
     request: Request
@@ -700,7 +716,7 @@ async def collect_frontend_event(
         logger.error(f"Error collecting frontend event: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/frontend/events/batch", response_model=Dict[str, Any])
+@app.post("/api/v1/frontend/events/batch", response_model=Dict[str, Any])
 async def collect_frontend_events_batch(
     batch: FrontendEventBatch,
     request: Request
@@ -763,7 +779,7 @@ async def collect_frontend_events_batch(
         logger.error(f"Error collecting frontend event batch: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/frontend/health")
+@app.get("/api/v1/frontend/health")
 async def frontend_health():
     """前端事件采集健康检查"""
     return {

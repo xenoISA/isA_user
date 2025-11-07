@@ -1,7 +1,8 @@
 """
-Consul Service Registry Module
+Consul Service Discovery Module
 
-Provides service registration and health check functionality for microservices
+Provides service discovery functionality for microservices.
+Service registration is handled by Consul agent sidecar (not programmatically).
 """
 
 import consul
@@ -16,208 +17,81 @@ logger = logging.getLogger(__name__)
 
 
 class ConsulRegistry:
-    """Handles service registration with Consul"""
-    
+    """
+    Consul Service Discovery Client
+
+    NOTE: Service registration is handled by Consul agent sidecar.
+    This class ONLY provides service discovery functionality.
+    """
+
     def __init__(
         self,
-        service_name: str,
-        service_port: int,
+        service_name: str = None,
+        service_port: int = None,
         consul_host: str = "localhost",
         consul_port: int = 8500,
         service_host: Optional[str] = None,
         tags: Optional[List[str]] = None,
-        health_check_type: str = "ttl"  # ttl or http
+        health_check_type: str = "ttl"  # kept for backward compatibility
     ):
         """
-        Initialize Consul registry
-        
+        Initialize Consul service discovery client
+
         Args:
-            service_name: Name of the service to register
-            service_port: Port the service is running on
+            service_name: (Optional) Name of the calling service (for logging)
+            service_port: (Optional) Port of the calling service (for logging)
             consul_host: Consul server host
             consul_port: Consul server port
-            service_host: Service host (defaults to hostname)
-            tags: Service tags for discovery
-            health_check_type: Type of health check (ttl or http)
+
+        Note: service_host, tags, health_check_type kept for backward compatibility but not used
         """
         self.consul = consul.Consul(host=consul_host, port=consul_port)
         self.service_name = service_name
         self.service_port = service_port
-        # Handle 0.0.0.0 which is invalid for Consul service registration
-        # Use HOSTNAME env var (container name in Docker) instead of socket.gethostname()
-        # socket.gethostname() returns short container ID which is NOT DNS resolvable
+        logger.info(f"Consul service discovery initialized: {consul_host}:{consul_port}")
+
+        # Keep these for backward compatibility (not used for sidecar registration)
         import os
         if service_host and service_host != "0.0.0.0":
             self.service_host = service_host
         else:
             self.service_host = os.getenv('HOSTNAME', socket.gethostname())
-        self.service_id = f"{service_name}-{self.service_host}-{service_port}"
+        self.service_id = f"{service_name}-{self.service_host}-{service_port}" if service_name and service_port else "discovery-client"
         self.tags = tags or []
-        self.check_interval = "15s"
-        self.deregister_after = "90s"  # 增加到90秒，给服务更多时间
-        self._health_check_task = None
-        self.health_check_type = health_check_type
-        self.ttl_interval = 30  # 标准30秒TTL间隔
+
+    # ========================================
+    # Registration Methods (No-op - handled by Consul agent sidecar)
+    # ========================================
 
     def cleanup_stale_registrations(self) -> int:
-        """
-        Clean up stale registrations for this service before registering.
-        Removes any existing registrations with different hostnames (e.g., old container IDs).
-
-        Returns:
-            Number of stale registrations removed
-        """
-        try:
-            removed_count = 0
-            services = self.consul.agent.services()
-
-            # Find all registrations for this service name on the same port
-            for service_id, service_info in services.items():
-                if (service_info['Service'] == self.service_name and
-                    service_info['Port'] == self.service_port and
-                    service_id != self.service_id):  # Different service_id = stale
-
-                    logger.info(f"🧹 Removing stale registration: {service_id} (address: {service_info['Address']})")
-                    self.consul.agent.service.deregister(service_id)
-                    removed_count += 1
-
-            if removed_count > 0:
-                logger.info(f"✨ Cleaned up {removed_count} stale registration(s) for {self.service_name}")
-
-            return removed_count
-
-        except Exception as e:
-            logger.warning(f"⚠️  Failed to cleanup stale registrations: {e}")
-            return 0
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping cleanup")
+        return 0
 
     def register(self, cleanup_stale: bool = True) -> bool:
-        """
-        Register service with Consul
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping programmatic registration")
+        return True
 
-        Args:
-            cleanup_stale: If True, remove stale registrations before registering (default: True)
-        """
-        try:
-            # Clean up stale registrations first
-            if cleanup_stale:
-                self.cleanup_stale_registrations()
-
-            # Choose health check type
-            if self.health_check_type == "ttl":
-                check = consul.Check.ttl(f"{self.ttl_interval}s")
-            else:
-                check = consul.Check.http(
-                    f"http://{self.service_host}:{self.service_port}/health",
-                    interval=self.check_interval,
-                    timeout="5s",
-                    deregister=self.deregister_after
-                )
-
-            # Register service with selected health check
-            self.consul.agent.service.register(
-                name=self.service_name,
-                service_id=self.service_id,
-                address=self.service_host,
-                port=self.service_port,
-                tags=self.tags,
-                check=check
-            )
-
-            # If TTL, immediately pass the health check
-            if self.health_check_type == "ttl":
-                self.consul.agent.check.ttl_pass(f"service:{self.service_id}")
-
-            logger.info(
-                f"✅ Service registered with Consul: {self.service_name} "
-                f"({self.service_id}) at {self.service_host}:{self.service_port} "
-                f"with {self.health_check_type} health check, tags: {self.tags}"
-            )
-            self._log_service_metrics("register", True)
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ Failed to register service with Consul: {e}")
-            self._log_service_metrics("register", False)
-            return False
-    
     def deregister(self) -> bool:
-        """Deregister service from Consul"""
-        try:
-            self.consul.agent.service.deregister(self.service_id)
-            logger.info(f"✅ Service deregistered from Consul: {self.service_id}")
-            self._log_service_metrics("deregister", True)
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to deregister service from Consul: {e}")
-            self._log_service_metrics("deregister", False)
-            return False
-    
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping deregistration")
+        return True
+
     async def maintain_registration(self):
-        """Maintain service registration (re-register if needed)"""
-        retry_count = 0
-        max_retries = 3
-        
-        while True:
-            try:
-                # Check if service is still registered
-                services = self.consul.agent.services()
-                if self.service_id not in services:
-                    logger.warning(f"Service {self.service_id} not found in Consul, re-registering...")
-                    if self.register():
-                        retry_count = 0  # 重置重试计数
-                        logger.info(f"Successfully re-registered {self.service_id}")
-                    else:
-                        retry_count += 1
-                        logger.error(f"Failed to re-register {self.service_id}, retry {retry_count}/{max_retries}")
-                
-                # If using TTL checks, update the health status
-                if self.health_check_type == "ttl":
-                    try:
-                        self.consul.agent.check.ttl_pass(
-                            f"service:{self.service_id}",
-                            f"Service is healthy - {self.service_name}@{self.service_host}:{self.service_port}"
-                        )
-                        logger.debug(f"TTL health check passed for {self.service_id}")
-                        retry_count = 0  # TTL成功则重置重试计数
-                    except Exception as e:
-                        retry_count += 1
-                        logger.warning(f"Failed to update TTL health check: {e}, retry {retry_count}/{max_retries}")
-                        
-                        # 如果TTL连续失败，尝试重新注册
-                        if retry_count >= max_retries:
-                            logger.error(f"TTL failed {max_retries} times, attempting re-registration")
-                            self.register()
-                            retry_count = 0
-                
-                # 动态调整睡眠时间，错误时更频繁检查
-                if retry_count > 0:
-                    sleep_time = 5  # 有错误时5秒检查一次
-                else:
-                    sleep_time = self.ttl_interval / 2 if self.health_check_type == "ttl" else 30
-                    
-                await asyncio.sleep(sleep_time)
-                
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                retry_count += 1
-                logger.error(f"Error maintaining registration: {e}, retry {retry_count}/{max_retries}")
-                # 指数退避
-                sleep_time = min(10 * (2 ** (retry_count - 1)), 60)
-                await asyncio.sleep(sleep_time)
-    
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping maintenance")
+        pass
+
     def start_maintenance(self):
-        """Start the background maintenance task"""
-        if not self._health_check_task:
-            loop = asyncio.get_event_loop()
-            self._health_check_task = loop.create_task(self.maintain_registration())
-    
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping maintenance start")
+        pass
+
     def stop_maintenance(self):
-        """Stop the background maintenance task"""
-        if self._health_check_task:
-            self._health_check_task.cancel()
-            self._health_check_task = None
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping maintenance stop")
+        pass
     
     # Configuration Management Methods
     def get_config(self, key: str, default: Any = None) -> Any:

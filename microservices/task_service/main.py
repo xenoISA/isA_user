@@ -15,11 +15,11 @@ import requests
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.consul_registry import ConsulRegistry
+from isa_common.consul_client import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.service_discovery import get_service_discovery
 from core.nats_client import get_event_bus
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     TaskCreateRequest, TaskUpdateRequest, TaskExecutionRequest,
     TaskResponse, TaskExecutionResponse, TaskTemplateResponse,
@@ -43,12 +43,13 @@ class TaskMicroservice:
     def __init__(self):
         self.service = None
         self.repository = None
-    
-    async def initialize(self, event_bus=None):
-        self.repository = TaskRepository()
-        self.service = TaskService(event_bus=event_bus)
+        self.consul_registry = None
+
+    async def initialize(self, event_bus=None, config_manager=None):
+        self.repository = TaskRepository(config=config_manager)
+        self.service = TaskService(event_bus=event_bus, config_manager=config_manager)
         logger.info("Task service initialized")
-    
+
     async def shutdown(self):
         logger.info("Task service shutting down")
 
@@ -68,13 +69,13 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
 
-    # Startup
-    await microservice.initialize(event_bus=event_bus)
+    # Startup - pass config_manager for service discovery
+    await microservice.initialize(event_bus=event_bus, config_manager=config_manager)
 
     # Set up event subscriptions
     if event_bus:
         try:
-            task_repo = TaskRepository()
+            task_repo = TaskRepository(config=config_manager)
             event_handler = TaskEventHandler(task_repo)
 
             # Subscribe to user.deleted events
@@ -86,30 +87,46 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 
-    # Consul注册
-    consul_registry = ConsulRegistry(
-        service_name="task_service",
-        service_port=config.service_port,
-        consul_host=config.consul_host,
-        consul_port=config.consul_port,
-        service_host=config.service_host,
-        tags=["microservice", "task", "scheduler", "api", "v1"]
-    )
-    
-    if consul_registry.register():
-        consul_registry.start_maintenance()
-        app.state.consul_registry = consul_registry
-        logger.info("Successfully registered with Consul")
-    else:
-        logger.warning("Failed to register with Consul")
+    # Register with Consul
+    if config.consul_enabled:
+        try:
+            # Get route metadata for Consul
+            route_meta = get_routes_for_consul()
+
+            # Merge service metadata
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities'][:5]),  # Limit capabilities
+                **route_meta
+            }
+
+            microservice.consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            microservice.consul_registry.register()
+            logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+        except Exception as e:
+            logger.warning(f"Failed to register with Consul: {e}")
+            microservice.consul_registry = None
+
+    logger.info("Service discovery via Consul agent sidecar")
     
     yield
-    
+
     # Shutdown
-    if hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
+    # Deregister from Consul
+    if microservice.consul_registry:
+        try:
+            microservice.consul_registry.deregister()
+            logger.info("Service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"Failed to deregister from Consul: {e}")
 
     # Close event bus
     if event_bus:
@@ -178,17 +195,20 @@ async def get_user_context(
 ) -> Dict[str, Any]:
     """获取用户上下文信息"""
     logger.debug(f"Auth headers: authorization={authorization}, x_api_key={x_api_key}")
-    
+
     if not authorization and not x_api_key:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
-    # Use Consul service discovery for auth service
-    if not hasattr(app.state, 'consul_registry') or not app.state.consul_registry:
-        raise HTTPException(status_code=503, detail="Service discovery not available")
-    
-    auth_service_url = app.state.consul_registry.get_service_endpoint("auth_service")
-    if not auth_service_url:
-        raise HTTPException(status_code=503, detail="Auth service not available")
+
+    # Use config_manager service discovery for auth service
+    # Priority: Environment variables → Consul → localhost fallback
+    auth_host, auth_port = config_manager.discover_service(
+        service_name='auth_service',
+        default_host='localhost',
+        default_port=8201,
+        env_host_key='AUTH_SERVICE_HOST',
+        env_port_key='AUTH_SERVICE_PORT'
+    )
+    auth_service_url = f"http://{auth_host}:{auth_port}"
     
     try:
         if authorization:
@@ -423,19 +443,26 @@ async def create_task_from_template(
 ):
     """从模板创建任务"""
     try:
+        subscription_level = user_context.get("subscription_level", "free")
+        logger.info(f"Creating task from template {template_id} for user with subscription: {subscription_level}")
+
         # 获取模板
         templates = await microservice.repository.get_task_templates(
-            user_context["subscription_level"]
+            subscription_level
         )
-        
+
+        logger.info(f"Found {len(templates)} templates for subscription level {subscription_level}")
+        logger.debug(f"Template IDs: {[t.template_id for t in templates]}")
+
         template = None
         for t in templates:
             if t.template_id == template_id:
                 template = t
                 break
-        
+
         if not template:
-            raise HTTPException(status_code=404, detail="Template not found")
+            logger.warning(f"Template {template_id} not found among {len(templates)} available templates")
+            raise HTTPException(status_code=404, detail=f"Template {template_id} not found for subscription level {subscription_level}")
         
         # 创建任务
         task_data = {
@@ -488,6 +515,9 @@ async def get_task_analytics(
         if analytics:
             return analytics
         raise HTTPException(status_code=404, detail="No analytics data available")
+    except HTTPException:
+        # Re-raise HTTP exceptions without wrapping them
+        raise
     except Exception as e:
         logger.error(f"Error getting task analytics: {e}")
         raise HTTPException(status_code=500, detail=str(e))

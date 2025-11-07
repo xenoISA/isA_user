@@ -47,8 +47,8 @@ class VaultNotFoundError(VaultServiceError):
 class VaultService:
     """Vault service for secure credential management"""
 
-    def __init__(self, blockchain_client: Optional[BlockchainClient] = None, event_bus=None):
-        self.repository = VaultRepository()
+    def __init__(self, blockchain_client: Optional[BlockchainClient] = None, event_bus=None, config=None):
+        self.repository = VaultRepository(config=config)
         self.encryption = VaultEncryption()
         self.event_bus = event_bus
 

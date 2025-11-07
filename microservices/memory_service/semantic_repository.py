@@ -7,6 +7,7 @@ import logging
 from typing import List, Optional, Dict, Any
 
 from .base_repository import BaseMemoryRepository
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,9 @@ logger = logging.getLogger(__name__)
 class SemanticMemoryRepository(BaseMemoryRepository):
     """Repository for semantic memory operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize semantic memory repository"""
-        super().__init__(schema="memory", table_name="semantic_memories")
+        super().__init__(schema="memory", table_name="semantic_memories", config=config)
 
     async def search_by_category(
         self,
@@ -47,7 +48,10 @@ class SemanticMemoryRepository(BaseMemoryRepository):
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
 
-            return results or []
+            # Deserialize each row to clean protobuf objects
+            if results:
+                return [self._deserialize_row(row) for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error searching concepts by category: {e}")
@@ -82,7 +86,10 @@ class SemanticMemoryRepository(BaseMemoryRepository):
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
 
-            return results or []
+            # Deserialize each row to clean protobuf objects
+            if results:
+                return [self._deserialize_row(row) for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error searching concepts by concept type: {e}")
@@ -117,7 +124,10 @@ class SemanticMemoryRepository(BaseMemoryRepository):
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
 
-            return results or []
+            # Deserialize each row to clean protobuf objects
+            if results:
+                return [self._deserialize_row(row) for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error searching concepts by abstraction level: {e}")
@@ -152,7 +162,10 @@ class SemanticMemoryRepository(BaseMemoryRepository):
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
 
-            return results or []
+            # Deserialize each row to clean protobuf objects
+            if results:
+                return [self._deserialize_row(row) for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error searching concepts by definition: {e}")

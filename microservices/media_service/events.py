@@ -26,16 +26,24 @@ class MediaEventHandler:
         """
         self.media_service = media_service
 
-    async def handle_event(self, msg):
+    async def handle_event(self, event):
         """
         Generic event handler dispatcher
 
         Args:
-            msg: NATS message
+            event: Event object (already parsed from NATS message)
         """
         try:
-            data = json.loads(msg.data.decode())
-            event_type = data.get("event_type") or data.get("type")
+            # Event is already parsed by NATSEventBus
+            # Extract data from Event object
+            if hasattr(event, 'to_dict'):
+                event_dict = event.to_dict()
+                data = event_dict.get("data", {})
+                event_type = event_dict.get("type")
+            else:
+                # Fallback: if it's a raw dict
+                data = event.get("data", {}) if isinstance(event, dict) else {}
+                event_type = event.get("type") if isinstance(event, dict) else None
 
             logger.info(f"Received event: {event_type}")
 
@@ -43,6 +51,9 @@ class MediaEventHandler:
                 await self.handle_file_deleted(data)
             elif event_type == "device.deleted" or event_type == "DEVICE_DELETED":
                 await self.handle_device_deleted(data)
+            elif event_type == "file.uploaded.with_ai" or event_type == "FILE_UPLOADED_WITH_AI":
+                # 🆕 优先处理带 AI 元数据的事件
+                await self.handle_file_uploaded_with_ai(data)
             elif event_type == "file.uploaded" or event_type == "FILE_UPLOADED":
                 await self.handle_file_uploaded(data)
             else:
@@ -205,3 +216,91 @@ class MediaEventHandler:
 
         except Exception as e:
             logger.error(f"Error handling file.uploaded event: {e}", exc_info=True)
+
+    async def handle_file_uploaded_with_ai(self, event_data: Dict[str, Any]):
+        """
+        Handle file.uploaded.with_ai event - 处理带 AI 元数据的文件上传事件
+
+        当 Storage Service 完成 AI 提取后，直接保存完整的 AI 元数据到 Media Service。
+        这样避免了 Media Service 重复调用 VLM API。
+
+        Args:
+            event_data: 事件数据包含:
+                - file_id: 文件ID
+                - user_id: 用户ID
+                - chunk_id: Qdrant 向量 ID (用于后续搜索)
+                - ai_metadata: AI 提取的元数据
+                    - ai_categories: 分类
+                    - ai_tags: 标签
+                    - ai_mood: 情绪
+                    - ai_dominant_colors: 主色调
+                    - ai_quality_score: 质量分数
+                - download_url: MinIO 下载链接
+                - bucket_name: MinIO bucket
+                - object_name: MinIO object key
+        """
+        try:
+            file_id = event_data.get("file_id")
+            user_id = event_data.get("user_id")
+            ai_metadata = event_data.get("ai_metadata", {})
+            chunk_id = event_data.get("chunk_id")
+
+            if not file_id or not user_id:
+                logger.warning("file.uploaded.with_ai event missing file_id or user_id")
+                return
+
+            if not ai_metadata:
+                logger.warning(f"file.uploaded.with_ai event for {file_id} has no ai_metadata")
+                return
+
+            logger.info(f"📥 Handling file.uploaded.with_ai event for file_id={file_id}, chunk_id={chunk_id}")
+            logger.info(f"AI metadata received: categories={ai_metadata.get('ai_categories')}, tags={ai_metadata.get('ai_tags', [])[:3]}")
+
+            # 检查是否已存在元数据
+            existing_metadata = await self.media_service.repository.get_photo_metadata(file_id)
+            if existing_metadata:
+                logger.info(f"Metadata already exists for file {file_id}, updating with AI data")
+
+            # 创建/更新完整的 PhotoMetadata（带 AI 数据）
+            from .models import PhotoMetadata
+
+            metadata = PhotoMetadata(
+                file_id=file_id,
+                user_id=user_id,
+                organization_id=event_data.get("organization_id"),
+
+                # AI 提取的数据（来自 Storage Service）
+                ai_labels=ai_metadata.get("ai_tags", []),  # 使用 tags 作为 labels
+                ai_objects=[],  # TODO: 如果 VLM 支持对象检测，可以填充
+                ai_scenes=ai_metadata.get("ai_categories", []),  # 使用 categories 作为 scenes
+                ai_colors=ai_metadata.get("ai_dominant_colors", []),
+                ai_description=f"Mood: {ai_metadata.get('ai_mood', 'unknown')}, Style: {ai_metadata.get('ai_style', 'unknown')}",
+                quality_score=ai_metadata.get("ai_quality_score"),
+
+                # 面部检测（如果需要，可以后续添加）
+                face_detection={
+                    "has_people": ai_metadata.get("ai_has_people", False)
+                },
+
+                # EXIF 数据（保持为空，如果需要可以从 Storage Service 传递）
+                exif_data={},
+
+                # 🔗 关联数据
+                metadata={
+                    "chunk_id": chunk_id,  # Qdrant 向量 ID
+                    "download_url": event_data.get("download_url"),
+                    "bucket_name": event_data.get("bucket_name"),
+                    "object_name": event_data.get("object_name"),
+                    "ai_extraction_source": "storage_service_mcp"
+                }
+            )
+
+            await self.media_service.repository.create_or_update_metadata(metadata)
+            logger.info(f"✅ Saved AI metadata for file {file_id} to Media Service")
+            logger.info(f"   - Categories: {ai_metadata.get('ai_categories')}")
+            logger.info(f"   - Tags: {ai_metadata.get('ai_tags', [])[:5]}")
+            logger.info(f"   - Quality: {ai_metadata.get('ai_quality_score')}")
+            logger.info(f"   - Chunk ID: {chunk_id}")
+
+        except Exception as e:
+            logger.error(f"Error handling file.uploaded.with_ai event: {e}", exc_info=True)

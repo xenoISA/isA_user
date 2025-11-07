@@ -14,6 +14,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     OrganizationPlan, OrganizationStatus, OrganizationRole, MemberStatus,
     OrganizationResponse, OrganizationMemberResponse
@@ -25,12 +26,23 @@ logger = logging.getLogger(__name__)
 class OrganizationRepository:
     """组织数据仓库"""
 
-    def __init__(self):
-        self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
-            user_id='organization_service'
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # 使用 config_manager 进行服务发现
+        if config is None:
+            config = ConfigManager("organization_service")
+
+        # 发现 PostgreSQL 服务
+        # 优先级：环境变量 → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id='organization_service')
         self.schema = "organization"
         self.organizations_table = "organizations"
         self.org_members_table = "organization_members"

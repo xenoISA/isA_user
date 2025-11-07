@@ -27,11 +27,12 @@ from .family_sharing_service import FamilySharingService
 from .family_sharing_repository import FamilySharingRepository
 # Note: AccountServiceClient and AuthServiceClient were removed as they were unused
 # If user validation is needed in the future, implement via auth_dependencies
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.auth_dependencies import require_auth_or_internal_service, is_internal_service_request
+from isa_common.consul_client import ConsulRegistry
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     OrganizationCreateRequest, OrganizationUpdateRequest,
     OrganizationMemberAddRequest, OrganizationMemberUpdateRequest,
@@ -65,10 +66,41 @@ class OrganizationMicroservice:
         self.organization_service = None
         self.family_sharing_service = None
         self.event_bus = None
+        self.consul_registry: Optional[ConsulRegistry] = None
 
     async def initialize(self):
         """初始化微服务"""
         try:
+            logger.info("Initializing organization microservice...")
+
+            # Consul 服务注册
+            if config.consul_enabled:
+                try:
+                    # 获取路由元数据
+                    route_meta = get_routes_for_consul()
+
+                    # 合并服务元数据
+                    consul_meta = {
+                        'version': SERVICE_METADATA['version'],
+                        'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                        **route_meta
+                    }
+
+                    self.consul_registry = ConsulRegistry(
+                        service_name=SERVICE_METADATA['service_name'],
+                        service_port=config.service_port,
+                        consul_host=config.consul_host,
+                        consul_port=config.consul_port,
+                        tags=SERVICE_METADATA['tags'],
+                        meta=consul_meta,
+                        health_check_type='http'
+                    )
+                    self.consul_registry.register()
+                    logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+                except Exception as e:
+                    logger.warning(f"Failed to register with Consul: {e}")
+                    self.consul_registry = None
+
             # Initialize event bus for event-driven communication
             try:
                 self.event_bus = await get_event_bus("organization_service")
@@ -77,8 +109,8 @@ class OrganizationMicroservice:
                 logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
                 self.event_bus = None
 
-            self.organization_service = OrganizationService(event_bus=self.event_bus)
-            sharing_repository = FamilySharingRepository()
+            self.organization_service = OrganizationService(event_bus=self.event_bus, config=config_manager)
+            sharing_repository = FamilySharingRepository(config=config_manager)
             self.family_sharing_service = FamilySharingService(
                 repository=sharing_repository,
                 event_bus=self.event_bus
@@ -91,6 +123,14 @@ class OrganizationMicroservice:
     async def shutdown(self):
         """关闭微服务"""
         try:
+            # Consul 注销
+            if self.consul_registry:
+                try:
+                    self.consul_registry.deregister()
+                    logger.info("Service deregistered from Consul")
+                except Exception as e:
+                    logger.error(f"Failed to deregister from Consul: {e}")
+
             if self.event_bus:
                 await self.event_bus.close()
             logger.info("Organization microservice shutdown completed")
@@ -114,7 +154,7 @@ async def lifespan(app: FastAPI):
             from .events import OrganizationEventHandler
             from .organization_repository import OrganizationRepository
 
-            repository = OrganizationRepository()
+            repository = OrganizationRepository(config=config_manager)
             event_handler = OrganizationEventHandler(repository)
 
             # Subscribe to user.deleted events - clean up organization memberships
@@ -128,22 +168,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"Failed to subscribe to events: {e}")
 
     # Register with Consul
-    if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "organization", "api"]
-        )
-        
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
+    logger.info("Service discovery via Consul agent sidecar")
     
     yield
     

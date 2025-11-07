@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 class AuthorizationService:
     """Core authorization service with business logic"""
 
-    def __init__(self, event_bus=None):
-        self.repository = AuthorizationRepository()
+    def __init__(self, event_bus=None, config=None):
+        self.repository = AuthorizationRepository(config=config)
         self.event_bus = event_bus
 
         # Subscription tier hierarchy for access control

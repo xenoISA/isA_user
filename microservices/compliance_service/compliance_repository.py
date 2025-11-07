@@ -13,6 +13,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     ComplianceCheck, CompliancePolicy, ComplianceStatus,
     RiskLevel, ComplianceCheckType, ContentType
@@ -24,10 +25,25 @@ logger = logging.getLogger(__name__)
 class ComplianceRepository:
     """合规数据访问层 - PostgreSQL"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("compliance_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variables → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
+            host=host,
+            port=port,
             user_id="compliance_service"
         )
         self.schema = "compliance"

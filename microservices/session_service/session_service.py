@@ -21,13 +21,12 @@ from .models import (
     MessageResponse, MessageListResponse, MemoryResponse, SessionSummaryResponse,
     SessionStatsResponse, Session, SessionMessage, SessionMemory
 )
-from .client import get_account_client
+from microservices.account_service.client import AccountServiceClient
 
 # Import Consul registry for service discovery
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.nats_client import Event, EventType, ServiceSource
 
@@ -62,28 +61,19 @@ class MemoryNotFoundError(SessionServiceError):
 class SessionService:
     """
     Session management business logic service
-    
+
     Handles all session-related business operations while delegating
     data access to the Repository layers.
     """
-    
-    def __init__(self, event_bus=None):
-        self.session_repo = SessionRepository()
-        self.message_repo = SessionMessageRepository()
+
+    def __init__(self, event_bus=None, config=None):
+        # Initialize repositories with config for service discovery
+        self.session_repo = SessionRepository(config=config)
+        self.message_repo = SessionMessageRepository(config=config)
         # Note: Memory functionality is handled by dedicated memory_service
-        self.account_client = get_account_client()
+        self.account_client = AccountServiceClient()
         self.event_bus = event_bus
 
-        # Initialize Consul for service discovery
-        config_manager = ConfigManager("session_service")
-        config = config_manager.get_service_config()
-        self.consul_registry = ConsulRegistry(
-            service_name="session_service",
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port
-        )
-    
     # Session Operations
     
     async def create_session(self, request: SessionCreateRequest) -> SessionResponse:
@@ -106,11 +96,14 @@ class SessionService:
 
             # Application-layer validation: Check if user exists via account service API
             # This replaces database foreign key constraint for microservice independence
-            user_exists = self.account_client.check_user_exists(request.user_id)
-            if not user_exists:
-                logger.warning(f"Creating session for potentially non-existent user: {request.user_id}")
-                # Note: We log a warning but don't fail - this allows eventual consistency
-                # The account_client fails open (returns True) if account service is unavailable
+            try:
+                user_profile = await self.account_client.get_account_profile(request.user_id)
+                if not user_profile:
+                    logger.warning(f"Creating session for potentially non-existent user: {request.user_id}")
+                    # Note: We log a warning but don't fail - this allows eventual consistency
+            except Exception as e:
+                logger.warning(f"Account service unavailable, failing open: {e}")
+                # Fail open - allow operation if account service is unavailable
 
             # Use provided session_id or generate new UUID
             session_id = request.session_id if request.session_id else str(uuid.uuid4())
@@ -392,6 +385,7 @@ class SessionService:
                             "user_id": session.user_id,
                             "message_id": message.message_id,
                             "role": request.role,
+                            "content": request.content,  # Add message content for memory service
                             "message_type": request.message_type,
                             "tokens_used": request.tokens_used or 0,
                             "cost_usd": float(request.cost_usd) if request.cost_usd else 0.0,

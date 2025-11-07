@@ -7,6 +7,7 @@ import logging
 from typing import List, Optional, Dict, Any
 
 from .base_repository import BaseMemoryRepository
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,9 @@ logger = logging.getLogger(__name__)
 class FactualMemoryRepository(BaseMemoryRepository):
     """Repository for factual memory operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize factual memory repository"""
-        super().__init__(schema="memory", table_name="factual_memories")
+        super().__init__(schema="memory", table_name="factual_memories", config=config)
 
     async def search_by_subject(
         self,
@@ -197,27 +198,39 @@ class FactualMemoryRepository(BaseMemoryRepository):
         self,
         user_id: str,
         subject: str,
-        predicate: str
+        predicate: str,
+        object_value: str = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Find duplicate fact by subject and predicate
+        Find duplicate fact by subject, predicate, and optionally object_value
 
         Args:
             user_id: User ID
             subject: Fact subject
             predicate: Fact predicate
+            object_value: Optional fact object value for more precise duplicate detection
 
         Returns:
             Existing fact if found, None otherwise
         """
         try:
             # Note: query_row doesn't support LIMIT, use query instead
-            query = f"""
-                SELECT * FROM {self.schema}.{self.table_name}
-                WHERE user_id = $1 AND subject = $2 AND predicate = $3
-                ORDER BY created_at DESC
-            """
-            params = [user_id, subject, predicate]
+            if object_value is not None:
+                # Check for exact match including object_value for precise duplicate detection
+                query = f"""
+                    SELECT * FROM {self.schema}.{self.table_name}
+                    WHERE user_id = $1 AND subject = $2 AND predicate = $3 AND object_value = $4
+                    ORDER BY created_at DESC
+                """
+                params = [user_id, subject, predicate, object_value]
+            else:
+                # Fallback to subject + predicate only (for backward compatibility)
+                query = f"""
+                    SELECT * FROM {self.schema}.{self.table_name}
+                    WHERE user_id = $1 AND subject = $2 AND predicate = $3
+                    ORDER BY created_at DESC
+                """
+                params = [user_id, subject, predicate]
 
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)

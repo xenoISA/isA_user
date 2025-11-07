@@ -31,7 +31,7 @@ class NotificationServiceClient:
                 self.base_url = sd.get_service_url("notification_service")
             except Exception as e:
                 logger.warning(f"Service discovery failed, using default: {e}")
-                self.base_url = "http://localhost:8216"
+                self.base_url = "http://localhost:8206"
 
         self.client = httpx.AsyncClient(timeout=30.0)
 

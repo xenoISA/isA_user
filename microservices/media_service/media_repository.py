@@ -13,6 +13,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     PhotoVersion, PhotoMetadata, Playlist, RotationSchedule, PhotoCache,
     PhotoVersionType, PlaylistType, CacheStatus, ScheduleType
@@ -24,14 +25,25 @@ logger = logging.getLogger(__name__)
 class MediaRepository:
     """Media repository - data access layer for media operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize media repository with PostgresClient"""
-        # TODO: Use Consul service discovery
-        self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
-            user_id='media_service'
+        # 使用 config_manager 进行服务发现
+        if config is None:
+            config = ConfigManager("media_service")
+
+        # 发现 PostgreSQL 服务
+        # 优先级：环境变量 → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_GRPC_HOST',
+            env_port_key='POSTGRES_GRPC_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id='media_service')
+
         # Table names (media schema)
         self.schema = "media"
         self.versions_table = "photo_versions"
@@ -200,8 +212,12 @@ class MediaRepository:
         with self.db:
             count = self.db.insert_into(self.metadata_table, [data], schema=self.schema)
 
-        if count > 0:
+        if count is not None and count > 0:
             return await self.get_photo_metadata(metadata_data.file_id)
+        elif count is None:
+            logger.error(f"PostgreSQL insert returned None for file_id={metadata_data.file_id}")
+            logger.error(f"Data causing error: {data}")
+            raise Exception("Database insert failed - check PostgreSQL logs for type mismatch")
         return None
 
     async def _update_metadata(self, metadata_data: PhotoMetadata) -> Optional[PhotoMetadata]:

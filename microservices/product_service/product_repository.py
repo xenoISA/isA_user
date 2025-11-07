@@ -14,7 +14,8 @@ from decimal import Decimal
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
-from .models import Product, PricingModel, ProductType, Currency
+from core.config_manager import ConfigManager
+from .models import Product, PricingModel, ProductType, Currency, ProductCategory
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +23,38 @@ logger = logging.getLogger(__name__)
 class ProductRepository:
     """产品数据访问仓库 - PostgreSQL"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
+        """
+        Initialize product repository with service discovery.
+
+        Args:
+            config: ConfigManager instance for service discovery
+        """
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("product_service")
+
+        # Discover PostgreSQL service
+        # Priority: Environment variables → Consul → localhost fallback
+        postgres_host, postgres_port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_GRPC_HOST',
+            env_port_key='POSTGRES_GRPC_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
         self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
+            host=postgres_host,
+            port=postgres_port,
             user_id="product_service"
         )
         self.schema = "product"
         self.products_table = "products"
         self.pricing_table = "product_pricing"
+        # In-memory storage for subscriptions (until we have a subscriptions table)
+        self._subscriptions_cache = {}
 
     async def initialize(self):
         """Initialize repository (placeholder for consistency with other services)"""
@@ -205,26 +229,248 @@ class ProductRepository:
     def _row_to_product(self, row: Dict[str, Any]) -> Product:
         """Convert database row to Product model"""
         return Product(
-            id=row.get("id"),
+            id=int(row.get("id")) if row.get("id") else None,
             product_id=row.get("product_id"),
-            product_name=row.get("product_name"),
-            product_code=row.get("product_code"),
+            category_id=row.get("category", ""),  # Map category to category_id
+            name=row.get("product_name", ""),      # Map product_name to name
             description=row.get("description"),
-            category=row.get("category"),
             product_type=ProductType(row.get("product_type")),
-            base_price=Decimal(str(row.get("base_price", 0))),
-            currency=Currency(row.get("currency", "USD")),
-            billing_interval=row.get("billing_interval"),
-            features=row.get("features", []),
-            quota_limits=row.get("quota_limits", {}),
+            provider=row.get("provider"),
+            specifications=row.get("specifications", {}),
             is_active=row.get("is_active", True),
-            is_featured=row.get("is_featured", False),
-            display_order=row.get("display_order", 0),
-            metadata=row.get("metadata", {}),
-            tags=row.get("tags", []),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")
         )
+
+    # ==================== Category Operations ====================
+
+    async def get_categories(self) -> List[ProductCategory]:
+        """获取所有产品类别"""
+        try:
+            query = f'''
+                SELECT DISTINCT category
+                FROM {self.schema}.{self.products_table}
+                WHERE is_active = true
+                ORDER BY category
+            '''
+
+            with self.db:
+                results = self.db.query(query, [], schema=self.schema)
+
+            if results:
+                categories = []
+                for idx, row in enumerate(results):
+                    category_name = row.get("category")
+                    categories.append(ProductCategory(
+                        category_id=category_name,
+                        name=category_name.replace("_", " ").title(),
+                        description=f"{category_name.replace('_', ' ').title()} products and services",
+                        display_order=idx,
+                        is_active=True,
+                        created_at=datetime.now(timezone.utc)
+                    ))
+                return categories
+            return []
+
+        except Exception as e:
+            logger.error(f"Error getting categories: {e}")
+            return []
+
+    # ==================== Pricing Operations ====================
+
+    async def get_product_pricing(
+        self,
+        product_id: str,
+        user_id: Optional[str] = None,
+        subscription_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """获取产品定价信息"""
+        try:
+            # Query product with pricing info from database
+            query = f'''
+                SELECT
+                    product_id,
+                    product_name as name,
+                    product_type,
+                    base_price,
+                    currency,
+                    billing_interval,
+                    features,
+                    quota_limits
+                FROM {self.schema}.{self.products_table}
+                WHERE product_id = $1 AND is_active = true
+            '''
+
+            with self.db:
+                results = self.db.query(query, [product_id], schema=self.schema)
+
+            if not results or len(results) == 0:
+                return None
+
+            row = results[0]
+            base_price = float(row.get("base_price", 0.0))
+
+            # Build pricing information
+            pricing = {
+                "product_id": row.get("product_id"),
+                "product_name": row.get("name"),
+                "base_price": base_price,
+                "currency": row.get("currency", "USD"),
+                "billing_interval": row.get("billing_interval", "per_unit"),
+                "pricing_type": "usage_based",
+                "tiers": [],
+                "features": row.get("features") or [],
+                "quota_limits": row.get("quota_limits") or {}
+            }
+
+            # Add tiered pricing structure
+            pricing["tiers"] = [
+                {
+                    "tier_name": "Base",
+                    "min_units": 0,
+                    "max_units": 1000,
+                    "price_per_unit": base_price,
+                    "currency": pricing["currency"]
+                },
+                {
+                    "tier_name": "Standard",
+                    "min_units": 1001,
+                    "max_units": 10000,
+                    "price_per_unit": round(base_price * 0.9, 4),
+                    "currency": pricing["currency"]
+                },
+                {
+                    "tier_name": "Premium",
+                    "min_units": 10001,
+                    "max_units": None,
+                    "price_per_unit": round(base_price * 0.8, 4),
+                    "currency": pricing["currency"]
+                }
+            ]
+
+            return pricing
+
+        except Exception as e:
+            logger.error(f"Error getting product pricing: {e}")
+            return None
+
+    # ==================== Service Plan Operations ====================
+    
+    async def get_service_plan(self, plan_id: str) -> Optional[Dict[str, Any]]:
+        """获取服务计划"""
+        try:
+            # TODO: Implement actual service plan query when service_plans table exists
+            # For now, return a mock plan with plan_tier
+            # Determine tier from plan_id
+            tier = "pro"
+            if "free" in plan_id.lower():
+                tier = "free"
+            elif "basic" in plan_id.lower():
+                tier = "basic"
+            elif "enterprise" in plan_id.lower():
+                tier = "enterprise"
+
+            return {
+                "plan_id": plan_id,
+                "plan_name": plan_id.replace("-", " ").title(),
+                "plan_tier": tier,
+                "features": [],
+                "price": 0.0
+            }
+        except Exception as e:
+            logger.error(f"Error getting service plan: {e}")
+            return None
+    
+    # ==================== Subscription Operations ====================
+
+    async def create_subscription(self, subscription: Any) -> Any:
+        """创建订阅"""
+        try:
+            # TODO: Implement actual subscription creation when subscriptions table exists
+            # For now, store in memory cache
+            self._subscriptions_cache[subscription.subscription_id] = subscription
+            logger.info(f"Mock: Created subscription {subscription.subscription_id} for user {subscription.user_id}")
+            return subscription
+        except Exception as e:
+            logger.error(f"Error creating subscription: {e}")
+            return None
+
+    async def get_subscription(self, subscription_id: str) -> Optional[Any]:
+        """获取单个订阅"""
+        try:
+            # TODO: Implement actual subscription query when subscriptions table exists
+            # For now, return from memory cache
+            subscription = self._subscriptions_cache.get(subscription_id)
+            if subscription:
+                logger.info(f"Mock: Found subscription {subscription_id}")
+            else:
+                logger.info(f"Mock: Subscription {subscription_id} not found in cache")
+            return subscription
+        except Exception as e:
+            logger.error(f"Error getting subscription: {e}")
+            return None
+
+    async def get_user_subscriptions(
+        self,
+        user_id: str,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """获取用户订阅列表"""
+        try:
+            # TODO: Implement actual subscription query when subscriptions table exists
+            # For now, return empty list
+            return []
+        except Exception as e:
+            logger.error(f"Error getting user subscriptions: {e}")
+            return []
+
+    # ==================== Usage Records Operations ====================
+
+    async def get_usage_records(
+        self,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        subscription_id: Optional[str] = None,
+        product_id: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """获取使用记录"""
+        try:
+            # TODO: Implement actual usage records query when usage_records table exists
+            # For now, return empty list
+            return []
+        except Exception as e:
+            logger.error(f"Error getting usage records: {e}")
+            return []
+
+    # ==================== Statistics Operations ====================
+
+    async def get_usage_statistics(
+        self,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        product_id: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """获取使用统计"""
+        try:
+            # TODO: Implement actual statistics when usage_records table exists
+            return {
+                "total_usage": 0,
+                "usage_by_product": {},
+                "usage_by_date": {},
+                "period": {
+                    "start_date": start_date.isoformat() if start_date else None,
+                    "end_date": end_date.isoformat() if end_date else None
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting usage statistics: {e}")
+            return {}
 
 
 __all__ = ["ProductRepository"]

@@ -34,30 +34,20 @@ echo -e "${CYAN}       STORAGE SERVICE - QUOTA & STATS TEST${NC}"
 echo -e "${CYAN}======================================================================${NC}"
 echo ""
 
-# Auto-discover test user
-echo -e "${CYAN}Fetching test user from database...${NC}"
-TEST_USER=$(docker exec user-staging python3 -c "
-import sys
-sys.path.insert(0, '/app')
-from core.database.supabase_client import get_supabase_client
+# Use test data from seed files
+echo -e "${CYAN}Using test user from seed data...${NC}"
+TEST_USER_ID="user_test_001"
+TEST_ORG_ID="org_test_001"
 
-try:
-    client = get_supabase_client()
-    result = client.table('users').select('user_id').eq('is_active', True).limit(1).execute()
-    if result.data and len(result.data) > 0:
-        print(result.data[0]['user_id'])
-except Exception as e:
-    print('test_user_001', file=sys.stderr)
-" 2>&1)
-
-TEST_USER_ID="$TEST_USER"
 echo -e "${GREEN}✓ Using test user: $TEST_USER_ID${NC}"
+echo -e "${GREEN}✓ Using test org: $TEST_ORG_ID${NC}"
+echo -e "${YELLOW}Note: Using test data from seed_test_data.sql${NC}"
 echo ""
 
 # Test 1: Get User Storage Quota
 echo -e "${YELLOW}Test 1: Get User Storage Quota${NC}"
-echo "GET /api/v1/storage/quota?user_id=${TEST_USER_ID}"
-RESPONSE=$(curl -s "${API_BASE}/storage/quota?user_id=${TEST_USER_ID}")
+echo "GET /api/v1/storage/files/quota?user_id=${TEST_USER_ID}"
+RESPONSE=$(curl -s "${API_BASE}/storage/files/quota?user_id=${TEST_USER_ID}")
 echo "$RESPONSE" | python3 -m json.tool
 
 if echo "$RESPONSE" | grep -q '"total_quota_bytes"'; then
@@ -77,8 +67,8 @@ echo ""
 
 # Test 2: Get User Storage Stats
 echo -e "${YELLOW}Test 2: Get User Storage Statistics${NC}"
-echo "GET /api/v1/storage/stats?user_id=${TEST_USER_ID}"
-RESPONSE=$(curl -s "${API_BASE}/storage/stats?user_id=${TEST_USER_ID}")
+echo "GET /api/v1/storage/files/stats?user_id=${TEST_USER_ID}"
+RESPONSE=$(curl -s "${API_BASE}/storage/files/stats?user_id=${TEST_USER_ID}")
 echo "$RESPONSE" | python3 -m json.tool
 
 if echo "$RESPONSE" | grep -q '"file_count"\|"used_bytes"'; then
@@ -96,7 +86,7 @@ echo ""
 
 # Test 3: Get Stats by File Type
 echo -e "${YELLOW}Test 3: Get Storage Stats with File Type Breakdown${NC}"
-RESPONSE=$(curl -s "${API_BASE}/storage/stats?user_id=${TEST_USER_ID}")
+RESPONSE=$(curl -s "${API_BASE}/storage/files/stats?user_id=${TEST_USER_ID}")
 echo "$RESPONSE" | python3 -m json.tool | head -30
 
 if echo "$RESPONSE" | grep -q '"file_count"\|"by_type"'; then
@@ -111,14 +101,14 @@ echo ""
 echo -e "${YELLOW}Test 4: Upload File and Verify Quota Update${NC}"
 
 # Get current quota
-QUOTA_BEFORE=$(curl -s "${API_BASE}/storage/quota?user_id=${TEST_USER_ID}")
+QUOTA_BEFORE=$(curl -s "${API_BASE}/storage/files/quota?user_id=${TEST_USER_ID}")
 USED_BEFORE=$(echo "$QUOTA_BEFORE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('used_bytes', 0))")
 
 # Upload a test file
 TEST_FILE="/tmp/quota_test_$(date +%s).txt"
 dd if=/dev/zero of="$TEST_FILE" bs=1024 count=100 2>/dev/null  # 100KB file
 
-UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/files/upload" \
+UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/files/upload" \
   -F "file=@${TEST_FILE}" \
   -F "user_id=${TEST_USER_ID}" \
   -F "enable_indexing=false")
@@ -129,7 +119,7 @@ if echo "$UPLOAD_RESPONSE" | grep -q '"file_id"'; then
 
     # Get updated quota
     sleep 1
-    QUOTA_AFTER=$(curl -s "${API_BASE}/storage/quota?user_id=${TEST_USER_ID}")
+    QUOTA_AFTER=$(curl -s "${API_BASE}/storage/files/quota?user_id=${TEST_USER_ID}")
     USED_AFTER=$(echo "$QUOTA_AFTER" | python3 -c "import sys, json; print(json.load(sys.stdin).get('used_bytes', 0))")
 
     echo -e "${GREEN}✓ File uploaded${NC}"
@@ -148,7 +138,7 @@ if echo "$UPLOAD_RESPONSE" | grep -q '"file_id"'; then
     fi
 
     # Clean up
-    curl -s -X DELETE "${API_BASE}/files/${FILE_ID}?user_id=${TEST_USER_ID}&permanent=true" > /dev/null
+    curl -s -X DELETE "${API_BASE}/storage/files/${FILE_ID}?user_id=${TEST_USER_ID}&permanent=true" > /dev/null
 else
     echo -e "${RED}✗ Upload failed${NC}"
     test_result 1
@@ -159,7 +149,7 @@ echo ""
 
 # Test 5: Check Quota Response Format
 echo -e "${YELLOW}Test 5: Verify Quota Response Format${NC}"
-RESPONSE=$(curl -s "${API_BASE}/storage/quota?user_id=${TEST_USER_ID}")
+RESPONSE=$(curl -s "${API_BASE}/storage/files/quota?user_id=${TEST_USER_ID}")
 
 # Check for required fields
 REQUIRED_FIELDS=("total_quota_bytes" "used_bytes" "available_bytes" "file_count")
@@ -198,8 +188,8 @@ except:
 " 2>&1)
 
 if [ -n "$ORG_ID" ] && [ "$ORG_ID" != "" ]; then
-    echo "GET /api/v1/storage/stats?organization_id=${ORG_ID}"
-    RESPONSE=$(curl -s "${API_BASE}/storage/stats?organization_id=${ORG_ID}")
+    echo "GET /api/v1/storage/files/stats?organization_id=${ORG_ID}"
+    RESPONSE=$(curl -s "${API_BASE}/storage/files/stats?organization_id=${ORG_ID}")
     echo "$RESPONSE" | python3 -m json.tool
 
     if echo "$RESPONSE" | grep -q '"file_count"\|"used_bytes"'; then

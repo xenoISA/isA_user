@@ -19,6 +19,7 @@ from .models import (
 )
 from .account_repository import UserNotFoundException, DuplicateEntryException
 from core.nats_client import Event, EventType, ServiceSource
+from core.config_manager import ConfigManager
 # Database connection now handled by repositories directly
 
 logger = logging.getLogger(__name__)
@@ -47,8 +48,8 @@ class AccountService:
     data access to the AccountRepository layer.
     """
 
-    def __init__(self, event_bus=None):
-        self.account_repo = AccountRepository()
+    def __init__(self, event_bus=None, config: Optional[ConfigManager] = None):
+        self.account_repo = AccountRepository(config=config)
         self.event_bus = event_bus
         
     # Account Lifecycle Operations

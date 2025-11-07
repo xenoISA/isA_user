@@ -19,7 +19,6 @@ from .models import (
     UsageStatsRequest, UsageStatsResponse, BillingStats,
     BillingStatus, BillingMethod, EventType, ServiceType, Currency
 )
-from core.consul_registry import ConsulRegistry
 from core.nats_client import Event, EventType as NATSEventType, ServiceSource
 
 logger = logging.getLogger(__name__)
@@ -56,28 +55,12 @@ class BillingService:
             self.wallet_client = None
 
     def _init_consul(self):
-        """Initialize Consul registry for service discovery"""
-        try:
-            from core.config_manager import ConfigManager
-            config_manager = ConfigManager("billing_service")
-            config = config_manager.get_service_config()
-
-            if config.consul_enabled:
-                self.consul = ConsulRegistry(
-                    service_name=config.service_name,
-                    service_port=config.service_port,
-                    consul_host=config.consul_host,
-                    consul_port=config.consul_port
-                )
-                logger.info("Consul service discovery initialized for billing service")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Consul: {e}, will use fallback URLs")
+        """Service discovery via Consul agent sidecar"""
+        logger.info("Service discovery via Consul agent sidecar")
 
     def _get_service_url(self, service_name: str, fallback_port: int) -> str:
-        """Get service URL via Consul discovery with fallback"""
+        """Get service URL from environment or use fallback"""
         fallback_url = f"http://localhost:{fallback_port}"
-        if self.consul:
-            return self.consul.get_service_address(service_name, fallback_url=fallback_url)
         return fallback_url
 
     # ====================
@@ -147,6 +130,7 @@ class BillingService:
                     user_id=request.user_id,
                     organization_id=request.organization_id,
                     subscription_id=request.subscription_id,
+                    service_type=ServiceType(request.service_type) if request.service_type else None,
                     event_data={
                         "requested_amount": float(request.usage_amount),
                         "quota_limit": float(quota_check.quota_limit) if quota_check.quota_limit else None,
@@ -197,6 +181,7 @@ class BillingService:
                     subscription_id=request.subscription_id,
                     billing_record_id=billing_record.billing_id,
                     amount=calculation.total_cost,
+                    service_type=ServiceType(request.service_type) if request.service_type else None,
                     event_data={"billing_method": "subscription_included"}
                 )
 
@@ -398,8 +383,11 @@ class BillingService:
                     await self._create_billing_event(
                         EventType.BILLING_PROCESSED,
                         "billing_service",
+                        user_id=billing_record.user_id,
+                        organization_id=billing_record.organization_id,
                         billing_record_id=billing_record.billing_id,
                         amount=calculation.total_cost,
+                        service_type=billing_record.service_type,
                         event_data={"billing_method": "wallet_deduction", "transaction_id": transaction_id}
                     )
 
@@ -443,7 +431,10 @@ class BillingService:
                     await self._create_billing_event(
                         EventType.BILLING_FAILED,
                         "billing_service",
+                        user_id=billing_record.user_id,
+                        organization_id=billing_record.organization_id,
                         billing_record_id=billing_record.billing_id,
+                        service_type=billing_record.service_type,
                         event_data={"error": error, "billing_method": "wallet_deduction"}
                     )
 
@@ -584,7 +575,7 @@ class BillingService:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self._get_service_url('product_service', 8215)}/api/v1/usage/record",
+                    f"{self._get_service_url('product_service', 8215)}/api/v1/product/usage/record",
                     json={
                         "user_id": request.user_id,
                         "organization_id": request.organization_id,
@@ -628,7 +619,7 @@ class BillingService:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"{self._get_service_url('product_service', 8215)}/api/v1/products/{product_id}/pricing",
+                    f"{self._get_service_url('product_service', 8215)}/api/v1/product/products/{product_id}/pricing",
                     params={
                         "user_id": user_id,
                         "subscription_id": subscription_id
@@ -651,7 +642,7 @@ class BillingService:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"{self._get_service_url('product_service', 8215)}/api/v1/subscriptions/{subscription_id}",
+                    f"{self._get_service_url('product_service', 8215)}/api/v1/product/subscriptions/{subscription_id}",
                     timeout=10.0
                 )
                 
@@ -839,6 +830,7 @@ class BillingService:
         subscription_id: Optional[str] = None,
         billing_record_id: Optional[str] = None,
         amount: Optional[Decimal] = None,
+        service_type: Optional[ServiceType] = None,
         event_data: Optional[Dict[str, Any]] = None
     ) -> BillingEvent:
         """创建计费事件"""
@@ -851,8 +843,9 @@ class BillingService:
             subscription_id=subscription_id,
             billing_record_id=billing_record_id,
             amount=amount,
+            service_type=service_type,
             currency=Currency.CREDIT if amount else None,
             event_data=event_data or {}
         )
-        
+
         return await self.repository.create_billing_event(billing_event)

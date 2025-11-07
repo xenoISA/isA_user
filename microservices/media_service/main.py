@@ -21,10 +21,10 @@ from contextlib import asynccontextmanager
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 from .models import (
     PhotoVersionCreateRequest, PhotoVersionResponse,
@@ -40,6 +40,7 @@ from .media_service import (
     MediaValidationError,
     MediaPermissionError
 )
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize configuration
 config_manager = ConfigManager("media_service")
@@ -52,12 +53,13 @@ logger = app_logger
 # Global service instance
 media_service = None
 event_bus = None  # NATS event bus
+consul_registry: Optional[ConsulRegistry] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    global media_service, event_bus
+    global media_service, event_bus, consul_registry
 
     logger.info("Starting Media Service...")
 
@@ -78,26 +80,24 @@ async def lifespan(app: FastAPI):
             from .events import MediaEventHandler
             event_handler = MediaEventHandler(media_service)
 
-            # Subscribe to file.deleted events - clean up photo versions and metadata
-            await event_bus.subscribe(
-                subject="events.file.deleted",
-                callback=lambda msg: event_handler.handle_event(msg)
+            # Subscribe to all storage/device events using wildcard pattern
+            # This catches: file.uploaded, file.uploaded.with_ai, file.deleted, device.deleted
+            # Note: EventType enum values are lowercase (e.g., "file.uploaded.with_ai")
+            # Events are published to: events.storage_service.file.uploaded.with_ai
+            # subscribe_to_events automatically prepends "events." so we don't include it here
+            await event_bus.subscribe_to_events(
+                pattern="*.file.>",  # Will match events.storage_service.file.* (subscribe_to_events adds "events." prefix)
+                handler=lambda msg: event_handler.handle_event(msg),
+                durable="media-file-consumer-v3"  # Changed to v3 with correct pattern
             )
-            logger.info("✅ Subscribed to file.deleted events")
+            logger.info("✅ Subscribed to file events (*.file.>)")
 
-            # Subscribe to device.deleted events - clean up playlists and schedules
-            await event_bus.subscribe(
-                subject="events.device.deleted",
-                callback=lambda msg: event_handler.handle_event(msg)
+            await event_bus.subscribe_to_events(
+                pattern="*.device.>",  # Will match events.device_service.device.* (subscribe_to_events adds "events." prefix)
+                handler=lambda msg: event_handler.handle_event(msg),
+                durable="media-device-consumer-v3"  # Changed to v3 with correct pattern
             )
-            logger.info("✅ Subscribed to device.deleted events")
-
-            # Subscribe to file.uploaded events - auto-create photo metadata (optional)
-            await event_bus.subscribe(
-                subject="events.file.uploaded",
-                callback=lambda msg: event_handler.handle_event(msg)
-            )
-            logger.info("✅ Subscribed to file.uploaded events")
+            logger.info("✅ Subscribed to device events (*.device.>)")
 
         except Exception as e:
             logger.error(f"Failed to subscribe to events: {e}")
@@ -108,25 +108,33 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to connect to database")
         raise RuntimeError("Database connection failed")
 
-    # Register with Consul
+    # Consul 服务注册
     if service_config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=service_config.service_name,
-            service_port=service_config.service_port,
-            consul_host=service_config.consul_host,
-            consul_port=service_config.consul_port,
-            service_host=service_config.service_host,
-            tags=["microservice", "media", "api"]
-        )
+        try:
+            # 获取路由元数据
+            route_meta = get_routes_for_consul()
 
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{service_config.service_name} registered with Consul")
-        else:
-            logger.warning(f"Failed to register {service_config.service_name} with Consul")
-    else:
-        logger.info("Consul registration disabled")
+            # 合并服务元数据
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=service_config.service_port,
+                consul_host=service_config.consul_host,
+                consul_port=service_config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            consul_registry.register()
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            consul_registry = None
 
     logger.info(f"Media Service started on port {service_config.service_port}")
 
@@ -140,10 +148,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Error closing event bus: {e}")
 
-    if hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
+    # Consul 注销
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("✅ Service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"❌ Failed to deregister from Consul: {e}")
 
     logger.info("Media Service stopped")
 

@@ -29,7 +29,7 @@ if [ -n "$1" ]; then
     ORG_ID="$1"
     echo -e "${CYAN}Using provided organization: $ORG_ID${NC}"
 else
-    ORG_ID="org_test_123"
+    ORG_ID="org_test_001"
     echo -e "${YELLOW}Using default organization: $ORG_ID${NC}"
 fi
 

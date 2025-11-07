@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 
 logger = logging.getLogger(__name__)
@@ -21,20 +22,31 @@ logger = logging.getLogger(__name__)
 class BaseMemoryRepository:
     """Base repository class for memory operations"""
 
-    def __init__(self, schema: str = "memory", table_name: str = "memories"):
+    def __init__(self, schema: str = "memory", table_name: str = "memories", config: Optional[ConfigManager] = None):
         """
         Initialize base memory repository with PostgresClient
 
         Args:
             schema: Database schema name
             table_name: Table name for this memory type
+            config: ConfigManager instance for service discovery
         """
-        # TODO: Use Consul service discovery instead of hardcoded host/port
-        self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
-            user_id='memory_service'
+        # 使用 config_manager 进行服务发现
+        if config is None:
+            config = ConfigManager("memory_service")
+
+        # 发现 PostgreSQL 服务
+        # 优先级：环境变量 → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_GRPC_HOST',
+            env_port_key='POSTGRES_GRPC_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id='memory_service')
         self.schema = schema
         self.table_name = table_name
 

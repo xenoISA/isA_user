@@ -16,6 +16,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     WalletBalance, WalletTransaction, WalletCreate,
     TransactionCreate, TransactionType, WalletType,
@@ -28,11 +29,26 @@ logger = logging.getLogger(__name__)
 class WalletRepository:
     """Repository for wallet operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize Wallet Repository with PostgresClient"""
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("wallet_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variable → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
+            host=host,
+            port=port,
             user_id="wallet_service"
         )
 
@@ -447,11 +463,13 @@ class WalletRepository:
                 return None
 
             # Get transactions for statistics
+            # Note: TransactionFilter.limit has max value of 100
+            # For accurate statistics, we should fetch in batches if needed
             filter_params = TransactionFilter(
                 wallet_id=wallet_id,
                 start_date=start_date,
                 end_date=end_date,
-                limit=1000  # Increase for better stats
+                limit=100  # Max allowed by TransactionFilter validation
             )
             transactions = await self.get_transactions(filter_params)
 

@@ -6,7 +6,9 @@ Client library for other microservices to interact with organization service
 
 import httpx
 import logging
+import os
 from typing import Optional, List, Dict, Any
+from isa_common.consul_client import ConsulRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +27,22 @@ class OrganizationServiceClient:
         if base_url:
             self.base_url = base_url.rstrip('/')
         else:
-            # Use service discovery
+            # Use Consul service discovery with isa-common
             try:
-                from core.service_discovery import get_service_discovery
-                sd = get_service_discovery()
-                self.base_url = sd.get_service_url("organization_service")
+                consul_host = os.getenv('CONSUL_HOST', 'localhost')
+                consul_port = int(os.getenv('CONSUL_PORT', 8500))
+
+                consul = ConsulRegistry(consul_host=consul_host, consul_port=consul_port)
+                endpoint = consul.get_service_endpoint("organization_service")
+
+                if endpoint:
+                    self.base_url = endpoint
+                    logger.debug(f"Discovered organization_service at {self.base_url}")
+                else:
+                    logger.warning("Organization service not found in Consul, using fallback")
+                    self.base_url = "http://localhost:8212"
             except Exception as e:
-                logger.warning(f"Service discovery failed, using default: {e}")
+                logger.warning(f"Service discovery failed, using fallback: {e}")
                 self.base_url = "http://localhost:8212"
 
         # 设置默认 headers（包括内部服务认证）

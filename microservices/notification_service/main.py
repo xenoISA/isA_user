@@ -10,9 +10,10 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # Import ConsulRegistry and ConfigManager
-from core.consul_registry import ConsulRegistry
+from isa_common.consul_client import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.nats_client import get_event_bus
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from typing import Optional, List
@@ -48,6 +49,7 @@ logger = app_logger  # for backward compatibility
 service: Optional[NotificationService] = None
 event_bus = None
 event_handlers = None
+consul_registry: Optional[ConsulRegistry] = None
 
 # 后台任务
 background_task = None
@@ -72,7 +74,7 @@ async def process_pending_notifications_task():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global service, background_task, event_bus, event_handlers
+    global service, background_task, event_bus, event_handlers, consul_registry
 
     # Initialize event bus first
     try:
@@ -82,9 +84,9 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
 
-    # Initialize service with event bus
+    # Initialize service with event bus and config_manager
     logger.info("Starting Notification Service...")
-    service = NotificationService(event_bus=event_bus)
+    service = NotificationService(event_bus=event_bus, config_manager=config_manager)
 
     # Initialize event handlers if event bus is available
     if event_bus:
@@ -108,24 +110,36 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Failed to initialize event bus: {e}. Continuing without event subscriptions.")
             event_bus = None
             event_handlers = None
-    
+
     # Register with Consul
     if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "notification", "api"]
-        )
-        
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
+        try:
+            # Get route metadata for Consul
+            route_meta = get_routes_for_consul()
+
+            # Merge service metadata
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities'][:5]),  # Limit capabilities
+                **route_meta
+            }
+
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            consul_registry.register()
+            logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+        except Exception as e:
+            logger.warning(f"Failed to register with Consul: {e}")
+            consul_registry = None
+
+    logger.info("Service discovery via Consul agent sidecar")
     
     # 启动后台任务
     background_task = asyncio.create_task(process_pending_notifications_task())
@@ -135,16 +149,18 @@ async def lifespan(app: FastAPI):
     # 关闭时清理
     logger.info("Shutting down Notification Service...")
 
+    # Deregister from Consul
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("Service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"Failed to deregister from Consul: {e}")
+
     # Close event bus
     if event_bus:
         await event_bus.close()
         logger.info("Event bus closed")
-
-    # Deregister from Consul
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-
     if background_task:
         background_task.cancel()
         try:

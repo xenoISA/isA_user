@@ -50,7 +50,7 @@ echo "POST ${AUTH_URL}/dev-token"
 TOKEN_PAYLOAD='{
   "user_id": "test_user_commands_123",
   "email": "commands@example.com",
-  "organization_id": "org_test_123",
+  "organization_id": "org_test_001",
   "role": "admin",
   "expires_in": 3600
 }'

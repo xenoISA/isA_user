@@ -88,7 +88,7 @@ ORG_ID="org_billing_test_123"
 # Test 0.5: Create a subscription in product service for testing
 print_section "Test 0.5: Create Subscription for Testing"
 PLAN_ID="free-plan"  # Use existing free plan from database
-echo "POST http://localhost:8216/api/v1/subscriptions"
+echo "POST http://localhost:8215/api/v1/product/subscriptions"
 CREATE_SUB_PAYLOAD="{
   \"user_id\": \"${USER_ID}\",
   \"plan_id\": \"${PLAN_ID}\",
@@ -101,7 +101,7 @@ CREATE_SUB_PAYLOAD="{
 echo "Request Body:"
 echo "$CREATE_SUB_PAYLOAD" | jq '.'
 
-CREATE_SUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:8216/api/v1/subscriptions" \
+CREATE_SUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:8215/api/v1/product/subscriptions" \
   -H "Content-Type: application/json" \
   -d "$CREATE_SUB_PAYLOAD")
 HTTP_CODE=$(echo "$CREATE_SUB_RESPONSE" | tail -n1)
@@ -145,8 +145,8 @@ fi
 
 # Test 2: Get Service Info
 print_section "Test 2: Get Service Info"
-echo "GET ${API_BASE}/info"
-INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/info")
+echo "GET ${API_BASE}/billing/info"
+INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/billing/info")
 HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$INFO_RESPONSE" | sed '$d')
 
@@ -207,7 +207,7 @@ fi
 
 # Test 4: Record Usage and Bill
 print_section "Test 4: Record Usage and Bill"
-echo "POST ${API_BASE}/usage/record"
+echo "POST ${API_BASE}/billing/usage/record"
 # Build payload conditionally
 if [ -n "$SUBSCRIPTION_ID" ] && [ "$SUBSCRIPTION_ID" != "null" ]; then
     RECORD_USAGE_PAYLOAD="{
@@ -246,7 +246,7 @@ fi
 echo "Request Body:"
 echo "$RECORD_USAGE_PAYLOAD" | jq '.'
 
-RECORD_USAGE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/usage/record" \
+RECORD_USAGE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/billing/usage/record" \
   -H "Content-Type: application/json" \
   -d "$RECORD_USAGE_PAYLOAD")
 HTTP_CODE=$(echo "$RECORD_USAGE_RESPONSE" | tail -n1)
@@ -319,7 +319,7 @@ fi
 
 # Test 7: Check Quota - Allowed
 print_section "Test 7: Check Quota - Allowed"
-echo "POST ${API_BASE}/quota/check"
+echo "POST ${API_BASE}/billing/quota/check"
 QUOTA_CHECK_PAYLOAD="{
   \"user_id\": \"${USER_ID}\",
   \"organization_id\": \"${ORG_ID}\",
@@ -331,7 +331,7 @@ QUOTA_CHECK_PAYLOAD="{
 echo "Request Body:"
 echo "$QUOTA_CHECK_PAYLOAD" | jq '.'
 
-QUOTA_CHECK_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/quota/check" \
+QUOTA_CHECK_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/billing/quota/check" \
   -H "Content-Type: application/json" \
   -d "$QUOTA_CHECK_PAYLOAD")
 HTTP_CODE=$(echo "$QUOTA_CHECK_RESPONSE" | tail -n1)
@@ -350,9 +350,9 @@ fi
 
 # Test 8: Get Usage Aggregations
 print_section "Test 8: Get Usage Aggregations"
-echo "GET ${API_BASE}/usage/aggregations?user_id=${USER_ID}&limit=10"
+echo "GET ${API_BASE}/billing/usage/aggregations?user_id=${USER_ID}&limit=10"
 
-AGGREGATIONS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/usage/aggregations?user_id=${USER_ID}&limit=10")
+AGGREGATIONS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/billing/usage/aggregations?user_id=${USER_ID}&limit=10")
 HTTP_CODE=$(echo "$AGGREGATIONS_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$AGGREGATIONS_RESPONSE" | sed '$d')
 
@@ -369,9 +369,9 @@ fi
 
 # Test 9: Get Billing Statistics
 print_section "Test 9: Get Billing Statistics"
-echo "GET ${API_BASE}/stats"
+echo "GET ${API_BASE}/billing/stats"
 
-STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/stats")
+STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/billing/stats")
 HTTP_CODE=$(echo "$STATS_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$STATS_RESPONSE" | sed '$d')
 
@@ -417,7 +417,7 @@ fi
 
 # Test 11: Record Another Usage (Different Service Type)
 print_section "Test 11: Record Usage - Storage Service"
-echo "POST ${API_BASE}/usage/record"
+echo "POST ${API_BASE}/billing/usage/record"
 RECORD_STORAGE_PAYLOAD="{
   \"user_id\": \"${USER_ID}\",
   \"organization_id\": \"${ORG_ID}\",
@@ -434,7 +434,7 @@ RECORD_STORAGE_PAYLOAD="{
 echo "Request Body:"
 echo "$RECORD_STORAGE_PAYLOAD" | jq '.'
 
-RECORD_STORAGE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/usage/record" \
+RECORD_STORAGE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/billing/usage/record" \
   -H "Content-Type: application/json" \
   -d "$RECORD_STORAGE_PAYLOAD")
 HTTP_CODE=$(echo "$RECORD_STORAGE_RESPONSE" | tail -n1)
@@ -506,7 +506,7 @@ fi
 
 # Test 14: Record Usage - API Gateway
 print_section "Test 14: Record Usage - API Gateway"
-echo "POST ${API_BASE}/usage/record"
+echo "POST ${API_BASE}/billing/usage/record"
 RECORD_API_PAYLOAD="{
   \"user_id\": \"${USER_ID}\",
   \"organization_id\": \"${ORG_ID}\",
@@ -522,7 +522,7 @@ RECORD_API_PAYLOAD="{
 echo "Request Body:"
 echo "$RECORD_API_PAYLOAD" | jq '.'
 
-RECORD_API_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/usage/record" \
+RECORD_API_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/billing/usage/record" \
   -H "Content-Type: application/json" \
   -d "$RECORD_API_PAYLOAD")
 HTTP_CODE=$(echo "$RECORD_API_RESPONSE" | tail -n1)
@@ -545,10 +545,10 @@ fi
 
 # Test 15: Get Usage Aggregations with Filters
 print_section "Test 15: Get Usage Aggregations - Filtered by Organization"
-echo "GET ${API_BASE}/usage/aggregations?organization_id=${ORG_ID}&limit=20"
+echo "GET ${API_BASE}/billing/usage/aggregations?organization_id=${ORG_ID}&limit=20"
 
 ORG_AGGREGATIONS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET \
-  "${API_BASE}/usage/aggregations?organization_id=${ORG_ID}&limit=20")
+  "${API_BASE}/billing/usage/aggregations?organization_id=${ORG_ID}&limit=20")
 HTTP_CODE=$(echo "$ORG_AGGREGATIONS_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$ORG_AGGREGATIONS_RESPONSE" | sed '$d')
 

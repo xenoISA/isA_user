@@ -18,7 +18,6 @@ from .models import (
     OrderSearchParams, Order, OrderStatus, OrderType, PaymentStatus,
     PaymentServiceRequest, WalletServiceRequest
 )
-from core.consul_registry import ConsulRegistry
 from core.nats_client import Event, EventType, ServiceSource
 
 # Import service clients for synchronous dependencies (architecture design)
@@ -55,8 +54,6 @@ class OrderService:
     def __init__(self, event_bus=None):
         self.order_repo = OrderRepository()
         self.event_bus = event_bus
-        self.consul = None
-        self._init_consul()
 
         # Initialize service clients for synchronous dependencies
         self.payment_client = PaymentServiceClient()
@@ -65,29 +62,9 @@ class OrderService:
         self.storage_client = StorageServiceClient()
         logger.info("Order Service initialized with all service clients")
 
-    def _init_consul(self):
-        """Initialize Consul registry for service discovery"""
-        try:
-            from core.config_manager import ConfigManager
-            config_manager = ConfigManager("order_service")
-            config = config_manager.get_service_config()
-
-            if config.consul_enabled:
-                self.consul = ConsulRegistry(
-                    service_name=config.service_name,
-                    service_port=config.service_port,
-                    consul_host=config.consul_host,
-                    consul_port=config.consul_port
-                )
-                logger.info("Consul service discovery initialized for order service")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Consul: {e}, will use fallback URLs")
-
     def _get_service_url(self, service_name: str, fallback_port: int) -> str:
-        """Get service URL via Consul discovery with fallback"""
+        """Get service URL from environment or use fallback"""
         fallback_url = f"http://localhost:{fallback_port}"
-        if self.consul:
-            return self.consul.get_service_address(service_name, fallback_url=fallback_url)
         return fallback_url
         
     # Order Lifecycle Operations

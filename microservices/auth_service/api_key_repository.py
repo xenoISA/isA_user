@@ -15,19 +15,32 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
 class ApiKeyRepository:
     """API key repository - compatible with main project structure"""
 
-    def __init__(self, organization_service_client=None):
+    def __init__(self, organization_service_client=None, config: Optional[ConfigManager] = None):
         # Use organization service client for microservice communication
         self.organization_service_client = organization_service_client
 
-        # PostgreSQL client for API key storage
-        # TODO: Use Consul service discovery instead of hardcoded host/port
-        self.db = PostgresClient(host='isa-postgres-grpc', port=50061, user_id='auth-service')
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("auth_service")
+
+        # Discover PostgreSQL service (priority: env var → Consul → localhost)
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id='auth-service')
         self.schema = "auth"
         self.organizations_table = "organizations"
     

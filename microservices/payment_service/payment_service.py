@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 class PaymentService:
     """支付服务业务逻辑层"""
 
-    def __init__(self, repository: PaymentRepository, stripe_secret_key: Optional[str] = None, event_bus=None):
+    def __init__(self, repository: PaymentRepository, stripe_secret_key: Optional[str] = None, event_bus=None, config=None):
         """
         初始化支付服务
 
@@ -46,13 +46,14 @@ class PaymentService:
             repository: 数据访问层实例
             stripe_secret_key: Stripe API密钥 (use sk_test_* for testing/development)
             event_bus: NATSEventBus instance for event publishing (optional)
+            config: ConfigManager instance for service discovery (optional)
         """
         self.repository = repository
         self.event_bus = event_bus
 
         # Initialize service clients for synchronous dependencies
-        self.account_client = AccountServiceClient()
-        self.wallet_client = WalletServiceClient()
+        self.account_client = AccountServiceClient(config=config)
+        self.wallet_client = WalletServiceClient(config=config)
 
         # 初始化Stripe
         if stripe_secret_key:
@@ -201,12 +202,11 @@ class PaymentService:
         """
         # Validate user exists via Account Service (synchronous dependency)
         try:
-            async with self.account_client as client:
-                user_account = await client.get_account_profile(request.user_id)
-                if not user_account:
-                    logger.error(f"User {request.user_id} not found in Account Service")
-                    raise ValueError(f"User {request.user_id} does not exist")
-                logger.info(f"User {request.user_id} validated via Account Service for subscription")
+            user_account = await self.account_client.get_account_profile(request.user_id)
+            if not user_account:
+                logger.error(f"User {request.user_id} not found in Account Service")
+                raise ValueError(f"User {request.user_id} does not exist")
+            logger.info(f"User {request.user_id} validated via Account Service for subscription")
         except ValueError:
             raise  # Re-raise validation errors
         except Exception as e:
@@ -444,12 +444,11 @@ class PaymentService:
         """
         # Validate user exists via Account Service (synchronous dependency)
         try:
-            async with self.account_client as client:
-                user_account = await client.get_account_profile(request.user_id)
-                if not user_account:
-                    logger.error(f"User {request.user_id} not found in Account Service")
-                    raise ValueError(f"User {request.user_id} does not exist")
-                logger.info(f"User {request.user_id} validated via Account Service for payment")
+            user_account = await self.account_client.get_account_profile(request.user_id)
+            if not user_account:
+                logger.error(f"User {request.user_id} not found in Account Service")
+                raise ValueError(f"User {request.user_id} does not exist")
+            logger.info(f"User {request.user_id} validated via Account Service for payment")
         except ValueError:
             raise  # Re-raise validation errors
         except Exception as e:

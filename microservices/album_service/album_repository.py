@@ -13,6 +13,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import Album, AlbumPhoto, AlbumSyncStatus, SyncStatus
 
 logger = logging.getLogger(__name__)
@@ -21,14 +22,25 @@ logger = logging.getLogger(__name__)
 class AlbumRepository:
     """Album repository - data access layer for album operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize album repository with PostgresClient"""
-        # TODO: Use Consul service discovery instead of hardcoded host/port
-        self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
-            user_id='album_service'
+        # 使用 config_manager 进行服务发现
+        if config is None:
+            config = ConfigManager("album_service")
+
+        # 发现 PostgreSQL 服务
+        # 优先级：环境变量 → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_GRPC_HOST',
+            env_port_key='POSTGRES_GRPC_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id='album_service')
+
         # Table names (album schema)
         self.schema = "album"
         self.albums_table = "albums"

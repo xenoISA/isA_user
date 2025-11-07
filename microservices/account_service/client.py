@@ -14,26 +14,50 @@ logger = logging.getLogger(__name__)
 class AccountServiceClient:
     """Account Service HTTP client"""
 
-    def __init__(self, base_url: str = None):
+    def __init__(self, base_url: str = None, config=None):
         """
         Initialize Account Service client
 
         Args:
-            base_url: Account service base URL, defaults to service discovery
+            base_url: Account service base URL, defaults to service discovery via ConfigManager
+            config: Optional ConfigManager instance for service discovery
         """
         if base_url:
             self.base_url = base_url.rstrip('/')
+            self.config = None
         else:
-            # Use service discovery
-            try:
-                from core.service_discovery import get_service_discovery
-                sd = get_service_discovery()
-                self.base_url = sd.get_service_url("account_service")
-            except Exception as e:
-                logger.warning(f"Service discovery failed, using default: {e}")
-                self.base_url = "http://localhost:8202"
+            # Use ConfigManager for service discovery
+            # Priority: Environment variables → Consul → localhost fallback
+            if config is None:
+                from core.config_manager import ConfigManager
+                config = ConfigManager("account_service_client")
+
+            self.config = config
+            # Do service discovery on first use, not at init time
+            self.base_url = None
 
         self.client = httpx.AsyncClient(timeout=30.0)
+
+    def _get_base_url(self) -> str:
+        """Get base URL with lazy service discovery"""
+        if self.base_url:
+            return self.base_url
+
+        if self.config:
+            try:
+                host, port = self.config.discover_service(
+                    service_name='account_service',
+                    default_host='localhost',
+                    default_port=8202,
+                    env_host_key='ACCOUNT_SERVICE_HOST',
+                    env_port_key='ACCOUNT_SERVICE_PORT'
+                )
+                return f"http://{host}:{port}"
+            except Exception as e:
+                logger.warning(f"Service discovery failed, using default: {e}")
+                return "http://localhost:8202"
+
+        return "http://localhost:8202"
 
     async def close(self):
         """Close HTTP client"""
@@ -79,7 +103,7 @@ class AccountServiceClient:
         """
         try:
             response = await self.client.post(
-                f"{self.base_url}/api/v1/accounts/ensure",
+                f"{self._get_base_url()}/api/v1/accounts/ensure",
                 json={
                     "auth0_id": auth0_id,
                     "email": email,
@@ -114,7 +138,7 @@ class AccountServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/accounts/profile/{user_id}"
+                f"{self._get_base_url()}/api/v1/accounts/profile/{user_id}"
             )
             response.raise_for_status()
             return response.json()
@@ -143,7 +167,7 @@ class AccountServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/accounts/by-email/{email}"
+                f"{self._get_base_url()}/api/v1/accounts/by-email/{email}"
             )
             response.raise_for_status()
             return response.json()
@@ -196,7 +220,7 @@ class AccountServiceClient:
                 return None
 
             response = await self.client.put(
-                f"{self.base_url}/api/v1/accounts/profile/{user_id}",
+                f"{self._get_base_url()}/api/v1/accounts/profile/{user_id}",
                 json=update_data
             )
             response.raise_for_status()
@@ -256,7 +280,7 @@ class AccountServiceClient:
                 return True  # No changes
 
             response = await self.client.put(
-                f"{self.base_url}/api/v1/accounts/preferences/{user_id}",
+                f"{self._get_base_url()}/api/v1/accounts/preferences/{user_id}",
                 json=prefs
             )
             response.raise_for_status()
@@ -312,7 +336,7 @@ class AccountServiceClient:
                 params["search"] = search
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/accounts",
+                f"{self._get_base_url()}/api/v1/accounts",
                 params=params
             )
             response.raise_for_status()
@@ -349,7 +373,7 @@ class AccountServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/accounts/search",
+                f"{self._get_base_url()}/api/v1/accounts/search",
                 params={
                     "query": query,
                     "limit": limit,
@@ -400,7 +424,7 @@ class AccountServiceClient:
                 payload["reason"] = reason
 
             response = await self.client.put(
-                f"{self.base_url}/api/v1/accounts/status/{user_id}",
+                f"{self._get_base_url()}/api/v1/accounts/status/{user_id}",
                 json=payload
             )
             response.raise_for_status()
@@ -437,7 +461,7 @@ class AccountServiceClient:
                 params["reason"] = reason
 
             response = await self.client.delete(
-                f"{self.base_url}/api/v1/accounts/profile/{user_id}",
+                f"{self._get_base_url()}/api/v1/accounts/profile/{user_id}",
                 params=params
             )
             response.raise_for_status()
@@ -467,7 +491,7 @@ class AccountServiceClient:
             >>> print(f"Active: {stats['active_accounts']}")
         """
         try:
-            response = await self.client.get(f"{self.base_url}/api/v1/accounts/stats")
+            response = await self.client.get(f"{self._get_base_url()}/api/v1/accounts/stats")
             response.raise_for_status()
             return response.json()
 
@@ -490,7 +514,7 @@ class AccountServiceClient:
             True if service is healthy
         """
         try:
-            response = await self.client.get(f"{self.base_url}/health")
+            response = await self.client.get(f"{self._get_base_url()}/health")
             return response.status_code == 200
         except:
             return False

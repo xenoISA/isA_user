@@ -5,6 +5,7 @@ Client library for other microservices to interact with storage service
 """
 
 import httpx
+from core.service_discovery import get_service_discovery
 import logging
 from typing import Optional, List, Dict, Any, BinaryIO
 from datetime import datetime
@@ -27,7 +28,6 @@ class StorageServiceClient:
         else:
             # Use service discovery
             try:
-                from core.service_discovery import get_service_discovery
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("storage_service")
             except Exception as e:

@@ -111,7 +111,7 @@ fi
 
 # Test 3: Create Invitation (requires organization service to be running)
 print_section "Test 3: Create Invitation"
-echo "POST ${API_BASE}/organizations/${TEST_ORG_ID}/invitations"
+echo "POST ${API_BASE}/invitations/organizations/${TEST_ORG_ID}"
 CREATE_PAYLOAD=$(cat <<EOF
 {
   "email": "${TEST_EMAIL}",
@@ -123,7 +123,7 @@ EOF
 echo "Request Body:"
 pretty_json "$CREATE_PAYLOAD"
 
-CREATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/organizations/${TEST_ORG_ID}/invitations" \
+CREATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/invitations/organizations/${TEST_ORG_ID}" \
   -H "Content-Type: application/json" \
   -H "X-User-Id: ${TEST_INVITER_ID}" \
   -d "$CREATE_PAYLOAD")
@@ -182,9 +182,9 @@ fi
 # Test 5: Get Organization Invitations
 if [ -n "$INVITATION_TOKEN" ]; then
     print_section "Test 5: Get Organization Invitations"
-    echo "GET ${API_BASE}/organizations/${TEST_ORG_ID}/invitations"
+    echo "GET ${API_BASE}/invitations/organizations/${TEST_ORG_ID}"
 
-    LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/organizations/${TEST_ORG_ID}/invitations?limit=10" \
+    LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/invitations/organizations/${TEST_ORG_ID}?limit=10" \
       -H "X-User-Id: ${TEST_INVITER_ID}")
     HTTP_CODE=$(echo "$LIST_RESPONSE" | tail -n1)
     RESPONSE_BODY=$(echo "$LIST_RESPONSE" | sed '$d')

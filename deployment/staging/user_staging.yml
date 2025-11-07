@@ -43,7 +43,9 @@ services:
       - "8221:8221"  # OTA Service
       - "8222:8222"  # Media Service
       - "8223:8223"  # Memory Service
+      - "8224:8224"  # Location Service
       - "8225:8225"  # Telemetry Service
+      - "8226:8226"  # Compliance Service
       - "8230:8230"  # Event Service
 
     # Volume mounts for logs and source code hot-reload

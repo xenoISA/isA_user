@@ -30,10 +30,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from core.logger import setup_service_logger
 from core.config_manager import ConfigManager
-from core.consul_registry import ConsulRegistry
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 from .compliance_service import ComplianceService
 from .compliance_repository import ComplianceRepository
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     ComplianceCheckRequest, ComplianceCheckResponse,
     BatchComplianceCheckRequest, BatchComplianceCheckResponse,
@@ -60,16 +61,16 @@ app_logger = logger  # For compatibility
 # ====================
 compliance_service: Optional[ComplianceService] = None
 compliance_repository: Optional[ComplianceRepository] = None
-consul_registry: Optional[ConsulRegistry] = None
 event_bus = None  # NATS event bus
+consul_registry = None
 
 # ====================
 # 服务配置
 # ====================
 SERVICE_NAME = "compliance_service"
-SERVICE_PORT = int(config.port) if config and config.port else int(os.getenv("COMPLIANCE_SERVICE_PORT", "8250"))
+SERVICE_PORT = int(config.service_port) if config and config.service_port else int(os.getenv("COMPLIANCE_SERVICE_PORT", "8250"))
 SERVICE_VERSION = "1.0.0"
-SERVICE_HOST = config.host if config and config.host else os.getenv("COMPLIANCE_SERVICE_HOST", "0.0.0.0")
+SERVICE_HOST = config.service_host if config and config.service_host else os.getenv("COMPLIANCE_SERVICE_HOST", "0.0.0.0")
 
 # ====================
 # 生命周期管理
@@ -92,34 +93,56 @@ async def lifespan(app: FastAPI):
             event_bus = None
 
         # 初始化合规服务
-        compliance_service = ComplianceService(event_bus=event_bus)
+        compliance_service = ComplianceService(event_bus=event_bus, config=config_manager)
         compliance_repository = compliance_service.repository
         await compliance_repository.initialize()
-        
-        # 注册到Consul
-        try:
-            if config and config.consul_enabled:
-                consul_registry = ConsulRegistry(config)
-                await consul_registry.register_service(
-                    service_name=SERVICE_NAME,
-                    service_id=f"{SERVICE_NAME}-{SERVICE_PORT}",
-                    port=SERVICE_PORT,
-                    health_check_endpoint="/health"
+
+        # Consul service registration
+        if config.consul_enabled:
+            try:
+                # Get route metadata
+                route_meta = get_routes_for_consul()
+
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=SERVICE_PORT,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
                 )
-                logger.info(f"[{SERVICE_NAME}] Registered with Consul")
-        except Exception as e:
-            logger.warning(f"[{SERVICE_NAME}] Consul registration failed (non-critical): {e}")
-        
+                consul_registry.register()
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                consul_registry = None
+
         logger.info(f"[{SERVICE_NAME}] Service started successfully on port {SERVICE_PORT}")
-        
+
         yield
-        
+
     except Exception as e:
         logger.error(f"[{SERVICE_NAME}] Startup error: {e}")
         raise
     finally:
         # Cleanup
         logger.info(f"[{SERVICE_NAME}] Shutting down...")
+
+        # Consul deregistration
+        if consul_registry:
+            try:
+                consul_registry.deregister()
+                logger.info(f"[{SERVICE_NAME}] Deregistered from Consul")
+            except Exception as e:
+                logger.warning(f"[{SERVICE_NAME}] Consul deregistration failed: {e}")
 
         # Close event bus
         if event_bus:
@@ -128,14 +151,6 @@ async def lifespan(app: FastAPI):
                 logger.info("Compliance event bus closed")
             except Exception as e:
                 logger.error(f"Error closing event bus: {e}")
-
-        # Deregister from Consul
-        if consul_registry:
-            try:
-                await consul_registry.deregister_service(f"{SERVICE_NAME}-{SERVICE_PORT}")
-                logger.info(f"[{SERVICE_NAME}] Deregistered from Consul")
-            except Exception as e:
-                logger.warning(f"[{SERVICE_NAME}] Consul deregistration failed: {e}")
 
 # ====================
 # FastAPI应用配置
@@ -212,7 +227,7 @@ async def service_status(
 # 核心合规检查端点
 # ====================
 
-@app.post("/api/compliance/check", response_model=ComplianceCheckResponse)
+@app.post("/api/v1/compliance/check", response_model=ComplianceCheckResponse)
 async def check_compliance(
     request: ComplianceCheckRequest,
     service: ComplianceService = Depends(get_compliance_service)
@@ -254,7 +269,7 @@ async def check_compliance(
         logger.error(f"Compliance check error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/compliance/check/batch", response_model=BatchComplianceCheckResponse)
+@app.post("/api/v1/compliance/check/batch", response_model=BatchComplianceCheckResponse)
 async def check_compliance_batch(
     request: BatchComplianceCheckRequest,
     service: ComplianceService = Depends(get_compliance_service)
@@ -298,7 +313,7 @@ async def check_compliance_batch(
 # 查询和报告端点
 # ====================
 
-@app.get("/api/compliance/checks/{check_id}")
+@app.get("/api/v1/compliance/checks/{check_id}")
 async def get_check_by_id(
     check_id: str,
     repo: ComplianceRepository = Depends(get_compliance_repository)
@@ -315,7 +330,7 @@ async def get_check_by_id(
         logger.error(f"Error getting check {check_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/compliance/checks/user/{user_id}")
+@app.get("/api/v1/compliance/checks/user/{user_id}")
 async def get_user_checks(
     user_id: str,
     limit: int = Query(100, ge=1, le=1000),
@@ -344,7 +359,7 @@ async def get_user_checks(
         logger.error(f"Error getting user checks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/compliance/reviews/pending")
+@app.get("/api/v1/compliance/reviews/pending")
 async def get_pending_reviews(
     limit: int = Query(50, ge=1, le=100),
     repo: ComplianceRepository = Depends(get_compliance_repository)
@@ -360,7 +375,7 @@ async def get_pending_reviews(
         logger.error(f"Error getting pending reviews: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/compliance/reviews/{check_id}")
+@app.put("/api/v1/compliance/reviews/{check_id}")
 async def update_review(
     check_id: str,
     reviewed_by: str,
@@ -391,7 +406,7 @@ async def update_review(
         logger.error(f"Error updating review: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/compliance/reports", response_model=ComplianceReportResponse)
+@app.post("/api/v1/compliance/reports", response_model=ComplianceReportResponse)
 async def generate_report(
     request: ComplianceReportRequest,
     repo: ComplianceRepository = Depends(get_compliance_repository)
@@ -459,7 +474,7 @@ async def generate_report(
 # 策略管理端点
 # ====================
 
-@app.post("/api/compliance/policies", response_model=CompliancePolicy)
+@app.post("/api/v1/compliance/policies", response_model=CompliancePolicy)
 async def create_policy(
     request: CompliancePolicyRequest,
     repo: ComplianceRepository = Depends(get_compliance_repository)
@@ -492,7 +507,7 @@ async def create_policy(
         logger.error(f"Error creating policy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/compliance/policies/{policy_id}", response_model=CompliancePolicy)
+@app.get("/api/v1/compliance/policies/{policy_id}", response_model=CompliancePolicy)
 async def get_policy(
     policy_id: str,
     repo: ComplianceRepository = Depends(get_compliance_repository)
@@ -509,7 +524,7 @@ async def get_policy(
         logger.error(f"Error getting policy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/compliance/policies")
+@app.get("/api/v1/compliance/policies")
 async def list_policies(
     organization_id: Optional[str] = None,
     repo: ComplianceRepository = Depends(get_compliance_repository)
@@ -529,7 +544,7 @@ async def list_policies(
 # 统计端点
 # ====================
 
-@app.get("/api/compliance/stats", response_model=ComplianceStats)
+@app.get("/api/v1/compliance/stats", response_model=ComplianceStats)
 async def get_statistics(
     organization_id: Optional[str] = None,
     repo: ComplianceRepository = Depends(get_compliance_repository)
@@ -579,7 +594,7 @@ async def get_statistics(
 # GDPR / Data Privacy Endpoints
 # ====================
 
-@app.get("/api/compliance/user/{user_id}/data-export")
+@app.get("/api/v1/compliance/user/{user_id}/data-export")
 async def export_user_data(
     user_id: str,
     format: str = Query("json", regex="^(json|csv)$"),
@@ -661,7 +676,7 @@ async def export_user_data(
         logger.error(f"Error exporting user data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/compliance/user/{user_id}/data")
+@app.delete("/api/v1/compliance/user/{user_id}/data")
 async def delete_user_data(
     user_id: str,
     confirmation: str = Query(..., description="Must be 'CONFIRM_DELETE'"),
@@ -727,7 +742,7 @@ async def delete_user_data(
         logger.error(f"Error deleting user data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/compliance/user/{user_id}/data-summary")
+@app.get("/api/v1/compliance/user/{user_id}/data-summary")
 async def get_user_data_summary(
     user_id: str,
     repo: ComplianceRepository = Depends(get_compliance_repository)
@@ -793,7 +808,7 @@ async def get_user_data_summary(
         logger.error(f"Error getting user data summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/compliance/user/{user_id}/consent")
+@app.post("/api/v1/compliance/user/{user_id}/consent")
 async def update_user_consent(
     user_id: str,
     consent_type: str = Query(..., description="Type: data_processing, marketing, analytics"),
@@ -849,7 +864,7 @@ async def update_user_consent(
         logger.error(f"Error updating consent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/compliance/user/{user_id}/audit-log")
+@app.get("/api/v1/compliance/user/{user_id}/audit-log")
 async def get_user_audit_log(
     user_id: str,
     limit: int = Query(100, ge=1, le=1000),
@@ -909,7 +924,7 @@ async def get_user_audit_log(
 # PCI-DSS Compliance Endpoints
 # ====================
 
-@app.post("/api/compliance/pci/card-data-check")
+@app.post("/api/v1/compliance/pci/card-data-check")
 async def check_card_data_exposure(
     content: str,
     user_id: str,

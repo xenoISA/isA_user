@@ -14,6 +14,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     DeviceResponse, DeviceStatus, DeviceType, ConnectivityType, SecurityLevel,
     DeviceGroupResponse, FrameConfig, DeviceAuthResponse
@@ -25,12 +26,26 @@ logger = logging.getLogger(__name__)
 class DeviceRepository:
     """Device repository - data access layer for device operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize device repository with PostgresClient"""
-        # TODO: Use Consul service discovery instead of hardcoded host/port
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("device_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variable → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
+            host=host,
+            port=port,
             user_id='device_service'
         )
         # Table names (device schema)
@@ -75,7 +90,7 @@ class DeviceRepository:
                     metadata JSONB DEFAULT '{}',
                     total_commands INTEGER DEFAULT 0,
                     total_telemetry_points INTEGER DEFAULT 0,
-                    uptime_percentage DECIMAL(5,2) DEFAULT 0.00,
+                    uptime_percentage REAL DEFAULT 0.0,
                     registered_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW(),
                     last_authenticated_at TIMESTAMPTZ,

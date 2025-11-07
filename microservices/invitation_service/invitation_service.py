@@ -19,7 +19,6 @@ from .models import (
     InvitationResponse, InvitationDetailResponse, InvitationListResponse,
     AcceptInvitationResponse
 )
-from core.consul_registry import ConsulRegistry
 from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger(__name__)
@@ -43,20 +42,9 @@ class InvitationService:
     def _init_consul(self):
         """Initialize Consul registry for service discovery"""
         try:
-            from core.config_manager import ConfigManager
-            config_manager = ConfigManager("invitation_service")
-            config = config_manager.get_service_config()
-
-            if config.consul_enabled:
-                self.consul = ConsulRegistry(
-                    service_name=config.service_name,
-                    service_port=config.service_port,
-                    consul_host=config.consul_host,
-                    consul_port=config.consul_port
-                )
-                logger.info("Consul service discovery initialized for invitation service")
+            logger.info("Service discovery via Consul agent sidecar")
         except Exception as e:
-            logger.warning(f"Failed to initialize Consul: {e}, will use fallback URLs")
+            logger.warning(f"Service discovery setup: {e}")
 
     def _get_service_url(self, service_name: str, fallback_port: int) -> str:
         """Get service URL via Consul discovery with fallback"""

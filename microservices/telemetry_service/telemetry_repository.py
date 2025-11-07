@@ -14,6 +14,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import ListValue, Struct
 
@@ -29,10 +30,25 @@ logger = logging.getLogger(__name__)
 class TelemetryRepository:
     """Repository for telemetry operations using PostgresClient"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
+        # Use config_manager for service discovery
+        if config is None:
+            config = ConfigManager("telemetry_service")
+
+        # Discover PostgreSQL service
+        # Priority: environment variables → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
+        )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
         self.db = PostgresClient(
-            host=os.getenv("POSTGRES_GRPC_HOST", "isa-postgres-grpc"),
-            port=int(os.getenv("POSTGRES_GRPC_PORT", "50061")),
+            host=host,
+            port=port,
             user_id="telemetry_service"
         )
         self.schema = "telemetry"
@@ -301,6 +317,12 @@ class TelemetryRepository:
     async def create_metric_definition(self, metric_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Create a metric definition"""
         try:
+            # First check if metric with this name already exists
+            existing = await self.get_metric_definition(metric_def["name"])
+            if existing:
+                logger.info(f"Metric definition '{metric_def['name']}' already exists, returning existing")
+                return existing
+
             metric_id = str(uuid.uuid4())
             now = datetime.now(timezone.utc)
 
@@ -335,12 +357,23 @@ class TelemetryRepository:
                 results = self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
-                return results[0]
+                result = results[0]
+                # Ensure metadata and tags are never None
+                if result.get("metadata") is None:
+                    result["metadata"] = {}
+                if result.get("tags") is None:
+                    result["tags"] = []
+                return result
 
             return None
 
         except Exception as e:
             logger.error(f"Error creating metric definition: {e}")
+            # If it's a duplicate key error, try to return the existing metric
+            if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+                existing = await self.get_metric_definition(metric_def["name"])
+                if existing:
+                    return existing
             return None
 
     async def get_metric_definition(self, name: str) -> Optional[Dict[str, Any]]:
@@ -415,7 +448,19 @@ class TelemetryRepository:
                 results = self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
-                return results[0]
+                result = results[0]
+                # Ensure arrays and JSONB fields are never None
+                if result.get("device_ids") is None:
+                    result["device_ids"] = []
+                if result.get("device_groups") is None:
+                    result["device_groups"] = []
+                if result.get("device_filters") is None:
+                    result["device_filters"] = {}
+                if result.get("notification_channels") is None:
+                    result["notification_channels"] = []
+                if result.get("tags") is None:
+                    result["tags"] = []
+                return result
 
             return None
 
@@ -735,7 +780,32 @@ class TelemetryRepository:
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
 
-            return results if results else []
+            if results:
+                # Ensure arrays and JSONB fields are never None for all results
+                for result in results:
+                    if result.get("device_ids") is None:
+                        result["device_ids"] = []
+                    else:
+                        result["device_ids"] = self._convert_protobuf_to_native(result["device_ids"])
+                    if result.get("device_groups") is None:
+                        result["device_groups"] = []
+                    else:
+                        result["device_groups"] = self._convert_protobuf_to_native(result["device_groups"])
+                    if result.get("device_filters") is None:
+                        result["device_filters"] = {}
+                    else:
+                        result["device_filters"] = self._convert_protobuf_to_native(result["device_filters"])
+                    if result.get("notification_channels") is None:
+                        result["notification_channels"] = []
+                    else:
+                        result["notification_channels"] = self._convert_protobuf_to_native(result["notification_channels"])
+                    if result.get("tags") is None:
+                        result["tags"] = []
+                    else:
+                        result["tags"] = self._convert_protobuf_to_native(result["tags"])
+                return results
+
+            return []
 
         except Exception as e:
             logger.error(f"Error getting alert rules: {e}")
@@ -750,7 +820,19 @@ class TelemetryRepository:
                 results = self.db.query(query, [rule_id], schema=self.schema)
 
             if results and len(results) > 0:
-                return results[0]
+                result = results[0]
+                # Ensure arrays and JSONB fields are never None
+                if result.get("device_ids") is None:
+                    result["device_ids"] = []
+                if result.get("device_groups") is None:
+                    result["device_groups"] = []
+                if result.get("device_filters") is None:
+                    result["device_filters"] = {}
+                if result.get("notification_channels") is None:
+                    result["notification_channels"] = []
+                if result.get("tags") is None:
+                    result["tags"] = []
+                return result
 
             return None
 

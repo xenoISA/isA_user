@@ -3,7 +3,7 @@
 # Compliance Check Test Script
 # Test content moderation and compliance checking
 
-BASE_URL="http://localhost:8250"
+BASE_URL="http://localhost:8226"
 
 echo "=========================================="
 echo "Compliance Service Test Script"
@@ -28,7 +28,7 @@ echo ""
 
 # Test 2: Check Clean Text (Should Pass)
 echo "Test 2: Check Clean Text (Should Pass)"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/check" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "test_user_123",
@@ -46,7 +46,7 @@ echo ""
 
 # Test 3: Check Text with PII
 echo "Test 3: Check Text with PII"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/check" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "test_user_123",
@@ -64,7 +64,7 @@ echo ""
 
 # Test 4: Check Prompt Injection
 echo "Test 4: Check Prompt Injection"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/check" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "test_user_123",
@@ -82,7 +82,7 @@ echo ""
 
 # Test 5: Get User Data Summary
 echo "Test 5: Get User Data Summary"
-response=$(curl -s "${BASE_URL}/api/compliance/user/test_user_123/data-summary")
+response=$(curl -s "${BASE_URL}/api/v1/compliance/user/test_user_123/data-summary")
 echo "Response: $response"
 if echo "$response" | grep -q '"user_id"'; then
     echo -e "${GREEN}✓ User data summary working${NC}"
@@ -93,7 +93,7 @@ echo ""
 
 # Test 6: PCI Card Data Check
 echo "Test 6: PCI Card Data Check"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/pci/card-data-check" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/pci/card-data-check" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "My card number is 4532-1234-5678-9010",
@@ -109,7 +109,7 @@ echo ""
 
 # Test 7: Batch Check
 echo "Test 7: Batch Check"
-response=$(curl -s -X POST "${BASE_URL}/api/compliance/check/batch" \
+response=$(curl -s -X POST "${BASE_URL}/api/v1/compliance/check/batch" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "test_user_123",

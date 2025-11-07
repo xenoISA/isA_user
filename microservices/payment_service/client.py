@@ -5,6 +5,7 @@ Client library for other microservices to interact with payment service
 """
 
 import httpx
+from core.config_manager import ConfigManager
 import logging
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
@@ -15,24 +16,34 @@ logger = logging.getLogger(__name__)
 class PaymentServiceClient:
     """Payment Service HTTP client"""
 
-    def __init__(self, base_url: str = None):
+    def __init__(self, base_url: str = None, config: Optional[ConfigManager] = None):
         """
         Initialize Payment Service client
 
         Args:
             base_url: Payment service base URL, defaults to service discovery
+            config: ConfigManager instance for service discovery
         """
         if base_url:
             self.base_url = base_url.rstrip('/')
         else:
-            # Use service discovery
+            # Use service discovery via ConfigManager
+            if config is None:
+                config = ConfigManager("payment_service_client")
+
             try:
-                from core.service_discovery import get_service_discovery
-                sd = get_service_discovery()
-                self.base_url = sd.get_service_url("payment_service")
+                host, port = config.discover_service(
+                    service_name='payment_service',
+                    default_host='localhost',
+                    default_port=8207,
+                    env_host_key='PAYMENT_SERVICE_HOST',
+                    env_port_key='PAYMENT_SERVICE_PORT'
+                )
+                self.base_url = f"http://{host}:{port}"
+                logger.info(f"Payment service discovered at {self.base_url}")
             except Exception as e:
                 logger.warning(f"Service discovery failed, using default: {e}")
-                self.base_url = "http://localhost:8205"
+                self.base_url = "http://localhost:8207"
 
         self.client = httpx.AsyncClient(timeout=30.0)
 

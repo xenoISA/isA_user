@@ -21,10 +21,10 @@ from contextlib import asynccontextmanager
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 from .models import (
     AlbumCreateRequest, AlbumUpdateRequest, AlbumResponse,
@@ -42,6 +42,7 @@ from .album_service import (
 )
 from .album_repository import AlbumRepository
 from .events import AlbumEventHandler
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize configuration
 config_manager = ConfigManager("album_service")
@@ -53,12 +54,13 @@ logger = app_logger
 
 # Global service instance
 album_service = None
+consul_registry: Optional[ConsulRegistry] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    global album_service
+    global album_service, consul_registry
 
     logger.info("Starting Album Service...")
 
@@ -102,35 +104,46 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 
-    # Register with Consul
+    # Consul 服务注册
     if service_config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=service_config.service_name,
-            service_port=service_config.service_port,
-            consul_host=service_config.consul_host,
-            consul_port=service_config.consul_port,
-            service_host=service_config.service_host,
-            tags=["microservice", "album", "api"]
-        )
+        try:
+            # 获取路由元数据
+            route_meta = get_routes_for_consul()
 
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{service_config.service_name} registered with Consul")
-        else:
-            logger.warning(f"Failed to register {service_config.service_name} with Consul")
-    else:
-        logger.info("Consul registration disabled")
+            # 合并服务元数据
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=service_config.service_port,
+                consul_host=service_config.consul_host,
+                consul_port=service_config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='http'
+            )
+            consul_registry.register()
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            consul_registry = None
 
     logger.info(f"Album Service started on port {service_config.service_port}")
 
     yield
 
     # Cleanup
-    if hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
+    # Consul 注销
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("✅ Service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"❌ Failed to deregister from Consul: {e}")
 
     # Close event bus
     if event_bus:

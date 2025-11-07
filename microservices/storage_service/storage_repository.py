@@ -14,6 +14,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common.postgres_client import PostgresClient
+from core.config_manager import ConfigManager
 from .models import (
     StoredFile, FileShare, StorageQuota,
     FileStatus, StorageProvider, FileAccessLevel
@@ -25,14 +26,24 @@ logger = logging.getLogger(__name__)
 class StorageRepository:
     """Storage repository - data access layer for file storage operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize storage repository with PostgresClient"""
-        # TODO: Use Consul service discovery instead of hardcoded host/port
-        self.db = PostgresClient(
-            host='isa-postgres-grpc',
-            port=50061,
-            user_id='storage_service'
+        # 使用 config_manager 进行服务发现
+        if config is None:
+            config = ConfigManager("storage_service")
+
+        # 发现 PostgreSQL 服务
+        # 优先级：环境变量 → Consul → localhost fallback
+        host, port = config.discover_service(
+            service_name='postgres_grpc_service',
+            default_host='isa-postgres-grpc',
+            default_port=50061,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
+
+        logger.info(f"Connecting to PostgreSQL at {host}:{port}")
+        self.db = PostgresClient(host=host, port=port, user_id='storage_service')
         # Table names (storage schema)
         self.schema = "storage"
         self.files_table = "storage_files"
@@ -475,7 +486,7 @@ class StorageRepository:
             with self.db:
                 count = self.db.insert_into(self.quotas_table, [data], schema=self.schema)
 
-            if count > 0:
+            if count is not None and count > 0:
                 return await self.get_storage_quota(quota_type, entity_id)
             return None
 
@@ -492,11 +503,26 @@ class StorageRepository:
     ) -> bool:
         """Update storage usage (add or subtract bytes and file count)"""
         try:
+            # First, check if quota record exists
+            existing_quota = await self.get_storage_quota(quota_type, entity_id)
+
+            # If no quota exists, create one with default values
+            if not existing_quota:
+                logger.info(f"Creating default quota for {quota_type}:{entity_id}")
+                await self.create_storage_quota(
+                    quota_type=quota_type,
+                    entity_id=entity_id,
+                    total_quota_bytes=10737418240,  # 10GB default
+                    max_file_size=524288000,  # 500MB default
+                    max_file_count=10000
+                )
+
+            # Now update the usage (use COALESCE to handle NULL values)
             query = f"""
                 UPDATE {self.schema}.{self.quotas_table}
                 SET
-                    used_bytes = used_bytes + $1,
-                    file_count = file_count + $2,
+                    used_bytes = COALESCE(used_bytes, 0) + $1,
+                    file_count = COALESCE(file_count, 0) + $2,
                     updated_at = $3
                 WHERE quota_type = $4 AND entity_id = $5
             """
@@ -505,7 +531,7 @@ class StorageRepository:
             with self.db:
                 count = self.db.execute(query, params, schema=self.schema)
 
-            return count > 0
+            return count is not None and count > 0
 
         except Exception as e:
             logger.error(f"Error updating storage usage: {e}")
@@ -528,24 +554,28 @@ class StorageRepository:
             # Get user quota
             user_quota = await self.get_storage_quota("user", user_id)
             if user_quota:
+                used_bytes = user_quota.used_bytes if user_quota.used_bytes is not None else 0
+                total_quota_bytes = user_quota.total_quota_bytes if user_quota.total_quota_bytes is not None else 0
                 stats["user_quota"] = {
-                    "used_bytes": user_quota.used_bytes,
-                    "total_quota_bytes": user_quota.total_quota_bytes,
-                    "file_count": user_quota.file_count,
+                    "used_bytes": used_bytes,
+                    "total_quota_bytes": total_quota_bytes,
+                    "file_count": user_quota.file_count if user_quota.file_count is not None else 0,
                     "max_file_count": user_quota.max_file_count,
-                    "usage_percent": (user_quota.used_bytes / user_quota.total_quota_bytes * 100) if user_quota.total_quota_bytes > 0 else 0
+                    "usage_percent": (used_bytes / total_quota_bytes * 100) if total_quota_bytes > 0 else 0
                 }
 
             # Get org quota if organization_id provided
             if organization_id:
                 org_quota = await self.get_storage_quota("organization", organization_id)
                 if org_quota:
+                    used_bytes = org_quota.used_bytes if org_quota.used_bytes is not None else 0
+                    total_quota_bytes = org_quota.total_quota_bytes if org_quota.total_quota_bytes is not None else 0
                     stats["org_quota"] = {
-                        "used_bytes": org_quota.used_bytes,
-                        "total_quota_bytes": org_quota.total_quota_bytes,
-                        "file_count": org_quota.file_count,
+                        "used_bytes": used_bytes,
+                        "total_quota_bytes": total_quota_bytes,
+                        "file_count": org_quota.file_count if org_quota.file_count is not None else 0,
                         "max_file_count": org_quota.max_file_count,
-                        "usage_percent": (org_quota.used_bytes / org_quota.total_quota_bytes * 100) if org_quota.total_quota_bytes > 0 else 0
+                        "usage_percent": (used_bytes / total_quota_bytes * 100) if total_quota_bytes > 0 else 0
                     }
 
             # Get actual file stats from storage_files

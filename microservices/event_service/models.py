@@ -30,20 +30,21 @@ class EventCategory(str, Enum):
     PAGE_VIEW = "page_view"
     FORM_SUBMIT = "form_submit"
     CLICK = "click"
-    
+
     # 业务事件
     USER_LIFECYCLE = "user_lifecycle"
     PAYMENT = "payment"
     ORDER = "order"
     TASK = "task"
-    
+
     # 系统事件
     SYSTEM = "system"
     SECURITY = "security"
     PERFORMANCE = "performance"
     ERROR = "error"
-    
+
     # IoT事件
+    DEVICE = "device"  # 兼容旧数据
     DEVICE_STATUS = "device_status"
     TELEMETRY = "telemetry"
     COMMAND = "command"

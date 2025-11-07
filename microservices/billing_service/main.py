@@ -15,13 +15,14 @@ from datetime import datetime
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 from .billing_repository import BillingRepository
 from .billing_service import BillingService
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     RecordUsageRequest, BillingCalculationRequest, BillingCalculationResponse,
     ProcessBillingRequest, ProcessBillingResponse, QuotaCheckRequest, QuotaCheckResponse,
@@ -43,9 +44,9 @@ if config.debug:
 # 全局变量
 billing_service: Optional[BillingService] = None
 repository: Optional[BillingRepository] = None
-consul_registry: Optional[ConsulRegistry] = None
 event_bus = None  # NATS event bus
 event_handlers = None  # Event handlers
+consul_registry = None  # Consul service registry
 SERVICE_PORT = config.service_port or 8216
 
 
@@ -56,7 +57,7 @@ async def lifespan(app: FastAPI):
 
     try:
         # 初始化数据库连接
-        repository = BillingRepository()
+        repository = BillingRepository(config=config_manager)
         await repository.initialize()
 
         # 初始化并启动事件订阅器 (CRITICAL for event-driven billing)
@@ -94,23 +95,35 @@ async def lifespan(app: FastAPI):
             # 初始化业务服务 without event bus
             billing_service = BillingService(repository, event_bus=None)
 
-        # 注册到 Consul（如果启用）
+        # Consul service registration
         if config.consul_enabled:
-            consul_registry = ConsulRegistry(
-                service_name="billing_service",
-                service_port=SERVICE_PORT,
-                consul_host=config.consul_host,
-                consul_port=config.consul_port,
-                service_host=config.service_host,
-                tags=["microservice", "billing", "api"]
-            )
-            if consul_registry.register():
-                consul_registry.start_maintenance()
-                logger.info("Billing service registered with Consul")
-            else:
-                logger.error("Failed to register billing service with Consul")
+            try:
+                # Get route metadata
+                route_meta = get_routes_for_consul()
 
-        logger.info(f"Billing service started on port {SERVICE_PORT}")
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='http'
+                )
+                consul_registry.register()
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                consul_registry = None
+
+        logger.info(f"✅ Billing service started on port {SERVICE_PORT}")
         yield
         
     except Exception as e:
@@ -118,17 +131,20 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # 清理资源
+        # Consul deregistration
+        if consul_registry:
+            try:
+                consul_registry.deregister()
+                logger.info("✅ Billing service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
+
         if event_bus:
             try:
                 await event_bus.close()
                 logger.info("Billing event bus closed")
             except Exception as e:
                 logger.error(f"Error closing event bus: {e}")
-
-        if consul_registry:
-            consul_registry.stop_maintenance()
-            consul_registry.deregister()
-            logger.info("Billing service deregistered from Consul")
 
         if repository:
             await repository.close()
@@ -163,18 +179,18 @@ async def get_billing_service() -> BillingService:
 async def health_check():
     """健康检查"""
     dependencies = {}
-    
+
     # 检查数据库连接
     try:
-        if repository and repository.client:
-            # Simple test query to check database connection
-            repository.client.table("billing_records").select("count", count="exact").limit(1).execute()
-            dependencies["database"] = "healthy"
+        if repository and repository.db:
+            # Use PostgresClient health check method
+            is_healthy = repository.db.health_check()
+            dependencies["database"] = "healthy" if is_healthy else "unhealthy"
         else:
             dependencies["database"] = "unhealthy"
     except Exception:
         dependencies["database"] = "unhealthy"
-    
+
     return HealthResponse(
         status="healthy" if all(v == "healthy" for v in dependencies.values()) else "degraded",
         service="billing_service",
@@ -184,7 +200,7 @@ async def health_check():
     )
 
 
-@app.get("/api/v1/info", response_model=ServiceInfo)
+@app.get("/api/v1/billing/info", response_model=ServiceInfo)
 async def get_service_info():
     """获取服务信息"""
     return ServiceInfo(
@@ -193,14 +209,14 @@ async def get_service_info():
         description="专注于使用量跟踪、费用计算和计费处理的微服务",
         capabilities=[
             "usage_tracking",
-            "cost_calculation", 
+            "cost_calculation",
             "billing_processing",
             "quota_management",
             "billing_analytics"
         ],
         supported_services=[
             "model_inference",
-            "mcp_service", 
+            "mcp_service",
             "agent_execution",
             "storage_minio",
             "api_gateway",
@@ -209,7 +225,7 @@ async def get_service_info():
         supported_billing_methods=[
             "wallet_deduction",
             "payment_charge",
-            "credit_consumption", 
+            "credit_consumption",
             "subscription_included"
         ]
     )
@@ -219,7 +235,7 @@ async def get_service_info():
 # 核心计费API
 # ====================
 
-@app.post("/api/v1/usage/record", response_model=ProcessBillingResponse)
+@app.post("/api/v1/billing/usage/record", response_model=ProcessBillingResponse)
 async def record_usage_and_bill(
     request: RecordUsageRequest,
     service: BillingService = Depends(get_billing_service)
@@ -227,12 +243,12 @@ async def record_usage_and_bill(
     """记录使用量并立即计费（核心API）"""
     try:
         result = await service.record_usage_and_bill(request)
-        
+
         if not result.success:
             raise HTTPException(status_code=400, detail=result.message)
-        
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -280,7 +296,7 @@ async def process_billing(
 # 配额管理API
 # ====================
 
-@app.post("/api/v1/quota/check", response_model=QuotaCheckResponse)
+@app.post("/api/v1/billing/quota/check", response_model=QuotaCheckResponse)
 async def check_quota(
     request: QuotaCheckRequest,
     service: BillingService = Depends(get_billing_service)
@@ -289,7 +305,7 @@ async def check_quota(
     try:
         result = await service.check_quota(request)
         return result
-        
+
     except Exception as e:
         logger.error(f"Error checking quota: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -363,7 +379,7 @@ async def get_billing_record(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/usage/aggregations")
+@app.get("/api/v1/billing/usage/aggregations")
 async def get_usage_aggregations(
     user_id: Optional[str] = None,
     organization_id: Optional[str] = None,
@@ -413,7 +429,7 @@ async def get_usage_aggregations(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/stats", response_model=BillingStats)
+@app.get("/api/v1/billing/stats", response_model=BillingStats)
 async def get_billing_statistics(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,

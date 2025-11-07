@@ -7,6 +7,7 @@ import logging
 from typing import List, Optional, Dict, Any
 
 from .base_repository import BaseMemoryRepository
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,9 @@ logger = logging.getLogger(__name__)
 class ProceduralMemoryRepository(BaseMemoryRepository):
     """Repository for procedural memory operations"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize procedural memory repository"""
-        super().__init__(schema="memory", table_name="procedural_memories")
+        super().__init__(schema="memory", table_name="procedural_memories", config=config)
 
     async def search_by_domain(
         self,
