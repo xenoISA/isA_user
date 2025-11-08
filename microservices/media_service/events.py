@@ -282,11 +282,8 @@ class MediaEventHandler:
                     "has_people": ai_metadata.get("ai_has_people", False)
                 },
 
-                # EXIF 数据（保持为空，如果需要可以从 Storage Service 传递）
-                exif_data={},
-
-                # 🔗 关联数据
-                metadata={
+                # 🔗 关联数据 - 使用 full_metadata 字段
+                full_metadata={
                     "chunk_id": chunk_id,  # Qdrant 向量 ID
                     "download_url": event_data.get("download_url"),
                     "bucket_name": event_data.get("bucket_name"),

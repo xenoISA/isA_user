@@ -222,7 +222,7 @@ echo ""
 echo -e "${BLUE}[TEST 5]${NC} Verify chunk_id → file_id Mapping"
 
 # 从 Media Service metadata 中提取 chunk_id
-CHUNK_ID=$(echo "$MEDIA_METADATA" | jq -r '.metadata.chunk_id' 2>/dev/null)
+CHUNK_ID=$(echo "$MEDIA_METADATA" | jq -r '.full_metadata.chunk_id' 2>/dev/null)
 
 if [ -n "$CHUNK_ID" ] && [ "$CHUNK_ID" != "null" ]; then
     pass_test "chunk_id found in Media metadata: ${CHUNK_ID:0:16}..."

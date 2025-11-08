@@ -328,6 +328,7 @@ class PhotoMetadataResponse(BaseModel):
     ai_objects: List[str]
     ai_scenes: List[str]
     quality_score: Optional[float]
+    full_metadata: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         from_attributes = True

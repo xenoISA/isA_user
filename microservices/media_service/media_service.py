@@ -7,19 +7,33 @@ for smart frame ecosystem.
 
 import logging
 import uuid
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
-from .models import (
-    PhotoVersion, PhotoMetadata, Playlist, RotationSchedule, PhotoCache,
-    PhotoVersionType, PlaylistType, CacheStatus, ScheduleType,
-    PhotoVersionCreateRequest, PlaylistCreateRequest, PlaylistUpdateRequest,
-    RotationScheduleCreateRequest, PhotoMetadataUpdateRequest,
-    PhotoVersionResponse, PhotoMetadataResponse, PlaylistResponse,
-    RotationScheduleResponse, PhotoCacheResponse
-)
-from .media_repository import MediaRepository
 from core.nats_client import Event, EventType, ServiceSource
+
+from .media_repository import MediaRepository
+from .models import (
+    CacheStatus,
+    PhotoCache,
+    PhotoCacheResponse,
+    PhotoMetadata,
+    PhotoMetadataResponse,
+    PhotoMetadataUpdateRequest,
+    PhotoVersion,
+    PhotoVersionCreateRequest,
+    PhotoVersionResponse,
+    PhotoVersionType,
+    Playlist,
+    PlaylistCreateRequest,
+    PlaylistResponse,
+    PlaylistType,
+    PlaylistUpdateRequest,
+    RotationSchedule,
+    RotationScheduleCreateRequest,
+    RotationScheduleResponse,
+    ScheduleType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,27 +53,33 @@ except ImportError:
 
 # ==================== Custom Exceptions ====================
 
+
 class MediaServiceError(Exception):
     """Base exception for media service errors"""
+
     pass
 
 
 class MediaNotFoundError(MediaServiceError):
     """Media resource not found"""
+
     pass
 
 
 class MediaValidationError(MediaServiceError):
     """Media data validation error"""
+
     pass
 
 
 class MediaPermissionError(MediaServiceError):
     """Media permission error"""
+
     pass
 
 
 # ==================== Media Service ====================
+
 
 class MediaService:
     """Media service - business logic layer for media operations"""
@@ -84,7 +104,7 @@ class MediaService:
         self,
         request: PhotoVersionCreateRequest,
         user_id: str,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
     ) -> PhotoVersionResponse:
         """
         Create a new photo version
@@ -110,8 +130,7 @@ class MediaService:
 
             # Get current version count for this photo
             existing_versions = await self.repository.list_photo_versions(
-                request.photo_id,
-                user_id
+                request.photo_id, user_id
             )
             version_number = len(existing_versions) + 1
 
@@ -128,7 +147,7 @@ class MediaService:
                 processing_params=request.processing_params or {},
                 metadata={},
                 is_current=False,
-                version_number=version_number
+                version_number=version_number,
             )
 
             # Save to database
@@ -149,8 +168,8 @@ class MediaService:
                             "user_id": user_id,
                             "version_type": created_version.version_type.value,
                             "version_number": created_version.version_number,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
@@ -165,9 +184,7 @@ class MediaService:
             raise MediaServiceError(f"Failed to create photo version: {str(e)}")
 
     async def get_photo_version(
-        self,
-        version_id: str,
-        user_id: str
+        self, version_id: str, user_id: str
     ) -> PhotoVersionResponse:
         """
         Get photo version by ID
@@ -194,9 +211,7 @@ class MediaService:
         return self._version_to_response(version)
 
     async def list_photo_versions(
-        self,
-        photo_id: str,
-        user_id: str
+        self, photo_id: str, user_id: str
     ) -> List[PhotoVersionResponse]:
         """
         List all versions of a photo
@@ -218,7 +233,7 @@ class MediaService:
         file_id: str,
         user_id: str,
         request: PhotoMetadataUpdateRequest,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
     ) -> PhotoMetadataResponse:
         """
         Update or create photo metadata
@@ -262,7 +277,7 @@ class MediaService:
                     ai_scenes=request.ai_scenes or [],
                     ai_colors=request.ai_colors or [],
                     face_detection=request.face_detection or {},
-                    quality_score=request.quality_score
+                    quality_score=request.quality_score,
                 )
 
             # Save to database
@@ -283,8 +298,8 @@ class MediaService:
                             "has_ai_labels": bool(updated.ai_labels),
                             "has_face_detection": bool(updated.face_detection),
                             "quality_score": updated.quality_score,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
@@ -297,9 +312,7 @@ class MediaService:
             raise MediaServiceError(f"Failed to update metadata: {str(e)}")
 
     async def get_photo_metadata(
-        self,
-        file_id: str,
-        user_id: str
+        self, file_id: str, user_id: str
     ) -> Optional[PhotoMetadataResponse]:
         """
         Get photo metadata by file ID
@@ -327,7 +340,7 @@ class MediaService:
         self,
         request: PlaylistCreateRequest,
         user_id: str,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
     ) -> PlaylistResponse:
         """
         Create a new playlist
@@ -359,7 +372,7 @@ class MediaService:
                 photo_ids=request.photo_ids or [],
                 shuffle=request.shuffle,
                 loop=request.loop,
-                transition_duration=request.transition_duration
+                transition_duration=request.transition_duration,
             )
 
             # Save to database
@@ -380,8 +393,8 @@ class MediaService:
                             "user_id": user_id,
                             "playlist_type": created.playlist_type.value,
                             "photo_count": len(created.photo_ids),
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
@@ -395,11 +408,7 @@ class MediaService:
             logger.error(f"Error creating playlist: {e}")
             raise MediaServiceError(f"Failed to create playlist: {str(e)}")
 
-    async def get_playlist(
-        self,
-        playlist_id: str,
-        user_id: str
-    ) -> PlaylistResponse:
+    async def get_playlist(self, playlist_id: str, user_id: str) -> PlaylistResponse:
         """
         Get playlist by ID
 
@@ -421,10 +430,7 @@ class MediaService:
         return self._playlist_to_response(playlist)
 
     async def list_user_playlists(
-        self,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, user_id: str, limit: int = 50, offset: int = 0
     ) -> List[PlaylistResponse]:
         """
         List user's playlists
@@ -441,10 +447,7 @@ class MediaService:
         return [self._playlist_to_response(p) for p in playlists]
 
     async def update_playlist(
-        self,
-        playlist_id: str,
-        user_id: str,
-        request: PlaylistUpdateRequest
+        self, playlist_id: str, user_id: str, request: PlaylistUpdateRequest
     ) -> PlaylistResponse:
         """
         Update playlist
@@ -485,9 +488,7 @@ class MediaService:
 
             # Update playlist
             updated = await self.repository.update_playlist(
-                playlist_id,
-                user_id,
-                update_data
+                playlist_id, user_id, update_data
             )
 
             if not updated:
@@ -503,8 +504,8 @@ class MediaService:
                             "playlist_id": playlist_id,
                             "user_id": user_id,
                             "updated_fields": list(update_data.keys()),
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
@@ -518,11 +519,7 @@ class MediaService:
             logger.error(f"Error updating playlist: {e}")
             raise MediaServiceError(f"Failed to update playlist: {str(e)}")
 
-    async def delete_playlist(
-        self,
-        playlist_id: str,
-        user_id: str
-    ) -> bool:
+    async def delete_playlist(self, playlist_id: str, user_id: str) -> bool:
         """
         Delete playlist
 
@@ -553,8 +550,8 @@ class MediaService:
                         data={
                             "playlist_id": playlist_id,
                             "user_id": user_id,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
@@ -571,9 +568,7 @@ class MediaService:
     # ==================== Rotation Schedule Operations ====================
 
     async def create_rotation_schedule(
-        self,
-        request: RotationScheduleCreateRequest,
-        user_id: str
+        self, request: RotationScheduleCreateRequest, user_id: str
     ) -> RotationScheduleResponse:
         """
         Create a new rotation schedule for a smart frame
@@ -604,7 +599,7 @@ class MediaService:
                 days_of_week=request.days_of_week or [],
                 rotation_interval=request.rotation_interval,
                 shuffle=request.shuffle,
-                is_active=True
+                is_active=True,
             )
 
             # Save to database
@@ -626,12 +621,14 @@ class MediaService:
                             "user_id": user_id,
                             "schedule_type": created.schedule_type.value,
                             "rotation_interval": created.rotation_interval,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
-                    logger.error(f"Failed to publish rotation_schedule.created event: {e}")
+                    logger.error(
+                        f"Failed to publish rotation_schedule.created event: {e}"
+                    )
 
             return self._schedule_to_response(created)
 
@@ -642,9 +639,7 @@ class MediaService:
             raise MediaServiceError(f"Failed to create schedule: {str(e)}")
 
     async def get_rotation_schedule(
-        self,
-        schedule_id: str,
-        user_id: str
+        self, schedule_id: str, user_id: str
     ) -> RotationScheduleResponse:
         """Get rotation schedule by ID"""
         schedule = await self.repository.get_rotation_schedule(schedule_id)
@@ -658,19 +653,14 @@ class MediaService:
         return self._schedule_to_response(schedule)
 
     async def list_frame_schedules(
-        self,
-        frame_id: str,
-        user_id: str
+        self, frame_id: str, user_id: str
     ) -> List[RotationScheduleResponse]:
         """List all schedules for a frame"""
         schedules = await self.repository.list_frame_schedules(frame_id, user_id)
         return [self._schedule_to_response(s) for s in schedules]
 
     async def update_schedule_status(
-        self,
-        schedule_id: str,
-        user_id: str,
-        is_active: bool
+        self, schedule_id: str, user_id: str, is_active: bool
     ) -> RotationScheduleResponse:
         """Update schedule active status"""
         try:
@@ -684,9 +674,7 @@ class MediaService:
 
             # Update status
             updated = await self.repository.update_schedule_status(
-                schedule_id,
-                user_id,
-                is_active
+                schedule_id, user_id, is_active
             )
 
             if not updated:
@@ -702,12 +690,14 @@ class MediaService:
                             "schedule_id": schedule_id,
                             "user_id": user_id,
                             "is_active": is_active,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
-                    logger.error(f"Failed to publish rotation_schedule.updated event: {e}")
+                    logger.error(
+                        f"Failed to publish rotation_schedule.updated event: {e}"
+                    )
 
             return self._schedule_to_response(updated)
 
@@ -717,11 +707,7 @@ class MediaService:
             logger.error(f"Error updating schedule status: {e}")
             raise MediaServiceError(f"Failed to update schedule: {str(e)}")
 
-    async def delete_rotation_schedule(
-        self,
-        schedule_id: str,
-        user_id: str
-    ) -> bool:
+    async def delete_rotation_schedule(self, schedule_id: str, user_id: str) -> bool:
         """Delete rotation schedule"""
         try:
             existing = await self.repository.get_rotation_schedule(schedule_id)
@@ -746,7 +732,7 @@ class MediaService:
         frame_id: str,
         photo_id: str,
         user_id: str,
-        version_id: Optional[str] = None
+        version_id: Optional[str] = None,
     ) -> PhotoCacheResponse:
         """
         Create cache entry for a photo on a smart frame
@@ -762,7 +748,9 @@ class MediaService:
         """
         try:
             # Check if already cached
-            existing = await self.repository.get_frame_cache(frame_id, photo_id, user_id)
+            existing = await self.repository.get_frame_cache(
+                frame_id, photo_id, user_id
+            )
 
             if existing and existing.cache_status == CacheStatus.CACHED:
                 # Already cached, increment hit count
@@ -782,7 +770,7 @@ class MediaService:
                 cache_status=CacheStatus.PENDING,
                 hit_count=0,
                 retry_count=0,
-                expires_at=datetime.now(timezone.utc) + timedelta(days=7)
+                expires_at=datetime.now(timezone.utc) + timedelta(days=7),
             )
 
             # Save to database
@@ -804,8 +792,8 @@ class MediaService:
                             "user_id": user_id,
                             "version_id": version_id,
                             "cache_status": created.cache_status.value,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
@@ -818,17 +806,12 @@ class MediaService:
             raise MediaServiceError(f"Failed to cache photo: {str(e)}")
 
     async def update_cache_status(
-        self,
-        cache_id: str,
-        status: CacheStatus,
-        error_message: Optional[str] = None
+        self, cache_id: str, status: CacheStatus, error_message: Optional[str] = None
     ) -> PhotoCacheResponse:
         """Update photo cache status"""
         try:
             updated = await self.repository.update_cache_status(
-                cache_id,
-                status,
-                error_message
+                cache_id, status, error_message
             )
 
             if not updated:
@@ -841,13 +824,12 @@ class MediaService:
             raise MediaServiceError(f"Failed to update cache: {str(e)}")
 
     async def list_frame_cache(
-        self,
-        frame_id: str,
-        user_id: str,
-        status: Optional[CacheStatus] = None
+        self, frame_id: str, user_id: str, status: Optional[CacheStatus] = None
     ) -> List[PhotoCacheResponse]:
         """List cache entries for a frame"""
-        cache_entries = await self.repository.list_frame_cache(frame_id, user_id, status)
+        cache_entries = await self.repository.list_frame_cache(
+            frame_id, user_id, status
+        )
         return [self._cache_to_response(c) for c in cache_entries]
 
     # ==================== Validation Methods ====================
@@ -901,7 +883,7 @@ class MediaService:
             file_size=version.file_size,
             is_current=version.is_current,
             version_number=version.version_number,
-            created_at=version.created_at
+            created_at=version.created_at,
         )
 
     def _metadata_to_response(self, metadata: PhotoMetadata) -> PhotoMetadataResponse:
@@ -914,7 +896,8 @@ class MediaService:
             ai_labels=metadata.ai_labels,
             ai_objects=metadata.ai_objects,
             ai_scenes=metadata.ai_scenes,
-            quality_score=metadata.quality_score
+            quality_score=metadata.quality_score,
+            full_metadata=metadata.full_metadata,
         )
 
     def _playlist_to_response(self, playlist: Playlist) -> PlaylistResponse:
@@ -930,10 +913,12 @@ class MediaService:
             loop=playlist.loop,
             transition_duration=playlist.transition_duration,
             created_at=playlist.created_at,
-            updated_at=playlist.updated_at
+            updated_at=playlist.updated_at,
         )
 
-    def _schedule_to_response(self, schedule: RotationSchedule) -> RotationScheduleResponse:
+    def _schedule_to_response(
+        self, schedule: RotationSchedule
+    ) -> RotationScheduleResponse:
         """Convert RotationSchedule to response"""
         return RotationScheduleResponse(
             schedule_id=schedule.schedule_id,
@@ -942,7 +927,7 @@ class MediaService:
             schedule_type=schedule.schedule_type,
             rotation_interval=schedule.rotation_interval,
             is_active=schedule.is_active,
-            created_at=schedule.created_at
+            created_at=schedule.created_at,
         )
 
     def _cache_to_response(self, cache: PhotoCache) -> PhotoCacheResponse:
@@ -953,7 +938,7 @@ class MediaService:
             photo_id=cache.photo_id,
             cache_status=cache.cache_status,
             hit_count=cache.hit_count,
-            last_accessed_at=cache.last_accessed_at
+            last_accessed_at=cache.last_accessed_at,
         )
 
     # ==================== Health Check ====================
@@ -966,7 +951,7 @@ class MediaService:
                 "service": "media_service",
                 "status": "healthy" if db_connected else "unhealthy",
                 "database": "connected" if db_connected else "disconnected",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             logger.error(f"Health check failed: {e}")
@@ -974,5 +959,5 @@ class MediaService:
                 "service": "media_service",
                 "status": "unhealthy",
                 "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
