@@ -22,18 +22,114 @@ class AlbumEventHandler:
     Handles events subscribed by Album Service
 
     Subscribes to:
+    - file.uploaded.with_ai: Add photo to user's default album or specified album
     - file.deleted: Remove deleted photos from all albums
     - device.deleted: Clean up sync status for deleted devices
     """
 
-    def __init__(self, album_repository):
+    def __init__(self, album_repository, album_service=None, mqtt_publisher=None):
         """
         Initialize event handler
 
         Args:
             album_repository: AlbumRepository instance for data access
+            album_service: AlbumService instance for business logic
+            mqtt_publisher: AlbumMQTTPublisher instance for MQTT notifications
         """
         self.album_repo = album_repository
+        self.album_service = album_service
+        self.mqtt_publisher = mqtt_publisher
+
+    async def handle_file_uploaded_with_ai(self, event_data: Dict[str, Any]) -> bool:
+        """
+        Handle file.uploaded.with_ai event
+
+        When a photo is uploaded with AI metadata, automatically add it to:
+        1. Album specified in upload metadata (if provided)
+        2. User's default album (if no album specified)
+
+        Then publish MQTT notification to subscribed smart frames
+
+        Args:
+            event_data: Event data containing file_id, user_id, metadata
+
+        Returns:
+            bool: True if handled successfully
+        """
+        try:
+            file_id = event_data.get('file_id')
+            user_id = event_data.get('user_id')
+            metadata = event_data.get('metadata', {})
+            ai_metadata = event_data.get('ai_metadata', {})
+
+            if not file_id or not user_id:
+                logger.warning("file.uploaded.with_ai event missing file_id or user_id")
+                return False
+
+            logger.info(f"Handling file.uploaded.with_ai event for file {file_id}")
+
+            # Check if album_id is specified in upload metadata
+            album_id = metadata.get('album_id')
+
+            if album_id:
+                # Add photo to specified album
+                await self.album_repo.add_photo_to_album(album_id, file_id, user_id)
+                logger.info(f"Added photo {file_id} to specified album {album_id}")
+
+                # Publish MQTT notification
+                if self.mqtt_publisher:
+                    photo_metadata = {
+                        'file_name': event_data.get('file_name'),
+                        'content_type': event_data.get('content_type'),
+                        'file_size': event_data.get('file_size'),
+                        'ai_metadata': ai_metadata,
+                        'created_at': event_data.get('timestamp')
+                    }
+                    await self.mqtt_publisher.publish_photo_added(
+                        album_id=album_id,
+                        file_id=file_id,
+                        photo_metadata=photo_metadata
+                    )
+
+                # Publish NATS event if album_service is available
+                if self.album_service and hasattr(self.album_service, 'event_publishers'):
+                    await self.album_service.event_publishers.publish_album_photo_added(
+                        album_id=album_id,
+                        file_id=file_id,
+                        added_by=user_id,
+                        photo_metadata=photo_metadata
+                    )
+
+            else:
+                # Get or create user's default album
+                # This requires album_service to have a get_or_create_default_album method
+                if self.album_service:
+                    default_album = await self.album_service.get_or_create_default_album(user_id)
+                    if default_album:
+                        album_id = default_album.get('album_id')
+                        await self.album_repo.add_photo_to_album(album_id, file_id, user_id)
+                        logger.info(f"Added photo {file_id} to default album {album_id}")
+
+                        # Publish MQTT notification
+                        if self.mqtt_publisher:
+                            photo_metadata = {
+                                'file_name': event_data.get('file_name'),
+                                'content_type': event_data.get('content_type'),
+                                'file_size': event_data.get('file_size'),
+                                'ai_metadata': ai_metadata,
+                                'created_at': event_data.get('timestamp')
+                            }
+                            await self.mqtt_publisher.publish_photo_added(
+                                album_id=album_id,
+                                file_id=file_id,
+                                photo_metadata=photo_metadata
+                            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to handle file.uploaded.with_ai event: {e}", exc_info=True)
+            return False
 
     async def handle_file_deleted(self, event_data: Dict[str, Any]) -> bool:
         """
@@ -110,7 +206,9 @@ class AlbumEventHandler:
         try:
             event_type = event.type
 
-            if event_type == EventType.FILE_DELETED.value:
+            if event_type == EventType.FILE_UPLOADED_WITH_AI.value:
+                return await self.handle_file_uploaded_with_ai(event.data)
+            elif event_type == EventType.FILE_DELETED.value:
                 return await self.handle_file_deleted(event.data)
             elif event_type == EventType.DEVICE_OFFLINE.value:
                 # We're treating device.deleted similarly to device.offline

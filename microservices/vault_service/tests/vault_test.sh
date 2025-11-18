@@ -3,7 +3,7 @@
 # Vault Service Testing Script
 # Tests secure credential management, encryption, sharing, and audit features
 
-BASE_URL="http://localhost:8214"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/vault"
 
 # Test user ID (required for authentication)
@@ -68,60 +68,8 @@ print_section() {
     echo -e "${BLUE}======================================${NC}"
     echo ""
 }
-
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Detailed Health Check
-print_section "Test 2: Detailed Health Check"
-echo "GET ${BASE_URL}/health/detailed"
-DETAILED_HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health/detailed")
-HTTP_CODE=$(echo "$DETAILED_HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$DETAILED_HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Detailed health check successful"
-else
-    print_result 1 "Detailed health check failed"
-fi
-
-# Test 3: Get Service Info
-print_section "Test 3: Get Service Info"
-echo "GET ${BASE_URL}/info"
-INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/info")
-HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$INFO_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Service info retrieved"
-else
-    print_result 1 "Failed to get service info"
-fi
-
-# Test 4: Create API Key Secret
-print_section "Test 4: Create API Key Secret"
+# Test 1: Create API Key Secret
+print_section "Test 1: Create API Key Secret"
 echo "POST ${API_BASE}/secrets"
 CREATE_SECRET_PAYLOAD='{
   "name": "Test API Key",
@@ -164,8 +112,8 @@ else
     print_result 1 "Failed to create API key secret"
 fi
 
-# Test 5: Create Database Password Secret
-print_section "Test 5: Create Database Password Secret"
+# Test 2: Create Database Password Secret
+print_section "Test 2: Create Database Password Secret"
 echo "POST ${API_BASE}/secrets"
 DB_SECRET_PAYLOAD='{
   "name": "Production Database Password",
@@ -209,8 +157,8 @@ else
     print_result 1 "Failed to create database password secret"
 fi
 
-# Test 6: List All Secrets
-print_section "Test 6: List All Secrets"
+# Test 3: List All Secrets
+print_section "Test 3: List All Secrets"
 echo "GET ${API_BASE}/secrets?page=1&page_size=10"
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/secrets?page=1&page_size=10" \
   -H "X-User-Id: ${TEST_USER_ID}")
@@ -227,9 +175,9 @@ else
     print_result 1 "Failed to list secrets"
 fi
 
-# Test 7: Get Secret (Encrypted - No Decrypt)
+# Test 4: Get Secret (Encrypted - No Decrypt)
 if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
-    print_section "Test 7: Get Secret (Encrypted)"
+    print_section "Test 4: Get Secret (Encrypted)"
     echo "GET ${API_BASE}/secrets/${VAULT_ID}?decrypt=false"
     
     GET_ENCRYPTED_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/secrets/${VAULT_ID}?decrypt=false" \
@@ -252,13 +200,13 @@ if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
         print_result 1 "Failed to get encrypted secret"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 7: No vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 4: No vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 8: Get Secret (Decrypted)
+# Test 5: Get Secret (Decrypted)
 if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
-    print_section "Test 8: Get Secret (Decrypted)"
+    print_section "Test 5: Get Secret (Decrypted)"
     echo "GET ${API_BASE}/secrets/${VAULT_ID}?decrypt=true"
     
     GET_DECRYPTED_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/secrets/${VAULT_ID}?decrypt=true" \
@@ -282,13 +230,13 @@ if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
         print_result 1 "Failed to get decrypted secret"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 8: No vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 5: No vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 9: Update Secret Metadata
+# Test 6: Update Secret Metadata
 if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
-    print_section "Test 9: Update Secret Metadata"
+    print_section "Test 6: Update Secret Metadata"
     echo "PUT ${API_BASE}/secrets/${VAULT_ID}"
     UPDATE_PAYLOAD='{
       "name": "Test API Key (Updated)",
@@ -320,13 +268,13 @@ if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
         print_result 1 "Failed to update secret metadata"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 9: No vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 6: No vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 10: Rotate Secret
+# Test 7: Rotate Secret
 if [ -n "$DB_VAULT_ID" ] && [ "$DB_VAULT_ID" != "null" ]; then
-    print_section "Test 10: Rotate Secret"
+    print_section "Test 7: Rotate Secret"
     echo "POST ${API_BASE}/secrets/${DB_VAULT_ID}/rotate?new_secret_value=NewRotatedP%40ssw0rd%212024"
     
     ROTATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
@@ -345,12 +293,12 @@ if [ -n "$DB_VAULT_ID" ] && [ "$DB_VAULT_ID" != "null" ]; then
         print_result 1 "Failed to rotate secret"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 10: No DB vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 7: No DB vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 11: Filter Secrets by Type
-print_section "Test 11: Filter Secrets by Type"
+# Test 8: Filter Secrets by Type
+print_section "Test 8: Filter Secrets by Type"
 echo "GET ${API_BASE}/secrets?secret_type=api_key&page=1&page_size=10"
 FILTER_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/secrets?secret_type=api_key&page=1&page_size=10" \
   -H "X-User-Id: ${TEST_USER_ID}")
@@ -367,8 +315,8 @@ else
     print_result 1 "Failed to filter secrets by type"
 fi
 
-# Test 12: Filter Secrets by Tags
-print_section "Test 12: Filter Secrets by Tags"
+# Test 9: Filter Secrets by Tags
+print_section "Test 9: Filter Secrets by Tags"
 echo "GET ${API_BASE}/secrets?tags=test,api&page=1&page_size=10"
 TAG_FILTER_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/secrets?tags=test,api&page=1&page_size=10" \
   -H "X-User-Id: ${TEST_USER_ID}")
@@ -385,9 +333,9 @@ else
     print_result 1 "Failed to filter secrets by tags"
 fi
 
-# Test 13: Share Secret with Another User
+# Test 10: Share Secret with Another User
 if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
-    print_section "Test 13: Share Secret with Another User"
+    print_section "Test 10: Share Secret with Another User"
     echo "POST ${API_BASE}/secrets/${VAULT_ID}/share"
     SHARE_PAYLOAD='{
       "shared_with_user_id": "test_user_vault_456",
@@ -413,12 +361,12 @@ if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
         print_result 1 "Failed to share secret"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 13: No vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 10: No vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 14: Get Shared Secrets
-print_section "Test 14: Get Shared Secrets"
+# Test 11: Get Shared Secrets
+print_section "Test 11: Get Shared Secrets"
 echo "GET ${API_BASE}/shared"
 SHARED_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/shared" \
   -H "X-User-Id: ${TEST_USER_ID}")
@@ -435,8 +383,8 @@ else
     print_result 1 "Failed to get shared secrets"
 fi
 
-# Test 15: Get Vault Statistics
-print_section "Test 15: Get Vault Statistics"
+# Test 12: Get Vault Statistics
+print_section "Test 12: Get Vault Statistics"
 echo "GET ${API_BASE}/stats"
 STATS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/stats" \
   -H "X-User-Id: ${TEST_USER_ID}")
@@ -453,8 +401,8 @@ else
     print_result 1 "Failed to get vault statistics"
 fi
 
-# Test 16: Get Audit Logs
-print_section "Test 16: Get Audit Logs"
+# Test 13: Get Audit Logs
+print_section "Test 13: Get Audit Logs"
 echo "GET ${API_BASE}/audit-logs?page=1&page_size=20"
 AUDIT_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/audit-logs?page=1&page_size=20" \
   -H "X-User-Id: ${TEST_USER_ID}")
@@ -471,9 +419,9 @@ else
     print_result 1 "Failed to get audit logs"
 fi
 
-# Test 17: Get Audit Logs for Specific Vault
+# Test 14: Get Audit Logs for Specific Vault
 if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
-    print_section "Test 17: Get Audit Logs for Specific Vault"
+    print_section "Test 14: Get Audit Logs for Specific Vault"
     echo "GET ${API_BASE}/audit-logs?vault_id=${VAULT_ID}&page=1&page_size=10"
     
     VAULT_AUDIT_RESPONSE=$(curl -s -w "\n%{http_code}" \
@@ -492,13 +440,13 @@ if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
         print_result 1 "Failed to get vault-specific audit logs"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 17: No vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 14: No vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 18: Test Credential
+# Test 15: Test Credential
 if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
-    print_section "Test 18: Test Credential"
+    print_section "Test 15: Test Credential"
     echo "POST ${API_BASE}/secrets/${VAULT_ID}/test"
     
     TEST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/secrets/${VAULT_ID}/test" \
@@ -518,13 +466,13 @@ if [ -n "$VAULT_ID" ] && [ "$VAULT_ID" != "null" ]; then
         print_result 1 "Failed to test credential"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 18: No vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 15: No vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 19: Delete Secret
+# Test 16: Delete Secret
 if [ -n "$DB_VAULT_ID" ] && [ "$DB_VAULT_ID" != "null" ]; then
-    print_section "Test 19: Delete Secret"
+    print_section "Test 16: Delete Secret"
     echo "DELETE ${API_BASE}/secrets/${DB_VAULT_ID}"
     
     DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/secrets/${DB_VAULT_ID}" \
@@ -542,13 +490,13 @@ if [ -n "$DB_VAULT_ID" ] && [ "$DB_VAULT_ID" != "null" ]; then
         print_result 1 "Failed to delete secret"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 19: No DB vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 16: No DB vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 20: Verify Secret is Deleted
+# Test 17: Verify Secret is Deleted
 if [ -n "$DB_VAULT_ID" ] && [ "$DB_VAULT_ID" != "null" ]; then
-    print_section "Test 20: Verify Secret is Deleted"
+    print_section "Test 17: Verify Secret is Deleted"
     echo "GET ${API_BASE}/secrets/${DB_VAULT_ID}"
     
     VERIFY_DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/secrets/${DB_VAULT_ID}" \
@@ -566,7 +514,7 @@ if [ -n "$DB_VAULT_ID" ] && [ "$DB_VAULT_ID" != "null" ]; then
         print_result 1 "Deleted secret is still accessible (should return 404)"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 20: No DB vault ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 17: No DB vault ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

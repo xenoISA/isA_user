@@ -269,7 +269,7 @@ async def get_user_context(
 # Data Ingestion Endpoints
 # ======================
 
-@app.post("/api/v1/devices/{device_id}/telemetry")
+@app.post("/api/v1/telemetry/devices/{device_id}/telemetry")
 async def ingest_single_data_point(
     device_id: str = Path(..., description="Device ID"),
     data_point: TelemetryDataPoint = Body(...),
@@ -291,7 +291,7 @@ async def ingest_single_data_point(
         logger.error(f"Error ingesting single data point: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/devices/{device_id}/telemetry/batch")
+@app.post("/api/v1/telemetry/devices/{device_id}/telemetry/batch")
 async def ingest_batch_data(
     device_id: str = Path(..., description="Device ID"),
     request: TelemetryBatchRequest = Body(...),
@@ -330,7 +330,7 @@ async def ingest_bulk_data(
 # Metric Management
 # ======================
 
-@app.post("/api/v1/metrics", response_model=MetricDefinitionResponse)
+@app.post("/api/v1/telemetry/metrics", response_model=MetricDefinitionResponse)
 async def create_metric_definition(
     request: MetricDefinitionRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -348,7 +348,7 @@ async def create_metric_definition(
         logger.error(f"Error creating metric definition: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/metrics")
+@app.get("/api/v1/telemetry/metrics")
 async def list_metric_definitions(
     data_type: Optional[DataType] = Query(None, description="Filter by data type"),
     metric_type: Optional[MetricType] = Query(None, description="Filter by metric type"),
@@ -380,7 +380,7 @@ async def list_metric_definitions(
         logger.error(f"Error listing metric definitions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/metrics/{metric_name}", response_model=MetricDefinitionResponse)
+@app.get("/api/v1/telemetry/metrics/{metric_name}", response_model=MetricDefinitionResponse)
 async def get_metric_definition(
     metric_name: str = Path(..., description="Metric name"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -412,7 +412,7 @@ async def get_metric_definition(
         logger.error(f"Error getting metric definition: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/v1/metrics/{metric_name}")
+@app.delete("/api/v1/telemetry/metrics/{metric_name}")
 async def delete_metric_definition(
     metric_name: str = Path(..., description="Metric name"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -434,7 +434,7 @@ async def delete_metric_definition(
 # Data Query Endpoints
 # ======================
 
-@app.post("/api/v1/query", response_model=TelemetryDataResponse)
+@app.post("/api/v1/telemetry/query", response_model=TelemetryDataResponse)
 async def query_telemetry_data(
     request: QueryRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -449,7 +449,7 @@ async def query_telemetry_data(
         logger.error(f"Error querying telemetry data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/{device_id}/metrics/{metric_name}/latest")
+@app.get("/api/v1/telemetry/devices/{device_id}/metrics/{metric_name}/latest")
 async def get_latest_value(
     device_id: str = Path(..., description="Device ID"),
     metric_name: str = Path(..., description="Metric name"),
@@ -498,7 +498,7 @@ async def get_latest_value(
         logger.error(f"Error getting latest value: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/{device_id}/metrics", response_model=List[str])
+@app.get("/api/v1/telemetry/devices/{device_id}/metrics", response_model=List[str])
 async def get_device_metrics(
     device_id: str = Path(..., description="Device ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -516,7 +516,7 @@ async def get_device_metrics(
         logger.error(f"Error getting device metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/{device_id}/metrics/{metric_name}/range")
+@app.get("/api/v1/telemetry/devices/{device_id}/metrics/{metric_name}/range")
 async def get_metric_range(
     device_id: str = Path(..., description="Device ID"),
     metric_name: str = Path(..., description="Metric name"),
@@ -564,7 +564,7 @@ async def get_metric_range(
 # Aggregation Endpoints
 # ======================
 
-@app.get("/api/v1/aggregated", response_model=AggregatedDataResponse)
+@app.get("/api/v1/telemetry/aggregated", response_model=AggregatedDataResponse)
 async def get_aggregated_data(
     metric_name: str = Query(..., description="Metric name"),
     aggregation_type: AggregationType = Query(..., description="Aggregation type"),
@@ -597,7 +597,7 @@ async def get_aggregated_data(
 # Alert Management
 # ======================
 
-@app.post("/api/v1/alerts/rules", response_model=AlertRuleResponse)
+@app.post("/api/v1/telemetry/alerts/rules", response_model=AlertRuleResponse)
 async def create_alert_rule(
     request: AlertRuleRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -615,7 +615,7 @@ async def create_alert_rule(
         logger.error(f"Error creating alert rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/alerts/rules")
+@app.get("/api/v1/telemetry/alerts/rules")
 async def list_alert_rules(
     enabled: Optional[bool] = Query(None, description="Filter by enabled status"),
     level: Optional[AlertLevel] = Query(None, description="Filter by alert level"),
@@ -656,7 +656,7 @@ async def list_alert_rules(
         logger.error(f"Error listing alert rules: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/alerts/rules/{rule_id}", response_model=AlertRuleResponse)
+@app.get("/api/v1/telemetry/alerts/rules/{rule_id}", response_model=AlertRuleResponse)
 async def get_alert_rule(
     rule_id: str = Path(..., description="Alert rule ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -696,7 +696,7 @@ async def get_alert_rule(
         logger.error(f"Error getting alert rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/v1/alerts/rules/{rule_id}/enable")
+@app.put("/api/v1/telemetry/alerts/rules/{rule_id}/enable")
 async def enable_alert_rule(
     rule_id: str = Path(..., description="Alert rule ID"),
     enabled: bool = Body(..., embed=True),
@@ -719,7 +719,7 @@ async def enable_alert_rule(
         logger.error(f"Error enabling/disabling alert rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/alerts", response_model=AlertListResponse)
+@app.get("/api/v1/telemetry/alerts", response_model=AlertListResponse)
 async def list_alerts(
     status: Optional[AlertStatus] = Query(None, description="Filter by status"),
     level: Optional[AlertLevel] = Query(None, description="Filter by level"),
@@ -769,7 +769,7 @@ async def list_alerts(
         logger.error(f"Error listing alerts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/v1/alerts/{alert_id}/acknowledge")
+@app.put("/api/v1/telemetry/alerts/{alert_id}/acknowledge")
 async def acknowledge_alert(
     alert_id: str = Path(..., description="Alert ID"),
     note: Optional[str] = Body(None, embed=True),
@@ -795,7 +795,7 @@ async def acknowledge_alert(
         logger.error(f"Error acknowledging alert: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/v1/alerts/{alert_id}/resolve")
+@app.put("/api/v1/telemetry/alerts/{alert_id}/resolve")
 async def resolve_alert(
     alert_id: str = Path(..., description="Alert ID"),
     note: Optional[str] = Body(None, embed=True),
@@ -803,46 +803,19 @@ async def resolve_alert(
 ):
     """解决警报"""
     try:
-        # Get alert details before updating
-        alerts = await microservice.service.repository.get_alerts()
-        alert_data = next((a for a in alerts if a.get("alert_id") == alert_id), None)
+        # Use service method to resolve alert (handles event publishing)
+        success = await microservice.service.resolve_alert(
+            alert_id=alert_id,
+            resolved_by=user_context["user_id"],
+            resolution_note=note
+        )
 
-        now = datetime.now(timezone.utc)
-        update_data = {
-            "status": AlertStatus.RESOLVED.value,
-            "resolved_at": now,
-            "resolved_by": user_context["user_id"]
-        }
-        if note:
-            update_data["resolution_note"] = note
-
-        success = await microservice.service.repository.update_alert(alert_id, update_data)
         if success:
-            # Publish alert.resolved event
-            if microservice.event_bus and alert_data:
-                try:
-                    event = Event(
-                        event_type=EventType.ALERT_RESOLVED,
-                        source=ServiceSource.TELEMETRY_SERVICE,
-                        data={
-                            "alert_id": alert_id,
-                            "rule_id": alert_data.get("rule_id"),
-                            "rule_name": alert_data.get("rule_name"),
-                            "device_id": alert_data.get("device_id"),
-                            "metric_name": alert_data.get("metric_name"),
-                            "level": alert_data.get("level"),
-                            "resolved_by": user_context["user_id"],
-                            "resolution_note": note,
-                            "timestamp": now.isoformat()
-                        }
-                    )
-                    await microservice.event_bus.publish_event(event)
-                except Exception as e:
-                    logger.error(f"Failed to publish alert.resolved event: {e}")
-
             return {"message": "Alert resolved successfully"}
 
         raise HTTPException(status_code=404, detail="Alert not found")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
         logger.error(f"Error resolving alert: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -851,7 +824,7 @@ async def resolve_alert(
 # Statistics Endpoints
 # ======================
 
-@app.get("/api/v1/devices/{device_id}/stats", response_model=DeviceTelemetryStatsResponse)
+@app.get("/api/v1/telemetry/devices/{device_id}/stats", response_model=DeviceTelemetryStatsResponse)
 async def get_device_telemetry_stats(
     device_id: str = Path(..., description="Device ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -868,7 +841,7 @@ async def get_device_telemetry_stats(
         logger.error(f"Error getting device stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/stats", response_model=TelemetryStatsResponse)
+@app.get("/api/v1/telemetry/stats", response_model=TelemetryStatsResponse)
 async def get_telemetry_stats(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
@@ -888,7 +861,7 @@ async def get_telemetry_stats(
 # Real-time Data Streaming
 # ======================
 
-@app.post("/api/v1/subscribe")
+@app.post("/api/v1/telemetry/subscribe")
 async def subscribe_real_time_data(
     request: RealTimeSubscriptionRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -907,7 +880,7 @@ async def subscribe_real_time_data(
         logger.error(f"Error creating subscription: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/v1/subscribe/{subscription_id}")
+@app.delete("/api/v1/telemetry/subscribe/{subscription_id}")
 async def unsubscribe_real_time_data(
     subscription_id: str = Path(..., description="Subscription ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -951,7 +924,7 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
 # Data Export
 # ======================
 
-@app.get("/api/v1/export/csv")
+@app.get("/api/v1/telemetry/export/csv")
 async def export_csv(
     device_ids: List[str] = Query(..., description="Device IDs"),
     metric_names: List[str] = Query(..., description="Metric names"),
@@ -1010,7 +983,7 @@ async def export_csv(
 # Service Statistics
 # ======================
 
-@app.get("/api/v1/service/stats")
+@app.get("/api/v1/telemetry/service/stats")
 async def get_service_stats():
     """获取服务统计信息"""
     return {

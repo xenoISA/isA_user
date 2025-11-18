@@ -18,13 +18,24 @@ from .models import (
     OrderSearchParams, Order, OrderStatus, OrderType, PaymentStatus,
     PaymentServiceRequest, WalletServiceRequest
 )
-from core.nats_client import Event, EventType, ServiceSource
 
-# Import service clients for synchronous dependencies (architecture design)
-from microservices.payment_service.client import PaymentServiceClient
-from microservices.wallet_service.client import WalletServiceClient
-from microservices.account_service.client import AccountServiceClient
-from microservices.storage_service.client import StorageServiceClient
+# Import event publishers
+from .events.publishers import (
+    publish_order_created,
+    publish_order_updated,
+    publish_order_canceled,
+    publish_order_completed,
+    publish_order_expired
+)
+
+# Import service clients
+from .clients import (
+    PaymentClient,
+    WalletClient,
+    AccountClient,
+    StorageClient,
+    BillingClient
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,21 +62,38 @@ class OrderService:
     Handles order lifecycle, payment integration, and wallet communication.
     """
 
-    def __init__(self, event_bus=None):
+    def __init__(
+        self,
+        event_bus=None,
+        payment_client: Optional[PaymentClient] = None,
+        wallet_client: Optional[WalletClient] = None,
+        account_client: Optional[AccountClient] = None,
+        storage_client: Optional[StorageClient] = None,
+        billing_client: Optional[BillingClient] = None
+    ):
+        """
+        Initialize Order Service
+
+        Args:
+            event_bus: NATS event bus instance (optional)
+            payment_client: Payment service client (optional, dependency injection)
+            wallet_client: Wallet service client (optional, dependency injection)
+            account_client: Account service client (optional, dependency injection)
+            storage_client: Storage service client (optional, dependency injection)
+            billing_client: Billing service client (optional, dependency injection)
+        """
         self.order_repo = OrderRepository()
+        self.repository = self.order_repo  # Alias for consistency
         self.event_bus = event_bus
 
-        # Initialize service clients for synchronous dependencies
-        self.payment_client = PaymentServiceClient()
-        self.wallet_client = WalletServiceClient()
-        self.account_client = AccountServiceClient()
-        self.storage_client = StorageServiceClient()
-        logger.info("Order Service initialized with all service clients")
+        # Service clients (dependency injection)
+        self.payment_client = payment_client
+        self.wallet_client = wallet_client
+        self.account_client = account_client
+        self.storage_client = storage_client
+        self.billing_client = billing_client
 
-    def _get_service_url(self, service_name: str, fallback_port: int) -> str:
-        """Get service URL from environment or use fallback"""
-        fallback_url = f"http://localhost:{fallback_port}"
-        return fallback_url
+        logger.info("✅ OrderService initialized")
         
     # Order Lifecycle Operations
     
@@ -118,21 +146,16 @@ class OrderService:
             # Publish ORDER_CREATED event
             if self.event_bus:
                 try:
-                    event = Event(
-                        event_type=EventType.ORDER_CREATED,
-                        source=ServiceSource.ORDER_SERVICE,
-                        data={
-                            "order_id": order.order_id,
-                            "user_id": request.user_id,
-                            "order_type": request.order_type.value,
-                            "total_amount": float(request.total_amount),
-                            "currency": request.currency,
-                            "payment_intent_id": request.payment_intent_id,
-                            "items": request.items,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_order_created(
+                        event_bus=self.event_bus,
+                        order_id=order.order_id,
+                        user_id=request.user_id,
+                        order_type=request.order_type.value,
+                        total_amount=float(request.total_amount),
+                        currency=request.currency,
+                        payment_intent_id=request.payment_intent_id,
+                        items=request.items
                     )
-                    await self.event_bus.publish_event(event)
                     logger.info(f"Published order.created event for order {order.order_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish order.created event: {e}")
@@ -241,21 +264,16 @@ class OrderService:
                 # Publish ORDER_CANCELED event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.ORDER_CANCELED,
-                            source=ServiceSource.ORDER_SERVICE,
-                            data={
-                                "order_id": order_id,
-                                "user_id": existing_order.user_id,
-                                "order_type": existing_order.order_type.value,
-                                "total_amount": float(existing_order.total_amount),
-                                "currency": existing_order.currency,
-                                "reason": request.reason,
-                                "refund_amount": float(request.refund_amount) if request.refund_amount else 0,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_order_canceled(
+                            event_bus=self.event_bus,
+                            order_id=order_id,
+                            user_id=existing_order.user_id,
+                            order_type=existing_order.order_type.value,
+                            total_amount=float(existing_order.total_amount),
+                            currency=existing_order.currency,
+                            reason=request.reason,
+                            refund_amount=float(request.refund_amount) if request.refund_amount else 0
                         )
-                        await self.event_bus.publish_event(event)
                         logger.info(f"Published order.canceled event for order {order_id}")
                     except Exception as e:
                         logger.error(f"Failed to publish order.canceled event: {e}")
@@ -321,22 +339,17 @@ class OrderService:
                 # Publish ORDER_COMPLETED event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.ORDER_COMPLETED,
-                            source=ServiceSource.ORDER_SERVICE,
-                            data={
-                                "order_id": order_id,
-                                "user_id": existing_order.user_id,
-                                "order_type": existing_order.order_type.value,
-                                "total_amount": float(existing_order.total_amount),
-                                "currency": existing_order.currency,
-                                "transaction_id": request.transaction_id,
-                                "payment_confirmed": request.payment_confirmed,
-                                "credits_added": request.credits_added if request.credits_added else 0,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_order_completed(
+                            event_bus=self.event_bus,
+                            order_id=order_id,
+                            user_id=existing_order.user_id,
+                            order_type=existing_order.order_type.value,
+                            total_amount=float(existing_order.total_amount),
+                            currency=existing_order.currency,
+                            transaction_id=request.transaction_id,
+                            payment_confirmed=request.payment_confirmed,
+                            credits_added=request.credits_added if request.credits_added else 0
                         )
-                        await self.event_bus.publish_event(event)
                         logger.info(f"Published order.completed event for order {order_id}")
                     except Exception as e:
                         logger.error(f"Failed to publish order.completed event: {e}")

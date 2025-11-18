@@ -3,7 +3,7 @@
 # Compliance Check Test Script
 # Test content moderation and compliance checking
 
-BASE_URL="http://localhost:8226"
+BASE_URL="http://localhost"
 
 echo "=========================================="
 echo "Compliance Service Test Script"

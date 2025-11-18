@@ -29,10 +29,10 @@ SERVICE_ROUTES = [
         "description": "Get wallet details"
     },
     {
-        "path": "/api/v1/users/{user_id}/wallets",
+        "path": "/api/v1/wallets",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List user wallets"
+        "description": "List user wallets (with user_id query parameter)"
     },
     {
         "path": "/api/v1/wallets/{wallet_id}/balance",
@@ -61,10 +61,10 @@ SERVICE_ROUTES = [
         "description": "Consume wallet balance"
     },
     {
-        "path": "/api/v1/users/{user_id}/credits/consume",
+        "path": "/api/v1/wallets/credits/consume",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Consume user credits"
+        "description": "Consume user credits (with user_id query parameter)"
     },
     {
         "path": "/api/v1/wallets/{wallet_id}/transfer",
@@ -87,10 +87,10 @@ SERVICE_ROUTES = [
         "description": "Get wallet transaction history"
     },
     {
-        "path": "/api/v1/users/{user_id}/transactions",
+        "path": "/api/v1/wallets/transactions",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user transaction history"
+        "description": "Get user transaction history (with user_id query parameter)"
     },
 
     # Statistics & Credits
@@ -101,16 +101,16 @@ SERVICE_ROUTES = [
         "description": "Get wallet statistics"
     },
     {
-        "path": "/api/v1/users/{user_id}/statistics",
+        "path": "/api/v1/wallets/statistics",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user wallet statistics"
+        "description": "Get user wallet statistics (with user_id query parameter)"
     },
     {
-        "path": "/api/v1/users/{user_id}/credits/balance",
+        "path": "/api/v1/wallets/credits/balance",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user credit balance"
+        "description": "Get user credit balance (with user_id query parameter)"
     },
     {
         "path": "/api/v1/wallet/stats",

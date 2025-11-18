@@ -44,10 +44,10 @@ ORGANIZATION_SERVICE_ROUTES = [
         "description": "Organization CRUD operations"
     },
     {
-        "path": "/api/v1/users/organizations",
+        "path": "/api/v1/organizations",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user organizations"
+        "description": "Get user organizations (user_id from auth)"
     },
 
     # Member Management

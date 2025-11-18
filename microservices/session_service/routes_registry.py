@@ -47,10 +47,10 @@ SERVICE_ROUTES = [
         "description": "Delete session"
     },
     {
-        "path": "/api/v1/users/{user_id}/sessions",
+        "path": "/api/v1/sessions",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List user sessions"
+        "description": "List user sessions (with user_id query parameter)"
     },
 
     # Session Messages

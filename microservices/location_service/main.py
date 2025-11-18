@@ -7,36 +7,43 @@ Supports real-time location tracking, geofences, places, and route management
 Port: 8224
 """
 
+import logging
 import os
 import sys
-import logging
-from pathlib import Path
-from typing import Optional, List
-from datetime import datetime
-
-from fastapi import FastAPI, HTTPException, Query, Depends
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+
 from isa_common.consul_client import ConsulRegistry
 
-from .models import (
-    LocationReportRequest, LocationBatchRequest,
-    GeofenceCreateRequest, GeofenceUpdateRequest,
-    PlaceCreateRequest, PlaceUpdateRequest,
-    RouteStartRequest, NearbySearchRequest,
-    RadiusSearchRequest, PolygonSearchRequest,
-    LocationServiceStatus, LocationOperationResult
-)
 from .location_service import LocationService
-from .routes_registry import get_routes_for_consul, SERVICE_METADATA
+from .models import (
+    GeofenceCreateRequest,
+    GeofenceUpdateRequest,
+    LocationBatchRequest,
+    LocationOperationResult,
+    LocationReportRequest,
+    LocationServiceStatus,
+    NearbySearchRequest,
+    PlaceCreateRequest,
+    PlaceUpdateRequest,
+    PolygonSearchRequest,
+    RadiusSearchRequest,
+    RouteStartRequest,
+)
+from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Initialize configuration
 config_manager = ConfigManager("location_service")
@@ -81,22 +88,24 @@ async def lifespan(app: FastAPI):
 
             # 合并服务元数据
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
             }
 
             consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=service_config.service_port,
                 consul_host=service_config.consul_host,
                 consul_port=service_config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type="http",
             )
             consul_registry.register()
-            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             consul_registry = None
@@ -125,7 +134,7 @@ app = FastAPI(
     title="Location Service",
     description="Location tracking and geofencing service with PostGIS support",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -140,11 +149,12 @@ app.add_middleware(
 
 # ==================== Helper Functions ====================
 
+
 def get_user_id_from_request() -> str:
     """
     Extract user ID from authentication context
     TODO: Implement proper authentication
-    
+
     For testing, this returns a placeholder that matches test expectations
     """
     # Return a placeholder that works with test users
@@ -153,6 +163,7 @@ def get_user_id_from_request() -> str:
 
 
 # ==================== Health Check ====================
+
 
 @app.get("/health")
 async def health_check():
@@ -168,7 +179,7 @@ async def health_check():
             cache_connected=True,  # Placeholder
             geofencing_enabled=True,
             route_tracking_enabled=True,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
         return {
@@ -179,7 +190,7 @@ async def health_check():
             "cache_connected": status.cache_connected,
             "geofencing_enabled": status.geofencing_enabled,
             "route_tracking_enabled": status.route_tracking_enabled,
-            "timestamp": status.timestamp.isoformat()
+            "timestamp": status.timestamp.isoformat(),
         }
 
     except Exception as e:
@@ -190,12 +201,13 @@ async def health_check():
                 "status": "unhealthy",
                 "service": "location_service",
                 "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
+                "timestamp": datetime.now().isoformat(),
+            },
         )
 
 
 # ==================== Location Management ====================
+
 
 @app.post("/api/v1/locations")
 async def report_location(request: LocationReportRequest):
@@ -258,7 +270,7 @@ async def get_device_location_history(
     start_time: Optional[datetime] = Query(None),
     end_time: Optional[datetime] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
 ):
     """Get device location history"""
     try:
@@ -269,7 +281,7 @@ async def get_device_location_history(
             start_time=start_time,
             end_time=end_time,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
 
         return {"locations": locations, "count": len(locations)}
@@ -313,6 +325,7 @@ async def delete_location(location_id: str):
 
 # ==================== Geofence Management ====================
 
+
 @app.post("/api/v1/geofences")
 async def create_geofence(request: GeofenceCreateRequest):
     """Create a new geofence"""
@@ -334,16 +347,13 @@ async def create_geofence(request: GeofenceCreateRequest):
 async def list_geofences(
     active_only: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
 ):
     """List geofences"""
     try:
         user_id = get_user_id_from_request()
         geofences = await location_service.list_geofences(
-            user_id=user_id,
-            active_only=active_only,
-            limit=limit,
-            offset=offset
+            user_id=user_id, active_only=active_only, limit=limit, offset=offset
         )
 
         return {"geofences": geofences, "count": len(geofences)}
@@ -444,7 +454,7 @@ async def deactivate_geofence(geofence_id: str):
 async def get_geofence_events(
     geofence_id: str,
     limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
 ):
     """Get geofence event history"""
     try:
@@ -469,6 +479,7 @@ async def check_device_in_geofences(device_id: str):
 
 
 # ==================== Place Management ====================
+
 
 @app.post("/api/v1/places")
 async def create_place(request: PlaceCreateRequest):
@@ -562,6 +573,7 @@ async def delete_place(place_id: str):
 
 # ==================== Location Search ====================
 
+
 @app.get("/api/v1/locations/nearby")
 async def find_nearby_devices(
     latitude: float = Query(..., ge=-90, le=90),
@@ -569,13 +581,13 @@ async def find_nearby_devices(
     radius_meters: float = Query(..., gt=0, le=50000),
     device_types: Optional[str] = Query(None),
     time_window_minutes: int = Query(30, ge=1, le=1440),
-    limit: int = Query(50, ge=1, le=500)
+    limit: int = Query(50, ge=1, le=500),
 ):
     """Find devices near a location"""
     try:
         user_id = get_user_id_from_request()
 
-        device_types_list = device_types.split(',') if device_types else None
+        device_types_list = device_types.split(",") if device_types else None
 
         request = NearbySearchRequest(
             latitude=latitude,
@@ -583,7 +595,7 @@ async def find_nearby_devices(
             radius_meters=radius_meters,
             device_types=device_types_list,
             time_window_minutes=time_window_minutes,
-            limit=limit
+            limit=limit,
         )
 
         devices = await location_service.find_nearby_devices(request, user_id)
@@ -624,7 +636,7 @@ async def calculate_distance(
     from_lat: float = Query(..., ge=-90, le=90),
     from_lon: float = Query(..., ge=-180, le=180),
     to_lat: float = Query(..., ge=-90, le=90),
-    to_lon: float = Query(..., ge=-180, le=180)
+    to_lon: float = Query(..., ge=-180, le=180),
 ):
     """Calculate distance between two points"""
     try:
@@ -636,8 +648,8 @@ async def calculate_distance(
                 "from_lon": from_lon,
                 "to_lat": to_lat,
                 "to_lon": to_lon,
-                **result
-            }
+                **result,
+            },
         }
 
     except Exception as e:
@@ -650,13 +662,14 @@ async def calculate_distance_alt(
     lat1: float = Query(..., ge=-90, le=90),
     lon1: float = Query(..., ge=-180, le=180),
     lat2: float = Query(..., ge=-90, le=90),
-    lon2: float = Query(..., ge=-180, le=180)
+    lon2: float = Query(..., ge=-180, le=180),
 ):
     """Calculate distance between two points (alternative route)"""
     return await calculate_distance(lat1, lon1, lat2, lon2)
 
 
 # ==================== Statistics ====================
+
 
 @app.get("/api/v1/stats/user/{user_id}")
 async def get_user_stats(user_id: str):
@@ -688,10 +701,4 @@ if __name__ == "__main__":
 
     logger.info(f"Starting Location Service on {host}:{port}")
 
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=False,
-        log_level="info"
-    )
+    uvicorn.run("main:app", host=host, port=port, reload=False, log_level="info")

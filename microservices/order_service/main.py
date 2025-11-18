@@ -45,101 +45,12 @@ config = config_manager.get_service_config()
 app_logger = setup_service_logger("order_service")
 logger = app_logger  # for backward compatibility
 
-# Track processed event IDs for idempotency
-processed_event_ids = set()
-
-
-def is_event_processed(event_id: str) -> bool:
-    """Check if event has already been processed (idempotency)"""
-    return event_id in processed_event_ids
-
-
-def mark_event_processed(event_id: str):
-    """Mark event as processed"""
-    global processed_event_ids
-    processed_event_ids.add(event_id)
-    if len(processed_event_ids) > 10000:
-        processed_event_ids = set(list(processed_event_ids)[5000:])
-
-
-# ==================== Event Handlers ====================
-
-async def handle_payment_completed(event: Event):
-    """
-    Handle payment.completed event
-    Automatically complete order after successful payment
-    """
-    try:
-        if is_event_processed(event.id):
-            logger.debug(f"Event {event.id} already processed, skipping")
-            return
-
-        payment_intent_id = event.data.get("payment_intent_id")
-        user_id = event.data.get("user_id")
-        amount = event.data.get("amount")
-
-        if not payment_intent_id:
-            logger.warning(f"payment.completed event missing payment_intent_id: {event.id}")
-            return
-
-        # Find order by payment_intent_id
-        order = await order_microservice.order_service.repository.get_order_by_payment_intent(payment_intent_id)
-        if not order:
-            logger.warning(f"No order found for payment_intent_id: {payment_intent_id}")
-            mark_event_processed(event.id)
-            return
-
-        # Update order status to completed
-        complete_request = OrderCompleteRequest(
-            payment_confirmed=True,
-            transaction_id=event.data.get("payment_id") or event.data.get("transaction_id"),
-            credits_added=Decimal(str(amount)) if amount else None
-        )
-
-        await order_microservice.order_service.complete_order(order.order_id, complete_request)
-
-        mark_event_processed(event.id)
-        logger.info(f"✅ Order {order.order_id} completed after payment success (event: {event.id})")
-
-    except Exception as e:
-        logger.error(f"Failed to handle payment.completed event {event.id}: {e}")
-
-
-async def handle_payment_failed(event: Event):
-    """
-    Handle payment.failed event
-    Mark order as payment failed
-    """
-    try:
-        if is_event_processed(event.id):
-            logger.debug(f"Event {event.id} already processed, skipping")
-            return
-
-        payment_intent_id = event.data.get("payment_intent_id")
-
-        if not payment_intent_id:
-            logger.warning(f"payment.failed event missing payment_intent_id: {event.id}")
-            return
-
-        # Find order by payment_intent_id
-        order = await order_microservice.order_service.repository.get_order_by_payment_intent(payment_intent_id)
-        if not order:
-            logger.warning(f"No order found for payment_intent_id: {payment_intent_id}")
-            mark_event_processed(event.id)
-            return
-
-        # Update order status to failed
-        await order_microservice.order_service.repository.update_order_status(
-            order.order_id,
-            OrderStatus.FAILED,
-            payment_status=PaymentStatus.FAILED
-        )
-
-        mark_event_processed(event.id)
-        logger.info(f"✅ Order {order.order_id} marked as failed after payment failure (event: {event.id})")
-
-    except Exception as e:
-        logger.error(f"Failed to handle payment.failed event {event.id}: {e}")
+# Global client instances
+payment_client = None
+wallet_client = None
+account_client = None
+storage_client = None
+billing_client = None
 
 
 class OrderMicroservice:
@@ -149,11 +60,26 @@ class OrderMicroservice:
         self.order_service = None
         self.event_bus = None
 
-    async def initialize(self, event_bus=None):
+    async def initialize(
+        self,
+        event_bus=None,
+        payment_client=None,
+        wallet_client=None,
+        account_client=None,
+        storage_client=None,
+        billing_client=None
+    ):
         """Initialize the microservice"""
         try:
             self.event_bus = event_bus
-            self.order_service = OrderService(event_bus=event_bus)
+            self.order_service = OrderService(
+                event_bus=event_bus,
+                payment_client=payment_client,
+                wallet_client=wallet_client,
+                account_client=account_client,
+                storage_client=storage_client,
+                billing_client=billing_client
+            )
             logger.info("Order microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize order microservice: {e}")
@@ -178,7 +104,7 @@ consul_registry: Optional[ConsulRegistry] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    global consul_registry
+    global consul_registry, payment_client, wallet_client, account_client, storage_client, billing_client
 
     # Initialize event bus
     event_bus = None
@@ -189,30 +115,43 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
 
-    # Initialize microservice with event bus
-    await order_microservice.initialize(event_bus=event_bus)
+    # Initialize service clients
+    try:
+        from .clients import PaymentClient, WalletClient, AccountClient, StorageClient, BillingClient
 
-    # Subscribe to events
+        payment_client = PaymentClient(config=config_manager)
+        wallet_client = WalletClient(config=config_manager)
+        account_client = AccountClient(config=config_manager)
+        storage_client = StorageClient(config=config_manager)
+        billing_client = BillingClient(config=config_manager)
+
+        logger.info("✅ Service clients initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize service clients: {e}")
+        payment_client = None
+        wallet_client = None
+        account_client = None
+        storage_client = None
+        billing_client = None
+
+    # Initialize microservice with event bus and clients
+    await order_microservice.initialize(
+        event_bus=event_bus,
+        payment_client=payment_client,
+        wallet_client=wallet_client,
+        account_client=account_client,
+        storage_client=storage_client,
+        billing_client=billing_client
+    )
+
+    # Register event handlers
     if event_bus:
         try:
-            # Subscribe to payment.completed from payment_service
-            await event_bus.subscribe_to_events(
-                pattern="payment_service.payment.completed",
-                handler=handle_payment_completed,
-                durable="order-payment-completed-consumer"
-            )
-            logger.info("✅ Subscribed to payment.completed events")
-
-            # Subscribe to payment.failed from payment_service
-            await event_bus.subscribe_to_events(
-                pattern="payment_service.payment.failed",
-                handler=handle_payment_failed,
-                durable="order-payment-failed-consumer"
-            )
-            logger.info("✅ Subscribed to payment.failed events")
-
+            from .events.handlers import register_event_handlers
+            await register_event_handlers(event_bus, order_microservice.order_service)
+            logger.info("✅ Event handlers registered successfully")
         except Exception as e:
-            logger.warning(f"⚠️  Failed to subscribe to events: {e}")
+            logger.warning(f"⚠️  Failed to register event handlers: {e}")
 
     # Consul 服务注册
     if config.consul_enabled:
@@ -245,15 +184,55 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
-    # Consul 注销
-    if consul_registry:
-        try:
-            consul_registry.deregister()
-            logger.info("✅ Service deregistered from Consul")
-        except Exception as e:
-            logger.error(f"❌ Failed to deregister from Consul: {e}")
+    try:
+        # Consul 注销
+        if consul_registry:
+            try:
+                consul_registry.deregister()
+                logger.info("✅ Service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
 
-    await order_microservice.shutdown()
+        # Close service clients
+        if payment_client:
+            try:
+                await payment_client.close()
+                logger.info("✅ Payment client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close payment client: {e}")
+
+        if wallet_client:
+            try:
+                await wallet_client.close()
+                logger.info("✅ Wallet client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close wallet client: {e}")
+
+        if account_client:
+            try:
+                await account_client.close()
+                logger.info("✅ Account client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close account client: {e}")
+
+        if storage_client:
+            try:
+                await storage_client.close()
+                logger.info("✅ Storage client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close storage client: {e}")
+
+        if billing_client:
+            try:
+                await billing_client.close()
+                logger.info("✅ Billing client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close billing client: {e}")
+
+        await order_microservice.shutdown()
+
+    except Exception as e:
+        logger.error(f"❌ Error during cleanup: {e}")
 
 
 # Create FastAPI application
@@ -455,24 +434,9 @@ async def list_orders(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/users/{user_id}/orders")
-async def get_user_orders(
-    user_id: str = Path(..., description="User ID"),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0, ge=0),
-    order_service: OrderService = Depends(get_order_service)
-):
-    """Get orders for a specific user"""
-    try:
-        orders = await order_service.get_user_orders(user_id, limit, offset)
-        return {
-            "orders": orders,
-            "count": len(orders),
-            "limit": limit,
-            "offset": offset
-        }
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+# Note: User orders can be retrieved using GET /api/v1/orders?user_id={user_id}
+# The dedicated /api/v1/users/{user_id}/orders endpoint has been removed to avoid
+# routing conflicts with APISIX base_path pattern
 
 
 # Integration endpoints

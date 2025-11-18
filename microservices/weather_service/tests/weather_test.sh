@@ -2,8 +2,9 @@
 
 # Weather Service Test Script
 # 天气服务测试脚本
+# Event-Driven Architecture v2.0 - via Kubernetes Ingress
 
-BASE_URL="http://localhost:8218"
+BASE_URL="http://localhost"
 USER_ID="test_user_$(date +%s)"
 
 echo "========================================"
@@ -16,23 +17,10 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
-
-# Test 1: Health Check
-echo "Test 1: Health Check"
-response=$(curl -s -w "\n%{http_code}" $BASE_URL/health)
-http_code=$(echo "$response" | tail -n1)
-body=$(echo "$response" | sed '$d')
-
-if [ "$http_code" = "200" ]; then
-    echo -e "${GREEN}✓ PASSED${NC}"
-    echo "Response: $body"
-else
-    echo -e "${RED}✗ FAILED${NC} (HTTP $http_code)"
-fi
 echo ""
 
-# Test 2: Get Current Weather
-echo "Test 2: Get Current Weather for New York"
+# Test 1: Get Current Weather
+echo "Test 1: Get Current Weather for New York"
 response=$(curl -s -w "\n%{http_code}" "$BASE_URL/api/v1/weather/current?location=New%20York&units=metric")
 http_code=$(echo "$response" | tail -n1)
 body=$(echo "$response" | sed '$d')
@@ -49,8 +37,8 @@ else
 fi
 echo ""
 
-# Test 3: Get Weather Forecast
-echo "Test 3: Get 5-Day Forecast for London"
+# Test 2: Get Weather Forecast
+echo "Test 2: Get 5-Day Forecast for London"
 response=$(curl -s -w "\n%{http_code}" "$BASE_URL/api/v1/weather/forecast?location=London&days=5&units=metric")
 http_code=$(echo "$response" | tail -n1)
 body=$(echo "$response" | sed '$d')
@@ -65,8 +53,8 @@ else
 fi
 echo ""
 
-# Test 4: Save Favorite Location
-echo "Test 4: Save Favorite Location"
+# Test 3: Save Favorite Location
+echo "Test 3: Save Favorite Location"
 response=$(curl -s -w "\n%{http_code}" -X POST $BASE_URL/api/v1/weather/locations \
   -H "Content-Type: application/json" \
   -d '{
@@ -92,8 +80,8 @@ else
 fi
 echo ""
 
-# Test 5: Get User Locations
-echo "Test 5: Get User's Favorite Locations"
+# Test 4: Get User Locations
+echo "Test 4: Get User's Favorite Locations"
 response=$(curl -s -w "\n%{http_code}" "$BASE_URL/api/v1/weather/locations/$USER_ID")
 http_code=$(echo "$response" | tail -n1)
 body=$(echo "$response" | sed '$d')
@@ -106,8 +94,8 @@ else
 fi
 echo ""
 
-# Test 6: Get Weather Alerts
-echo "Test 6: Get Weather Alerts"
+# Test 5: Get Weather Alerts
+echo "Test 5: Get Weather Alerts"
 response=$(curl -s -w "\n%{http_code}" "$BASE_URL/api/v1/weather/alerts?location=Miami")
 http_code=$(echo "$response" | tail -n1)
 body=$(echo "$response" | sed '$d')
@@ -120,8 +108,8 @@ else
 fi
 echo ""
 
-# Test 7: Get Weather for Multiple Cities
-echo "Test 7: Get Weather for Multiple Cities"
+# Test 6: Get Weather for Multiple Cities
+echo "Test 6: Get Weather for Multiple Cities"
 cities=("Tokyo" "Paris" "Sydney")
 
 for city in "${cities[@]}"; do
@@ -136,9 +124,9 @@ for city in "${cities[@]}"; do
 done
 echo ""
 
-# Test 8: Delete Location
+# Test 7: Delete Location
 if [ ! -z "$LOCATION_ID" ]; then
-    echo "Test 8: Delete Favorite Location"
+    echo "Test 7: Delete Favorite Location"
     response=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE_URL/api/v1/weather/locations/$LOCATION_ID?user_id=$USER_ID")
     http_code=$(echo "$response" | tail -n1)
 

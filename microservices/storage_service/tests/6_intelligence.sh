@@ -1,8 +1,9 @@
 #!/bin/bash
 # Storage Service - Intelligence Features Test Script
 # Tests: Semantic Search, RAG Query, Image Intelligence, Intelligence Stats
+# Event-Driven Architecture v2.0 - via Kubernetes Ingress
 
-BASE_URL="http://localhost:8209"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors

@@ -20,7 +20,13 @@ from .models import (
     TelemetryStatsResponse, RealTimeDataResponse, AggregatedDataResponse
 )
 from .telemetry_repository import TelemetryRepository
-from core.nats_client import Event, EventType, ServiceSource
+from .events.publishers import (
+    publish_telemetry_data_received,
+    publish_metric_defined,
+    publish_alert_rule_created,
+    publish_alert_triggered,
+    publish_alert_resolved
+)
 
 logger = logging.getLogger("telemetry_service")
 
@@ -72,17 +78,12 @@ class TelemetryService:
             # Publish telemetry.data.received event
             if self.event_bus and result.get('ingested_count', 0) > 0:
                 try:
-                    event = Event(
-                        event_type=EventType.TELEMETRY_DATA_RECEIVED,
-                        source=ServiceSource.TELEMETRY_SERVICE,
-                        data={
-                            "device_id": device_id,
-                            "metrics_count": len(set(dp.metric_name for dp in data_points)),
-                            "points_count": result['ingested_count'],
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_telemetry_data_received(
+                        event_bus=self.event_bus,
+                        device_id=device_id,
+                        metrics_count=len(set(dp.metric_name for dp in data_points)),
+                        points_count=result['ingested_count']
                     )
-                    await self.event_bus.publish_event(event)
                 except Exception as e:
                     logger.error(f"Failed to publish telemetry.data.received event: {e}")
 
@@ -144,20 +145,15 @@ class TelemetryService:
                 # Publish metric.defined event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.METRIC_DEFINED,
-                            source=ServiceSource.TELEMETRY_SERVICE,
-                            data={
-                                "metric_id": metric_definition.metric_id,
-                                "name": metric_definition.name,
-                                "data_type": metric_definition.data_type.value,
-                                "metric_type": metric_definition.metric_type.value,
-                                "unit": metric_definition.unit,
-                                "created_by": user_id,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_metric_defined(
+                            event_bus=self.event_bus,
+                            metric_id=metric_definition.metric_id,
+                            name=metric_definition.name,
+                            data_type=metric_definition.data_type.value,
+                            metric_type=metric_definition.metric_type.value,
+                            unit=metric_definition.unit,
+                            created_by=user_id
                         )
-                        await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish metric.defined event: {e}")
 
@@ -229,22 +225,17 @@ class TelemetryService:
                 # Publish alert.rule.created event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.ALERT_RULE_CREATED,
-                            source=ServiceSource.TELEMETRY_SERVICE,
-                            data={
-                                "rule_id": alert_rule.rule_id,
-                                "name": alert_rule.name,
-                                "metric_name": alert_rule.metric_name,
-                                "condition": alert_rule.condition,
-                                "threshold_value": alert_rule.threshold_value,
-                                "level": alert_rule.level.value,
-                                "enabled": alert_rule.enabled,
-                                "created_by": user_id,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_alert_rule_created(
+                            event_bus=self.event_bus,
+                            rule_id=alert_rule.rule_id,
+                            name=alert_rule.name,
+                            metric_name=alert_rule.metric_name,
+                            condition=alert_rule.condition,
+                            threshold_value=alert_rule.threshold_value,
+                            level=alert_rule.level.value,
+                            enabled=alert_rule.enabled,
+                            created_by=user_id
                         )
-                        await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish alert.rule.created event: {e}")
 
@@ -710,22 +701,17 @@ class TelemetryService:
                 # Publish alert.triggered event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.ALERT_TRIGGERED,
-                            source=ServiceSource.TELEMETRY_SERVICE,
-                            data={
-                                "alert_id": alert_result.get("alert_id"),
-                                "rule_id": rule_data["rule_id"],
-                                "rule_name": rule_data["name"],
-                                "device_id": device_id,
-                                "metric_name": rule_data["metric_name"],
-                                "level": rule_data["level"],
-                                "current_value": str(data_point.value),
-                                "threshold_value": rule_data["threshold_value"],
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_alert_triggered(
+                            event_bus=self.event_bus,
+                            alert_id=alert_result.get("alert_id"),
+                            rule_id=rule_data["rule_id"],
+                            rule_name=rule_data["name"],
+                            device_id=device_id,
+                            metric_name=rule_data["metric_name"],
+                            level=rule_data["level"],
+                            current_value=str(data_point.value),
+                            threshold_value=rule_data["threshold_value"]
                         )
-                        await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish alert.triggered event: {e}")
 
@@ -766,22 +752,17 @@ class TelemetryService:
                 # Publish alert.triggered event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.ALERT_TRIGGERED,
-                            source=ServiceSource.TELEMETRY_SERVICE,
-                            data={
-                                "alert_id": alert_result.get("alert_id"),
-                                "rule_id": rule.rule_id,
-                                "rule_name": rule.name,
-                                "device_id": device_id,
-                                "metric_name": rule.metric_name,
-                                "level": rule.level.value if hasattr(rule.level, 'value') else str(rule.level),
-                                "current_value": str(data_point.value),
-                                "threshold_value": rule.threshold_value,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_alert_triggered(
+                            event_bus=self.event_bus,
+                            alert_id=alert_result.get("alert_id"),
+                            rule_id=rule.rule_id,
+                            rule_name=rule.name,
+                            device_id=device_id,
+                            metric_name=rule.metric_name,
+                            level=rule.level.value if hasattr(rule.level, 'value') else str(rule.level),
+                            current_value=str(data_point.value),
+                            threshold_value=rule.threshold_value
                         )
-                        await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish alert.triggered event: {e}")
 
@@ -915,5 +896,70 @@ class TelemetryService:
                 "timestamp": bucket_start,
                 "value": agg_value
             })
-        
+
         return aggregated_points
+
+    async def resolve_alert(
+        self,
+        alert_id: str,
+        resolved_by: str,
+        resolution_note: Optional[str] = None
+    ) -> bool:
+        """
+        Resolve an alert and publish event
+
+        Args:
+            alert_id: Alert ID to resolve
+            resolved_by: User ID who resolved
+            resolution_note: Optional resolution note
+
+        Returns:
+            bool: True if successful
+        """
+        try:
+            # Get alert details before updating
+            alerts = await self.repository.get_alerts()
+            alert_data = next((a for a in alerts if a.get("alert_id") == alert_id), None)
+
+            if not alert_data:
+                logger.warning(f"Alert {alert_id} not found")
+                return False
+
+            # Update alert status
+            now = datetime.now(timezone.utc)
+            update_data = {
+                "status": AlertStatus.RESOLVED.value,
+                "resolved_at": now,
+                "resolved_by": resolved_by
+            }
+            if resolution_note:
+                update_data["resolution_note"] = resolution_note
+
+            success = await self.repository.update_alert(alert_id, update_data)
+
+            if success:
+                # Publish alert.resolved event
+                if self.event_bus:
+                    try:
+                        await publish_alert_resolved(
+                            event_bus=self.event_bus,
+                            alert_id=alert_id,
+                            rule_id=alert_data.get("rule_id"),
+                            rule_name=alert_data.get("rule_name"),
+                            device_id=alert_data.get("device_id"),
+                            metric_name=alert_data.get("metric_name"),
+                            level=alert_data.get("level"),
+                            resolved_by=resolved_by,
+                            resolution_note=resolution_note
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to publish alert.resolved event: {e}")
+
+                logger.info(f"Alert {alert_id} resolved by {resolved_by}")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Error resolving alert: {e}")
+            return False

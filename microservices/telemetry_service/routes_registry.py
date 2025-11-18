@@ -81,7 +81,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
 
     return {
         "route_count": str(len(SERVICE_ROUTES)),
-        "base_path": "/api/v1",
+        "base_path": "/api/v1/telemetry",
         "health": ",".join(set(health_routes)),
         "ingestion": ",".join(list(set(ingestion_routes))[:5]),  # Limit for space
         "metrics": ",".join(list(set(metric_routes))[:5]),

@@ -3,7 +3,7 @@
 # GDPR Compliance Test Script
 # Test user data control features
 
-BASE_URL="http://localhost:8226"
+BASE_URL="http://localhost"
 TEST_USER="gdpr_test_user_$(date +%s)"
 
 echo "=========================================="

@@ -1,204 +1,336 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Wallet Service Event Handlers
+Wallet Event Handlers
 
-Handles incoming events from NATS message bus.
+处理钱包相关的事件订阅和发布
 """
 
 import logging
+from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import Optional
 
-from core.events.event_subscriber import EventHandler
-from core.events.billing_events import BillingCalculatedEvent, EventType
-from core.events.event_publisher import BillingEventPublisher
+from core.nats_client import Event, EventType, ServiceSource
 
-if TYPE_CHECKING:
-    from ..wallet_service import WalletService
+from .models import (
+    BillingCalculatedEventData,
+    TokensDeductedEventData,
+    TokensInsufficientEventData,
+    parse_billing_calculated_event,
+)
+from .publishers import publish_tokens_deducted, publish_tokens_insufficient
 
 logger = logging.getLogger(__name__)
 
 
-class BillingCalculatedEventHandler(EventHandler):
+async def handle_billing_calculated(event: Event, wallet_service, event_bus):
     """
-    Handles billing.calculated events from billing_service.
+    处理 billing.calculated 事件并执行 token 扣费
 
-    Flow:
-    1. Receive BillingCalculatedEvent
-    2. Get user's wallet
-    3. Check if sufficient tokens
-    4. Deduct tokens from wallet
-    5. Publish wallet.tokens.deducted OR wallet.tokens.insufficient
+    Args:
+        event: 接收到的事件对象
+        wallet_service: WalletService 实例
+        event_bus: 事件总线实例
+
+    工作流程:
+        1. 解析计费事件数据
+        2. 检查是否需要扣费（免费额度、订阅包含的不扣费）
+        3. 获取用户钱包
+        4. 检查余额是否充足
+        5. 扣除 token
+        6. 发布 tokens.deducted 或 tokens.insufficient 事件
     """
+    try:
+        # 解析事件数据
+        billing_data = parse_billing_calculated_event(event.data)
 
-    def __init__(self, wallet_service: 'WalletService', event_publisher: BillingEventPublisher):
-        """
-        Initialize handler.
+        logger.info(
+            f"Processing billing.calculated for user {billing_data.user_id}, "
+            f"billing_record {billing_data.billing_record_id}, "
+            f"tokens {billing_data.token_equivalent}"
+        )
 
-        Args:
-            wallet_service: Wallet service instance
-            event_publisher: Event publisher for downstream events
-        """
-        self.wallet_service = wallet_service
-        self.event_publisher = event_publisher
-
-    def event_type(self) -> str:
-        """Return event type this handler processes"""
-        return EventType.COST_CALCULATED
-
-    async def handle(self, event: BillingCalculatedEvent) -> bool:
-        """
-        Handle billing.calculated event.
-
-        Args:
-            event: BillingCalculatedEvent from billing_service
-
-        Returns:
-            True if processed successfully
-        """
-        try:
+        # 检查是否需要扣费
+        if billing_data.is_free_tier:
             logger.info(
-                f"Processing billing event: user={event.user_id}, "
-                f"billing_record={event.billing_record_id}, "
-                f"tokens={event.token_equivalent:.0f}, "
-                f"cost=${event.cost_usd:.6f}"
+                f"Free tier usage, no wallet deduction for {billing_data.user_id}"
             )
+            return
 
-            # 1. Check if free tier or subscription included
-            if event.is_free_tier or event.is_included_in_subscription:
-                logger.info(
-                    f"Billing covered by free tier/subscription for {event.user_id}, "
-                    f"no wallet deduction needed"
-                )
-                # Still publish event for tracking
-                await self.event_publisher.publish_tokens_deducted(
-                    user_id=event.user_id,
-                    billing_record_id=event.billing_record_id,
-                    transaction_id=f"free_{event.billing_record_id}",
-                    tokens_deducted=Decimal("0"),
-                    balance_before=Decimal("0"),
-                    balance_after=Decimal("0")
-                )
-                return True
+        if billing_data.is_included_in_subscription:
+            logger.info(
+                f"Subscription included usage, no wallet deduction for {billing_data.user_id}"
+            )
+            # 更新订阅使用量统计（如果需要）
+            return
 
-            # 2. Get user's primary wallet
-            wallet = await self.wallet_service.repository.get_primary_wallet(event.user_id)
+        # 需要从钱包扣费
+        tokens_to_deduct = billing_data.token_equivalent
 
-            if not wallet:
-                logger.warning(f"No wallet found for user {event.user_id}, creating default wallet")
-                # Create default wallet with 0 balance
-                from ..models import WalletCreate, WalletType
-                create_result = await self.wallet_service.create_wallet(
-                    WalletCreate(
-                        user_id=event.user_id,
-                        wallet_type=WalletType.FIAT,
-                        initial_balance=Decimal(0),
-                        currency="CREDIT"
-                    )
-                )
-                if not create_result.success:
-                    logger.error(f"Failed to create wallet for {event.user_id}")
-                    return False
+        # 调用 wallet_service 的扣费方法
+        deduction_result = await wallet_service.consume_tokens(
+            user_id=billing_data.user_id,
+            amount=tokens_to_deduct,
+            billing_record_id=billing_data.billing_record_id,
+            description=f"Usage charge for {billing_data.product_id}",
+        )
 
-                wallet = await self.wallet_service.repository.get_primary_wallet(event.user_id)
-
-            # 3. Check if sufficient tokens
-            required_tokens = event.token_equivalent
-            available_tokens = wallet.available_balance
+        if deduction_result.get("success"):
+            # 扣费成功，发布 tokens.deducted 事件
+            await publish_tokens_deducted(
+                event_bus=event_bus,
+                user_id=billing_data.user_id,
+                billing_record_id=billing_data.billing_record_id,
+                transaction_id=deduction_result.get("transaction_id"),
+                tokens_deducted=tokens_to_deduct,
+                balance_before=Decimal(str(deduction_result.get("balance_before", 0))),
+                balance_after=Decimal(str(deduction_result.get("balance_after", 0))),
+                monthly_quota=deduction_result.get("monthly_quota"),
+                monthly_used=deduction_result.get("monthly_used"),
+            )
 
             logger.info(
-                f"Wallet check: user={event.user_id}, "
-                f"required={required_tokens:.0f}, "
-                f"available={available_tokens:.0f}"
+                f"Successfully deducted {tokens_to_deduct} tokens from user {billing_data.user_id}, "
+                f"new balance: {deduction_result.get('balance_after')}"
+            )
+        else:
+            # 扣费失败（余额不足），发布 tokens.insufficient 事件
+            await publish_tokens_insufficient(
+                event_bus=event_bus,
+                user_id=billing_data.user_id,
+                billing_record_id=billing_data.billing_record_id,
+                tokens_required=tokens_to_deduct,
+                tokens_available=Decimal(
+                    str(deduction_result.get("balance_available", 0))
+                ),
+                suggested_action=deduction_result.get(
+                    "suggested_action", "upgrade_plan"
+                ),
             )
 
-            if available_tokens < required_tokens:
-                logger.warning(
-                    f"Insufficient tokens for {event.user_id}: "
-                    f"need {required_tokens:.0f}, have {available_tokens:.0f}"
-                )
-
-                # Publish insufficient tokens event
-                await self.event_publisher.publish_tokens_insufficient(
-                    user_id=event.user_id,
-                    billing_record_id=event.billing_record_id,
-                    tokens_required=required_tokens,
-                    tokens_available=available_tokens,
-                    suggested_action="upgrade_plan"
-                )
-
-                # TODO: Should we reject the operation or allow negative balance?
-                # For now, we reject
-                return False
-
-            # 4. Deduct tokens from wallet
-            from ..models import ConsumeRequest
-            consume_result = await self.wallet_service.consume(
-                wallet_id=wallet.wallet_id,
-                request=ConsumeRequest(
-                    amount=required_tokens,
-                    description=f"Usage billing: {event.product_id}",
-                    usage_record_id=event.billing_record_id,
-                    metadata={
-                        "product_id": event.product_id,
-                        "usage_amount": float(event.actual_usage),
-                        "unit_type": event.unit_type,
-                        "cost_usd": float(event.cost_usd),
-                        "usage_event_id": event.usage_event_id
-                    }
-                )
+            logger.warning(
+                f"Insufficient tokens for user {billing_data.user_id}, "
+                f"required: {tokens_to_deduct}, available: {deduction_result.get('balance_available')}"
             )
 
-            if not consume_result.success:
-                logger.error(
-                    f"Failed to deduct tokens for {event.user_id}: "
-                    f"{consume_result.message}"
-                )
-                return False
+    except Exception as e:
+        logger.error(f"Error handling billing_calculated event: {e}", exc_info=True)
 
-            # 5. Get updated wallet balance
-            balance_after = consume_result.balance
-            balance_before = balance_after + required_tokens
 
-            # 6. Calculate quota usage percentage (if subscription has quota)
-            monthly_quota = None
-            monthly_used = None
-            percentage_used = None
+async def setup_event_subscriptions(event_bus, wallet_service):
+    """
+    设置 wallet_service 的事件订阅
 
-            # TODO: Get subscription quota from product_service
-            # For now, simplified calculation
-            if balance_before > 0:
-                percentage_used = float((required_tokens / balance_before) * 100)
+    Args:
+        event_bus: 事件总线实例
+        wallet_service: WalletService 实例
 
-            # 7. Publish tokens.deducted event
-            success = await self.event_publisher.publish_tokens_deducted(
-                user_id=event.user_id,
-                billing_record_id=event.billing_record_id,
-                transaction_id=consume_result.transaction_id,
-                tokens_deducted=required_tokens,
-                balance_before=balance_before,
-                balance_after=balance_after,
-                monthly_quota=monthly_quota,
-                monthly_used=monthly_used,
-                percentage_used=percentage_used
+    订阅的事件:
+        - billing.calculated (执行 token 扣费)
+        - payment.completed (处理充值)
+    """
+    try:
+        # 订阅计费完成事件
+        await event_bus.subscribe_to_events(
+            pattern="billing.calculated",
+            handler=lambda event: handle_billing_calculated(
+                event, wallet_service, event_bus
+            ),
+        )
+
+        logger.info("✅ Wallet service event subscriptions setup complete")
+        logger.info("   - Subscribed to: billing.calculated")
+
+    except Exception as e:
+        logger.error(f"Failed to setup wallet event subscriptions: {e}", exc_info=True)
+        raise
+
+
+# =============================================================================
+# NEW STANDARDIZED EVENT HANDLERS (Migrated from main.py)
+# =============================================================================
+
+# Idempotency tracking
+_processed_event_ids = set()
+
+
+def _is_event_processed(event_id: str) -> bool:
+    """Check if event has already been processed (idempotency)"""
+    return event_id in _processed_event_ids
+
+
+def _mark_event_processed(event_id: str):
+    """Mark event as processed"""
+    global _processed_event_ids
+    _processed_event_ids.add(event_id)
+    if len(_processed_event_ids) > 10000:
+        # Remove oldest half to prevent memory bloat
+        _processed_event_ids = set(list(_processed_event_ids)[5000:])
+
+
+async def handle_payment_completed(event: Event, wallet_service):
+    """
+    Handle payment.completed event
+    Deposit funds into wallet after successful payment
+
+    Args:
+        event: NATS event object
+        wallet_service: WalletService instance
+
+    Event Data:
+        - user_id: User ID
+        - amount: Payment amount
+        - currency: Currency code (default: USD)
+        - payment_id: Payment transaction ID
+
+    Workflow:
+        1. Validate event data
+        2. Get user's primary wallet
+        3. Deposit funds to wallet
+        4. Publish deposit.completed event
+    """
+    try:
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        user_id = event.data.get("user_id")
+        amount = event.data.get("amount")
+        currency = event.data.get("currency", "USD")
+        payment_id = event.data.get("payment_id")
+
+        if not user_id or not amount:
+            logger.warning(
+                f"payment.completed event missing required fields: {event.id}"
             )
+            return
 
-            if success:
-                logger.info(
-                    f"✅ Tokens deducted successfully: "
-                    f"user={event.user_id}, "
-                    f"amount={required_tokens:.0f}, "
-                    f"new_balance={balance_after:.0f}, "
-                    f"transaction={consume_result.transaction_id}"
-                )
-                return True
-            else:
-                logger.error("Failed to publish tokens.deducted event")
-                # Transaction already completed, so we return True
-                # but log the publish failure
-                return True
+        # Get user's primary wallet
+        wallet = await wallet_service.repository.get_primary_wallet(user_id)
+        if not wallet:
+            logger.warning(f"No wallet found for user {user_id}, skipping deposit")
+            _mark_event_processed(event.id)
+            return
 
-        except Exception as e:
-            logger.error(f"Error handling billing.calculated event: {e}", exc_info=True)
-            return False
+        # Import here to avoid circular imports
+        from ..models import DepositRequest
+
+        # Deposit into wallet
+        deposit_request = DepositRequest(
+            amount=Decimal(str(amount)),
+            description=f"Payment received (payment_id: {payment_id})",
+            reference_id=payment_id,
+            metadata={
+                "event_id": event.id,
+                "event_type": event.type,
+                "payment_id": payment_id,
+                "timestamp": event.timestamp,
+                "currency": currency,
+            },
+        )
+
+        result = await wallet_service.deposit(wallet.wallet_id, deposit_request)
+
+        _mark_event_processed(event.id)
+        logger.info(
+            f"✅ Deposited {amount} {currency} to wallet for user {user_id} (event: {event.id})"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to handle payment.completed event {event.id}: {e}")
+
+
+async def handle_user_created(event: Event, wallet_service):
+    """
+    Handle user.created event
+    Automatically create wallet for new user
+
+    Args:
+        event: NATS event object
+        wallet_service: WalletService instance
+
+    Event Data:
+        - user_id: New user ID
+
+    Workflow:
+        1. Validate event data
+        2. Create default wallet for user
+        3. Publish wallet.created event
+    """
+    try:
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        user_id = event.data.get("user_id")
+
+        if not user_id:
+            logger.warning(f"user.created event missing user_id: {event.id}")
+            return
+
+        # Import here to avoid circular imports
+        from datetime import timezone
+
+        from ..models import WalletCreate, WalletType
+
+        # Create wallet for user
+        wallet_request = WalletCreate(
+            user_id=user_id,
+            wallet_type=WalletType.FIAT,
+            currency="USD",
+            initial_balance=Decimal("0"),
+            metadata={
+                "auto_created": True,
+                "event_id": event.id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        wallet = await wallet_service.create_wallet(wallet_request)
+
+        _mark_event_processed(event.id)
+        logger.info(
+            f"✅ Auto-created wallet {wallet.wallet_id} for user {user_id} (event: {event.id})"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to handle user.created event {event.id}: {e}")
+
+
+# =============================================================================
+# Event Handler Registry
+# =============================================================================
+
+
+def get_event_handlers(wallet_service, event_bus):
+    """
+    Get all event handlers for wallet service.
+
+    Returns a dict mapping event patterns to handler functions.
+    This is used by main.py to register all event subscriptions.
+
+    Args:
+        wallet_service: WalletService instance
+        event_bus: Event bus instance
+
+    Returns:
+        Dict[str, callable]: Event pattern -> handler function mapping
+    """
+    return {
+        "payment_service.payment.completed": lambda event: handle_payment_completed(
+            event, wallet_service
+        ),
+        "account_service.user.created": lambda event: handle_user_created(
+            event, wallet_service
+        ),
+        "billing_service.billing.calculated": lambda event: handle_billing_calculated(
+            event, wallet_service, event_bus
+        ),
+    }
+
+
+__all__ = [
+    "handle_billing_calculated",
+    "handle_payment_completed",
+    "handle_user_created",
+    "get_event_handlers",
+]

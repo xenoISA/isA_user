@@ -162,7 +162,7 @@ class ProductServiceClient:
             params = {"currency": currency}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/products/{product_id}/pricing",
+                f"{self.base_url}/api/v1/product/products/{product_id}/pricing",
                 params=params
             )
             response.raise_for_status()

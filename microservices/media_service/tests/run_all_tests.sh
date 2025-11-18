@@ -19,8 +19,8 @@ echo ""
 
 # Check if media service is running
 echo -e "${YELLOW}Checking if Media Service is running...${NC}"
-if ! curl -s http://localhost:8222/health > /dev/null 2>&1; then
-    echo -e "${RED}✗ Media Service is not running on port 8222${NC}"
+if ! curl -s http://localhost/health > /dev/null 2>&1; then
+    echo -e "${RED}✗ Media Service is not running${NC}"
     echo -e "${YELLOW}Please start the service first:${NC}"
     echo -e "  cd microservices/media_service"
     echo -e "  python main.py"

@@ -4,28 +4,38 @@ Calendar Service - Main Application
 日历事件管理微服务主应用
 """
 
-from fastapi import FastAPI, HTTPException, Query, Path, Body
-from contextlib import asynccontextmanager
-from typing import Optional, List
 import logging
-import sys
 import os
+import sys
+from contextlib import asynccontextmanager
+from typing import List, Optional
+
+from fastapi import Body, FastAPI, HTTPException, Path, Query
 
 # Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+
 from isa_common.consul_client import ConsulRegistry
-from .models import (
-    EventCreateRequest, EventUpdateRequest, EventQueryRequest,
-    EventResponse, EventListResponse, SyncStatusResponse,
-    EventCategory
-)
-from .calendar_service import CalendarService
+
 from .calendar_repository import CalendarRepository
-from .routes_registry import get_routes_for_consul, SERVICE_METADATA
+from .calendar_service import CalendarService
+from .models import (
+    EventCategory,
+    EventCreateRequest,
+    EventListResponse,
+    EventQueryRequest,
+    EventResponse,
+    EventUpdateRequest,
+    SyncProvider,
+    SyncStatusResponse,
+)
+from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Initialize config
 config_manager = ConfigManager("calendar_service")
@@ -34,6 +44,7 @@ config = config_manager.get_service_config()
 # Setup logger
 app_logger = setup_service_logger("calendar_service")
 logger = app_logger
+
 
 # Service instance
 class CalendarMicroservice:
@@ -48,7 +59,9 @@ class CalendarMicroservice:
             self.event_bus = await get_event_bus("calendar_service")
             logger.info("✅ Event bus initialized successfully")
         except Exception as e:
-            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+            logger.warning(
+                f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
+            )
             self.event_bus = None
 
         self.repository = CalendarRepository()
@@ -59,13 +72,13 @@ class CalendarMicroservice:
         if self.event_bus and self.service:
             try:
                 from .events import CalendarEventHandlers
+
                 event_handlers = CalendarEventHandlers(self.service)
                 handler_map = event_handlers.get_event_handler_map()
 
                 for event_type, handler_func in handler_map.items():
                     await self.event_bus.subscribe_to_events(
-                        pattern=f"*.{event_type}",
-                        handler=handler_func
+                        pattern=f"*.{event_type}", handler=handler_func
                     )
                     logger.info(f"✅ Subscribed to {event_type} events")
 
@@ -82,9 +95,11 @@ class CalendarMicroservice:
                 logger.error(f"Error closing event bus: {e}")
         logger.info("Calendar service shutting down")
 
+
 # Global instance
 microservice = CalendarMicroservice()
 consul_registry: Optional[ConsulRegistry] = None
+
 
 # Lifespan management
 @asynccontextmanager
@@ -103,22 +118,24 @@ async def lifespan(app: FastAPI):
 
             # 合并服务元数据
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
             }
 
             consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=config.service_port,
                 consul_host=config.consul_host,
                 consul_port=config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type="http",
             )
             consul_registry.register()
-            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             consul_registry = None
@@ -136,12 +153,13 @@ async def lifespan(app: FastAPI):
 
     await microservice.shutdown()
 
+
 # Create FastAPI application
 app = FastAPI(
     title="Calendar Service",
     description="日历事件管理微服务 - Calendar event management with external sync",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
@@ -149,35 +167,33 @@ app = FastAPI(
 # Health Check
 # =============================================================================
 
+
 @app.get("/health")
 async def health_check():
     """健康检查"""
-    return {
-        "status": "healthy",
-        "service": "calendar_service",
-        "version": "1.0.0"
-    }
+    return {"status": "healthy", "service": "calendar_service", "version": "1.0.0"}
 
 
 # =============================================================================
 # Calendar Event Endpoints
 # =============================================================================
 
+
 @app.post("/api/v1/calendar/events", response_model=EventResponse, status_code=201)
 async def create_event(request: EventCreateRequest = Body(...)):
     """
     创建日历事件
-    
+
     Create a new calendar event
     """
     try:
         event = await microservice.service.create_event(request)
-        
+
         if not event:
             raise HTTPException(status_code=500, detail="Failed to create event")
-        
+
         return event
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -188,21 +204,21 @@ async def create_event(request: EventCreateRequest = Body(...)):
 @app.get("/api/v1/calendar/events/{event_id}", response_model=EventResponse)
 async def get_event(
     event_id: str = Path(..., description="Event ID"),
-    user_id: Optional[str] = Query(None, description="User ID for authorization")
+    user_id: Optional[str] = Query(None, description="User ID for authorization"),
 ):
     """
     获取事件详情
-    
+
     Get event details by ID
     """
     try:
         event = await microservice.service.get_event(event_id, user_id)
-        
+
         if not event:
             raise HTTPException(status_code=404, detail="Event not found")
-        
+
         return event
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -217,28 +233,28 @@ async def list_events(
     end_date: Optional[str] = Query(None, description="End date (ISO format)"),
     category: Optional[EventCategory] = Query(None, description="Event category"),
     limit: int = Query(100, ge=1, le=1000, description="Results per page"),
-    offset: int = Query(0, ge=0, description="Offset")
+    offset: int = Query(0, ge=0, description="Offset"),
 ):
     """
     查询事件列表
-    
+
     List events with optional filters
     """
     try:
         from datetime import datetime
-        
+
         query = EventQueryRequest(
             user_id=user_id,
             start_date=datetime.fromisoformat(start_date) if start_date else None,
             end_date=datetime.fromisoformat(end_date) if end_date else None,
             category=category,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
-        
+
         result = await microservice.service.query_events(query)
         return result
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
     except Exception as e:
@@ -250,21 +266,21 @@ async def list_events(
 async def update_event(
     event_id: str = Path(..., description="Event ID"),
     request: EventUpdateRequest = Body(...),
-    user_id: Optional[str] = Query(None, description="User ID for authorization")
+    user_id: Optional[str] = Query(None, description="User ID for authorization"),
 ):
     """
     更新事件
-    
+
     Update an existing event
     """
     try:
         event = await microservice.service.update_event(event_id, request, user_id)
-        
+
         if not event:
             raise HTTPException(status_code=404, detail="Event not found")
-        
+
         return event
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
@@ -277,21 +293,21 @@ async def update_event(
 @app.delete("/api/v1/calendar/events/{event_id}", status_code=204)
 async def delete_event(
     event_id: str = Path(..., description="Event ID"),
-    user_id: Optional[str] = Query(None, description="User ID for authorization")
+    user_id: Optional[str] = Query(None, description="User ID for authorization"),
 ):
     """
     删除事件
-    
+
     Delete an event
     """
     try:
         success = await microservice.service.delete_event(event_id, user_id)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="Event not found")
-        
+
         return None
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -303,38 +319,37 @@ async def delete_event(
 # Query Endpoints
 # =============================================================================
 
+
 @app.get("/api/v1/calendar/upcoming", response_model=List[EventResponse])
 async def get_upcoming_events(
     user_id: str = Query(..., description="User ID"),
-    days: int = Query(7, ge=1, le=365, description="Number of days to look ahead")
+    days: int = Query(7, ge=1, le=365, description="Number of days to look ahead"),
 ):
     """
     获取即将到来的事件
-    
+
     Get upcoming events for the next N days
     """
     try:
         events = await microservice.service.get_upcoming_events(user_id, days)
         return events
-        
+
     except Exception as e:
         logger.error(f"Error getting upcoming events: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/calendar/today", response_model=List[EventResponse])
-async def get_today_events(
-    user_id: str = Query(..., description="User ID")
-):
+async def get_today_events(user_id: str = Query(..., description="User ID")):
     """
     获取今天的事件
-    
+
     Get today's events
     """
     try:
         events = await microservice.service.get_today_events(user_id)
         return events
-        
+
     except Exception as e:
         logger.error(f"Error getting today's events: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -344,26 +359,27 @@ async def get_today_events(
 # External Calendar Sync Endpoints
 # =============================================================================
 
+
 @app.post("/api/v1/calendar/sync", response_model=SyncStatusResponse)
 async def sync_external_calendar(
     user_id: str = Query(..., description="User ID"),
-    provider: str = Query(..., description="Calendar provider (google_calendar, apple_calendar, outlook)"),
-    credentials: dict = Body(None, description="OAuth credentials (optional)")
+    provider: str = Query(
+        ..., description="Calendar provider (google_calendar, apple_calendar, outlook)"
+    ),
+    credentials: dict = Body(None, description="OAuth credentials (optional)"),
 ):
     """
     同步外部日历
-    
+
     Sync with external calendar (Google, Apple, Outlook)
     """
     try:
         result = await microservice.service.sync_with_external_calendar(
-            user_id=user_id,
-            provider=provider,
-            credentials=credentials
+            user_id=user_id, provider=provider, credentials=credentials
         )
-        
+
         return result
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -374,21 +390,21 @@ async def sync_external_calendar(
 @app.get("/api/v1/calendar/sync/status", response_model=SyncStatusResponse)
 async def get_sync_status(
     user_id: str = Query(..., description="User ID"),
-    provider: Optional[str] = Query(None, description="Calendar provider")
+    provider: Optional[str] = Query(None, description="Calendar provider"),
 ):
     """
     获取同步状态
-    
+
     Get sync status for external calendars
     """
     try:
         status = await microservice.service.get_sync_status(user_id, provider)
-        
+
         if not status:
             raise HTTPException(status_code=404, detail="Sync status not found")
-        
+
         return status
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -402,13 +418,7 @@ async def get_sync_status(
 
 if __name__ == "__main__":
     import uvicorn
-    
-    port = config.service_port if hasattr(config, 'service_port') else 8240
-    
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=True
-    )
 
+    port = config.service_port if hasattr(config, "service_port") else 8240
+
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

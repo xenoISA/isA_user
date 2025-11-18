@@ -129,67 +129,67 @@ SERVICE_ROUTES = [
     },
     # Gallery API
     {
-        "path": "/api/v1/gallery/albums",
+        "path": "/api/v1/media/gallery/albums",
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get gallery albums"
     },
     {
-        "path": "/api/v1/gallery/playlists",
+        "path": "/api/v1/media/gallery/playlists",
         "methods": ["GET", "POST"],
         "auth_required": True,
         "description": "List/create gallery playlists"
     },
     {
-        "path": "/api/v1/gallery/playlists/{playlist_id}",
+        "path": "/api/v1/media/gallery/playlists/{playlist_id}",
         "methods": ["GET", "PUT", "DELETE"],
         "auth_required": True,
         "description": "Get/update/delete gallery playlist"
     },
     {
-        "path": "/api/v1/gallery/photos/random",
+        "path": "/api/v1/media/gallery/photos/random",
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get random photos"
     },
     {
-        "path": "/api/v1/gallery/photos/metadata",
+        "path": "/api/v1/media/gallery/photos/metadata",
         "methods": ["POST"],
         "auth_required": True,
         "description": "Batch get photo metadata"
     },
     {
-        "path": "/api/v1/gallery/cache/preload",
+        "path": "/api/v1/media/gallery/cache/preload",
         "methods": ["POST"],
         "auth_required": True,
         "description": "Preload cache"
     },
     {
-        "path": "/api/v1/gallery/cache/{frame_id}/stats",
+        "path": "/api/v1/media/gallery/cache/{frame_id}/stats",
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get cache stats"
     },
     {
-        "path": "/api/v1/gallery/cache/{frame_id}/clear",
+        "path": "/api/v1/media/gallery/cache/{frame_id}/clear",
         "methods": ["POST"],
         "auth_required": True,
         "description": "Clear cache"
     },
     {
-        "path": "/api/v1/gallery/schedules",
+        "path": "/api/v1/media/gallery/schedules",
         "methods": ["POST"],
         "auth_required": True,
         "description": "Create gallery schedule"
     },
     {
-        "path": "/api/v1/gallery/schedules/{frame_id}",
+        "path": "/api/v1/media/gallery/schedules/{frame_id}",
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get gallery schedules"
     },
     {
-        "path": "/api/v1/gallery/frames/{frame_id}/playlists",
+        "path": "/api/v1/media/gallery/frames/{frame_id}/playlists",
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get frame playlists"
@@ -228,7 +228,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
 
     return {
         "route_count": str(len(SERVICE_ROUTES)),
-        "base_path": "/api/v1",
+        "base_path": "/api/v1/media",
         "health": ",".join(health_routes),
         "versions": str(len(version_routes)),
         "playlists": str(len(playlist_routes)),

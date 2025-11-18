@@ -5,72 +5,96 @@ Vault Service Event Handlers
 """
 
 import logging
-from typing import Dict, Callable
+from typing import Callable, Dict
+
+from core.nats_client import Event
+
+from .models import parse_user_deleted_event
 
 logger = logging.getLogger(__name__)
 
 
-class VaultEventHandlers:
-    """Vault 服务事件处理器"""
-
-    def __init__(self, vault_service):
-        """
-        初始化事件处理器
-
-        Args:
-            vault_service: VaultService 实例
-        """
-        self.service = vault_service
-        self.repository = vault_service.repository
-
-    def get_event_handler_map(self) -> Dict[str, Callable]:
-        """
-        获取事件处理器映射
-
-        Returns:
-            Dict[event_type, handler_function]
-        """
-        return {
-            "user.deleted": self.handle_user_deleted,
-        }
-
-    async def handle_user_deleted(self, event_data: dict):
-        """
-        处理用户删除事件
-
-        当用户被删除时，自动清理该用户的所有 vault 数据
-        包括: vault items, shares, access logs
-        符合 GDPR Article 17: Right to Erasure
-
-        Args:
-            event_data: {
-                "user_id": str,
-                "timestamp": str,
-                ...
-            }
-        """
-        try:
-            user_id = event_data.get("user_id")
-            if not user_id:
-                logger.warning("Received user.deleted event without user_id")
-                return
-
-            logger.info(f"Handling user.deleted event for user: {user_id}")
-
-            # Delete all user vault data
-            deleted_count = await self.repository.delete_user_data(user_id)
-
-            logger.info(
-                f"✅ Successfully deleted {deleted_count} vault records for user {user_id} "
-                f"(GDPR compliance)"
-            )
-
-        except Exception as e:
-            logger.error(
-                f"❌ Error handling user.deleted event for user {event_data.get('user_id')}: {e}",
-                exc_info=True
-            )
-            # Don't raise - we don't want to break the event processing chain
+# =============================================================================
+# Event Handlers (Async Functions)
+# =============================================================================
 
 
-__all__ = ["VaultEventHandlers"]
+async def handle_user_deleted(event: Event, vault_service):
+    """
+    Handle user.deleted event
+
+    当用户被删除时，自动清理该用户的所有 vault 数据
+    包括: vault items, shares, access logs
+    符合 GDPR Article 17: Right to Erasure
+
+    Args:
+        event: NATS event object
+        vault_service: VaultService instance
+
+    Event Data:
+        - user_id: str
+        - timestamp: str (optional)
+        - reason: str (optional)
+
+    Workflow:
+        1. Parse event data
+        2. Delete all user vault data (items, shares, logs)
+        3. Log completion for compliance
+    """
+    try:
+        # Parse event data
+        event_data = parse_user_deleted_event(event.data)
+        user_id = event_data.user_id
+
+        if not user_id:
+            logger.warning("Received user.deleted event without user_id")
+            return
+
+        logger.info(f"Handling user.deleted event for user: {user_id}")
+
+        # Delete all user vault data
+        deleted_count = await vault_service.repository.delete_user_data(user_id)
+
+        logger.info(
+            f"✅ Successfully deleted {deleted_count} vault records for user {user_id} "
+            f"(GDPR compliance)"
+        )
+
+    except Exception as e:
+        logger.error(
+            f"❌ Error handling user.deleted event for user {event.data.get('user_id')}: {e}",
+            exc_info=True,
+        )
+        # Don't raise - we don't want to break the event processing chain
+
+
+# =============================================================================
+# Event Handler Registry
+# =============================================================================
+
+
+def get_event_handlers(vault_service) -> Dict[str, Callable]:
+    """
+    Get all event handlers for vault service.
+
+    Returns a dict mapping event patterns to handler functions.
+    This is used by main.py to register all event subscriptions.
+
+    Args:
+        vault_service: VaultService instance
+
+    Returns:
+        Dict[str, callable]: Event pattern -> handler function mapping
+    """
+    return {
+        "account_service.user.deleted": lambda event: handle_user_deleted(
+            event, vault_service
+        ),
+        "*.user.deleted": lambda event: handle_user_deleted(event, vault_service),
+    }
+
+
+__all__ = [
+    "handle_user_deleted",
+    "get_event_handlers",
+]

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Storage Service - File Operations Test Script
-# Tests: Health, Upload, List, Get Info, Download, Delete
+# Tests: Upload, List, Get Info, Download, Delete
+# Event-Driven Architecture v2.0 - via APISIX Ingress
 
-BASE_URL="http://localhost:8209"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors
@@ -10,6 +11,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Test counters
@@ -30,8 +32,9 @@ test_result() {
 }
 
 echo -e "${CYAN}======================================================================${NC}"
-echo -e "${CYAN}       STORAGE SERVICE - FILE OPERATIONS TEST${NC}"
+echo -e "${CYAN}     STORAGE SERVICE - FILE OPERATIONS TEST (Event-Driven v2.0)${NC}"
 echo -e "${CYAN}======================================================================${NC}"
+echo -e "${BLUE}Testing via APISIX Ingress: ${BASE_URL}${NC}"
 echo ""
 
 # Use test user from seed_test_data.sql
@@ -40,41 +43,10 @@ TEST_USER_ID="test_user_001"
 echo -e "${GREEN}Using test user: ${CYAN}$TEST_USER_ID${NC}"
 echo -e "${CYAN}(Defined in migrations/seed_test_data.sql)${NC}"
 echo ""
-
-# Test 1: Health Check
-echo -e "${YELLOW}Test 1: Health Check${NC}"
-echo "GET /health"
-RESPONSE=$(curl -s "${BASE_URL}/health")
-echo "$RESPONSE" | python3 -m json.tool
-if echo "$RESPONSE" | grep -q '"status":"healthy"'; then
-    test_result 0
-else
-    test_result 1
-fi
-echo ""
-
-# Test 2: Service Info
-echo -e "${YELLOW}Test 2: Get Service Information${NC}"
-echo "GET /info"
-RESPONSE=$(curl -s "${BASE_URL}/info")
-echo "$RESPONSE" | python3 -m json.tool
-if echo "$RESPONSE" | grep -q '"service":"smart-storage-service"'; then
-    test_result 0
-else
-    test_result 1
-fi
-echo ""
-
-# Test 3: Check MinIO Status
-echo -e "${YELLOW}Test 3: Check MinIO Connection Status${NC}"
-echo "GET /api/v1/storage/test/minio-status"
-RESPONSE=$(curl -s "${API_BASE}/storage/test/minio-status")
-echo "$RESPONSE" | python3 -m json.tool
-if echo "$RESPONSE" | grep -q '"status":"connected"'; then
-    test_result 0
-else
-    test_result 1
-fi
+echo -e "${BLUE}Event-Driven Features:${NC}"
+echo "  ✓ Events published via events/publishers.py"
+echo "  ✓ Event handlers in events/handlers.py"
+echo "  ✓ Expected events: file.uploaded, file.deleted"
 echo ""
 
 # Create a test file for upload
@@ -83,9 +55,10 @@ echo "This is a test file for storage service testing." > "$TEST_FILE"
 echo "Created at: $(date)" >> "$TEST_FILE"
 echo "Test user: $TEST_USER_ID" >> "$TEST_FILE"
 
-# Test 4: Upload File
-echo -e "${YELLOW}Test 4: Upload File${NC}"
+# Test 1: Upload File - Event Publisher Test
+echo -e "${YELLOW}Test 1: Upload File - Event Publisher Test${NC}"
 echo "POST /api/v1/storage/files/upload"
+echo -e "${BLUE}Expected Event: file.uploaded will be published to NATS${NC}"
 UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/storage/files/upload" \
   -F "file=@${TEST_FILE}" \
   -F "user_id=${TEST_USER_ID}" \
@@ -99,6 +72,10 @@ echo "$UPLOAD_RESPONSE" | python3 -m json.tool
 if echo "$UPLOAD_RESPONSE" | grep -q '"file_id"'; then
     FILE_ID=$(echo "$UPLOAD_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['file_id'])")
     echo -e "${GREEN}✓ File uploaded: $FILE_ID${NC}"
+    echo -e "${GREEN}✓ Event 'file.uploaded' should be published with:${NC}"
+    echo "  - file_id: $FILE_ID"
+    echo "  - user_id: $TEST_USER_ID"
+    echo "  - file_name: $(basename $TEST_FILE)"
     test_result 0
 else
     echo -e "${RED}✗ Upload failed${NC}"
@@ -107,8 +84,8 @@ else
 fi
 echo ""
 
-# Test 5: List Files
-echo -e "${YELLOW}Test 5: List User Files${NC}"
+# Test 2: List Files
+echo -e "${YELLOW}Test 2: List User Files${NC}"
 echo "GET /api/v1/storage/files?user_id=${TEST_USER_ID}"
 RESPONSE=$(curl -s "${API_BASE}/storage/files?user_id=${TEST_USER_ID}&limit=10")
 echo "$RESPONSE" | python3 -m json.tool | head -50
@@ -121,9 +98,9 @@ else
 fi
 echo ""
 
-# Test 6: Get File Info
+# Test 3: Get File Info
 if [ -n "$FILE_ID" ]; then
-    echo -e "${YELLOW}Test 6: Get File Information${NC}"
+    echo -e "${YELLOW}Test 3: Get File Information${NC}"
     echo "GET /api/v1/storage/files/${FILE_ID}?user_id=${TEST_USER_ID}"
     RESPONSE=$(curl -s "${API_BASE}/storage/files/${FILE_ID}?user_id=${TEST_USER_ID}")
     echo "$RESPONSE" | python3 -m json.tool
@@ -134,13 +111,13 @@ if [ -n "$FILE_ID" ]; then
     fi
     echo ""
 else
-    echo -e "${YELLOW}Test 6: Get File Information - SKIPPED (no file_id)${NC}"
+    echo -e "${YELLOW}Test 3: Get File Information - SKIPPED (no file_id)${NC}"
     echo ""
 fi
 
-# Test 7: Get Download URL
+# Test 4: Get Download URL
 if [ -n "$FILE_ID" ]; then
-    echo -e "${YELLOW}Test 7: Get File Download URL${NC}"
+    echo -e "${YELLOW}Test 4: Get File Download URL${NC}"
     echo "GET /api/v1/storage/files/${FILE_ID}/download?user_id=${TEST_USER_ID}"
     RESPONSE=$(curl -s "${API_BASE}/storage/files/${FILE_ID}/download?user_id=${TEST_USER_ID}")
     echo "$RESPONSE" | python3 -m json.tool

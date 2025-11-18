@@ -1,8 +1,9 @@
 #!/bin/bash
 # Authorization Service Comprehensive Test Script
 # Tests all authorization and permission management endpoints
+# Tests service running in Kubernetes with Ingress
 
-BASE_URL="http://localhost:8204"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/authorization"
 
 # Colors
@@ -34,31 +35,7 @@ echo -e "${CYAN}       AUTHORIZATION SERVICE COMPREHENSIVE TEST${NC}"
 echo -e "${CYAN}======================================================================${NC}"
 echo ""
 
-# Test 1: Health Check
-echo -e "${YELLOW}Test 1: Health Check${NC}"
-echo "GET /health"
-RESPONSE=$(curl -s "${BASE_URL}/health")
-echo "$RESPONSE" | python3 -m json.tool
-if echo "$RESPONSE" | grep -q '"status":"healthy"'; then
-    test_result 0
-else
-    test_result 1
-fi
-echo ""
-
-# Test 2: Detailed Health Check
-echo -e "${YELLOW}Test 2: Detailed Health Check${NC}"
-echo "GET /health/detailed"
-RESPONSE=$(curl -s "${BASE_URL}/health/detailed")
-echo "$RESPONSE" | python3 -m json.tool
-if echo "$RESPONSE" | grep -q '"database_connected":true'; then
-    test_result 0
-else
-    test_result 1
-fi
-echo ""
-
-# Test 3: Service Info
+# Test 1: (skip health checks - for K8s probes only) Service Info
 echo -e "${YELLOW}Test 3: Get Service Information${NC}"
 echo "GET /api/v1/authorization/info"
 RESPONSE=$(curl -s "${API_BASE}/info")
@@ -89,7 +66,7 @@ TEST_EMAIL="authz_test_${TEST_TS}@example.com"
 TEST_AUTH0_ID="authz_test_user_${TEST_TS}"
 
 # Call account service to create test user
-USER_RESPONSE=$(curl -s -X POST "http://localhost:8202/api/v1/accounts/ensure" \
+USER_RESPONSE=$(curl -s -X POST "http://localhost/api/v1/accounts/ensure" \
   -H "Content-Type: application/json" \
   -d "{\"user_id\":\"${TEST_AUTH0_ID}\",\"email\":\"${TEST_EMAIL}\",\"name\":\"Authorization Test User\",\"subscription_plan\":\"free\"}")
 

@@ -5,34 +5,50 @@ Notification Service API
 提供通知发送、模板管理、应用内通知等功能
 """
 
-import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sys
 
-# Import ConsulRegistry and ConfigManager
-from isa_common.consul_client import ConsulRegistry
-from core.config_manager import ConfigManager
-from core.nats_client import get_event_bus
-from .routes_registry import get_routes_for_consul, SERVICE_METADATA
-
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
-from typing import Optional, List
-import logging
-import asyncio
-from contextlib import asynccontextmanager
-
-from .notification_service import NotificationService
-from .events.handlers import NotificationEventHandlers
-from .models import (
-    SendNotificationRequest, SendBatchRequest,
-    CreateTemplateRequest, UpdateTemplateRequest,
-    NotificationResponse, TemplateResponse, BatchResponse,
-    NotificationTemplate, Notification, InAppNotification,
-    NotificationStatsResponse, HealthResponse, ServiceInfo,
-    NotificationType, NotificationStatus, TemplateStatus, NotificationPriority,
-    RegisterPushSubscriptionRequest, PushSubscription, PushPlatform
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
+# Import ConsulRegistry and ConfigManager
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from typing import List, Optional
+
+from core.config_manager import ConfigManager
+from core.nats_client import get_event_bus
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+
+from isa_common.consul_client import ConsulRegistry
+
+from .events.handlers import get_event_handlers
+from .models import (
+    BatchResponse,
+    CreateTemplateRequest,
+    HealthResponse,
+    InAppNotification,
+    Notification,
+    NotificationPriority,
+    NotificationResponse,
+    NotificationStatsResponse,
+    NotificationStatus,
+    NotificationTemplate,
+    NotificationType,
+    PushPlatform,
+    PushSubscription,
+    RegisterPushSubscriptionRequest,
+    SendBatchRequest,
+    SendNotificationRequest,
+    ServiceInfo,
+    TemplateResponse,
+    TemplateStatus,
+    UpdateTemplateRequest,
+)
+from .notification_service import NotificationService
+from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Initialize configuration
 config_manager = ConfigManager("notification_service")
@@ -66,7 +82,7 @@ async def process_pending_notifications_task():
                     logger.info(f"Processed {count} pending notifications")
         except Exception as e:
             logger.error(f"Error in background task: {str(e)}")
-        
+
         # 每30秒检查一次
         await asyncio.sleep(30)
 
@@ -81,7 +97,9 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("notification_service")
         logger.info("Event bus initialized successfully")
     except Exception as e:
-        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"Failed to initialize event bus: {e}. Continuing without event publishing."
+        )
         event_bus = None
 
     # Initialize service with event bus and config_manager
@@ -91,23 +109,23 @@ async def lifespan(app: FastAPI):
     # Initialize event handlers if event bus is available
     if event_bus:
         try:
-            event_handlers = NotificationEventHandlers(service)
+            # Get event handlers (function-based, not class-based)
+            handler_map = get_event_handlers(service)
 
             # Subscribe to events
-            handler_map = event_handlers.get_event_handler_map()
-            for event_type, handler_func in handler_map.items():
-                # Subscribe to each event type
-                # Convert event type like "user.logged_in" to subscription pattern "*.*user.logged_in"
+            for event_pattern, handler_func in handler_map.items():
+                # Subscribe to each event pattern (already includes service prefix)
                 await event_bus.subscribe_to_events(
-                    pattern=f"*.{event_type}",
-                    handler=handler_func
+                    pattern=event_pattern, handler=handler_func
                 )
-                logger.info(f"Subscribed to {event_type} events")
+                logger.info(f"Subscribed to {event_pattern} events")
 
             logger.info(f"Subscribed to {len(handler_map)} event types")
 
         except Exception as e:
-            logger.warning(f"Failed to initialize event bus: {e}. Continuing without event subscriptions.")
+            logger.warning(
+                f"Failed to initialize event subscriptions: {e}. Continuing without event subscriptions."
+            )
             event_bus = None
             event_handlers = None
 
@@ -119,33 +137,37 @@ async def lifespan(app: FastAPI):
 
             # Merge service metadata
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities'][:5]),  # Limit capabilities
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(
+                    SERVICE_METADATA["capabilities"][:5]
+                ),  # Limit capabilities
+                **route_meta,
             }
 
             consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=config.service_port,
                 consul_host=config.consul_host,
                 consul_port=config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type="http",
             )
             consul_registry.register()
-            logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+            logger.info(
+                f"Service registered with Consul: {route_meta.get('route_count', 0)} routes"
+            )
         except Exception as e:
             logger.warning(f"Failed to register with Consul: {e}")
             consul_registry = None
 
     logger.info("Service discovery via Consul agent sidecar")
-    
+
     # 启动后台任务
     background_task = asyncio.create_task(process_pending_notifications_task())
-    
+
     yield
-    
+
     # 关闭时清理
     logger.info("Shutting down Notification Service...")
 
@@ -177,7 +199,7 @@ app = FastAPI(
     title="Notification Service",
     description="通知服务API - 支持邮件、应用内通知、模板管理等",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # 配置CORS
@@ -188,6 +210,7 @@ app = FastAPI(
 # 健康检查和服务信息
 # ====================
 
+
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 async def health_check():
     """健康检查"""
@@ -195,7 +218,7 @@ async def health_check():
         status="healthy",
         service=config.service_name,
         port=config.service_port,
-        version="1.0.0"
+        version="1.0.0",
     )
 
 
@@ -213,14 +236,14 @@ async def service_info():
             "push": True,
             "webhook": True,
             "templates": True,
-            "batch_sending": True
+            "batch_sending": True,
         },
         endpoints={
             "send_notification": "/api/v1/notifications/send",
             "send_batch": "/api/v1/notifications/batch",
             "templates": "/api/v1/notifications/templates",
-            "in_app_notifications": "/api/v1/notifications/in-app"
-        }
+            "in_app_notifications": "/api/v1/notifications/in-app",
+        },
     )
 
 
@@ -228,7 +251,12 @@ async def service_info():
 # 通知模板管理
 # ====================
 
-@app.post("/api/v1/notifications/templates", response_model=TemplateResponse, tags=["Templates"])
+
+@app.post(
+    "/api/v1/notifications/templates",
+    response_model=TemplateResponse,
+    tags=["Templates"],
+)
 async def create_template(request: CreateTemplateRequest):
     """创建通知模板"""
     try:
@@ -238,7 +266,11 @@ async def create_template(request: CreateTemplateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/notifications/templates/{template_id}", response_model=NotificationTemplate, tags=["Templates"])
+@app.get(
+    "/api/v1/notifications/templates/{template_id}",
+    response_model=NotificationTemplate,
+    tags=["Templates"],
+)
 async def get_template(template_id: str):
     """获取通知模板"""
     template = await service.get_template(template_id)
@@ -247,12 +279,16 @@ async def get_template(template_id: str):
     return template
 
 
-@app.get("/api/v1/notifications/templates", response_model=List[NotificationTemplate], tags=["Templates"])
+@app.get(
+    "/api/v1/notifications/templates",
+    response_model=List[NotificationTemplate],
+    tags=["Templates"],
+)
 async def list_templates(
     type: Optional[NotificationType] = None,
     status: Optional[TemplateStatus] = None,
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
 ):
     """列出通知模板"""
     try:
@@ -262,7 +298,11 @@ async def list_templates(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/v1/notifications/templates/{template_id}", response_model=TemplateResponse, tags=["Templates"])
+@app.put(
+    "/api/v1/notifications/templates/{template_id}",
+    response_model=TemplateResponse,
+    tags=["Templates"],
+)
 async def update_template(template_id: str, request: UpdateTemplateRequest):
     """更新通知模板"""
     try:
@@ -276,7 +316,12 @@ async def update_template(template_id: str, request: UpdateTemplateRequest):
 # 发送通知
 # ====================
 
-@app.post("/api/v1/notifications/send", response_model=NotificationResponse, tags=["Notifications"])
+
+@app.post(
+    "/api/v1/notifications/send",
+    response_model=NotificationResponse,
+    tags=["Notifications"],
+)
 async def send_notification(request: SendNotificationRequest):
     """发送单个通知"""
     try:
@@ -286,7 +331,9 @@ async def send_notification(request: SendNotificationRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/notifications/batch", response_model=BatchResponse, tags=["Notifications"])
+@app.post(
+    "/api/v1/notifications/batch", response_model=BatchResponse, tags=["Notifications"]
+)
 async def send_batch(request: SendBatchRequest):
     """批量发送通知"""
     try:
@@ -296,14 +343,16 @@ async def send_batch(request: SendBatchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/notifications", response_model=List[Notification], tags=["Notifications"])
+@app.get(
+    "/api/v1/notifications", response_model=List[Notification], tags=["Notifications"]
+)
 async def list_notifications(
     user_id: Optional[str] = None,
     type: Optional[NotificationType] = None,
     status: Optional[NotificationStatus] = None,
     priority: Optional[NotificationPriority] = None,
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
 ):
     """列出通知"""
     try:
@@ -319,14 +368,19 @@ async def list_notifications(
 # 应用内通知
 # ====================
 
-@app.get("/api/v1/notifications/in-app/{user_id}", response_model=List[InAppNotification], tags=["In-App"])
+
+@app.get(
+    "/api/v1/notifications/in-app/{user_id}",
+    response_model=List[InAppNotification],
+    tags=["In-App"],
+)
 async def list_user_notifications(
     user_id: str,
     is_read: Optional[bool] = None,
     is_archived: Optional[bool] = None,
     category: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
 ):
     """列出用户的应用内通知"""
     try:
@@ -381,7 +435,12 @@ async def get_unread_count(user_id: str):
 # Push通知订阅
 # ====================
 
-@app.post("/api/v1/notifications/push/subscribe", response_model=PushSubscription, tags=["Push"])
+
+@app.post(
+    "/api/v1/notifications/push/subscribe",
+    response_model=PushSubscription,
+    tags=["Push"],
+)
 async def register_push_subscription(request: RegisterPushSubscriptionRequest):
     """注册推送订阅"""
     try:
@@ -391,10 +450,13 @@ async def register_push_subscription(request: RegisterPushSubscriptionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/notifications/push/subscriptions/{user_id}", response_model=List[PushSubscription], tags=["Push"])
+@app.get(
+    "/api/v1/notifications/push/subscriptions/{user_id}",
+    response_model=List[PushSubscription],
+    tags=["Push"],
+)
 async def get_user_push_subscriptions(
-    user_id: str,
-    platform: Optional[PushPlatform] = None
+    user_id: str, platform: Optional[PushPlatform] = None
 ):
     """获取用户的推送订阅"""
     try:
@@ -422,10 +484,15 @@ async def unsubscribe_push(user_id: str, device_token: str):
 # 统计和报告
 # ====================
 
-@app.get("/api/v1/notifications/stats", response_model=NotificationStatsResponse, tags=["Statistics"])
+
+@app.get(
+    "/api/v1/notifications/stats",
+    response_model=NotificationStatsResponse,
+    tags=["Statistics"],
+)
 async def get_notification_stats(
     user_id: Optional[str] = None,
-    period: str = Query("all_time", regex="^(today|week|month|year|all_time)$")
+    period: str = Query("all_time", regex="^(today|week|month|year|all_time)$"),
 ):
     """获取通知统计"""
     try:
@@ -439,8 +506,11 @@ async def get_notification_stats(
 # 测试端点（开发环境）
 # ====================
 
+
 @app.post("/api/v1/notifications/test/email", tags=["Test"])
-async def test_email(to: str, subject: str = "Test Email", user_id: str = "test_user_email"):
+async def test_email(
+    to: str, subject: str = "Test Email", user_id: str = "test_user_email"
+):
     """测试邮件发送"""
     try:
         request = SendNotificationRequest(
@@ -450,7 +520,7 @@ async def test_email(to: str, subject: str = "Test Email", user_id: str = "test_
             subject=subject,
             content="This is a test email from Notification Service.",
             html_content="<h1>Test Email</h1><p>This is a test email from <b>Notification Service</b>.</p>",
-            priority=NotificationPriority.HIGH
+            priority=NotificationPriority.HIGH,
         )
         return await service.send_notification(request)
     except Exception as e:
@@ -467,7 +537,7 @@ async def test_in_app_notification(user_id: str, title: str = "Test Notification
             recipient_id=user_id,
             subject=title,
             content="This is a test in-app notification.",
-            priority=NotificationPriority.NORMAL
+            priority=NotificationPriority.NORMAL,
         )
         return await service.send_notification(request)
     except Exception as e:
@@ -477,13 +547,10 @@ async def test_in_app_notification(user_id: str, title: str = "Test Notification
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     # Print configuration summary for debugging
     config_manager.print_config_summary()
-    
+
     uvicorn.run(
-        app,
-        host=config.service_host,
-        port=config.service_port,
-        log_level="info"
+        app, host=config.service_host, port=config.service_port, log_level="info"
     )

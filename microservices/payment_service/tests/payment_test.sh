@@ -3,9 +3,9 @@
 # Payment Service CRUD Tests
 # Tests subscription plans, subscriptions, payments, invoices, and refunds
 
-BASE_URL="http://localhost:8207"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/payments"
-AUTH_URL="http://localhost:8201/api/v1/auth"
+AUTH_URL="http://localhost/api/v1/auth"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -48,9 +48,9 @@ print_section() {
 print_section "Test 0: Generate Test Token from Auth Service"
 echo "POST ${AUTH_URL}/dev-token"
 TOKEN_PAYLOAD='{
-  "user_id": "test-user-1",
-  "email": "test1@example.com",
-  "organization_id": "org_test_123",
+  "user_id": "test_user_001",
+  "email": "alice@example.com",
+  "organization_id": "test_org_001",
   "role": "user",
   "expires_in": 3600
 }'
@@ -82,27 +82,10 @@ else
     exit 1
 fi
 
-USER_ID="test-user-1"
+USER_ID="test_user_001"
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Get Service Info
-print_section "Test 2: Get Service Info"
+# Test 1: Get Service Info (skip health check - it's for K8s probes)
+print_section "Test 1: Get Service Info"
 echo "GET ${BASE_URL}/api/v1/payments/info"
 INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/api/v1/payments/info")
 HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
@@ -118,7 +101,7 @@ else
     print_result 1 "Failed to get service info"
 fi
 
-# Test 3: Create Subscription Plan
+# Test 2: Create Subscription Plan
 print_section "Test 3: Create Subscription Plan"
 PLAN_ID="plan_test_pro_monthly_$(date +%s)"
 echo "POST ${API_BASE}/plans"
@@ -515,7 +498,7 @@ if [ -n "$SUBSCRIPTION_ID" ] && [ "$SUBSCRIPTION_ID" != "null" ]; then
     echo "Request Body:"
     echo "$USAGE_PAYLOAD" | jq '.'
 
-    USAGE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BASE_URL}/api/v1/usage" \
+    USAGE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BASE_URL}/api/v1/payments/usage" \
       -H "Content-Type: application/json" \
       -d "$USAGE_PAYLOAD")
     HTTP_CODE=$(echo "$USAGE_RESPONSE" | tail -n1)
@@ -542,9 +525,9 @@ fi
 
 # Test 16: Get Revenue Statistics
 print_section "Test 16: Get Revenue Statistics"
-echo "GET ${BASE_URL}/api/v1/stats/revenue"
+echo "GET ${BASE_URL}/api/v1/payments/stats/revenue"
 
-REVENUE_STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BASE_URL}/api/v1/stats/revenue")
+REVENUE_STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BASE_URL}/api/v1/payments/stats/revenue")
 HTTP_CODE=$(echo "$REVENUE_STATS_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$REVENUE_STATS_RESPONSE" | sed '$d')
 
@@ -560,9 +543,9 @@ fi
 
 # Test 17: Get Subscription Statistics
 print_section "Test 17: Get Subscription Statistics"
-echo "GET ${BASE_URL}/api/v1/stats/subscriptions"
+echo "GET ${BASE_URL}/api/v1/payments/stats/subscriptions"
 
-SUB_STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BASE_URL}/api/v1/stats/subscriptions")
+SUB_STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BASE_URL}/api/v1/payments/stats/subscriptions")
 HTTP_CODE=$(echo "$SUB_STATS_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$SUB_STATS_RESPONSE" | sed '$d')
 

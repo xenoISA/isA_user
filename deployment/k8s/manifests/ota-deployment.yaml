@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ota
+  namespace: isa-cloud-staging
+  labels:
+    app: ota
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ota
+  template:
+    metadata:
+      labels:
+        app: ota
+        tier: applications
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: ota
+          image: isa-ota:latest
+          imagePullPolicy: IfNotPresent
+          
+          ports:
+            - name: http
+              containerPort: 8221
+          
+          envFrom:
+            - configMapRef:
+                name: user-config
+            - configMapRef:
+                name: data-config
+          
+          env:
+            - name: SERVICE_NAME
+              value: "ota_service"
+            - name: OTA_SERVICE_PORT
+              value: "8221"
+            - name: SERVICE_HOST
+              value: "ota.isa-cloud-staging.svc.cluster.local"
+          
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8221
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8221
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ota
+  namespace: isa-cloud-staging
+  labels:
+    app: ota
+    tier: applications
+spec:
+  type: ClusterIP
+  selector:
+    app: ota
+  ports:
+    - name: http
+      port: 8221
+      targetPort: 8221
+      protocol: TCP

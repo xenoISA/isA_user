@@ -225,7 +225,7 @@ class AuthMicroservice:
 
             # Initialize organization service client for microservice communication
             try:
-                from microservices.organization_service.client import OrganizationServiceClient
+                from clients import OrganizationServiceClient
                 self.organization_service_client = OrganizationServiceClient()
                 logger.info("Organization service client initialized")
             except Exception as e:
@@ -980,3 +980,95 @@ if __name__ == "__main__":
         reload=config.debug,
         log_level=config.log_level.lower()
     )
+
+# ============================================================================
+# Pairing Token Models (add after RegistrationVerifyResponse)
+# ============================================================================
+
+class PairingTokenGenerateResponse(BaseModel):
+    success: bool
+    pairing_token: Optional[str] = None
+    expires_at: Optional[str] = None
+    expires_in: Optional[int] = None
+    error: Optional[str] = None
+
+class PairingTokenVerifyRequest(BaseModel):
+    device_id: str
+    pairing_token: str
+    user_id: str
+
+class PairingTokenVerifyResponse(BaseModel):
+    valid: bool
+    device_id: Optional[str] = None
+    user_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ============================================================================
+# Device Pairing Token APIs
+# ============================================================================
+
+@app.post("/api/v1/auth/device/{device_id}/pairing-token", response_model=PairingTokenGenerateResponse)
+async def generate_pairing_token(
+    device_id: str,
+    device_auth_service: DeviceAuthService = Depends(get_device_auth_service)
+):
+    """
+    Generate a temporary pairing token for device-user pairing
+    
+    Called by Display device (EmoFrame tablet) to generate QR code
+    """
+    try:
+        result = await device_auth_service.generate_pairing_token(device_id)
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("error", "Failed to generate pairing token")
+            )
+        
+        return PairingTokenGenerateResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating pairing token: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/auth/device/pairing-token/verify", response_model=PairingTokenVerifyResponse)
+async def verify_pairing_token_endpoint(
+    request: PairingTokenVerifyRequest,
+    device_auth_service: DeviceAuthService = Depends(get_device_auth_service)
+):
+    """
+    Verify device pairing token
+    
+    Called by device_service when mobile user scans QR code
+    """
+    try:
+        result = await device_auth_service.verify_pairing_token(
+            device_id=request.device_id,
+            pairing_token=request.pairing_token,
+            user_id=request.user_id
+        )
+        
+        # Publish pairing completed event if successful
+        if result.get("valid"):
+            try:
+                event_bus = app.state.event_bus if hasattr(app.state, 'event_bus') else None
+                if event_bus:
+                    from events.publishers import publish_device_pairing_completed
+                    await publish_device_pairing_completed(
+                        event_bus=event_bus,
+                        device_id=request.device_id,
+                        user_id=request.user_id
+                    )
+            except Exception as e:
+                logger.error(f"Error publishing pairing completed event: {e}")
+        
+        return PairingTokenVerifyResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error verifying pairing token: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

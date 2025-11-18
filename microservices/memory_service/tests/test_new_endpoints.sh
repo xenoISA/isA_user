@@ -11,7 +11,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
-BASE_URL="http://localhost:8223"
+BASE_URL="http://localhost"
 USER_ID="test_user_$(date +%s)"
 SESSION_ID="test_session_$(date +%s)"
 
@@ -68,8 +68,6 @@ run_test() {
     echo ""
 }
 
-# Test 1: Health Check
-run_test "Health Check" "GET" "/health" ""
 
 # Test 2: Store Working Memory
 echo "----------------------------------------"

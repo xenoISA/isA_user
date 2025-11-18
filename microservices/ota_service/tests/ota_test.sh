@@ -11,9 +11,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-API_BASE="http://localhost:8221"
-AUTH_SERVICE_BASE="http://localhost:8201"
-DEVICE_SERVICE_BASE="http://localhost:8220"
+API_BASE="http://localhost/api/v1/ota"
+AUTH_SERVICE_BASE="http://localhost"
+DEVICE_SERVICE_BASE="http://localhost/device"
 
 # Test counters
 TESTS_PASSED=0
@@ -95,56 +95,16 @@ else
 fi
 
 # ======================
-# Test 1: Health Check
+# Test 1: Get Service Stats
 # ======================
-print_section "Test 1: Health Check"
+print_section "Test 1: Get Service Statistics"
 increment_test
 
-echo "GET ${API_BASE}/health"
-HEALTH_RESPONSE=$(curl -s "${API_BASE}/health")
-echo "Response:"
-echo "$HEALTH_RESPONSE" | jq '.'
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/health")
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" == "200" ]; then
-    pass_test "Health check successful"
-else
-    fail_test "Health check failed"
-fi
-
-# ======================
-# Test 2: Detailed Health Check
-# ======================
-print_section "Test 2: Detailed Health Check"
-increment_test
-
-echo "GET ${API_BASE}/health/detailed"
-DETAILED_HEALTH_RESPONSE=$(curl -s "${API_BASE}/health/detailed" \
-  -H "Authorization: Bearer ${TEST_TOKEN}")
-echo "Response:"
-echo "$DETAILED_HEALTH_RESPONSE" | jq '.'
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/health/detailed" \
-  -H "Authorization: Bearer ${TEST_TOKEN}")
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" == "200" ]; then
-    pass_test "Detailed health check successful"
-else
-    fail_test "Detailed health check failed"
-fi
-
-# ======================
-# Test 3: Get Service Stats
-# ======================
-print_section "Test 3: Get Service Statistics"
-increment_test
-
-echo "GET ${API_BASE}/api/v1/service/stats"
-SERVICE_STATS_RESPONSE=$(curl -s "${API_BASE}/api/v1/service/stats")
+echo "GET ${API_BASE}/service/stats"
+SERVICE_STATS_RESPONSE=$(curl -s "${API_BASE}/service/stats")
 echo "Response:"
 echo "$SERVICE_STATS_RESPONSE" | jq '.'
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/api/v1/service/stats")
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/service/stats")
 echo "HTTP Status: $HTTP_CODE"
 
 if [ "$HTTP_CODE" == "200" ]; then
@@ -154,12 +114,12 @@ else
 fi
 
 # ======================
-# Test 4: Upload Firmware (requires multipart/form-data)
+# Test 2: Upload Firmware (requires multipart/form-data)
 # ======================
-print_section "Test 4: Upload Firmware"
+print_section "Test 2: Upload Firmware"
 increment_test
 
-echo "POST ${API_BASE}/api/v1/firmware"
+echo "POST ${API_BASE}/firmware"
 
 # Create a temporary firmware file for testing
 TMP_FIRMWARE="/tmp/test_firmware_$(date +%s).bin"
@@ -185,14 +145,14 @@ FIRMWARE_METADATA='{
   "is_security_update": false
 }'
 
-FIRMWARE_UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/api/v1/firmware" \
+FIRMWARE_UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/firmware" \
   -H "Authorization: Bearer ${TEST_TOKEN}" \
   -F "metadata=${FIRMWARE_METADATA}" \
   -F "file=@${TMP_FIRMWARE}")
 
 echo "Response:"
 echo "$FIRMWARE_UPLOAD_RESPONSE" | jq '.'
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/api/v1/firmware" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/firmware" \
   -H "Authorization: Bearer ${TEST_TOKEN}" \
   -F "metadata=${FIRMWARE_METADATA}" \
   -F "file=@${TMP_FIRMWARE}")
@@ -212,17 +172,17 @@ fi
 rm -f "$TMP_FIRMWARE"
 
 # ======================
-# Test 5: List Firmware
+# Test 3: List Firmware
 # ======================
-print_section "Test 5: List Firmware"
+print_section "Test 3: List Firmware"
 increment_test
 
-echo "GET ${API_BASE}/api/v1/firmware"
-FIRMWARE_LIST_RESPONSE=$(curl -s "${API_BASE}/api/v1/firmware" \
+echo "GET ${API_BASE}/firmware"
+FIRMWARE_LIST_RESPONSE=$(curl -s "${API_BASE}/firmware" \
   -H "Authorization: Bearer ${TEST_TOKEN}")
 echo "Response:"
 echo "$FIRMWARE_LIST_RESPONSE" | jq '.'
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/api/v1/firmware" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/firmware" \
   -H "Authorization: Bearer ${TEST_TOKEN}")
 echo "HTTP Status: $HTTP_CODE"
 
@@ -235,18 +195,18 @@ else
 fi
 
 # ======================
-# Test 6: Get Firmware Details
+# Test 4: Get Firmware Details
 # ======================
 if [ -n "$FIRMWARE_ID" ] && [ "$FIRMWARE_ID" != "unknown" ]; then
-    print_section "Test 6: Get Firmware Details"
+    print_section "Test 4: Get Firmware Details"
     increment_test
 
-    echo "GET ${API_BASE}/api/v1/firmware/${FIRMWARE_ID}"
-    FIRMWARE_DETAILS_RESPONSE=$(curl -s "${API_BASE}/api/v1/firmware/${FIRMWARE_ID}" \
+    echo "GET ${API_BASE}/firmware/${FIRMWARE_ID}"
+    FIRMWARE_DETAILS_RESPONSE=$(curl -s "${API_BASE}/firmware/${FIRMWARE_ID}" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "Response:"
     echo "$FIRMWARE_DETAILS_RESPONSE" | jq '.'
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/api/v1/firmware/${FIRMWARE_ID}" \
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/firmware/${FIRMWARE_ID}" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "HTTP Status: $HTTP_CODE"
 
@@ -260,13 +220,13 @@ else
 fi
 
 # ======================
-# Test 7: Create Update Campaign
+# Test 5: Create Update Campaign
 # ======================
 if [ -n "$FIRMWARE_ID" ] && [ "$FIRMWARE_ID" != "unknown" ]; then
-    print_section "Test 7: Create Update Campaign"
+    print_section "Test 5: Create Update Campaign"
     increment_test
 
-    echo "POST ${API_BASE}/api/v1/campaigns"
+    echo "POST ${API_BASE}/campaigns"
     CAMPAIGN_REQUEST='{
       "name": "Test OTA Campaign",
       "description": "Automated test campaign",
@@ -286,14 +246,14 @@ if [ -n "$FIRMWARE_ID" ] && [ "$FIRMWARE_ID" != "unknown" ]; then
       "requires_approval": false
     }'
 
-    CAMPAIGN_RESPONSE=$(curl -s -X POST "${API_BASE}/api/v1/campaigns" \
+    CAMPAIGN_RESPONSE=$(curl -s -X POST "${API_BASE}/campaigns" \
       -H "Authorization: Bearer ${TEST_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "$CAMPAIGN_REQUEST")
 
     echo "Response:"
     echo "$CAMPAIGN_RESPONSE" | jq '.'
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/api/v1/campaigns" \
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/campaigns" \
       -H "Authorization: Bearer ${TEST_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "$CAMPAIGN_REQUEST")
@@ -313,18 +273,18 @@ else
 fi
 
 # ======================
-# Test 8: Get Campaign Details
+# Test 6: Get Campaign Details
 # ======================
 if [ -n "$CAMPAIGN_ID" ] && [ "$CAMPAIGN_ID" != "unknown" ]; then
-    print_section "Test 8: Get Campaign Details"
+    print_section "Test 6: Get Campaign Details"
     increment_test
 
-    echo "GET ${API_BASE}/api/v1/campaigns/${CAMPAIGN_ID}"
-    CAMPAIGN_DETAILS_RESPONSE=$(curl -s "${API_BASE}/api/v1/campaigns/${CAMPAIGN_ID}" \
+    echo "GET ${API_BASE}/campaigns/${CAMPAIGN_ID}"
+    CAMPAIGN_DETAILS_RESPONSE=$(curl -s "${API_BASE}/campaigns/${CAMPAIGN_ID}" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "Response:"
     echo "$CAMPAIGN_DETAILS_RESPONSE" | jq '.'
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/api/v1/campaigns/${CAMPAIGN_ID}" \
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/campaigns/${CAMPAIGN_ID}" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "HTTP Status: $HTTP_CODE"
 
@@ -338,17 +298,17 @@ else
 fi
 
 # ======================
-# Test 9: List Campaigns
+# Test 7: List Campaigns
 # ======================
-print_section "Test 9: List Campaigns"
+print_section "Test 7: List Campaigns"
 increment_test
 
-echo "GET ${API_BASE}/api/v1/campaigns"
-CAMPAIGNS_LIST_RESPONSE=$(curl -s "${API_BASE}/api/v1/campaigns" \
+echo "GET ${API_BASE}/campaigns"
+CAMPAIGNS_LIST_RESPONSE=$(curl -s "${API_BASE}/campaigns" \
   -H "Authorization: Bearer ${TEST_TOKEN}")
 echo "Response:"
 echo "$CAMPAIGNS_LIST_RESPONSE" | jq '.'
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/api/v1/campaigns" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/campaigns" \
   -H "Authorization: Bearer ${TEST_TOKEN}")
 echo "HTTP Status: $HTTP_CODE"
 
@@ -359,18 +319,18 @@ else
 fi
 
 # ======================
-# Test 10: Start Campaign
+# Test 8: Start Campaign
 # ======================
 if [ -n "$CAMPAIGN_ID" ] && [ "$CAMPAIGN_ID" != "unknown" ]; then
-    print_section "Test 10: Start Campaign"
+    print_section "Test 8: Start Campaign"
     increment_test
 
-    echo "POST ${API_BASE}/api/v1/campaigns/${CAMPAIGN_ID}/start"
-    START_CAMPAIGN_RESPONSE=$(curl -s -X POST "${API_BASE}/api/v1/campaigns/${CAMPAIGN_ID}/start" \
+    echo "POST ${API_BASE}/campaigns/${CAMPAIGN_ID}/start"
+    START_CAMPAIGN_RESPONSE=$(curl -s -X POST "${API_BASE}/campaigns/${CAMPAIGN_ID}/start" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "Response:"
     echo "$START_CAMPAIGN_RESPONSE" | jq '.'
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/api/v1/campaigns/${CAMPAIGN_ID}/start" \
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/campaigns/${CAMPAIGN_ID}/start" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "HTTP Status: $HTTP_CODE"
 
@@ -384,14 +344,14 @@ else
 fi
 
 # ======================
-# Test 11: Update Single Device
+# Test 9: Update Single Device
 # ======================
 if [ -n "$FIRMWARE_ID" ] && [ "$FIRMWARE_ID" != "unknown" ]; then
-    print_section "Test 11: Update Single Device"
+    print_section "Test 9: Update Single Device"
     increment_test
 
     TEST_DEVICE_ID="test_device_ota_$(date +%s)"
-    echo "POST ${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/update"
+    echo "POST ${API_BASE}/devices/${TEST_DEVICE_ID}/update"
     DEVICE_UPDATE_REQUEST='{
       "firmware_id": "'$FIRMWARE_ID'",
       "priority": "normal",
@@ -399,14 +359,14 @@ if [ -n "$FIRMWARE_ID" ] && [ "$FIRMWARE_ID" != "unknown" ]; then
       "force_update": false
     }'
 
-    DEVICE_UPDATE_RESPONSE=$(curl -s -X POST "${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/update" \
+    DEVICE_UPDATE_RESPONSE=$(curl -s -X POST "${API_BASE}/devices/${TEST_DEVICE_ID}/update" \
       -H "Authorization: Bearer ${TEST_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "$DEVICE_UPDATE_REQUEST")
 
     echo "Response:"
     echo "$DEVICE_UPDATE_RESPONSE" | jq '.'
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/update" \
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/devices/${TEST_DEVICE_ID}/update" \
       -H "Authorization: Bearer ${TEST_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "$DEVICE_UPDATE_REQUEST")
@@ -425,18 +385,18 @@ else
 fi
 
 # ======================
-# Test 12: Get Update Progress
+# Test 10: Get Update Progress
 # ======================
 if [ -n "$UPDATE_ID" ] && [ "$UPDATE_ID" != "unknown" ]; then
-    print_section "Test 12: Get Update Progress"
+    print_section "Test 10: Get Update Progress"
     increment_test
 
-    echo "GET ${API_BASE}/api/v1/updates/${UPDATE_ID}"
-    UPDATE_PROGRESS_RESPONSE=$(curl -s "${API_BASE}/api/v1/updates/${UPDATE_ID}" \
+    echo "GET ${API_BASE}/updates/${UPDATE_ID}"
+    UPDATE_PROGRESS_RESPONSE=$(curl -s "${API_BASE}/updates/${UPDATE_ID}" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "Response:"
     echo "$UPDATE_PROGRESS_RESPONSE" | jq '.'
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/api/v1/updates/${UPDATE_ID}" \
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/updates/${UPDATE_ID}" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "HTTP Status: $HTTP_CODE"
 
@@ -450,18 +410,18 @@ else
 fi
 
 # ======================
-# Test 13: Get Device Update History
+# Test 11: Get Device Update History
 # ======================
 if [ -n "$TEST_DEVICE_ID" ]; then
-    print_section "Test 13: Get Device Update History"
+    print_section "Test 11: Get Device Update History"
     increment_test
 
-    echo "GET ${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/updates"
-    UPDATE_HISTORY_RESPONSE=$(curl -s "${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/updates" \
+    echo "GET ${API_BASE}/devices/${TEST_DEVICE_ID}/updates"
+    UPDATE_HISTORY_RESPONSE=$(curl -s "${API_BASE}/devices/${TEST_DEVICE_ID}/updates" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "Response:"
     echo "$UPDATE_HISTORY_RESPONSE" | jq '.'
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/updates" \
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/devices/${TEST_DEVICE_ID}/updates" \
       -H "Authorization: Bearer ${TEST_TOKEN}")
     echo "HTTP Status: $HTTP_CODE"
 
@@ -475,17 +435,17 @@ else
 fi
 
 # ======================
-# Test 14: Get Update Statistics
+# Test 12: Get Update Statistics
 # ======================
-print_section "Test 14: Get Update Statistics"
+print_section "Test 12: Get Update Statistics"
 increment_test
 
-echo "GET ${API_BASE}/api/v1/stats"
-UPDATE_STATS_RESPONSE=$(curl -s "${API_BASE}/api/v1/stats" \
+echo "GET ${API_BASE}/stats"
+UPDATE_STATS_RESPONSE=$(curl -s "${API_BASE}/stats" \
   -H "Authorization: Bearer ${TEST_TOKEN}")
 echo "Response:"
 echo "$UPDATE_STATS_RESPONSE" | jq '.'
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/api/v1/stats" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_BASE}/stats" \
   -H "Authorization: Bearer ${TEST_TOKEN}")
 echo "HTTP Status: $HTTP_CODE"
 
@@ -496,23 +456,23 @@ else
 fi
 
 # ======================
-# Test 15: Rollback Device
+# Test 13: Rollback Device
 # ======================
 if [ -n "$TEST_DEVICE_ID" ]; then
-    print_section "Test 15: Rollback Device"
+    print_section "Test 13: Rollback Device"
     increment_test
 
-    echo "POST ${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/rollback"
+    echo "POST ${API_BASE}/devices/${TEST_DEVICE_ID}/rollback"
     ROLLBACK_REQUEST='{"to_version": "0.9.0", "reason": "Test rollback"}'
 
-    ROLLBACK_RESPONSE=$(curl -s -X POST "${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/rollback" \
+    ROLLBACK_RESPONSE=$(curl -s -X POST "${API_BASE}/devices/${TEST_DEVICE_ID}/rollback" \
       -H "Authorization: Bearer ${TEST_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "$ROLLBACK_REQUEST")
 
     echo "Response:"
     echo "$ROLLBACK_RESPONSE" | jq '.'
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/api/v1/devices/${TEST_DEVICE_ID}/rollback" \
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/devices/${TEST_DEVICE_ID}/rollback" \
       -H "Authorization: Bearer ${TEST_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "$ROLLBACK_REQUEST")

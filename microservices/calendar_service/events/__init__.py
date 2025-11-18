@@ -5,5 +5,6 @@ Calendar Service Event Handlers
 """
 
 from .handlers import CalendarEventHandlers
+from .publishers import CalendarEventPublisher
 
 __all__ = ["CalendarEventHandlers"]

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Storage Service - File Sharing Test Script
 # Tests: Create Share, Get Shared File, Share with Password, Access Control
+# Event-Driven Architecture v2.0 - via Kubernetes Ingress
 
-BASE_URL="http://localhost:8209"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors

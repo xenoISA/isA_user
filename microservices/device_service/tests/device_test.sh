@@ -3,9 +3,9 @@
 # Device CRUD Operations Testing Script
 # Tests device registration, retrieval, update, and deletion
 
-BASE_URL="http://localhost:8220"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/devices"
-AUTH_URL="http://localhost:8201/api/v1/auth"
+AUTH_URL="http://localhost/api/v1/auth"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -84,25 +84,8 @@ else
     exit 1
 fi
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Register Device
-print_section "Test 2: Register Device"
+# Test 1: Register Device
+print_section "Test 1: Register Device"
 DEVICE_ID=""
 # Generate unique serial number with timestamp
 SERIAL_NUMBER="SN_TEST_$(date +%s)"
@@ -155,9 +138,9 @@ else
     print_result 1 "Failed to register device"
 fi
 
-# Test 3: Get Device Details
+# Test 2: Get Device Details
 if [ -n "$DEVICE_ID" ] && [ "$DEVICE_ID" != "null" ]; then
-    print_section "Test 3: Get Device Details"
+    print_section "Test 2: Get Device Details"
     echo "GET ${API_BASE}/${DEVICE_ID}"
 
     GET_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/${DEVICE_ID}" \
@@ -184,9 +167,9 @@ else
     ((TESTS_FAILED++))
 fi
 
-# Test 4: Update Device
+# Test 3: Update Device
 if [ -n "$DEVICE_ID" ] && [ "$DEVICE_ID" != "null" ]; then
-    print_section "Test 4: Update Device"
+    print_section "Test 3: Update Device"
     echo "PUT ${API_BASE}/${DEVICE_ID}"
     UPDATE_PAYLOAD='{
       "device_name": "Updated Test Smart Frame 001",
@@ -228,8 +211,8 @@ else
     ((TESTS_FAILED++))
 fi
 
-# Test 5: List Devices
-print_section "Test 5: List Devices"
+# Test 4: List Devices
+print_section "Test 4: List Devices"
 echo "GET ${API_BASE}"
 
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}" \
@@ -248,8 +231,8 @@ else
     print_result 1 "Failed to list devices"
 fi
 
-# Test 6: List Devices with Filters
-print_section "Test 6: List Devices with Filters"
+# Test 5: List Devices with Filters
+print_section "Test 5: List Devices with Filters"
 echo "GET ${API_BASE}?device_type=smart_frame&status=active"
 
 FILTER_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}?device_type=smart_frame&status=active" \
@@ -267,7 +250,7 @@ else
     print_result 1 "Failed to retrieve filtered device list"
 fi
 
-# Test 7: Get Device Stats
+# Test 6: Get Device Statistics
 print_section "Test 7: Get Device Statistics"
 echo "GET ${API_BASE}/stats"
 
@@ -286,9 +269,9 @@ else
     print_result 1 "Failed to get device statistics"
 fi
 
-# Test 8: Get Device Health
+# Test 7: Get Device Health
 if [ -n "$DEVICE_ID" ] && [ "$DEVICE_ID" != "null" ]; then
-    print_section "Test 8: Get Device Health"
+    print_section "Test 7: Get Device Health"
     echo "GET ${API_BASE}/${DEVICE_ID}/health"
 
     HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/${DEVICE_ID}/health" \
@@ -311,9 +294,9 @@ else
     ((TESTS_FAILED++))
 fi
 
-# Test 9: Decommission Device
+# Test 8: Decommission Device
 if [ -n "$DEVICE_ID" ] && [ "$DEVICE_ID" != "null" ]; then
-    print_section "Test 9: Decommission Device"
+    print_section "Test 8: Decommission Device"
     echo "DELETE ${API_BASE}/${DEVICE_ID}"
 
     DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/${DEVICE_ID}" \
@@ -335,8 +318,8 @@ else
     ((TESTS_FAILED++))
 fi
 
-# Test 10: Unauthorized Access (no token)
-print_section "Test 10: Unauthorized Access (should fail)"
+# Test 9: Unauthorized Access (no token)
+print_section "Test 9: Unauthorized Access (should fail)"
 echo "GET ${API_BASE}"
 
 UNAUTH_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}")

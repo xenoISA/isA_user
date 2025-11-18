@@ -1,15 +1,14 @@
 -- Account Service: Seed Test Data
--- This script creates test users for development and testing
+-- Standardized test data following test_data_standard.md
+-- Date: 2025-11-11
 
--- Insert test users
+-- Insert test users (standardized IDs)
 INSERT INTO account.users (user_id, email, name, subscription_status, is_active, preferences, created_at, updated_at)
 VALUES
-    ('test-user-1', 'test1@example.com', 'Test User One', 'free', TRUE, '{"theme": "light", "language": "en"}'::jsonb, NOW(), NOW()),
-    ('test-user-2', 'test2@example.com', 'Test User Two', 'basic', TRUE, '{"theme": "dark", "language": "en"}'::jsonb, NOW(), NOW()),
-    ('test-user-3', 'test3@example.com', 'Test User Three', 'premium', TRUE, '{"theme": "light", "language": "es"}'::jsonb, NOW(), NOW()),
-    ('test-user-4', 'test4@example.com', 'Test User Four', 'pro', TRUE, '{"theme": "dark", "language": "fr"}'::jsonb, NOW(), NOW()),
-    ('test-user-5', 'test5@example.com', 'Test User Five', 'enterprise', TRUE, '{"theme": "light", "language": "de"}'::jsonb, NOW(), NOW()),
-    ('inactive-user-1', 'inactive1@example.com', 'Inactive User One', 'free', FALSE, '{}'::jsonb, NOW(), NOW())
+    ('test_user_001', 'alice@example.com', 'Alice Test', 'free', TRUE, '{"theme": "light", "language": "en"}'::jsonb, NOW(), NOW()),
+    ('test_user_002', 'bob@example.com', 'Bob Test', 'basic', TRUE, '{"theme": "dark", "language": "en"}'::jsonb, NOW(), NOW()),
+    ('test_user_003', 'charlie@example.com', 'Charlie Test', 'pro', TRUE, '{"theme": "light", "language": "en"}'::jsonb, NOW(), NOW()),
+    ('test_user_004', 'diana@example.com', 'Diana Test (Inactive)', 'free', FALSE, '{}'::jsonb, NOW(), NOW())
 ON CONFLICT (user_id) DO NOTHING;
 
 -- Print summary

@@ -7,14 +7,18 @@ Weather Repository
 import json
 import logging
 import os
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta, timezone
-
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+
+from core.config_manager import ConfigManager
 
 from isa_common.postgres_client import PostgresClient
-from core.config_manager import ConfigManager
+
 from .models import FavoriteLocation
 
 logger = logging.getLogger(__name__)
@@ -31,19 +35,15 @@ class WeatherRepository:
         # Discover PostgreSQL service
         # Priority: environment variables → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
+            service_name="postgres_grpc_service",
+            default_host="isa-postgres-grpc",
             default_port=50061,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
-            host=host,
-            port=port,
-            user_id="weather_service"
-        )
+        self.db = PostgresClient(host=host, port=port, user_id="weather_service")
         self.schema = "weather"
         self.locations_table = "weather_locations"
         self.cache_table = "weather_cache"
@@ -53,6 +53,7 @@ class WeatherRepository:
         self.redis = None
         try:
             import redis
+
             redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
             self.redis = redis.from_url(redis_url, decode_responses=True)
             logger.info("Redis cache initialized")
@@ -74,13 +75,15 @@ class WeatherRepository:
                     return json.loads(cached)
 
             # Fallback to database cache
-            query = f'''
+            query = f"""
                 SELECT data FROM {self.schema}.{self.cache_table}
                 WHERE cache_key = $1 AND expires_at >= $2
-            '''
+            """
 
             with self.db:
-                results = self.db.query(query, [cache_key, datetime.now(timezone.utc)], schema=self.schema)
+                results = self.db.query(
+                    query, [cache_key, datetime.now(timezone.utc)], schema=self.schema
+                )
 
             if results and len(results) > 0:
                 logger.debug(f"Cache hit (DB): {cache_key}")
@@ -93,17 +96,14 @@ class WeatherRepository:
             logger.error(f"Error reading cache: {e}")
             return None
 
-    async def set_cached_weather(self, cache_key: str, data: Dict[str, Any],
-                                 ttl_seconds: int = 900) -> bool:
+    async def set_cached_weather(
+        self, cache_key: str, data: Dict[str, Any], ttl_seconds: int = 900
+    ) -> bool:
         """缓存天气数据"""
         try:
             # Cache in Redis
             if self.redis:
-                self.redis.setex(
-                    cache_key,
-                    ttl_seconds,
-                    json.dumps(data)
-                )
+                self.redis.setex(cache_key, ttl_seconds, json.dumps(data))
                 logger.debug(f"Cached in Redis: {cache_key} (TTL: {ttl_seconds}s)")
 
             # Also cache in database as backup
@@ -111,7 +111,7 @@ class WeatherRepository:
             now = datetime.now(timezone.utc)
 
             # Upsert using INSERT ... ON CONFLICT
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.cache_table} (
                     cache_key, location, data, cached_at, expires_at, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -121,7 +121,7 @@ class WeatherRepository:
                     cached_at = EXCLUDED.cached_at,
                     expires_at = EXCLUDED.expires_at,
                     updated_at = EXCLUDED.updated_at
-            '''
+            """
 
             params = [
                 cache_key,
@@ -130,7 +130,7 @@ class WeatherRepository:
                 now,
                 expires_at,
                 now,
-                now
+                now,
             ]
 
             with self.db:
@@ -153,10 +153,10 @@ class WeatherRepository:
                     self.redis.delete(key)
 
             # Delete from database cache
-            query = f'''
+            query = f"""
                 DELETE FROM {self.schema}.{self.cache_table}
                 WHERE cache_key LIKE $1
-            '''
+            """
 
             with self.db:
                 self.db.execute(query, [f"%{location}%"], schema=self.schema)
@@ -170,26 +170,32 @@ class WeatherRepository:
     # Favorite Locations
     # =============================================================================
 
-    async def save_location(self, location_data: Dict[str, Any]) -> Optional[FavoriteLocation]:
+    async def save_location(
+        self, location_data: Dict[str, Any]
+    ) -> Optional[FavoriteLocation]:
         """保存收藏地点"""
         try:
             # If setting as default, unset other defaults first
             if location_data.get("is_default", False):
-                update_query = f'''
+                update_query = f"""
                     UPDATE {self.schema}.{self.locations_table}
                     SET is_default = FALSE, updated_at = $1
                     WHERE user_id = $2
-                '''
+                """
                 with self.db:
-                    self.db.execute(update_query, [datetime.now(timezone.utc), location_data["user_id"]], schema=self.schema)
+                    self.db.execute(
+                        update_query,
+                        [datetime.now(timezone.utc), location_data["user_id"]],
+                        schema=self.schema,
+                    )
 
             # Insert new location
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.locations_table} (
                     user_id, location, latitude, longitude, is_default, nickname, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING *
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -200,7 +206,7 @@ class WeatherRepository:
                 location_data.get("is_default", False),
                 location_data.get("nickname"),
                 now,
-                now
+                now,
             ]
 
             with self.db:
@@ -217,11 +223,11 @@ class WeatherRepository:
     async def get_user_locations(self, user_id: str) -> List[FavoriteLocation]:
         """获取用户的收藏地点"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.locations_table}
                 WHERE user_id = $1
                 ORDER BY is_default DESC, created_at DESC
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, [user_id], schema=self.schema)
@@ -237,11 +243,11 @@ class WeatherRepository:
     async def get_default_location(self, user_id: str) -> Optional[FavoriteLocation]:
         """获取用户的默认地点"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.locations_table}
                 WHERE user_id = $1 AND is_default = TRUE
                 LIMIT 1
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, [user_id], schema=self.schema)
@@ -257,13 +263,15 @@ class WeatherRepository:
     async def delete_location(self, location_id: int, user_id: str) -> bool:
         """删除收藏地点"""
         try:
-            query = f'''
+            query = f"""
                 DELETE FROM {self.schema}.{self.locations_table}
                 WHERE id = $1 AND user_id = $2
-            '''
+            """
 
             with self.db:
-                count = self.db.execute(query, [location_id, user_id], schema=self.schema)
+                count = self.db.execute(
+                    query, [location_id, user_id], schema=self.schema
+                )
 
             return count is not None and count > 0
 
@@ -281,18 +289,18 @@ class WeatherRepository:
             # Handle datetime serialization
             start_time = alert_data["start_time"]
             if isinstance(start_time, str):
-                start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
 
             end_time = alert_data["end_time"]
             if isinstance(end_time, str):
-                end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.alerts_table} (
                     location, alert_type, severity, headline, description,
                     start_time, end_time, source, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -305,7 +313,7 @@ class WeatherRepository:
                 end_time,
                 alert_data["source"],
                 now,
-                now
+                now,
             ]
 
             with self.db:
@@ -322,11 +330,11 @@ class WeatherRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.alerts_table}
                 WHERE location = $1 AND end_time >= $2
                 ORDER BY severity DESC
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, [location, now], schema=self.schema)

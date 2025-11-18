@@ -3,7 +3,7 @@
 # Invitation Service Testing Script
 # Tests invitation creation, acceptance, and management
 
-BASE_URL="http://localhost:8213"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors for output
@@ -75,27 +75,10 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Get Service Info
-print_section "Test 2: Get Service Info"
-echo "GET ${BASE_URL}/info"
-INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/info")
+# Test 1: Get Service Info
+print_section "Test 1: Get Service Info"
+echo "GET ${API_BASE}/invitations/info"
+INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/invitations/info")
 HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$INFO_RESPONSE" | sed '$d')
 
@@ -109,8 +92,8 @@ else
     print_result 1 "Failed to get service info"
 fi
 
-# Test 3: Create Invitation (requires organization service to be running)
-print_section "Test 3: Create Invitation"
+# Test 2: Create Invitation (requires organization service to be running)
+print_section "Test 2: Create Invitation"
 echo "POST ${API_BASE}/invitations/organizations/${TEST_ORG_ID}"
 CREATE_PAYLOAD=$(cat <<EOF
 {
@@ -153,9 +136,9 @@ else
     print_result 1 "Failed to create invitation"
 fi
 
-# Test 4: Get Invitation by Token
+# Test 3: Get Invitation by Token
 if [ -n "$INVITATION_TOKEN" ] && [ "$INVITATION_TOKEN" != "null" ]; then
-    print_section "Test 4: Get Invitation by Token"
+    print_section "Test 3: Get Invitation by Token"
     echo "GET ${API_BASE}/invitations/${INVITATION_TOKEN}"
 
     GET_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/invitations/${INVITATION_TOKEN}")
@@ -179,9 +162,9 @@ else
     echo -e "${YELLOW}⚠ Skipping Test 4: No invitation token available${NC}"
 fi
 
-# Test 5: Get Organization Invitations
+# Test 4: Get Organization Invitations
 if [ -n "$INVITATION_TOKEN" ]; then
-    print_section "Test 5: Get Organization Invitations"
+    print_section "Test 4: Get Organization Invitations"
     echo "GET ${API_BASE}/invitations/organizations/${TEST_ORG_ID}"
 
     LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/invitations/organizations/${TEST_ORG_ID}?limit=10" \
@@ -206,9 +189,9 @@ else
     echo -e "${YELLOW}⚠ Skipping Test 5: No invitation available${NC}"
 fi
 
-# Test 6: Accept Invitation
+# Test 5: Accept Invitation
 if [ -n "$INVITATION_TOKEN" ] && [ "$INVITATION_TOKEN" != "null" ]; then
-    print_section "Test 6: Accept Invitation"
+    print_section "Test 5: Accept Invitation"
     echo "POST ${API_BASE}/invitations/accept"
     ACCEPT_PAYLOAD=$(cat <<EOF
 {
@@ -243,9 +226,9 @@ else
     echo -e "${YELLOW}⚠ Skipping Test 6: No invitation token available${NC}"
 fi
 
-# Test 7: Resend Invitation
+# Test 6: Resend Invitation
 if [ -n "$INVITATION_ID" ] && [ "$INVITATION_ID" != "null" ]; then
-    print_section "Test 7: Resend Invitation"
+    print_section "Test 6: Resend Invitation"
     echo "POST ${API_BASE}/invitations/${INVITATION_ID}/resend"
 
     RESEND_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/invitations/${INVITATION_ID}/resend" \
@@ -268,9 +251,9 @@ else
     echo -e "${YELLOW}⚠ Skipping Test 7: No invitation ID available${NC}"
 fi
 
-# Test 8: Cancel Invitation
+# Test 7: Cancel Invitation
 if [ -n "$INVITATION_ID" ] && [ "$INVITATION_ID" != "null" ]; then
-    print_section "Test 8: Cancel Invitation"
+    print_section "Test 7: Cancel Invitation"
     echo "DELETE ${API_BASE}/invitations/${INVITATION_ID}"
 
     CANCEL_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/invitations/${INVITATION_ID}" \
@@ -293,11 +276,11 @@ else
     echo -e "${YELLOW}⚠ Skipping Test 8: No invitation ID available${NC}"
 fi
 
-# Test 9: Expire Old Invitations (Admin endpoint)
-print_section "Test 9: Expire Old Invitations (Admin)"
-echo "POST ${API_BASE}/admin/expire-invitations"
+# Test 8: Expire Old Invitations (Admin endpoint)
+print_section "Test 8: Expire Old Invitations (Admin)"
+echo "POST ${API_BASE}/invitations/admin/expire-invitations"
 
-EXPIRE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/admin/expire-invitations")
+EXPIRE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/invitations/admin/expire-invitations")
 HTTP_CODE=$(echo "$EXPIRE_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$EXPIRE_RESPONSE" | sed '$d')
 
@@ -313,8 +296,8 @@ else
     print_result 1 "Failed to expire old invitations"
 fi
 
-# Test 10: Get Invitation with Invalid Token
-print_section "Test 10: Get Invitation with Invalid Token (should fail gracefully)"
+# Test 9: Get Invitation with Invalid Token
+print_section "Test 9: Get Invitation with Invalid Token (should fail gracefully)"
 echo "GET ${API_BASE}/invitations/invalid_token_12345"
 
 INVALID_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/invitations/invalid_token_12345")

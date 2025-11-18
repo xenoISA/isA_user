@@ -77,7 +77,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
 
     return {
         "route_count": str(len(TASK_SERVICE_ROUTES)),
-        "base_path": "/api/v1",
+        "base_path": "/api/v1/tasks",
         "health": ",".join(health_routes[:10]),
         "tasks": ",".join(task_routes[:10]),
         "execution": ",".join(execution_routes[:10]),

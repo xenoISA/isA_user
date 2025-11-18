@@ -23,10 +23,9 @@ from fastapi import UploadFile, HTTPException
 from isa_common.minio_client import MinIOClient
 
 from .storage_repository import StorageRepository
-# Import organization client from organization_service (provider pattern)
-from microservices.organization_service.client import OrganizationServiceClient
 from core.nats_client import Event, EventType, ServiceSource
 from core.config_manager import ConfigManager
+from .clients import StorageOrganizationClient
 from .models import (
     StoredFile, FileShare, StorageQuota,
     FileStatus, StorageProvider, FileAccessLevel,
@@ -48,19 +47,22 @@ logger = logging.getLogger(__name__)
 class StorageService:
     """存储服务业务逻辑层"""
 
-    def __init__(self, config, event_bus=None, config_manager: Optional[ConfigManager] = None):
+    def __init__(self, config, event_bus=None, config_manager: Optional[ConfigManager] = None, event_publisher=None):
         """
         初始化存储服务
 
         Args:
             config: 配置对象
-            event_bus: 事件总线（可选）
+            event_bus: 事件总线（可选，保留向后兼容）
             config_manager: ConfigManager 实例（可选）
+            event_publisher: Event publisher from events/ (可选)
         """
         self.repository = StorageRepository(config=config_manager)
         self.config = config
         self.config_manager = config_manager
-        self.event_bus = event_bus
+        self.event_bus = event_bus  # 保留向后兼容
+        self.event_publisher = event_publisher  # 使用新的 publisher
+        self.org_client = StorageOrganizationClient()  # 初始化 org client
 
         # Discover MinIO gRPC service using config_manager (same as PostgresClient pattern)
         # Priority: Environment variables (MINIO_GRPC_HOST/PORT) → Consul → fallback
@@ -407,55 +409,41 @@ class StorageService:
                     logger.error(f"AI extraction failed for {file_id}: {e}")
                     # 不阻塞上传流程，继续执行
 
-            # Publish enhanced event
-            logger.info(f"Checking event_bus: {self.event_bus is not None}")
-            if self.event_bus:
+            # Publish file upload event using event publisher
+            if self.event_publisher:
                 try:
-                    logger.info(f"Event bus exists, preparing to publish event")
-                    # 基础事件数据
-                    event_data = {
-                        "file_id": file_id,
-                        "file_name": file.filename,
-                        "file_size": file_size,
-                        "content_type": content_type,
-                        "user_id": request.user_id,
-                        "organization_id": request.organization_id,
-                        "access_level": request.access_level,
-                        "download_url": download_url,
-                        "bucket_name": self.bucket_name,
-                        "object_name": object_name,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
-
-                    # 如果有 AI 元数据，发布增强事件
-                    logger.info(f"Event decision: ai_metadata={ai_metadata is not None}, chunk_id={chunk_id}")
                     if ai_metadata and chunk_id:
-                        event_data.update({
-                            "has_ai_data": True,
-                            "chunk_id": chunk_id,  # 🔗 关联：Qdrant chunk_id
-                            "ai_metadata": ai_metadata
-                        })
-                        event_type = EventType.FILE_UPLOADED_WITH_AI
-                        logger.info(f"Publishing FILE_UPLOADED_WITH_AI event for {file_id}")
+                        # Publish FILE_UPLOADED_WITH_AI event
+                        await self.event_publisher.publish_file_uploaded_with_ai(
+                            file_id=file_id,
+                            file_name=file.filename,
+                            file_size=file_size,
+                            content_type=content_type,
+                            user_id=request.user_id,
+                            organization_id=request.organization_id,
+                            access_level=request.access_level,
+                            download_url=download_url,
+                            bucket_name=self.bucket_name,
+                            object_name=object_name,
+                            chunk_id=chunk_id,
+                            ai_metadata=ai_metadata,
+                        )
                     else:
-                        event_data["has_ai_data"] = False
-                        event_type = EventType.FILE_UPLOADED
-                        logger.info(f"Publishing FILE_UPLOADED event for {file_id} (ai_metadata={bool(ai_metadata)}, chunk_id={bool(chunk_id)})")
-
-                    event = Event(
-                        event_type=event_type,
-                        source=ServiceSource.STORAGE_SERVICE,
-                        data=event_data
-                    )
-                    logger.info(f"About to publish event: {event_type}, event.type={event.type}")
-                    result = await self.event_bus.publish_event(event)
-                    logger.info(f"Publish result: {result}")
-                    if result:
-                        logger.info(f"✅ Published {event_type} event for file {file_id}")
-                    else:
-                        logger.error(f"❌ Failed to publish event (returned False)")
+                        # Publish standard FILE_UPLOADED event
+                        await self.event_publisher.publish_file_uploaded(
+                            file_id=file_id,
+                            file_name=file.filename,
+                            file_size=file_size,
+                            content_type=content_type,
+                            user_id=request.user_id,
+                            organization_id=request.organization_id,
+                            access_level=request.access_level,
+                            download_url=download_url,
+                            bucket_name=self.bucket_name,
+                            object_name=object_name,
+                        )
                 except Exception as e:
-                    logger.error(f"❌ Failed to publish event: {e}", exc_info=True)
+                    logger.error(f"Failed to publish file upload event: {e}", exc_info=True)
 
             return FileUploadResponse(
                 file_id=file_id,
@@ -615,23 +603,16 @@ class StorageService:
                 file_count_delta=-1
             )
 
-            # Publish file.deleted event
-            if self.event_bus:
+            # Publish file.deleted event using event publisher
+            if self.event_publisher:
                 try:
-                    event = Event(
-                        event_type=EventType.FILE_DELETED,
-                        source=ServiceSource.STORAGE_SERVICE,
-                        data={
-                            "file_id": file_id,
-                            "file_name": file.file_name,
-                            "file_size": file.file_size,
-                            "user_id": user_id,
-                            "permanent": permanent,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await self.event_publisher.publish_file_deleted(
+                        file_id=file_id,
+                        file_name=file.file_name,
+                        file_size=file.file_size,
+                        user_id=user_id,
+                        permanent=permanent,
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published file.deleted event for file {file_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish file.deleted event: {e}")
 
@@ -689,25 +670,18 @@ class StorageService:
         base_url = f"http://{storage_host}:{storage_port}"
         share_url = f"{base_url}/api/v1/storage/shares/{created_share.share_id}?token={access_token}"
 
-        # Publish file.shared event
-        if self.event_bus:
+        # Publish file.shared event using event publisher
+        if self.event_publisher:
             try:
-                event = Event(
-                    event_type=EventType.FILE_SHARED,
-                    source=ServiceSource.STORAGE_SERVICE,
-                    data={
-                        "share_id": created_share.share_id,
-                        "file_id": request.file_id,
-                        "file_name": file.file_name,
-                        "shared_by": request.shared_by,
-                        "shared_with": request.shared_with,
-                        "shared_with_email": request.shared_with_email,
-                        "expires_at": created_share.expires_at.isoformat(),
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
+                await self.event_publisher.publish_file_shared(
+                    share_id=created_share.share_id,
+                    file_id=request.file_id,
+                    file_name=file.file_name,
+                    shared_by=request.shared_by,
+                    shared_with=request.shared_with,
+                    shared_with_email=request.shared_with_email,
+                    expires_at=created_share.expires_at.isoformat(),
                 )
-                await self.event_bus.publish_event(event)
-                logger.info(f"Published file.shared event for file {request.file_id}")
             except Exception as e:
                 logger.error(f"Failed to publish file.shared event: {e}")
 
@@ -1125,17 +1099,15 @@ class StorageService:
             
             # 2. 如果启用家庭共享，创建共享资源
             if request.enable_family_sharing and request.organization_id:
-                async with OrganizationServiceClient() as org_client:
-                    sharing_result = await org_client.create_sharing(
-                        organization_id=request.organization_id,
-                        user_id=request.user_id,
-                        resource_type="album",
-                        resource_id=album_id,
-                        resource_name=request.name,
-                        share_with_all_members=True,
-                        default_permission="read_write"
-                    )
-                
+                sharing_result = await self.org_client.create_album_sharing(
+                    organization_id=request.organization_id,
+                    user_id=request.user_id,
+                    album_id=album_id,
+                    album_name=request.name,
+                    share_with_all_members=True,
+                    default_permission="read_write"
+                )
+
                 if sharing_result:
                     sharing_resource_id = sharing_result.get("sharing_id")
                     # 更新相册的sharing_resource_id
@@ -1188,12 +1160,11 @@ class StorageService:
             # 3. 获取家庭共享信息
             family_sharing_info = None
             if album_data.get("is_family_shared") and album_data.get("sharing_resource_id"):
-                async with OrganizationServiceClient() as org_client:
-                    family_sharing_info = await org_client.get_sharing(
-                        organization_id=album_data.get("organization_id"),
-                        sharing_id=album_data.get("sharing_resource_id"),
-                        user_id=user_id
-                    )
+                family_sharing_info = await self.org_client.get_sharing_info(
+                    organization_id=album_data.get("organization_id"),
+                    sharing_id=album_data.get("sharing_resource_id"),
+                    user_id=user_id
+                )
             
             from .models import AlbumResponse
             return AlbumResponse(
@@ -1222,17 +1193,11 @@ class StorageService:
 
     async def check_family_album_access(self, album_id: str, user_id: str, required_permission: str = "read") -> bool:
         """检查家庭共享相册访问权限"""
-        try:
-            async with OrganizationServiceClient() as org_client:
-                return await org_client.check_access(
-                    resource_type="album",
-                    resource_id=album_id,
-                    user_id=user_id,
-                    required_permission=required_permission
-                )
-        except Exception as e:
-            logger.error(f"Error checking family album access: {e}")
-            return False
+        return await self.org_client.check_album_access(
+            album_id=album_id,
+            user_id=user_id,
+            required_permission=required_permission
+        )
 
     async def list_user_albums(self, user_id: str, limit: int = 100, offset: int = 0) -> 'AlbumListResponse':
         """获取用户相册列表"""
@@ -1482,77 +1447,75 @@ class StorageService:
             if not album.get("organization_id"):
                 raise HTTPException(status_code=400, detail="Album must be associated with an organization for family sharing")
 
-            async with OrganizationServiceClient() as org_client:
-                # 2. 检查是否已有共享设置
-                sharing_resource_id = album.get("sharing_resource_id")
+            # 2. 检查是否已有共享设置
+            sharing_resource_id = album.get("sharing_resource_id")
 
-                if sharing_resource_id:
-                    # 更新现有共享设置
-                    sharing_updates = {}
-                    if request.shared_with_members is not None:
-                        sharing_updates["shared_with_members"] = request.shared_with_members
-                    if request.default_permission:
-                        sharing_updates["default_permission"] = request.default_permission
-                    if request.custom_permissions:
-                        sharing_updates["custom_permissions"] = request.custom_permissions
+            if sharing_resource_id:
+                # 更新现有共享设置
+                sharing_updates = {}
+                if request.shared_with_members is not None:
+                    sharing_updates["shared_with_members"] = request.shared_with_members
+                if request.default_permission:
+                    sharing_updates["default_permission"] = request.default_permission
+                if request.custom_permissions:
+                    sharing_updates["custom_permissions"] = request.custom_permissions
 
-                    sharing_updates["share_with_all_members"] = request.share_with_all_family
+                sharing_updates["share_with_all_members"] = request.share_with_all_family
 
-                    updated = await org_client.update_sharing(
-                        organization_id=album.get("organization_id"),
-                        sharing_id=sharing_resource_id,
-                        user_id=user_id,
-                        updates=sharing_updates
-                    )
-                    success = updated is not None
+                updated = await self.org_client.update_album_sharing(
+                    organization_id=album.get("organization_id"),
+                    sharing_id=sharing_resource_id,
+                    user_id=user_id,
+                    updates=sharing_updates
+                )
+                success = updated is not None
 
-                    if success:
-                        # 更新相册的家庭共享状态
-                        await self.repository.update_album(album_id, user_id, {
-                            "is_family_shared": True
-                        })
+                if success:
+                    # 更新相册的家庭共享状态
+                    await self.repository.update_album(album_id, user_id, {
+                        "is_family_shared": True
+                    })
 
-                        return {
-                            "success": True,
-                            "album_id": album_id,
-                            "sharing_resource_id": sharing_resource_id,
-                            "action": "updated",
-                            "message": "Album sharing updated successfully"
-                        }
-                    else:
-                        raise HTTPException(status_code=500, detail="Failed to update album sharing")
+                    return {
+                        "success": True,
+                        "album_id": album_id,
+                        "sharing_resource_id": sharing_resource_id,
+                        "action": "updated",
+                        "message": "Album sharing updated successfully"
+                    }
                 else:
-                    # 创建新的共享设置
-                    sharing_result = await org_client.create_sharing(
-                        organization_id=album["organization_id"],
-                        user_id=user_id,
-                        resource_type="album",
-                        resource_id=album_id,
-                        resource_name=album["name"],
-                        shared_with_members=request.shared_with_members,
-                        share_with_all_members=request.share_with_all_family,
-                        default_permission=request.default_permission,
-                        custom_permissions=request.custom_permissions
-                    )
+                    raise HTTPException(status_code=500, detail="Failed to update album sharing")
+            else:
+                # 创建新的共享设置
+                sharing_result = await self.org_client.create_album_sharing(
+                    organization_id=album["organization_id"],
+                    user_id=user_id,
+                    album_id=album_id,
+                    album_name=album["name"],
+                    shared_with_members=request.shared_with_members,
+                    share_with_all_members=request.share_with_all_family,
+                    default_permission=request.default_permission,
+                    custom_permissions=request.custom_permissions
+                )
 
-                    if sharing_result:
-                        new_sharing_resource_id = sharing_result.get("sharing_id")
+                if sharing_result:
+                    new_sharing_resource_id = sharing_result.get("sharing_id")
 
-                        # 更新相册记录
-                        await self.repository.update_album(album_id, user_id, {
-                            "is_family_shared": True,
-                            "sharing_resource_id": new_sharing_resource_id
-                        })
+                    # 更新相册记录
+                    await self.repository.update_album(album_id, user_id, {
+                        "is_family_shared": True,
+                        "sharing_resource_id": new_sharing_resource_id
+                    })
 
-                        return {
-                            "success": True,
-                            "album_id": album_id,
-                            "sharing_resource_id": new_sharing_resource_id,
-                            "action": "created",
-                            "message": "Album sharing created successfully"
-                        }
-                    else:
-                        raise HTTPException(status_code=500, detail="Failed to create album sharing")
+                    return {
+                        "success": True,
+                        "album_id": album_id,
+                        "sharing_resource_id": new_sharing_resource_id,
+                        "action": "created",
+                        "message": "Album sharing created successfully"
+                    }
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to create album sharing")
                     
         except HTTPException:
             raise
@@ -1571,11 +1534,10 @@ class StorageService:
             if include_shared:
                 try:
                     # Get user's organizations and their shared albums
-                    async with OrganizationServiceClient() as org_client:
-                        # For now, we need the organization_id to query shared resources
-                        # This would need to be refactored to get all orgs for user first
-                        shared_album_resources = []  # Placeholder - needs organization context
-                    
+                    # For now, we need the organization_id to query shared resources
+                    # This would need to be refactored to get all orgs for user first
+                    shared_album_resources = []  # Placeholder - needs organization context
+
                     # 获取共享相册的详细信息
                     for resource in shared_album_resources:
                         album_id = resource.get("resource_id")

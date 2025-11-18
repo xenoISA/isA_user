@@ -1,6 +1,6 @@
-y-- Auth Service Test Data Seed Script
--- Creates sample data for testing auth_service functionality
--- Run: docker exec staging-postgres psql -U postgres -d isa_platform -f /path/to/seed_test_data.sql
+-- Auth Service Test Data Seed Script
+-- Standardized test data following test_data_standard.md
+-- Date: 2025-11-11
 
 -- Clean up existing test data (if any)
 DELETE FROM auth.device_logs WHERE device_id LIKE 'test_%';
@@ -9,12 +9,12 @@ UPDATE auth.organizations SET api_keys = '[]'::jsonb WHERE organization_id LIKE 
 DELETE FROM auth.organizations WHERE organization_id LIKE 'test_%';
 DELETE FROM auth.users WHERE user_id LIKE 'test_%';
 
--- Insert test users
+-- Insert test users (matches account_service)
 INSERT INTO auth.users (user_id, email, name, is_active, created_at, updated_at) VALUES
-('test_user_001', 'alice@testorg.com', 'Alice Test', TRUE, NOW(), NOW()),
-('test_user_002', 'bob@testorg.com', 'Bob Test', TRUE, NOW(), NOW()),
-('test_user_003', 'charlie@testorg.com', 'Charlie Test', TRUE, NOW(), NOW()),
-('test_user_004', 'inactive@testorg.com', 'Inactive User', FALSE, NOW(), NOW())
+('test_user_001', 'alice@example.com', 'Alice Test', TRUE, NOW(), NOW()),
+('test_user_002', 'bob@example.com', 'Bob Test', TRUE, NOW(), NOW()),
+('test_user_003', 'charlie@example.com', 'Charlie Test', TRUE, NOW(), NOW()),
+('test_user_004', 'diana@example.com', 'Diana Test (Inactive)', FALSE, NOW(), NOW())
 ON CONFLICT (user_id) DO NOTHING;
 
 -- Insert test organizations

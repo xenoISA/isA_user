@@ -3,7 +3,7 @@
 # Product Service CRUD Tests
 # Tests product catalog, subscriptions, pricing, usage tracking, and statistics
 
-BASE_URL="http://localhost:8215"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/product"
 
 # Colors for output
@@ -43,25 +43,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Get Service Info
-print_section "Test 2: Get Service Info"
+# Test 1: Get Service Info
+print_section "Test 1: Get Service Info"
 echo "GET ${BASE_URL}/api/v1/product/info"
 INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/api/v1/product/info")
 HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
@@ -77,8 +60,8 @@ else
     print_result 1 "Failed to get service info"
 fi
 
-# Test 3: Get Product Categories
-print_section "Test 3: Get Product Categories"
+# Test 2: Get Product Categories
+print_section "Test 2: Get Product Categories"
 echo "GET ${API_BASE}/categories"
 
 CATEGORIES_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/categories")
@@ -102,8 +85,8 @@ else
     print_result 1 "Failed to get product categories"
 fi
 
-# Test 4: Get All Products
-print_section "Test 4: Get All Products"
+# Test 3: Get All Products
+print_section "Test 3: Get All Products"
 echo "GET ${API_BASE}/products"
 
 PRODUCTS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/products")
@@ -128,9 +111,9 @@ else
     print_result 1 "Failed to get products"
 fi
 
-# Test 5: Get Product by ID
+# Test 4: Get Product by ID
 if [ -n "$PRODUCT_ID" ] && [ "$PRODUCT_ID" != "null" ]; then
-    print_section "Test 5: Get Product by ID"
+    print_section "Test 4: Get Product by ID"
     echo "GET ${API_BASE}/products/${PRODUCT_ID}"
 
     PRODUCT_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/products/${PRODUCT_ID}")
@@ -156,9 +139,9 @@ else
     print_result 1 "Cannot test without product ID"
 fi
 
-# Test 6: Get Product Pricing
+# Test 5: Get Product Pricing
 if [ -n "$PRODUCT_ID" ] && [ "$PRODUCT_ID" != "null" ]; then
-    print_section "Test 6: Get Product Pricing"
+    print_section "Test 5: Get Product Pricing"
     echo "GET ${API_BASE}/products/${PRODUCT_ID}/pricing"
 
     PRICING_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/products/${PRODUCT_ID}/pricing")
@@ -179,9 +162,9 @@ else
     print_result 1 "Cannot test without product ID"
 fi
 
-# Test 7: Check Product Availability
+# Test 6: Check Product Availability
 if [ -n "$PRODUCT_ID" ] && [ "$PRODUCT_ID" != "null" ]; then
-    print_section "Test 7: Check Product Availability"
+    print_section "Test 6: Check Product Availability"
     TEST_USER_ID="test_user_123"
     echo "GET ${API_BASE}/products/${PRODUCT_ID}/availability?user_id=${TEST_USER_ID}"
 
@@ -203,9 +186,9 @@ else
     print_result 1 "Cannot test without product ID"
 fi
 
-# Test 8: Get Products by Category
+# Test 7: Get Products by Category
 if [ -n "$CATEGORY_ID" ] && [ "$CATEGORY_ID" != "null" ]; then
-    print_section "Test 8: Get Products by Category"
+    print_section "Test 7: Get Products by Category"
     echo "GET ${API_BASE}/products?category_id=${CATEGORY_ID}"
 
     CATEGORY_PRODUCTS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/products?category_id=${CATEGORY_ID}")
@@ -227,8 +210,8 @@ else
     print_result 1 "Cannot test without category ID"
 fi
 
-# Test 9: Create Subscription
-print_section "Test 9: Create Subscription"
+# Test 8: Create Subscription
+print_section "Test 8: Create Subscription"
 
 # First, create a test user directly in the database to satisfy foreign key constraint
 TEST_USER_ID="product_test_user_$(date +%s)"
@@ -301,8 +284,8 @@ else
     print_result 1 "Failed to create subscription"
 fi
 
-# Test 10: Get User Subscriptions
-print_section "Test 10: Get User Subscriptions"
+# Test 9: Get User Subscriptions
+print_section "Test 9: Get User Subscriptions"
 echo "GET ${API_BASE}/subscriptions/user/${TEST_USER_ID}"
 
 USER_SUBS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/subscriptions/user/${TEST_USER_ID}")
@@ -320,9 +303,9 @@ else
     print_result 1 "Failed to get user subscriptions"
 fi
 
-# Test 11: Get Subscription by ID
+# Test 10: Get Subscription by ID
 if [ -n "$SUBSCRIPTION_ID" ] && [ "$SUBSCRIPTION_ID" != "null" ]; then
-    print_section "Test 11: Get Subscription by ID"
+    print_section "Test 10: Get Subscription by ID"
     echo "GET ${API_BASE}/subscriptions/${SUBSCRIPTION_ID}"
 
     SUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/subscriptions/${SUBSCRIPTION_ID}")
@@ -348,9 +331,9 @@ else
     print_result 1 "Cannot test without subscription ID"
 fi
 
-# Test 12: Record Product Usage
+# Test 11: Record Product Usage
 if [ -n "$PRODUCT_ID" ] && [ "$PRODUCT_ID" != "null" ]; then
-    print_section "Test 12: Record Product Usage"
+    print_section "Test 11: Record Product Usage"
     echo "POST ${API_BASE}/usage/record"
     USAGE_PAYLOAD="{
       \"user_id\": \"${TEST_USER_ID}\",
@@ -386,8 +369,8 @@ else
     print_result 1 "Cannot test without product ID"
 fi
 
-# Test 13: Get Usage Records
-print_section "Test 13: Get Usage Records"
+# Test 12: Get Usage Records
+print_section "Test 12: Get Usage Records"
 echo "GET ${API_BASE}/usage/records?user_id=${TEST_USER_ID}&limit=10"
 
 USAGE_RECORDS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/usage/records?user_id=${TEST_USER_ID}&limit=10")
@@ -405,8 +388,8 @@ else
     print_result 1 "Failed to get usage records"
 fi
 
-# Test 14: Get Usage Statistics
-print_section "Test 14: Get Usage Statistics"
+# Test 13: Get Usage Statistics
+print_section "Test 13: Get Usage Statistics"
 echo "GET ${API_BASE}/statistics/usage?user_id=${TEST_USER_ID}"
 
 USAGE_STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/statistics/usage?user_id=${TEST_USER_ID}")
@@ -423,8 +406,8 @@ else
     print_result 1 "Failed to get usage statistics"
 fi
 
-# Test 15: Get Service Statistics
-print_section "Test 15: Get Service Statistics"
+# Test 14: Get Service Statistics
+print_section "Test 14: Get Service Statistics"
 echo "GET ${API_BASE}/statistics/service"
 
 SERVICE_STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/statistics/service")

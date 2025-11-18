@@ -19,7 +19,12 @@ from .models import (
     InvitationResponse, InvitationDetailResponse, InvitationListResponse,
     AcceptInvitationResponse
 )
-from core.nats_client import Event, EventType, ServiceSource
+from .events.publishers import (
+    publish_invitation_sent,
+    publish_invitation_expired,
+    publish_invitation_accepted,
+    publish_invitation_cancelled
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,25 +111,15 @@ class InvitationService:
             email_sent = await self._send_invitation_email(invitation, message)
 
             # Publish invitation.sent event
-            if self.event_bus:
-                try:
-                    event = Event(
-                        event_type=EventType.INVITATION_SENT,
-                        source=ServiceSource.INVITATION_SERVICE,
-                        data={
-                            "invitation_id": invitation.invitation_id,
-                            "organization_id": organization_id,
-                            "email": email,
-                            "role": role.value,
-                            "invited_by": inviter_user_id,
-                            "email_sent": email_sent,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
-                    )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published invitation.sent event for invitation {invitation.invitation_id}")
-                except Exception as e:
-                    logger.error(f"Failed to publish invitation.sent event: {e}")
+            await publish_invitation_sent(
+                self.event_bus,
+                invitation_id=invitation.invitation_id,
+                organization_id=organization_id,
+                email=email,
+                role=role.value,
+                invited_by=inviter_user_id,
+                email_sent=email_sent
+            )
 
             logger.info(f"Invitation created: {invitation.invitation_id}, email_sent: {email_sent}")
             return True, invitation, "Invitation created successfully"
@@ -159,23 +154,13 @@ class InvitationService:
                     })
 
                     # Publish invitation.expired event
-                    if self.event_bus:
-                        try:
-                            event = Event(
-                                event_type=EventType.INVITATION_EXPIRED,
-                                source=ServiceSource.INVITATION_SERVICE,
-                                data={
-                                    "invitation_id": invitation_info['invitation_id'],
-                                    "organization_id": invitation_info['organization_id'],
-                                    "email": invitation_info['email'],
-                                    "expired_at": expires_at.isoformat(),
-                                    "timestamp": datetime.now(timezone.utc).isoformat()
-                                }
-                            )
-                            await self.event_bus.publish_event(event)
-                            logger.info(f"Published invitation.expired event for invitation {invitation_info['invitation_id']}")
-                        except Exception as e:
-                            logger.error(f"Failed to publish invitation.expired event: {e}")
+                    await publish_invitation_expired(
+                        self.event_bus,
+                        invitation_id=invitation_info['invitation_id'],
+                        organization_id=invitation_info['organization_id'],
+                        email=invitation_info['email'],
+                        expired_at=expires_at.isoformat()
+                    )
 
                     return False, None, "Invitation has expired"
             
@@ -253,25 +238,15 @@ class InvitationService:
             )
 
             # Publish invitation.accepted event
-            if self.event_bus:
-                try:
-                    event = Event(
-                        event_type=EventType.INVITATION_ACCEPTED,
-                        source=ServiceSource.INVITATION_SERVICE,
-                        data={
-                            "invitation_id": invitation_detail.invitation_id,
-                            "organization_id": invitation_detail.organization_id,
-                            "user_id": user_id,
-                            "email": invitation_detail.email,
-                            "role": invitation_detail.role.value,
-                            "accepted_at": accept_response.accepted_at.isoformat(),
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
-                    )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published invitation.accepted event for invitation {invitation_detail.invitation_id}")
-                except Exception as e:
-                    logger.error(f"Failed to publish invitation.accepted event: {e}")
+            await publish_invitation_accepted(
+                self.event_bus,
+                invitation_id=invitation_detail.invitation_id,
+                organization_id=invitation_detail.organization_id,
+                user_id=user_id,
+                email=invitation_detail.email,
+                role=invitation_detail.role.value,
+                accepted_at=accept_response.accepted_at.isoformat()
+            )
 
             logger.info(f"Invitation accepted: user_id={user_id}, org_id={invitation_detail.organization_id}")
             return True, accept_response, "Invitation accepted successfully"
@@ -336,23 +311,13 @@ class InvitationService:
 
             if success:
                 # Publish invitation.cancelled event
-                if self.event_bus:
-                    try:
-                        event = Event(
-                            event_type=EventType.INVITATION_CANCELLED,
-                            source=ServiceSource.INVITATION_SERVICE,
-                            data={
-                                "invitation_id": invitation_id,
-                                "organization_id": invitation.organization_id,
-                                "email": invitation.email,
-                                "cancelled_by": user_id,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
-                        )
-                        await self.event_bus.publish_event(event)
-                        logger.info(f"Published invitation.cancelled event for invitation {invitation_id}")
-                    except Exception as e:
-                        logger.error(f"Failed to publish invitation.cancelled event: {e}")
+                await publish_invitation_cancelled(
+                    self.event_bus,
+                    invitation_id=invitation_id,
+                    organization_id=invitation.organization_id,
+                    email=invitation.email,
+                    cancelled_by=user_id
+                )
 
                 return True, "Invitation cancelled successfully"
             else:

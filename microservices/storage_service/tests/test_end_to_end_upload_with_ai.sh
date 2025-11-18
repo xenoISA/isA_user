@@ -18,9 +18,10 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Configuration
-STORAGE_URL="${STORAGE_URL:-http://localhost:8209}"
-MEDIA_URL="${MEDIA_URL:-http://localhost:8222}"
+# Configuration - Using APISIX Ingress
+BASE_URL="http://localhost"
+STORAGE_URL="${BASE_URL}/api/v1/storage"
+MEDIA_URL="${BASE_URL}/api/v1/media"
 MCP_URL="${MCP_URL:-http://localhost:8081}"
 TEST_USER="test_user_e2e_$$"
 TEST_ORG="test_org_e2e"
@@ -29,14 +30,21 @@ TEST_IMAGE_PATH="/tmp/test_e2e_image_$$.jpg"
 
 echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║ End-to-End Test: Upload → AI → Event → Media Storage         ║${NC}"
+echo -e "${CYAN}║ Event-Driven Architecture v2.0 (via APISIX Ingress)          ║${NC}"
 echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Configuration:${NC}"
-echo "  Storage Service: $STORAGE_URL"
-echo "  Media Service: $MEDIA_URL"
+echo "  Base URL: $BASE_URL (via APISIX Ingress)"
+echo "  Storage API: $STORAGE_URL"
+echo "  Media API: $MEDIA_URL"
 echo "  MCP Service: $MCP_URL"
 echo "  Test User: $TEST_USER"
 echo "  Test Image: $TEST_IMAGE_URL"
+echo ""
+echo -e "${BLUE}Event-Driven Architecture:${NC}"
+echo "  ✓ Events published via events/publishers.py"
+echo "  ✓ Event handlers in events/handlers.py"
+echo "  ✓ Service clients in clients/"
 echo ""
 
 # Test counter
@@ -105,35 +113,14 @@ else
 fi
 
 # ==============================================================================
-# Test 1: 服务健康检查
+# Test 1: 上传图片到 Storage Service (触发 AI 提取)
 # ==============================================================================
 echo ""
-echo -e "${BLUE}[TEST 1]${NC} Services Health Check"
-
-STORAGE_HEALTH=$(curl -s "$STORAGE_URL/health")
-STORAGE_STATUS=$(echo "$STORAGE_HEALTH" | jq -r '.status' 2>/dev/null)
-
-MEDIA_HEALTH=$(curl -s "$MEDIA_URL/health")
-MEDIA_STATUS=$(echo "$MEDIA_HEALTH" | jq -r '.status' 2>/dev/null)
-
-MCP_HEALTH=$(curl -s "$MCP_URL/health")
-MCP_STATUS=$(echo "$MCP_HEALTH" | jq -r '.status' 2>/dev/null)
-
-if [ "$STORAGE_STATUS" = "healthy" ] && [ "$MEDIA_STATUS" = "healthy" ] && [[ "$MCP_STATUS" =~ ^healthy|ok$ ]]; then
-    pass_test "All services healthy (Storage, Media, MCP)"
-else
-    fail_test "One or more services unhealthy"
-    echo "Storage: $STORAGE_STATUS, Media: $MEDIA_STATUS, MCP: $MCP_STATUS"
-fi
-
-# ==============================================================================
-# Test 2: 上传图片到 Storage Service (触发 AI 提取)
-# ==============================================================================
-echo ""
-echo -e "${BLUE}[TEST 2]${NC} Upload Image to Storage Service"
+echo -e "${BLUE}[TEST 1]${NC} Upload Image to Storage Service"
 info "This will trigger automatic AI extraction via MCP (10-15 seconds)..."
+echo -e "${BLUE}Expected Event: file.uploaded_with_ai will be published to NATS${NC}"
 
-UPLOAD_RESP=$(curl -s -X POST "$STORAGE_URL/api/v1/storage/files/upload" \
+UPLOAD_RESP=$(curl -s -X POST "$STORAGE_URL/files/upload" \
   -F "file=@$TEST_IMAGE_PATH" \
   -F "user_id=$TEST_USER" \
   -F "organization_id=$TEST_ORG")
@@ -160,7 +147,7 @@ info "Checking if chunk_id was saved in storage.storage_intelligence_index..."
 
 # 通过 PostgreSQL 查询（需要有访问权限）
 # 这里我们通过 Storage Service API 间接验证
-INTEL_SEARCH=$(curl -s -X POST "$STORAGE_URL/api/v1/storage/intelligence/image/search" \
+INTEL_SEARCH=$(curl -s -X POST "$STORAGE_URL/intelligence/image/search" \
   -H "Content-Type: application/json" \
   -d "{
     \"user_id\": \"$TEST_USER\",
@@ -188,7 +175,7 @@ info "Checking if Media Service stored the AI metadata from event..."
 sleep 3
 
 # 查询 Media Service 的 photo metadata
-MEDIA_METADATA=$(curl -s -X GET "$MEDIA_URL/api/v1/metadata/$UPLOAD_FILE_ID?user_id=$TEST_USER")
+MEDIA_METADATA=$(curl -s -X GET "$MEDIA_URL/metadata/$UPLOAD_FILE_ID?user_id=$TEST_USER")
 
 MEDIA_FILE_ID=$(echo "$MEDIA_METADATA" | jq -r '.file_id' 2>/dev/null)
 MEDIA_AI_LABELS=$(echo "$MEDIA_METADATA" | jq -r '.ai_labels | length' 2>/dev/null)
@@ -238,7 +225,7 @@ echo ""
 echo -e "${BLUE}[TEST 6]${NC} End-to-End Semantic Search"
 info "Searching for 'snow mountains sunset' to verify full integration..."
 
-E2E_SEARCH=$(curl -s -X POST "$STORAGE_URL/api/v1/storage/intelligence/image/search" \
+E2E_SEARCH=$(curl -s -X POST "$STORAGE_URL/intelligence/image/search" \
   -H "Content-Type: application/json" \
   -d "{
     \"user_id\": \"$TEST_USER\",

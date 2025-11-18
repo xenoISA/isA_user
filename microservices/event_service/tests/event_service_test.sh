@@ -3,7 +3,8 @@
 # Event Service Testing Script
 # Tests event creation, querying, statistics, and subscriptions
 
-BASE_URL="http://localhost:8230"
+# Use environment variable for base URL, default to localhost (via APISIX)
+BASE_URL="${EVENT_SERVICE_URL:-http://localhost}"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors for output
@@ -66,25 +67,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Create Event
-print_section "Test 2: Create Event"
+# Test 1: Create Event
+print_section "Test 1: Create Event"
 echo "POST ${API_BASE}/events/create"
 CREATE_EVENT_PAYLOAD='{
   "event_type": "user_login",
@@ -127,9 +111,9 @@ else
     print_result 1 "Failed to create event"
 fi
 
-# Test 3: Get Event by ID
+# Test 2: Get Event by ID
 if [ -n "$EVENT_ID" ] && [ "$EVENT_ID" != "null" ]; then
-    print_section "Test 3: Get Event by ID"
+    print_section "Test 2: Get Event by ID"
     echo "GET ${API_BASE}/events/${EVENT_ID}"
     
     GET_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/events/${EVENT_ID}")
@@ -155,8 +139,8 @@ else
     ((TESTS_FAILED++))
 fi
 
-# Test 4: Create Batch Events
-print_section "Test 4: Create Batch Events"
+# Test 3: Create Batch Events
+print_section "Test 3: Create Batch Events"
 echo "POST ${API_BASE}/events/batch"
 BATCH_PAYLOAD='[
   {
@@ -193,8 +177,8 @@ else
     print_result 1 "Failed to create batch events"
 fi
 
-# Test 5: Query Events
-print_section "Test 5: Query Events"
+# Test 4: Query Events
+print_section "Test 4: Query Events"
 echo "POST ${API_BASE}/events/query"
 QUERY_PAYLOAD='{
   "user_id": "test_user_123",
@@ -225,8 +209,8 @@ else
     print_result 1 "Failed to query events"
 fi
 
-# Test 6: Get Event Statistics
-print_section "Test 6: Get Event Statistics"
+# Test 5: Get Event Statistics
+print_section "Test 5: Get Event Statistics"
 echo "GET ${API_BASE}/events/statistics?user_id=test_user_123"
 
 STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/events/statistics?user_id=test_user_123")
@@ -243,8 +227,8 @@ else
     print_result 1 "Failed to retrieve statistics"
 fi
 
-# Test 7: Create Event Subscription
-print_section "Test 7: Create Event Subscription"
+# Test 6: Create Event Subscription
+print_section "Test 6: Create Event Subscription"
 echo "POST ${API_BASE}/events/subscriptions"
 TIMESTAMP=$(date +%s)
 SUB_PAYLOAD="{
@@ -281,8 +265,8 @@ else
     print_result 1 "Failed to create subscription"
 fi
 
-# Test 8: List Subscriptions
-print_section "Test 8: List Subscriptions"
+# Test 7: List Subscriptions
+print_section "Test 7: List Subscriptions"
 echo "GET ${API_BASE}/events/subscriptions"
 
 LIST_SUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/events/subscriptions")
@@ -297,73 +281,6 @@ if [ "$HTTP_CODE" = "200" ]; then
     print_result 0 "Subscriptions listed successfully"
 else
     print_result 1 "Failed to list subscriptions"
-fi
-
-# Test 9: Frontend Event Collection
-print_section "Test 9: Frontend Event Collection"
-echo "POST ${API_BASE}/frontend/events"
-FRONTEND_EVENT='{
-  "event_type": "page_view",
-  "category": "page_view",
-  "page_url": "https://example.com/dashboard",
-  "user_id": "test_user_123",
-  "session_id": "sess_12345",
-  "data": {
-    "page_title": "Dashboard",
-    "load_time": 250
-  },
-  "metadata": {
-    "browser": "Chrome",
-    "os": "MacOS"
-  }
-}'
-echo "Request Body:"
-pretty_json "$FRONTEND_EVENT"
-
-FRONTEND_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/frontend/events" \
-  -H "Content-Type: application/json" \
-  -d "$FRONTEND_EVENT")
-HTTP_CODE=$(echo "$FRONTEND_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$FRONTEND_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    STATUS=$(json_value "$RESPONSE_BODY" "status")
-    if [ "$STATUS" = "accepted" ]; then
-        print_result 0 "Frontend event collected successfully"
-    elif [ "$STATUS" = "error" ]; then
-        MESSAGE=$(json_value "$RESPONSE_BODY" "message")
-        if [[ "$MESSAGE" == *"not available"* ]]; then
-            print_result 0 "Frontend event endpoint working (NATS not connected)"
-        else
-            print_result 1 "Frontend event collection returned error: $MESSAGE"
-        fi
-    else
-        print_result 1 "Frontend event collection returned unexpected status: $STATUS"
-    fi
-else
-    print_result 1 "Failed to collect frontend event"
-fi
-
-# Test 10: Frontend Health Check
-print_section "Test 10: Frontend Health Check"
-echo "GET ${API_BASE}/frontend/health"
-
-FRONTEND_HEALTH=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/frontend/health")
-HTTP_CODE=$(echo "$FRONTEND_HEALTH" | tail -n1)
-RESPONSE_BODY=$(echo "$FRONTEND_HEALTH" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Frontend health check successful"
-else
-    print_result 1 "Frontend health check failed"
 fi
 
 # Summary

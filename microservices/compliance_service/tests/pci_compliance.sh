@@ -3,7 +3,7 @@
 # PCI-DSS Compliance Test Script
 # Test credit card data detection
 
-BASE_URL="http://localhost:8226"
+BASE_URL="http://localhost"
 
 echo "=========================================="
 echo "PCI-DSS Compliance Test Script"

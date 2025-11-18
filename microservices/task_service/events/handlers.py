@@ -5,95 +5,92 @@ Handles incoming events from other services via NATS
 """
 
 import logging
-import sys
-import os
-from typing import Dict, Any
+from typing import Callable, Dict
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+from core.nats_client import Event
 
-from core.nats_client import Event, EventType
+from .models import parse_user_deleted_event
 
 logger = logging.getLogger(__name__)
 
 
-class TaskEventHandler:
+# =============================================================================
+# Event Handlers (Async Functions)
+# =============================================================================
+
+
+async def handle_user_deleted(event: Event, task_repository):
     """
-    Handles events subscribed by Task Service
+    Handle user.deleted event
 
-    Subscribes to:
-    - user.deleted: Cancel all tasks for deleted user
+    When a user is deleted, cancel all their tasks
+
+    Args:
+        event: NATS event object
+        task_repository: TaskRepository instance
+
+    Event Data:
+        - user_id: str
+        - timestamp: str (optional)
+        - reason: str (optional)
+
+    Workflow:
+        1. Parse event data
+        2. Cancel all tasks for the user
+        3. Log completion
     """
+    try:
+        # Parse event data
+        event_data = parse_user_deleted_event(event.data)
+        user_id = event_data.user_id
 
-    def __init__(self, task_repository):
-        """
-        Initialize event handler
+        if not user_id:
+            logger.warning("user.deleted event missing user_id")
+            return
 
-        Args:
-            task_repository: TaskRepository instance for data access
-        """
-        self.task_repo = task_repository
+        logger.info(f"Handling user.deleted event for user {user_id}")
 
-    async def handle_user_deleted(self, event_data: Dict[str, Any]) -> bool:
-        """
-        Handle user.deleted event
+        # Cancel all tasks for this user
+        cancelled_count = await task_repository.cancel_user_tasks(user_id)
 
-        When a user is deleted, cancel all their tasks
+        logger.info(
+            f"✅ Cancelled {cancelled_count} tasks for deleted user {user_id}"
+        )
 
-        Args:
-            event_data: Event data containing user_id
+    except Exception as e:
+        logger.error(
+            f"❌ Failed to handle user.deleted event: {e}", exc_info=True
+        )
+        # Don't raise - we don't want to break the event processing chain
 
-        Returns:
-            bool: True if handled successfully
-        """
-        try:
-            user_id = event_data.get('user_id')
-            if not user_id:
-                logger.warning("user.deleted event missing user_id")
-                return False
 
-            logger.info(f"Handling user.deleted event for user {user_id}")
+# =============================================================================
+# Event Handler Registry
+# =============================================================================
 
-            # Cancel all tasks for this user
-            cancelled_count = await self.task_repo.cancel_user_tasks(user_id)
 
-            logger.info(f"Cancelled {cancelled_count} tasks for user {user_id}")
-            return True
+def get_event_handlers(task_repository) -> Dict[str, Callable]:
+    """
+    Get all event handlers for task service.
 
-        except Exception as e:
-            logger.error(f"Failed to handle user.deleted event: {e}", exc_info=True)
-            return False
+    Returns a dict mapping event patterns to handler functions.
+    This is used by main.py to register all event subscriptions.
 
-    async def handle_event(self, event: Event) -> bool:
-        """
-        Route event to appropriate handler
+    Args:
+        task_repository: TaskRepository instance
 
-        Args:
-            event: The event to handle
+    Returns:
+        Dict[str, callable]: Event pattern -> handler function mapping
+    """
+    return {
+        "account_service.user.deleted": lambda event: handle_user_deleted(
+            event, task_repository
+        ),
+        "*.user.deleted": lambda event: handle_user_deleted(event, task_repository),
+    }
 
-        Returns:
-            bool: True if handled successfully
-        """
-        try:
-            event_type = event.type
 
-            if event_type == EventType.USER_DELETED.value:
-                return await self.handle_user_deleted(event.data)
-            else:
-                logger.warning(f"Unknown event type: {event_type}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Failed to handle event: {e}", exc_info=True)
-            return False
-
-    def get_subscriptions(self) -> list:
-        """
-        Get list of event types this handler subscribes to
-
-        Returns:
-            list: List of event type values to subscribe to
-        """
-        return [
-            EventType.USER_DELETED.value,
-        ]
+__all__ = [
+    "handle_user_deleted",
+    "get_event_handlers",
+]

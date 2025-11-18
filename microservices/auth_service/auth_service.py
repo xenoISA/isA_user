@@ -30,7 +30,7 @@ from core.nats_client import Event, EventType, ServiceSource
 
 # Import Account Service Client for user validation
 from microservices.account_service.client import AccountServiceClient
-from microservices.notification_service.client import NotificationServiceClient
+from microservices.notification_service.clients.notification_client import NotificationServiceClient
 
 logger = logging.getLogger(__name__)
 

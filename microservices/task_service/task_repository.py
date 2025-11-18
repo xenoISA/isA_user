@@ -4,19 +4,26 @@ Task Repository
 任务数据访问层，提供任务相关的数据库操作
 """
 
+import logging
 import os
 import uuid
-import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
-from google.protobuf.struct_pb2 import Struct, ListValue
+from google.protobuf.struct_pb2 import ListValue, Struct
 
 from isa_common.postgres_client import PostgresClient
-from core.config_manager import ConfigManager
+
 from .models import (
-    TaskStatus, TaskType, TaskPriority,
-    TaskResponse, TaskExecutionResponse, TaskTemplateResponse, TaskAnalyticsResponse
+    TaskAnalyticsResponse,
+    TaskExecutionResponse,
+    TaskPriority,
+    TaskResponse,
+    TaskStatus,
+    TaskTemplateResponse,
+    TaskType,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,26 +60,26 @@ class TaskRepository:
         # Discover PostgreSQL service
         # Priority: Environment variables → Consul → localhost fallback
         postgres_host, postgres_port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
+            service_name="postgres_grpc_service",
+            default_host="isa-postgres-grpc",
             default_port=50061,
-            env_host_key='POSTGRES_GRPC_HOST',
-            env_port_key='POSTGRES_GRPC_PORT'
+            env_host_key="POSTGRES_GRPC_HOST",
+            env_port_key="POSTGRES_GRPC_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
         self.db = PostgresClient(
-            host=postgres_host,
-            port=postgres_port,
-            user_id="task_service"
+            host=postgres_host, port=postgres_port, user_id="task_service"
         )
         self.schema = "task"
-        self.table_name = 'user_tasks'
-        self.task_table = 'user_tasks'  # Alias for consistency
-        self.execution_table = 'task_executions'
-        self.template_table = 'task_templates'
+        self.table_name = "user_tasks"
+        self.task_table = "user_tasks"  # Alias for consistency
+        self.execution_table = "task_executions"
+        self.template_table = "task_templates"
 
-    async def create_task(self, user_id: str, task_data: Dict[str, Any]) -> Optional[TaskResponse]:
+    async def create_task(
+        self, user_id: str, task_data: Dict[str, Any]
+    ) -> Optional[TaskResponse]:
         """创建用户任务"""
         try:
             now = datetime.now(timezone.utc)
@@ -109,15 +116,19 @@ class TaskRepository:
                 "run_count": 0,
                 "success_count": 0,
                 "failure_count": 0,
-                "total_credits_consumed": 0.0
+                "total_credits_consumed": 0.0,
             }
 
             with self.db:
-                count = self.db.insert_into(self.table_name, [task_record], schema=self.schema)
+                count = self.db.insert_into(
+                    self.table_name, [task_record], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 # Query back to get the created task
-                query = f'SELECT * FROM {self.schema}.{self.table_name} WHERE task_id = $1'
+                query = (
+                    f"SELECT * FROM {self.schema}.{self.table_name} WHERE task_id = $1"
+                )
                 with self.db:
                     results = self.db.query(query, [task_id], schema=self.schema)
 
@@ -130,7 +141,9 @@ class TaskRepository:
             logger.error(f"Failed to create task: {e}", exc_info=True)
             return None
 
-    async def get_task_by_id(self, task_id: str, user_id: str = None) -> Optional[TaskResponse]:
+    async def get_task_by_id(
+        self, task_id: str, user_id: str = None
+    ) -> Optional[TaskResponse]:
         """根据ID获取任务"""
         try:
             conditions = ["task_id = $1", "deleted_at IS NULL"]
@@ -143,7 +156,7 @@ class TaskRepository:
                 params.append(user_id)
 
             where_clause = " AND ".join(conditions)
-            query = f'SELECT * FROM {self.schema}.{self.table_name} WHERE {where_clause} LIMIT 1'
+            query = f"SELECT * FROM {self.schema}.{self.table_name} WHERE {where_clause} LIMIT 1"
 
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
@@ -163,7 +176,7 @@ class TaskRepository:
         status: Optional[str] = None,
         task_type: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[TaskResponse]:
         """获取用户任务列表"""
         try:
@@ -182,12 +195,12 @@ class TaskRepository:
                 params.append(task_type)
 
             where_clause = " AND ".join(conditions)
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.table_name}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
@@ -204,7 +217,9 @@ class TaskRepository:
             logger.error(f"Failed to list user tasks: {e}")
             return []
 
-    async def update_task(self, task_id: str, updates: Dict[str, Any], user_id: str = None) -> bool:
+    async def update_task(
+        self, task_id: str, updates: Dict[str, Any], user_id: str = None
+    ) -> bool:
         """更新任务"""
         try:
             update_parts = []
@@ -212,9 +227,21 @@ class TaskRepository:
             param_count = 0
 
             # Process update fields
-            for field in ["name", "description", "status", "priority", "config",
-                         "schedule", "tags", "metadata", "due_date", "reminder_time",
-                         "next_run_time", "last_error", "last_result"]:
+            for field in [
+                "name",
+                "description",
+                "status",
+                "priority",
+                "config",
+                "schedule",
+                "tags",
+                "metadata",
+                "due_date",
+                "reminder_time",
+                "next_run_time",
+                "last_error",
+                "last_result",
+            ]:
                 if field in updates:
                     param_count += 1
                     update_parts.append(f"{field} = ${param_count}")
@@ -224,7 +251,7 @@ class TaskRepository:
                     if isinstance(value, datetime):
                         value = value.isoformat()
                     # Handle enum values
-                    elif hasattr(value, 'value'):
+                    elif hasattr(value, "value"):
                         value = value.value
 
                     params.append(value)
@@ -250,11 +277,11 @@ class TaskRepository:
             where_clause = " AND ".join(where_conditions)
             set_clause = ", ".join(update_parts)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.table_name}
                 SET {set_clause}
                 WHERE {where_clause}
-            '''
+            """
 
             with self.db:
                 count = self.db.execute(query, params, schema=self.schema)
@@ -283,11 +310,11 @@ class TaskRepository:
                 params.append(user_id)
 
             where_clause = " AND ".join(conditions)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.table_name}
                 SET deleted_at = $1, updated_at = $2
                 WHERE {where_clause} AND deleted_at IS NULL
-            '''
+            """
 
             with self.db:
                 count = self.db.execute(query, params, schema=self.schema)
@@ -299,26 +326,22 @@ class TaskRepository:
             return False
 
     async def update_task_execution_info(
-        self,
-        task_id: str,
-        success: bool,
-        credits_consumed: float = 0
+        self, task_id: str, success: bool, credits_consumed: float = 0
     ) -> bool:
         """更新任务执行统计 (别名)"""
-        return await self.update_task_execution_stats(task_id, success, credits_consumed)
+        return await self.update_task_execution_stats(
+            task_id, success, credits_consumed
+        )
 
     async def update_task_execution_stats(
-        self,
-        task_id: str,
-        success: bool,
-        credits_consumed: float = 0
+        self, task_id: str, success: bool, credits_consumed: float = 0
     ) -> bool:
         """更新任务执行统计"""
         try:
             now = datetime.now(timezone.utc).isoformat()
 
             if success:
-                query = f'''
+                query = f"""
                     UPDATE {self.schema}.{self.table_name}
                     SET run_count = run_count + 1,
                         success_count = success_count + 1,
@@ -327,10 +350,10 @@ class TaskRepository:
                         last_success_time = $2,
                         updated_at = $2
                     WHERE task_id = $3
-                '''
+                """
                 params = [credits_consumed, now, task_id]
             else:
-                query = f'''
+                query = f"""
                     UPDATE {self.schema}.{self.table_name}
                     SET run_count = run_count + 1,
                         failure_count = failure_count + 1,
@@ -338,7 +361,7 @@ class TaskRepository:
                         last_run_time = $2,
                         updated_at = $2
                     WHERE task_id = $3
-                '''
+                """
                 params = [credits_consumed, now, task_id]
 
             with self.db:
@@ -354,14 +377,14 @@ class TaskRepository:
         """获取待执行的任务"""
         try:
             now = datetime.now(timezone.utc).isoformat()
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.table_name}
                 WHERE status = 'scheduled'
                 AND deleted_at IS NULL
                 AND (next_run_time IS NULL OR next_run_time <= $1)
                 ORDER BY priority DESC, next_run_time
                 LIMIT {limit}
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, [now], schema=self.schema)
@@ -383,21 +406,16 @@ class TaskRepository:
     # ====================
 
     async def create_execution_record(
-        self,
-        task_id: str,
-        user_id: str,
-        execution_data: Dict[str, Any]
+        self, task_id: str, user_id: str, execution_data: Dict[str, Any]
     ) -> Optional[TaskExecutionResponse]:
         """创建任务执行记录 (别名)"""
         # Merge all data into one dict for create_execution
-        merged_data = {
-            "task_id": task_id,
-            "user_id": user_id,
-            **execution_data
-        }
+        merged_data = {"task_id": task_id, "user_id": user_id, **execution_data}
         return await self.create_execution(merged_data)
 
-    async def create_execution(self, execution_data: Dict[str, Any]) -> Optional[TaskExecutionResponse]:
+    async def create_execution(
+        self, execution_data: Dict[str, Any]
+    ) -> Optional[TaskExecutionResponse]:
         """创建任务执行记录"""
         try:
             now = datetime.now(timezone.utc)
@@ -411,14 +429,16 @@ class TaskRepository:
                 "trigger_type": execution_data.get("trigger_type", "manual"),
                 "trigger_data": execution_data.get("trigger_data"),
                 "started_at": now.isoformat(),
-                "created_at": now.isoformat()
+                "created_at": now.isoformat(),
             }
 
             with self.db:
-                count = self.db.insert_into(self.execution_table, [execution_record], schema=self.schema)
+                count = self.db.insert_into(
+                    self.execution_table, [execution_record], schema=self.schema
+                )
 
             if count is not None and count > 0:
-                query = f'SELECT * FROM {self.schema}.{self.execution_table} WHERE execution_id = $1'
+                query = f"SELECT * FROM {self.schema}.{self.execution_table} WHERE execution_id = $1"
                 with self.db:
                     results = self.db.query(query, [execution_id], schema=self.schema)
 
@@ -431,19 +451,31 @@ class TaskRepository:
             logger.error(f"Failed to create execution: {e}")
             return None
 
-    async def update_execution_record(self, execution_id: str, updates: Dict[str, Any]) -> bool:
+    async def update_execution_record(
+        self, execution_id: str, updates: Dict[str, Any]
+    ) -> bool:
         """更新任务执行记录 (别名)"""
         return await self.update_execution(execution_id, updates)
 
-    async def update_execution(self, execution_id: str, updates: Dict[str, Any]) -> bool:
+    async def update_execution(
+        self, execution_id: str, updates: Dict[str, Any]
+    ) -> bool:
         """更新任务执行记录"""
         try:
             update_parts = []
             params = []
             param_count = 0
 
-            for field in ["status", "result", "error_message", "error_details",
-                         "credits_consumed", "tokens_used", "api_calls_made", "duration_ms"]:
+            for field in [
+                "status",
+                "result",
+                "error_message",
+                "error_details",
+                "credits_consumed",
+                "tokens_used",
+                "api_calls_made",
+                "duration_ms",
+            ]:
                 if field in updates:
                     param_count += 1
                     update_parts.append(f"{field} = ${param_count}")
@@ -461,11 +493,11 @@ class TaskRepository:
             params.append(execution_id)
 
             set_clause = ", ".join(update_parts)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.execution_table}
                 SET {set_clause}
                 WHERE execution_id = ${param_count}
-            '''
+            """
 
             with self.db:
                 count = self.db.execute(query, params, schema=self.schema)
@@ -477,19 +509,16 @@ class TaskRepository:
             return False
 
     async def list_task_executions(
-        self,
-        task_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, task_id: str, limit: int = 50, offset: int = 0
     ) -> List[TaskExecutionResponse]:
         """获取任务执行历史"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.execution_table}
                 WHERE task_id = $1
                 ORDER BY started_at DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, [task_id], schema=self.schema)
@@ -507,10 +536,7 @@ class TaskRepository:
             return []
 
     async def get_task_executions(
-        self,
-        task_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, task_id: str, limit: int = 50, offset: int = 0
     ) -> List[TaskExecutionResponse]:
         """获取任务执行历史 (别名)"""
         return await self.list_task_executions(task_id, limit, offset)
@@ -524,7 +550,7 @@ class TaskRepository:
         subscription_level: Optional[str] = None,
         category: Optional[str] = None,
         task_type: Optional[str] = None,
-        is_active: bool = True
+        is_active: bool = True,
     ) -> List[TaskTemplateResponse]:
         """获取任务模板列表"""
         try:
@@ -551,12 +577,14 @@ class TaskRepository:
                 # Filter templates based on subscription level hierarchy
                 # Users can access templates at or below their subscription level
                 subscription_hierarchy = {
-                    'free': ['free'],
-                    'basic': ['free', 'basic'],
-                    'pro': ['free', 'basic', 'pro'],
-                    'enterprise': ['free', 'basic', 'pro', 'enterprise']
+                    "free": ["free"],
+                    "basic": ["free", "basic"],
+                    "pro": ["free", "basic", "pro"],
+                    "enterprise": ["free", "basic", "pro", "enterprise"],
                 }
-                allowed_levels = subscription_hierarchy.get(subscription_level, ['free'])
+                allowed_levels = subscription_hierarchy.get(
+                    subscription_level, ["free"]
+                )
 
                 # Build IN clause for allowed levels
                 level_placeholders = []
@@ -566,14 +594,16 @@ class TaskRepository:
                     params.append(level)
 
                 if level_placeholders:
-                    conditions.append(f"required_subscription_level IN ({', '.join(level_placeholders)})")
+                    conditions.append(
+                        f"required_subscription_level IN ({', '.join(level_placeholders)})"
+                    )
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.template_table}
                 WHERE {where_clause}
                 ORDER BY category, name
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
@@ -594,7 +624,7 @@ class TaskRepository:
         self,
         category: Optional[str] = None,
         task_type: Optional[str] = None,
-        is_active: bool = True
+        is_active: bool = True,
     ) -> List[TaskTemplateResponse]:
         """获取任务模板列表 (别名)"""
         try:
@@ -618,11 +648,11 @@ class TaskRepository:
                 params.append(task_type)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.template_table}
                 WHERE {where_clause}
                 ORDER BY category, name
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
@@ -642,7 +672,7 @@ class TaskRepository:
     async def get_template(self, template_id: str) -> Optional[TaskTemplateResponse]:
         """获取任务模板"""
         try:
-            query = f'SELECT * FROM {self.schema}.{self.template_table} WHERE template_id = $1 LIMIT 1'
+            query = f"SELECT * FROM {self.schema}.{self.template_table} WHERE template_id = $1 LIMIT 1"
 
             with self.db:
                 results = self.db.query(query, [template_id], schema=self.schema)
@@ -660,16 +690,18 @@ class TaskRepository:
     # Task Analytics
     # ====================
 
-    async def get_task_analytics(self, user_id: str, days: int = 30) -> Optional[TaskAnalyticsResponse]:
+    async def get_task_analytics(
+        self, user_id: str, days: int = 30
+    ) -> Optional[TaskAnalyticsResponse]:
         """获取任务分析数据"""
         try:
-            from decimal import Decimal
             from datetime import datetime, timedelta
+            from decimal import Decimal
 
             time_threshold = datetime.utcnow() - timedelta(days=days)
 
             # Query 1: Task statistics
-            task_stats_query = f'''
+            task_stats_query = f"""
                 SELECT
                     COUNT(*) as total_tasks,
                     COUNT(*) FILTER (WHERE status IN ('scheduled', 'running')) as active_tasks,
@@ -678,10 +710,10 @@ class TaskRepository:
                     COUNT(*) FILTER (WHERE status = 'paused') as paused_tasks
                 FROM {self.schema}.{self.task_table}
                 WHERE user_id = $1 AND deleted_at IS NULL
-            '''
+            """
 
             # Query 2: Execution statistics
-            exec_stats_query = f'''
+            exec_stats_query = f"""
                 SELECT
                     COUNT(*) as total_executions,
                     COUNT(*) FILTER (WHERE status = 'completed') as successful_executions,
@@ -692,43 +724,53 @@ class TaskRepository:
                     COALESCE(SUM(api_calls_made), 0) as total_api_calls
                 FROM {self.schema}.{self.execution_table}
                 WHERE user_id = $1 AND created_at >= $2
-            '''
+            """
 
             # Query 3: Task type distribution
-            type_dist_query = f'''
+            type_dist_query = f"""
                 SELECT task_type, COUNT(*) as count
                 FROM {self.schema}.{self.task_table}
                 WHERE user_id = $1 AND deleted_at IS NULL
                 GROUP BY task_type
-            '''
+            """
 
             # Query 4: Busiest hours (based on execution start times)
-            busiest_hours_query = f'''
+            busiest_hours_query = f"""
                 SELECT EXTRACT(HOUR FROM started_at) as hour, COUNT(*) as count
                 FROM {self.schema}.{self.execution_table}
                 WHERE user_id = $1 AND created_at >= $2
                 GROUP BY hour
                 ORDER BY count DESC
                 LIMIT 5
-            '''
+            """
 
             # Query 5: Busiest days (based on execution start times)
-            busiest_days_query = f'''
+            busiest_days_query = f"""
                 SELECT TO_CHAR(started_at, 'Day') as day_name, COUNT(*) as count
                 FROM {self.schema}.{self.execution_table}
                 WHERE user_id = $1 AND created_at >= $2
                 GROUP BY day_name
                 ORDER BY count DESC
                 LIMIT 5
-            '''
+            """
 
             with self.db:
                 # Execute all queries
-                task_stats = self.db.query(task_stats_query, [user_id], schema=self.schema)
-                exec_stats = self.db.query(exec_stats_query, [user_id, time_threshold], schema=self.schema)
-                type_dist = self.db.query(type_dist_query, [user_id], schema=self.schema)
-                busiest_hours = self.db.query(busiest_hours_query, [user_id, time_threshold], schema=self.schema)
-                busiest_days = self.db.query(busiest_days_query, [user_id, time_threshold], schema=self.schema)
+                task_stats = self.db.query(
+                    task_stats_query, [user_id], schema=self.schema
+                )
+                exec_stats = self.db.query(
+                    exec_stats_query, [user_id, time_threshold], schema=self.schema
+                )
+                type_dist = self.db.query(
+                    type_dist_query, [user_id], schema=self.schema
+                )
+                busiest_hours = self.db.query(
+                    busiest_hours_query, [user_id, time_threshold], schema=self.schema
+                )
+                busiest_days = self.db.query(
+                    busiest_days_query, [user_id, time_threshold], schema=self.schema
+                )
 
             # Parse results
             if not task_stats or not exec_stats:
@@ -740,7 +782,9 @@ class TaskRepository:
             # Calculate success rate
             total_execs = exec_data.get("total_executions", 0) or 0
             successful_execs = exec_data.get("successful_executions", 0) or 0
-            success_rate = (successful_execs / total_execs * 100) if total_execs > 0 else 0.0
+            success_rate = (
+                (successful_execs / total_execs * 100) if total_execs > 0 else 0.0
+            )
 
             # Parse task type distribution
             task_types_distribution = {}
@@ -748,10 +792,16 @@ class TaskRepository:
                 task_types_distribution[row["task_type"]] = row["count"]
 
             # Parse busiest hours
-            busiest_hours_list = [int(row["hour"]) for row in busiest_hours if row.get("hour") is not None]
+            busiest_hours_list = [
+                int(row["hour"]) for row in busiest_hours if row.get("hour") is not None
+            ]
 
             # Parse busiest days
-            busiest_days_list = [str(row["day_name"]).strip() for row in busiest_days if row.get("day_name")]
+            busiest_days_list = [
+                str(row["day_name"]).strip()
+                for row in busiest_days
+                if row.get("day_name")
+            ]
 
             # Create analytics response
             analytics = TaskAnalyticsResponse(
@@ -766,13 +816,15 @@ class TaskRepository:
                 successful_executions=successful_execs,
                 failed_executions=exec_data.get("failed_executions", 0) or 0,
                 success_rate=round(success_rate, 2),
-                average_execution_time=round(float(exec_data.get("avg_duration_ms", 0) or 0) / 1000, 2),  # Convert ms to seconds
+                average_execution_time=round(
+                    float(exec_data.get("avg_duration_ms", 0) or 0) / 1000, 2
+                ),  # Convert ms to seconds
                 total_credits_consumed=float(exec_data.get("total_credits", 0) or 0),
                 total_tokens_used=exec_data.get("total_tokens", 0) or 0,
                 total_api_calls=exec_data.get("total_api_calls", 0) or 0,
                 task_types_distribution=task_types_distribution,
                 busiest_hours=busiest_hours_list,
-                busiest_days=busiest_days_list
+                busiest_days=busiest_days_list,
             )
 
             return analytics
@@ -818,18 +870,31 @@ class TaskRepository:
                 "completed_at": None,
                 "deleted_at": None,
                 "created_at": None,
-                "updated_at": None
+                "updated_at": None,
             }
 
             # Parse datetime fields
-            for field in ["next_run_time", "last_run_time", "last_success_time",
-                         "due_date", "reminder_time", "completed_at", "created_at", "updated_at", "deleted_at"]:
+            for field in [
+                "next_run_time",
+                "last_run_time",
+                "last_success_time",
+                "due_date",
+                "reminder_time",
+                "completed_at",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ]:
                 if data.get(field):
-                    task_data[field] = datetime.fromisoformat(str(data[field]).replace('+00:00', ''))
+                    task_data[field] = datetime.fromisoformat(
+                        str(data[field]).replace("+00:00", "")
+                    )
 
             # Parse last_result if present
             if data.get("last_result"):
-                task_data["last_result"] = _convert_protobuf_to_native(data["last_result"])
+                task_data["last_result"] = _convert_protobuf_to_native(
+                    data["last_result"]
+                )
 
             if data.get("last_error"):
                 task_data["last_error"] = data["last_error"]
@@ -861,13 +926,15 @@ class TaskRepository:
                 # Initialize optional datetime fields
                 "started_at": None,
                 "completed_at": None,
-                "created_at": None
+                "created_at": None,
             }
 
             # Parse datetime fields
             for field in ["started_at", "completed_at", "created_at"]:
                 if data.get(field):
-                    execution_data[field] = datetime.fromisoformat(str(data[field]).replace('+00:00', ''))
+                    execution_data[field] = datetime.fromisoformat(
+                        str(data[field]).replace("+00:00", "")
+                    )
 
             return TaskExecutionResponse(**execution_data)
 
@@ -890,24 +957,36 @@ class TaskRepository:
                 "description": data.get("description", ""),
                 "category": data["category"],
                 "task_type": data["task_type"],
-                "default_config": _convert_protobuf_to_native(data.get("default_config", {})),
-                "required_fields": _convert_protobuf_to_native(data.get("required_fields", [])),
-                "optional_fields": _convert_protobuf_to_native(data.get("optional_fields", [])),
-                "config_schema": _convert_protobuf_to_native(data.get("config_schema", {})),
-                "required_subscription_level": data.get("required_subscription_level", "free"),
+                "default_config": _convert_protobuf_to_native(
+                    data.get("default_config", {})
+                ),
+                "required_fields": _convert_protobuf_to_native(
+                    data.get("required_fields", [])
+                ),
+                "optional_fields": _convert_protobuf_to_native(
+                    data.get("optional_fields", [])
+                ),
+                "config_schema": _convert_protobuf_to_native(
+                    data.get("config_schema", {})
+                ),
+                "required_subscription_level": data.get(
+                    "required_subscription_level", "free"
+                ),
                 "credits_per_run": credits,
                 "tags": _convert_protobuf_to_native(data.get("tags")),
                 "metadata": _convert_protobuf_to_native(data.get("metadata", {})),
                 "is_active": data.get("is_active", True),
                 # Initialize datetime fields
                 "created_at": None,
-                "updated_at": None
+                "updated_at": None,
             }
 
             # Parse datetime fields
             for field in ["created_at", "updated_at"]:
                 if data.get(field):
-                    template_data[field] = datetime.fromisoformat(str(data[field]).replace('+00:00', ''))
+                    template_data[field] = datetime.fromisoformat(
+                        str(data[field]).replace("+00:00", "")
+                    )
 
             return TaskTemplateResponse(**template_data)
 
@@ -928,18 +1007,18 @@ class TaskRepository:
             int: Number of tasks cancelled
         """
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.task_table}
                 SET status = $1, updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = $2
                 AND status IN ($3, $4)
-            '''
+            """
 
             with self.db:
                 count = self.db.execute(
                     query,
-                    ['cancelled', user_id, 'pending', 'scheduled'],
-                    schema=self.schema
+                    ["cancelled", user_id, "pending", "scheduled"],
+                    schema=self.schema,
                 )
 
             logger.info(f"Cancelled {count} tasks for user {user_id}")

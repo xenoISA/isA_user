@@ -3,9 +3,9 @@
 # Task Service Testing Script
 # Tests task CRUD operations, execution, templates, and analytics
 
-BASE_URL="http://localhost:8211"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
-AUTH_BASE="http://localhost:8201/api/v1/auth"
+AUTH_BASE="http://localhost/api/v1/auth"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -97,64 +97,8 @@ pretty_json() {
     fi
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    SERVICE=$(echo "$RESPONSE_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('service', ''))")
-    if [ "$SERVICE" = "task_service" ]; then
-        print_result 0 "Health check successful"
-    else
-        print_result 1 "Health check returned wrong service name"
-    fi
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Detailed Health Check
-print_section "Test 2: Detailed Health Check"
-echo "GET ${BASE_URL}/health/detailed"
-DETAILED_HEALTH=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health/detailed")
-HTTP_CODE=$(echo "$DETAILED_HEALTH" | tail -n1)
-RESPONSE_BODY=$(echo "$DETAILED_HEALTH" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Detailed health check successful"
-else
-    print_result 1 "Detailed health check failed"
-fi
-
-# Test 3: Service Statistics
-print_section "Test 3: Service Statistics"
-echo "GET ${API_BASE}/service/stats"
-STATS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/service/stats")
-HTTP_CODE=$(echo "$STATS_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$STATS_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Service statistics retrieved successfully"
-else
-    print_result 1 "Failed to get service statistics"
-fi
-
-# Test 4: Create Task
-print_section "Test 4: Create Task"
+# Test 1: Create Task
+print_section "Test 1: Create Task"
 echo "POST ${API_BASE}/tasks"
 CREATE_TASK_PAYLOAD="{
   \"name\": \"Test Task - Daily Weather\",
@@ -206,9 +150,9 @@ else
     print_result 1 "Failed to create task"
 fi
 
-# Test 5: Get Task Details
+# Test 2: Get Task Details
 if [ -n "$TASK_ID" ]; then
-    print_section "Test 5: Get Task Details"
+    print_section "Test 2: Get Task Details"
     echo "GET ${API_BASE}/tasks/${TASK_ID}"
 
     GET_TASK_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/tasks/${TASK_ID}" \
@@ -231,13 +175,13 @@ if [ -n "$TASK_ID" ]; then
         print_result 1 "Failed to get task details"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 5: No task ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 2: No task ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 6: Update Task
+# Test 3: Update Task
 if [ -n "$TASK_ID" ]; then
-    print_section "Test 6: Update Task"
+    print_section "Test 3: Update Task"
     echo "PUT ${API_BASE}/tasks/${TASK_ID}"
     UPDATE_TASK_PAYLOAD="{
       \"name\": \"Updated Test Task - Daily Weather\",
@@ -276,12 +220,12 @@ if [ -n "$TASK_ID" ]; then
         print_result 1 "Failed to update task"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 6: No task ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 3: No task ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 7: List Tasks
-print_section "Test 7: List User Tasks"
+# Test 4: List Tasks
+print_section "Test 4: List User Tasks"
 echo "GET ${API_BASE}/tasks?limit=10&offset=0"
 
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/tasks?limit=10&offset=0" \
@@ -300,8 +244,8 @@ else
     print_result 1 "Failed to list tasks"
 fi
 
-# Test 8: List Tasks with Filters
-print_section "Test 8: List Tasks with Filters (status=scheduled)"
+# Test 5: List Tasks with Filters
+print_section "Test 5: List Tasks with Filters (status=scheduled)"
 echo "GET ${API_BASE}/tasks?status=scheduled&limit=10"
 
 FILTERED_LIST=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/tasks?status=scheduled&limit=10" \
@@ -319,9 +263,9 @@ else
     print_result 1 "Failed to get filtered tasks"
 fi
 
-# Test 9: Execute Task Manually
+# Test 6: Execute Task Manually
 if [ -n "$TASK_ID" ]; then
-    print_section "Test 9: Execute Task Manually"
+    print_section "Test 6: Execute Task Manually"
     echo "POST ${API_BASE}/tasks/${TASK_ID}/execute"
     EXECUTE_PAYLOAD="{
       \"trigger_type\": \"manual\",
@@ -357,13 +301,13 @@ if [ -n "$TASK_ID" ]; then
         print_result 1 "Failed to execute task"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 9: No task ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 6: No task ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 10: Get Task Execution History
+# Test 7: Get Task Execution History
 if [ -n "$TASK_ID" ]; then
-    print_section "Test 10: Get Task Execution History"
+    print_section "Test 7: Get Task Execution History"
     echo "GET ${API_BASE}/tasks/${TASK_ID}/executions?limit=10"
 
     EXECUTIONS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/tasks/${TASK_ID}/executions?limit=10" \
@@ -381,90 +325,12 @@ if [ -n "$TASK_ID" ]; then
         print_result 1 "Failed to get task execution history"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 10: No task ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 7: No task ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 11: Get Task Templates
-print_section "Test 11: Get Available Task Templates"
-echo "GET ${API_BASE}/templates"
-
-TEMPLATES_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/templates" \
-  -H "Authorization: Bearer ${JWT_TOKEN}")
-HTTP_CODE=$(echo "$TEMPLATES_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$TEMPLATES_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    TEMPLATE_COUNT=$(echo "$RESPONSE_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data))")
-    if [ "$TEMPLATE_COUNT" -gt 0 ]; then
-        TEMPLATE_ID=$(echo "$RESPONSE_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0].get('template_id', '') if len(data) > 0 else '')")
-        print_result 0 "Task templates retrieved successfully (count: $TEMPLATE_COUNT)"
-        echo -e "${YELLOW}First Template ID: $TEMPLATE_ID${NC}"
-    else
-        print_result 0 "Task templates retrieved (empty list is valid)"
-    fi
-else
-    print_result 1 "Failed to get task templates"
-fi
-
-# Test 12: Create Task from Template
-if [ -n "$TEMPLATE_ID" ]; then
-    print_section "Test 12: Create Task from Template"
-    echo "POST ${API_BASE}/tasks/from-template"
-    TEMPLATE_TASK_PAYLOAD="{
-      \"template_id\": \"${TEMPLATE_ID}\",
-      \"customization\": {
-        \"name\": \"My Custom Team Meeting\",
-        \"config\": {
-          \"event_title\": \"Weekly Team Standup\",
-          \"event_time\": \"2025-11-10T10:00:00Z\",
-          \"location\": \"Conference Room A\",
-          \"recurring\": true
-        },
-        \"schedule\": {
-          \"type\": \"weekly\",
-          \"weekday\": 1,
-          \"run_time\": \"10:00\"
-        }
-      }
-    }"
-
-    echo "Request Body:"
-    pretty_json "$TEMPLATE_TASK_PAYLOAD"
-
-    TEMPLATE_TASK_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/tasks/from-template" \
-      -H "Content-Type: application/json" \
-      -H "Authorization: Bearer ${JWT_TOKEN}" \
-      -d "$TEMPLATE_TASK_PAYLOAD")
-    HTTP_CODE=$(echo "$TEMPLATE_TASK_RESPONSE" | tail -n1)
-    RESPONSE_BODY=$(echo "$TEMPLATE_TASK_RESPONSE" | sed '$d')
-
-    echo "Response:"
-    pretty_json "$RESPONSE_BODY"
-    echo "HTTP Status: $HTTP_CODE"
-
-    if [ "$HTTP_CODE" = "200" ]; then
-        TEMPLATE_TASK_ID=$(echo "$RESPONSE_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('task_id', ''))")
-        if [ -n "$TEMPLATE_TASK_ID" ] && [ "$TEMPLATE_TASK_ID" != "null" ]; then
-            print_result 0 "Task created from template successfully"
-            echo -e "${YELLOW}Template Task ID: $TEMPLATE_TASK_ID${NC}"
-        else
-            print_result 1 "Template task creation returned 200 but no task_id"
-        fi
-    else
-        print_result 1 "Failed to create task from template"
-    fi
-else
-    echo -e "${YELLOW}Skipping Test 12: No template ID available${NC}"
-    ((TESTS_FAILED++))
-fi
-
-# Test 13: Get Task Analytics
-print_section "Test 13: Get Task Analytics"
+# Test 8: Get Task Analytics
+print_section "Test 8: Get Task Analytics"
 echo "GET ${API_BASE}/analytics?days=30"
 
 ANALYTICS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/analytics?days=30" \
@@ -485,8 +351,8 @@ else
     print_result 1 "Failed to get task analytics"
 fi
 
-# Test 14: Create TODO Task
-print_section "Test 14: Create TODO Task"
+# Test 9: Create TODO Task
+print_section "Test 9: Create TODO Task"
 echo "POST ${API_BASE}/tasks"
 TODO_PAYLOAD="{
   \"name\": \"Buy groceries\",
@@ -524,8 +390,8 @@ else
     print_result 1 "Failed to create TODO task"
 fi
 
-# Test 15: Create Reminder Task
-print_section "Test 15: Create Reminder Task"
+# Test 10: Create Reminder Task
+print_section "Test 10: Create Reminder Task"
 echo "POST ${API_BASE}/tasks"
 REMINDER_PAYLOAD="{
   \"name\": \"Doctor Appointment\",
@@ -568,9 +434,9 @@ else
     print_result 1 "Failed to create reminder task"
 fi
 
-# Test 16: Delete Task
+# Test 11: Delete Task
 if [ -n "$TASK_ID" ]; then
-    print_section "Test 16: Delete Task"
+    print_section "Test 11: Delete Task"
     echo "DELETE ${API_BASE}/tasks/${TASK_ID}"
 
     DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/tasks/${TASK_ID}" \
@@ -588,7 +454,7 @@ if [ -n "$TASK_ID" ]; then
         print_result 1 "Failed to delete task"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 16: No task ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 11: No task ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

@@ -409,3 +409,19 @@ class FrameListResponse(BaseModel):
     count: int
     limit: int
     offset: int
+# ============================================================================
+# Device Pairing Models
+# ============================================================================
+
+class DevicePairingRequest(BaseModel):
+    """Request to pair a device with a user"""
+    pairing_token: str = Field(..., description="Pairing token from QR code")
+    user_id: str = Field(..., description="User ID attempting to pair")
+
+
+class DevicePairingResponse(BaseModel):
+    """Response for device pairing"""
+    success: bool
+    device: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
+    error: Optional[str] = None

@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compliance
+  namespace: isa-cloud-staging
+  labels:
+    app: compliance
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compliance
+  template:
+    metadata:
+      labels:
+        app: compliance
+        tier: applications
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: compliance
+          image: isa-compliance:latest
+          imagePullPolicy: IfNotPresent
+          
+          ports:
+            - name: http
+              containerPort: 8226
+          
+          envFrom:
+            - configMapRef:
+                name: user-config
+            - configMapRef:
+                name: data-config
+          
+          env:
+            - name: SERVICE_NAME
+              value: "compliance_service"
+            - name: COMPLIANCE_SERVICE_PORT
+              value: "8226"
+            - name: SERVICE_HOST
+              value: "compliance.isa-cloud-staging.svc.cluster.local"
+          
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8226
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8226
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: compliance
+  namespace: isa-cloud-staging
+  labels:
+    app: compliance
+    tier: applications
+spec:
+  type: ClusterIP
+  selector:
+    app: compliance
+  ports:
+    - name: http
+      port: 8226
+      targetPort: 8226
+      protocol: TCP

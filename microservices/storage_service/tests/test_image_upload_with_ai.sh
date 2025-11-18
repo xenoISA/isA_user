@@ -13,8 +13,8 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Configuration
-STORAGE_URL="${STORAGE_URL:-http://localhost:8209}"
+# Configuration - via Kubernetes Ingress
+STORAGE_URL="${STORAGE_URL:-http://localhost}"
 MCP_URL="${MCP_URL:-http://localhost:8081}"
 TEST_USER="test_user_storage_$$"
 TEST_IMAGE_URL="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800"

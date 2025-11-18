@@ -2,10 +2,11 @@
 
 # Audit Service Testing Script
 # Tests audit event logging, querying, security alerts, and compliance reporting
+# Event-Driven Architecture v2.0 - via Kubernetes Ingress
 
-BASE_URL="http://localhost:8205"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/audit"
-AUTH_URL="http://localhost:8201/api/v1/auth"
+AUTH_URL="http://localhost/api/v1/auth"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -82,42 +83,8 @@ else
     exit 1
 fi
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Detailed Health Check
-print_section "Test 2: Detailed Health Check"
-echo "GET ${BASE_URL}/health/detailed"
-DETAILED_HEALTH=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health/detailed")
-HTTP_CODE=$(echo "$DETAILED_HEALTH" | tail -n1)
-RESPONSE_BODY=$(echo "$DETAILED_HEALTH" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Detailed health check successful"
-else
-    print_result 1 "Detailed health check failed"
-fi
-
-# Test 3: Get Service Info
-print_section "Test 3: Get Service Info"
+# Test 1: Get Service Info (skip health checks - for K8s probes only)
+print_section "Test 1: Get Service Info"
 echo "GET ${API_BASE}/info"
 INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/info")
 HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
@@ -133,8 +100,8 @@ else
     print_result 1 "Failed to get service info"
 fi
 
-# Test 4: Get Service Stats
-print_section "Test 4: Get Service Stats"
+# Test 2: Get Service Stats
+print_section "Test 2: Get Service Stats"
 echo "GET ${API_BASE}/stats"
 STATS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/stats")
 HTTP_CODE=$(echo "$STATS_RESPONSE" | tail -n1)

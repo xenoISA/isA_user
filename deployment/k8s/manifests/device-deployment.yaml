@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: device
+  namespace: isa-cloud-staging
+  labels:
+    app: device
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: device
+  template:
+    metadata:
+      labels:
+        app: device
+        tier: applications
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: device
+          image: isa-device:latest
+          imagePullPolicy: IfNotPresent
+          
+          ports:
+            - name: http
+              containerPort: 8220
+          
+          envFrom:
+            - configMapRef:
+                name: user-config
+            - configMapRef:
+                name: data-config
+          
+          env:
+            - name: SERVICE_NAME
+              value: "device_service"
+            - name: DEVICE_SERVICE_PORT
+              value: "8220"
+            - name: SERVICE_HOST
+              value: "device.isa-cloud-staging.svc.cluster.local"
+          
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8220
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8220
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: device
+  namespace: isa-cloud-staging
+  labels:
+    app: device
+    tier: applications
+spec:
+  type: ClusterIP
+  selector:
+    app: device
+  ports:
+    - name: http
+      port: 8220
+      targetPort: 8220
+      protocol: TCP

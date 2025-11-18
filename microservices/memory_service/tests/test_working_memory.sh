@@ -3,7 +3,7 @@
 # Working Memory Testing Script
 # Tests working memory operations (short-term, temporary memory)
 
-BASE_URL="http://localhost:8223"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/memories"
 
 # Colors for output
@@ -65,25 +65,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Create Working Memory
-print_section "Test 2: Create Working Memory"
+# Test 1: Create Working Memory
+print_section "Test 1: Create Working Memory"
 echo "POST ${API_BASE}"
 CREATE_PAYLOAD='{
   "user_id": "test_user_xyz",
@@ -123,9 +106,9 @@ else
     print_result 1 "Failed to create working memory"
 fi
 
-# Test 3: Get Working Memory by ID
+# Test 2: Get Working Memory by ID
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 3: Get Working Memory by ID"
+    print_section "Test 2: Get Working Memory by ID"
     echo "GET ${API_BASE}/working/${MEMORY_ID}?user_id=test_user_xyz"
 
     GET_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/working/${MEMORY_ID}?user_id=test_user_xyz")
@@ -147,12 +130,12 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to retrieve working memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 3: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 2: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 4: Get Active Working Memories
-print_section "Test 4: Get Active Working Memories"
+# Test 3: Get Active Working Memories
+print_section "Test 3: Get Active Working Memories"
 echo "GET ${API_BASE}/working/active?user_id=test_user_xyz"
 
 ACTIVE_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/working/active?user_id=test_user_xyz")
@@ -170,8 +153,8 @@ else
     print_result 1 "Failed to get active working memories"
 fi
 
-# Test 5: Create Multiple Working Memories
-print_section "Test 5: Create Multiple Working Memories"
+# Test 4: Create Multiple Working Memories
+print_section "Test 4: Create Multiple Working Memories"
 echo "POST ${API_BASE}"
 MULTI_PAYLOAD='{
   "user_id": "test_user_xyz",
@@ -208,8 +191,8 @@ else
     print_result 1 "Failed to create second working memory"
 fi
 
-# Test 6: List All Working Memories
-print_section "Test 6: List All Working Memories for User"
+# Test 5: List All Working Memories
+print_section "Test 5: List All Working Memories for User"
 echo "GET ${API_BASE}?user_id=test_user_xyz&memory_type=working&limit=50"
 
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}?user_id=test_user_xyz&memory_type=working&limit=50")
@@ -227,9 +210,9 @@ else
     print_result 1 "Failed to list working memories"
 fi
 
-# Test 7: Update Working Memory
+# Test 6: Update Working Memory
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 7: Update Working Memory"
+    print_section "Test 6: Update Working Memory"
     echo "PUT ${API_BASE}/working/${MEMORY_ID}?user_id=test_user_xyz"
     UPDATE_PAYLOAD='{
       "importance_score": 0.9,
@@ -263,12 +246,12 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to update working memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 7: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 6: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 8: Cleanup Expired Memories
-print_section "Test 8: Cleanup Expired Working Memories"
+# Test 7: Cleanup Expired Memories
+print_section "Test 7: Cleanup Expired Working Memories"
 echo "POST ${API_BASE}/working/cleanup?user_id=test_user_xyz"
 
 CLEANUP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/working/cleanup?user_id=test_user_xyz")
@@ -290,9 +273,9 @@ else
     print_result 1 "Failed to cleanup expired memories"
 fi
 
-# Test 9: Delete Working Memory
+# Test 8: Delete Working Memory
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 9: Delete Working Memory"
+    print_section "Test 8: Delete Working Memory"
     echo "DELETE ${API_BASE}/working/${MEMORY_ID}?user_id=test_user_xyz"
 
     DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/working/${MEMORY_ID}?user_id=test_user_xyz")
@@ -314,7 +297,7 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to delete working memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 9: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 8: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

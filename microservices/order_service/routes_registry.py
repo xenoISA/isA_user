@@ -64,12 +64,8 @@ SERVICE_ROUTES = [
         "description": "Get order statistics"
     },
     # User & Payment Related
-    {
-        "path": "/api/v1/users/{user_id}/orders",
-        "methods": ["GET"],
-        "auth_required": True,
-        "description": "Get user orders"
-    },
+    # Note: User orders can be retrieved using GET /api/v1/orders?user_id={user_id}
+    # The dedicated /api/v1/users/{user_id}/orders route was removed to avoid APISIX routing conflicts
     {
         "path": "/api/v1/payments/{payment_intent_id}/orders",
         "methods": ["GET"],

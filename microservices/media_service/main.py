@@ -210,7 +210,7 @@ async def health_check():
 
 # ==================== File Upload (Proxy to Storage Service) ====================
 
-@app.post("/api/v1/files/upload")
+@app.post("/api/v1/media/files/upload")
 async def upload_file():
     """
     File upload endpoint - proxy to storage service (8209)
@@ -230,7 +230,7 @@ async def upload_file():
 
 # ==================== Photo Version Endpoints ====================
 
-@app.post("/api/v1/photos/versions/save")
+@app.post("/api/v1/media/photos/versions/save")
 async def save_photo_version(
     request_body: dict,
     service: MediaService = Depends(get_media_service)
@@ -286,7 +286,7 @@ async def save_photo_version(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/versions", response_model=PhotoVersionResponse)
+@app.post("/api/v1/media/versions", response_model=PhotoVersionResponse)
 async def create_photo_version(
     request: PhotoVersionCreateRequest,
     user_id: str = Depends(get_user_id),
@@ -304,7 +304,7 @@ async def create_photo_version(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/photos/{photo_id}/versions")
+@app.post("/api/v1/media/photos/{photo_id}/versions")
 async def get_photo_versions_list(
     photo_id: str,
     user_id: str = Query(...),
@@ -343,7 +343,7 @@ async def get_photo_versions_list(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/v1/photos/{photo_id}/versions/{version_id}/switch")
+@app.put("/api/v1/media/photos/{photo_id}/versions/{version_id}/switch")
 async def switch_photo_version_endpoint(
     photo_id: str,
     version_id: str,
@@ -376,7 +376,7 @@ async def switch_photo_version_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/v1/photos/versions/{version_id}")
+@app.delete("/api/v1/media/versions/{version_id}")
 async def delete_photo_version_endpoint(
     version_id: str,
     user_id: str = Query(...),
@@ -415,7 +415,7 @@ async def delete_photo_version_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/versions/{version_id}", response_model=PhotoVersionResponse)
+@app.get("/api/v1/media/versions/{version_id}", response_model=PhotoVersionResponse)
 async def get_photo_version(
     version_id: str,
     user_id: str = Depends(get_user_id),
@@ -434,7 +434,7 @@ async def get_photo_version(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/photos/{photo_id}/versions", response_model=List[PhotoVersionResponse])
+@app.get("/api/v1/media/photos/{photo_id}/versions", response_model=List[PhotoVersionResponse])
 async def list_photo_versions(
     photo_id: str,
     user_id: str = Depends(get_user_id),
@@ -451,7 +451,7 @@ async def list_photo_versions(
 
 # ==================== Photo Metadata Endpoints ====================
 
-@app.put("/api/v1/metadata/{file_id}", response_model=PhotoMetadataResponse)
+@app.put("/api/v1/media/metadata/{file_id}", response_model=PhotoMetadataResponse)
 async def update_photo_metadata(
     file_id: str,
     request: PhotoMetadataUpdateRequest,
@@ -468,7 +468,7 @@ async def update_photo_metadata(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/metadata/{file_id}", response_model=PhotoMetadataResponse)
+@app.get("/api/v1/media/metadata/{file_id}", response_model=PhotoMetadataResponse)
 async def get_photo_metadata(
     file_id: str,
     user_id: str = Depends(get_user_id),
@@ -488,9 +488,93 @@ async def get_photo_metadata(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/v1/media/photos/{file_id}")
+async def get_photo_for_frame(
+    file_id: str,
+    frame_id: Optional[str] = Query(None, description="Frame ID for optimization"),
+    service: MediaService = Depends(get_media_service)
+):
+    """
+    Get photo metadata and download URLs for smart frames
+
+    This endpoint is optimized for smart frame hardware to fetch:
+    - Photo metadata (AI labels, quality, etc.)
+    - Available versions (thumbnail, hd, original)
+    - Download URLs for each version
+    - Frame-specific cached versions
+
+    Args:
+        file_id: Photo file ID
+        frame_id: Optional frame ID for cache optimization
+
+    Returns:
+        Photo metadata with download URLs
+    """
+    try:
+        # Get photo metadata (without user_id requirement for frames)
+        metadata = await service.repository.get_photo_metadata(file_id)
+        if not metadata:
+            raise HTTPException(status_code=404, detail="Photo not found")
+
+        # Get available versions
+        # TODO: Implement get_photo_versions method in repository
+        versions = []
+
+        # For now, provide standard size options
+        base_download_url = f"http://storage-service:8220/api/v1/files/download/{file_id}"
+        versions = [
+            {
+                "size": "thumbnail",
+                "width": 300,
+                "height": 200,
+                "url": f"{base_download_url}?size=thumbnail"
+            },
+            {
+                "size": "hd",
+                "width": 1920,
+                "height": 1080,
+                "url": f"{base_download_url}?size=hd"
+            },
+            {
+                "size": "original",
+                "width": metadata.full_metadata.get("width", 4032) if metadata.full_metadata else 4032,
+                "height": metadata.full_metadata.get("height", 3024) if metadata.full_metadata else 3024,
+                "url": base_download_url
+            }
+        ]
+
+        # Check if cached for this frame
+        cached_for_frames = []
+        if frame_id:
+            # TODO: Check cache status for frame
+            pass
+
+        response = {
+            "file_id": file_id,
+            "user_id": metadata.user_id,
+            "ai_metadata": {
+                "labels": metadata.ai_labels,
+                "scenes": metadata.ai_scenes,
+                "colors": metadata.ai_colors,
+                "description": metadata.ai_description,
+                "quality_score": metadata.quality_score,
+                "face_detection": metadata.face_detection
+            },
+            "versions": versions,
+            "cached_for_frames": cached_for_frames,
+            "download_url": metadata.full_metadata.get("download_url") if metadata.full_metadata else base_download_url,
+            "timestamp": metadata.created_at.isoformat() if metadata.created_at else None
+        }
+
+        return response
+
+    except MediaServiceError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== Playlist Endpoints ====================
 
-@app.post("/api/v1/playlists", response_model=PlaylistResponse)
+@app.post("/api/v1/media/playlists", response_model=PlaylistResponse)
 async def create_playlist(
     request: PlaylistCreateRequest,
     user_id: str = Depends(get_user_id),
@@ -508,7 +592,7 @@ async def create_playlist(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/playlists/{playlist_id}", response_model=PlaylistResponse)
+@app.get("/api/v1/media/playlists/{playlist_id}", response_model=PlaylistResponse)
 async def get_playlist(
     playlist_id: str,
     user_id: str = Depends(get_user_id),
@@ -527,7 +611,7 @@ async def get_playlist(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/playlists", response_model=List[PlaylistResponse])
+@app.get("/api/v1/media/playlists", response_model=List[PlaylistResponse])
 async def list_user_playlists(
     user_id: str = Depends(get_user_id),
     limit: int = Query(50, ge=1, le=100),
@@ -543,7 +627,7 @@ async def list_user_playlists(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/v1/playlists/{playlist_id}", response_model=PlaylistResponse)
+@app.put("/api/v1/media/playlists/{playlist_id}", response_model=PlaylistResponse)
 async def update_playlist(
     playlist_id: str,
     request: PlaylistUpdateRequest,
@@ -563,7 +647,7 @@ async def update_playlist(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/v1/playlists/{playlist_id}")
+@app.delete("/api/v1/media/playlists/{playlist_id}")
 async def delete_playlist(
     playlist_id: str,
     user_id: str = Depends(get_user_id),
@@ -585,7 +669,7 @@ async def delete_playlist(
 
 # ==================== Rotation Schedule Endpoints ====================
 
-@app.post("/api/v1/schedules", response_model=RotationScheduleResponse)
+@app.post("/api/v1/media/schedules", response_model=RotationScheduleResponse)
 async def create_rotation_schedule(
     request: RotationScheduleCreateRequest,
     user_id: str = Depends(get_user_id),
@@ -602,7 +686,7 @@ async def create_rotation_schedule(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/schedules/{schedule_id}", response_model=RotationScheduleResponse)
+@app.get("/api/v1/media/schedules/{schedule_id}", response_model=RotationScheduleResponse)
 async def get_rotation_schedule(
     schedule_id: str,
     user_id: str = Depends(get_user_id),
@@ -621,7 +705,7 @@ async def get_rotation_schedule(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/frames/{frame_id}/schedules", response_model=List[RotationScheduleResponse])
+@app.get("/api/v1/media/frames/{frame_id}/schedules", response_model=List[RotationScheduleResponse])
 async def list_frame_schedules(
     frame_id: str,
     user_id: str = Depends(get_user_id),
@@ -656,7 +740,7 @@ async def update_schedule_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/v1/schedules/{schedule_id}")
+@app.delete("/api/v1/media/schedules/{schedule_id}")
 async def delete_rotation_schedule(
     schedule_id: str,
     user_id: str = Depends(get_user_id),
@@ -678,7 +762,7 @@ async def delete_rotation_schedule(
 
 # ==================== Photo Cache Endpoints ====================
 
-@app.post("/api/v1/cache", response_model=PhotoCacheResponse)
+@app.post("/api/v1/media/cache", response_model=PhotoCacheResponse)
 async def cache_photo_for_frame(
     frame_id: str = Query(...),
     photo_id: str = Query(...),
@@ -695,7 +779,7 @@ async def cache_photo_for_frame(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/frames/{frame_id}/cache", response_model=List[PhotoCacheResponse])
+@app.get("/api/v1/media/frames/{frame_id}/cache", response_model=List[PhotoCacheResponse])
 async def list_frame_cache(
     frame_id: str,
     user_id: str = Depends(get_user_id),
@@ -730,7 +814,7 @@ async def update_cache_status(
 # ==================== Gallery Endpoints (Compatibility Layer) ====================
 
 # Gallery Albums - proxy to storage service
-@app.get("/api/v1/gallery/albums")
+@app.get("/api/v1/media/gallery/albums")
 async def list_gallery_albums(
     user_id: str = Query(...),
     limit: int = Query(50, ge=1, le=100),
@@ -741,7 +825,7 @@ async def list_gallery_albums(
 
 
 # Gallery Playlists - proxy to existing playlist endpoints
-@app.get("/api/v1/gallery/playlists")
+@app.get("/api/v1/media/gallery/playlists")
 async def list_gallery_playlists(
     user_id: str = Query(...),
     service: MediaService = Depends(get_media_service)
@@ -754,7 +838,7 @@ async def list_gallery_playlists(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/gallery/playlists", status_code=201)
+@app.post("/api/v1/media/gallery/playlists", status_code=201)
 async def create_gallery_playlist(
     request_body: dict,
     service: MediaService = Depends(get_media_service)
@@ -809,7 +893,7 @@ async def create_gallery_playlist(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/gallery/playlists/{playlist_id}")
+@app.get("/api/v1/media/gallery/playlists/{playlist_id}")
 async def get_gallery_playlist(
     playlist_id: str,
     user_id: str = Query(...),
@@ -826,7 +910,7 @@ async def get_gallery_playlist(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/v1/gallery/playlists/{playlist_id}")
+@app.put("/api/v1/media/gallery/playlists/{playlist_id}")
 async def update_gallery_playlist(
     playlist_id: str,
     request_body: dict,
@@ -869,7 +953,7 @@ async def update_gallery_playlist(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/v1/gallery/playlists/{playlist_id}", status_code=204)
+@app.delete("/api/v1/media/gallery/playlists/{playlist_id}", status_code=204)
 async def delete_gallery_playlist(
     playlist_id: str,
     service: MediaService = Depends(get_media_service)
@@ -896,7 +980,7 @@ async def delete_gallery_playlist(
 
 
 # Gallery random photos
-@app.get("/api/v1/gallery/photos/random")
+@app.get("/api/v1/media/gallery/photos/random")
 async def get_random_photos(
     user_id: str = Query(...),
     count: int = Query(10, ge=1, le=100),
@@ -907,7 +991,7 @@ async def get_random_photos(
 
 
 # Gallery photo metadata
-@app.post("/api/v1/gallery/photos/metadata")
+@app.post("/api/v1/media/gallery/photos/metadata")
 async def update_gallery_photo_metadata(
     request_body: dict,
     user_id: str = Query(...),
@@ -931,7 +1015,7 @@ async def update_gallery_photo_metadata(
 
 
 # Gallery cache endpoints
-@app.post("/api/v1/gallery/cache/preload")
+@app.post("/api/v1/media/gallery/cache/preload")
 async def preload_gallery_images(request_body: dict):
     """Preload images to cache - accepts JSON body"""
     frame_id = request_body.get("frame_id")
@@ -951,7 +1035,7 @@ async def preload_gallery_images(request_body: dict):
     }
 
 
-@app.get("/api/v1/gallery/cache/{frame_id}/stats")
+@app.get("/api/v1/media/gallery/cache/{frame_id}/stats")
 async def get_gallery_cache_stats(frame_id: str):
     """Get cache statistics"""
     return {
@@ -964,7 +1048,7 @@ async def get_gallery_cache_stats(frame_id: str):
     }
 
 
-@app.post("/api/v1/gallery/cache/{frame_id}/clear")
+@app.post("/api/v1/media/gallery/cache/{frame_id}/clear")
 async def clear_gallery_cache(
     frame_id: str,
     days_old: int = Query(30, ge=1, le=365)
@@ -978,7 +1062,7 @@ async def clear_gallery_cache(
 
 
 # Gallery schedules - proxy to existing schedule endpoints
-@app.post("/api/v1/gallery/schedules", status_code=201)
+@app.post("/api/v1/media/gallery/schedules", status_code=201)
 async def create_gallery_schedule(
     request_body: dict,
     service: MediaService = Depends(get_media_service)
@@ -1026,7 +1110,7 @@ async def create_gallery_schedule(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/gallery/schedules/{frame_id}")
+@app.get("/api/v1/media/gallery/schedules/{frame_id}")
 async def get_gallery_schedules(
     frame_id: str,
     service: MediaService = Depends(get_media_service)
@@ -1040,7 +1124,7 @@ async def get_gallery_schedules(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/gallery/frames/{frame_id}/playlists")
+@app.get("/api/v1/media/gallery/frames/{frame_id}/playlists")
 async def get_gallery_frame_playlists(frame_id: str):
     """Get frame playlists - returns empty for now"""
     return {"frame_id": frame_id, "playlists": [], "total": 0}

@@ -3,7 +3,7 @@
 # JWT Authentication Testing Script
 # Tests JWT token generation, verification, and user info extraction
 
-BASE_URL="http://localhost:8201"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/auth"
 
 # Colors for output
@@ -65,23 +65,6 @@ print_section() {
     echo -e "${BLUE}======================================${NC}"
     echo ""
 }
-
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
 
 # Test 2: Get Auth Service Info
 print_section "Test 2: Get Auth Service Info"

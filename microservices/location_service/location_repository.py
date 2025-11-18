@@ -3,18 +3,21 @@ Location Repository
 Data access layer for location operations with PostGIS support
 """
 
-import logging
-import sys
-import os
-from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime, timezone, timedelta
 import json
+import logging
 import math
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+
+from core.config_manager import ConfigManager
 
 from isa_common.postgres_client import PostgresClient
-from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +34,15 @@ class LocationRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
+            service_name="postgres_grpc_service",
+            default_host="isa-postgres-grpc",
             default_port=50061,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id='location_service')
+        self.db = PostgresClient(host=host, port=port, user_id="location_service")
 
         self.schema = "location"
 
@@ -67,12 +70,21 @@ class LocationRepository:
             """
 
             params = [
-                data['location_id'], data['device_id'], data['user_id'],
-                data['latitude'], data['longitude'], data['accuracy'],
-                data.get('address'), data.get('city'), data.get('state'), data.get('country'),
-                data['location_method'], data['source'],
-                json.dumps(data.get('metadata', {})),
-                data['timestamp'], data['created_at']
+                data["location_id"],
+                data["device_id"],
+                data["user_id"],
+                data["latitude"],
+                data["longitude"],
+                data["accuracy"],
+                data.get("address"),
+                data.get("city"),
+                data.get("state"),
+                data.get("country"),
+                data["location_method"],
+                data["source"],
+                json.dumps(data.get("metadata", {})),
+                data["timestamp"],
+                data["created_at"],
             ]
 
             with self.db:
@@ -80,9 +92,11 @@ class LocationRepository:
                 logger.debug(f"Location insert result: {result}")
 
             if result:
-                return await self.get_location_by_id(data['location_id'])
+                return await self.get_location_by_id(data["location_id"])
 
-            logger.warning(f"Location insert returned no result for location_id: {data['location_id']}")
+            logger.warning(
+                f"Location insert returned no result for location_id: {data['location_id']}"
+            )
             return None
 
         except Exception as e:
@@ -115,8 +129,7 @@ class LocationRepository:
             return None
 
     async def get_device_latest_location(
-        self,
-        device_id: str
+        self, device_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get device's latest location"""
         try:
@@ -150,7 +163,7 @@ class LocationRepository:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Get device location history"""
         try:
@@ -176,7 +189,7 @@ class LocationRepository:
                     location_method, source, metadata,
                     timestamp, created_at
                 FROM {self.schema}.locations
-                WHERE {' AND '.join(conditions)}
+                WHERE {" AND ".join(conditions)}
                 ORDER BY timestamp DESC
                 LIMIT {limit} OFFSET {offset}
             """
@@ -198,12 +211,14 @@ class LocationRepository:
         user_id: str,
         time_window_minutes: int = 30,
         device_types: Optional[List[str]] = None,
-        limit: int = 50
+        limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Find devices near a location"""
         try:
             # Get most recent location for each device within time window
-            time_threshold = datetime.now(timezone.utc) - timedelta(minutes=time_window_minutes)
+            time_threshold = datetime.now(timezone.utc) - timedelta(
+                minutes=time_window_minutes
+            )
 
             query = f"""
                 WITH latest_locations AS (
@@ -258,7 +273,7 @@ class LocationRepository:
         start_time: datetime,
         end_time: datetime,
         device_ids: Optional[List[str]] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """Search locations within a circular area"""
         try:
@@ -267,7 +282,9 @@ class LocationRepository:
             param_idx = 3
 
             if device_ids:
-                placeholders = ','.join([f'${i}' for i in range(param_idx, param_idx + len(device_ids))])
+                placeholders = ",".join(
+                    [f"${i}" for i in range(param_idx, param_idx + len(device_ids))]
+                )
                 conditions.append(f"device_id IN ({placeholders})")
                 params.extend(device_ids)
                 param_idx += len(device_ids)
@@ -286,7 +303,7 @@ class LocationRepository:
                         ST_MakePoint(${param_idx}, ${param_idx + 1})::geography
                     ) as distance
                 FROM {self.schema}.locations
-                WHERE {' AND '.join(conditions)}
+                WHERE {" AND ".join(conditions)}
                     AND ST_DWithin(
                         coordinates,
                         ST_MakePoint(${param_idx}, ${param_idx + 1})::geography,
@@ -342,7 +359,7 @@ class LocationRepository:
                 result = self.db.execute(query, params, schema=self.schema)
 
             if result:
-                return await self.get_geofence_by_id(data['geofence_id'])
+                return await self.get_geofence_by_id(data["geofence_id"])
             return None
 
         except Exception as e:
@@ -380,11 +397,7 @@ class LocationRepository:
             return None
 
     async def list_geofences(
-        self,
-        user_id: str,
-        active_only: bool = False,
-        limit: int = 100,
-        offset: int = 0
+        self, user_id: str, active_only: bool = False, limit: int = 100, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """List geofences for a user"""
         try:
@@ -407,7 +420,7 @@ class LocationRepository:
                     total_triggers, last_triggered,
                     created_at, updated_at, tags, metadata
                 FROM {self.schema}.geofences
-                WHERE {' AND '.join(conditions)}
+                WHERE {" AND ".join(conditions)}
                 ORDER BY created_at DESC
                 LIMIT {limit} OFFSET {offset}
             """
@@ -421,11 +434,7 @@ class LocationRepository:
             logger.error(f"Error listing geofences: {e}")
             return []
 
-    async def update_geofence(
-        self,
-        geofence_id: str,
-        updates: Dict[str, Any]
-    ) -> bool:
+    async def update_geofence(self, geofence_id: str, updates: Dict[str, Any]) -> bool:
         """Update geofence"""
         try:
             set_clauses = []
@@ -453,7 +462,7 @@ class LocationRepository:
 
             query = f"""
                 UPDATE {self.schema}.geofences
-                SET {', '.join(set_clauses)}
+                SET {", ".join(set_clauses)}
                 WHERE geofence_id = ${param_idx}
             """
 
@@ -481,11 +490,7 @@ class LocationRepository:
             return False
 
     async def check_point_in_geofences(
-        self,
-        latitude: float,
-        longitude: float,
-        device_id: str,
-        user_id: str
+        self, latitude: float, longitude: float, device_id: str, user_id: str
     ) -> List[Dict[str, Any]]:
         """Check if a point is inside any active geofences"""
         try:
@@ -538,16 +543,22 @@ class LocationRepository:
             """
 
             params = [
-                data['place_id'], data['user_id'], data['name'], data['category'],
-                data['latitude'], data['longitude'], data.get('address'),
-                data['created_at'], data['updated_at']
+                data["place_id"],
+                data["user_id"],
+                data["name"],
+                data["category"],
+                data["latitude"],
+                data["longitude"],
+                data.get("address"),
+                data["created_at"],
+                data["updated_at"],
             ]
 
             with self.db:
                 result = self.db.execute(query, params, schema=self.schema)
 
             if result:
-                return await self.get_place_by_id(data['place_id'])
+                return await self.get_place_by_id(data["place_id"])
             return None
 
         except Exception as e:
@@ -608,15 +619,17 @@ class LocationRepository:
 
             for key, value in updates.items():
                 if value is not None:
-                    if key in ['latitude', 'longitude']:
+                    if key in ["latitude", "longitude"]:
                         # Handle coordinate updates
-                        if 'latitude' in updates and 'longitude' in updates:
-                            if key == 'latitude':
+                        if "latitude" in updates and "longitude" in updates:
+                            if key == "latitude":
                                 # Only process once when we have both
                                 continue
-                            set_clauses.append(f"coordinates = ST_MakePoint(${param_idx}, ${param_idx + 1})::geography")
-                            params.append(updates['longitude'])
-                            params.append(updates['latitude'])
+                            set_clauses.append(
+                                f"coordinates = ST_MakePoint(${param_idx}, ${param_idx + 1})::geography"
+                            )
+                            params.append(updates["longitude"])
+                            params.append(updates["latitude"])
                             param_idx += 2
                             continue
                     elif isinstance(value, (list, dict)):
@@ -638,7 +651,7 @@ class LocationRepository:
 
             query = f"""
                 UPDATE {self.schema}.places
-                SET {', '.join(set_clauses)}
+                SET {", ".join(set_clauses)}
                 WHERE place_id = ${param_idx}
             """
 
@@ -669,35 +682,42 @@ class LocationRepository:
 
     def _deserialize_location(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """Deserialize location row"""
-        if 'metadata' in row and isinstance(row['metadata'], str):
-            row['metadata'] = json.loads(row['metadata'])
+        if "metadata" in row and isinstance(row["metadata"], str):
+            row["metadata"] = json.loads(row["metadata"])
         return dict(row)
 
     def _deserialize_geofence(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """Deserialize geofence row"""
-        for key in ['target_devices', 'target_groups', 'active_days', 'active_hours',
-                    'notification_channels', 'tags', 'metadata']:
+        for key in [
+            "target_devices",
+            "target_groups",
+            "active_days",
+            "active_hours",
+            "notification_channels",
+            "tags",
+            "metadata",
+        ]:
             if key in row and isinstance(row[key], str):
                 row[key] = json.loads(row[key])
         return dict(row)
 
     def _deserialize_place(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """Deserialize place row"""
-        if 'tags' in row and isinstance(row['tags'], str):
-            row['tags'] = json.loads(row['tags'])
+        if "tags" in row and isinstance(row["tags"], str):
+            row["tags"] = json.loads(row["tags"])
         return dict(row)
 
     def _build_geometry_sql(self, data: Dict[str, Any]) -> str:
         """Build PostGIS geometry SQL based on shape type"""
-        shape_type = data['shape_type']
+        shape_type = data["shape_type"]
 
-        if shape_type == 'circle':
+        if shape_type == "circle":
             # Use ST_Buffer to create a circle
             return "ST_Buffer(ST_MakePoint($7, $8)::geography, $9)"
-        elif shape_type == 'polygon':
+        elif shape_type == "polygon":
             # Build polygon from coordinates
             return "ST_MakePolygon(ST_MakeLine(ARRAY[$10]))::geography"
-        elif shape_type == 'rectangle':
+        elif shape_type == "rectangle":
             # Build rectangle from two corner points
             return "ST_MakeEnvelope($7, $8, $9, $10, 4326)::geography"
         else:
@@ -706,36 +726,36 @@ class LocationRepository:
     def _build_geofence_params(self, data: Dict[str, Any]) -> List[Any]:
         """Build parameter list for geofence creation"""
         params = [
-            data['geofence_id'],
-            data['name'],
-            data.get('description'),
-            data['user_id'],
-            data.get('organization_id'),
-            data['shape_type'],
+            data["geofence_id"],
+            data["name"],
+            data.get("description"),
+            data["user_id"],
+            data.get("organization_id"),
+            data["shape_type"],
             # Geometry parameters added by _build_geometry_sql
-            data.get('active', True),
-            data.get('trigger_on_enter', True),
-            data.get('trigger_on_exit', True),
-            data.get('trigger_on_dwell', False),
-            data.get('dwell_time_seconds'),
-            json.dumps(data.get('target_devices', [])),
-            json.dumps(data.get('target_groups', [])),
-            json.dumps(data.get('active_days')),
-            json.dumps(data.get('active_hours')),
-            json.dumps(data.get('notification_channels', [])),
-            data.get('notification_template'),
+            data.get("active", True),
+            data.get("trigger_on_enter", True),
+            data.get("trigger_on_exit", True),
+            data.get("trigger_on_dwell", False),
+            data.get("dwell_time_seconds"),
+            json.dumps(data.get("target_devices", [])),
+            json.dumps(data.get("target_groups", [])),
+            json.dumps(data.get("active_days")),
+            json.dumps(data.get("active_hours")),
+            json.dumps(data.get("notification_channels", [])),
+            data.get("notification_template"),
             0,  # total_triggers
-            data['created_at'],
-            data['updated_at'],
-            json.dumps(data.get('tags', [])),
-            json.dumps(data.get('metadata', {}))
+            data["created_at"],
+            data["updated_at"],
+            json.dumps(data.get("tags", [])),
+            json.dumps(data.get("metadata", {})),
         ]
 
         # Add geometry-specific parameters
-        if data['shape_type'] == 'circle':
-            params.insert(6, data['center_lon'])
-            params.insert(7, data['center_lat'])
-            params.insert(8, data['radius'])
+        if data["shape_type"] == "circle":
+            params.insert(6, data["center_lon"])
+            params.insert(7, data["center_lat"])
+            params.insert(8, data["radius"])
 
         return params
 
@@ -749,9 +769,10 @@ class LocationRepository:
         delta_lat = math.radians(lat2 - lat1)
         delta_lon = math.radians(lon2 - lon1)
 
-        a = (math.sin(delta_lat / 2) ** 2 +
-             math.cos(lat1_rad) * math.cos(lat2_rad) *
-             math.sin(delta_lon / 2) ** 2)
+        a = (
+            math.sin(delta_lat / 2) ** 2
+            + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
+        )
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
         return R * c

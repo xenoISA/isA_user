@@ -1,5 +1,6 @@
 -- Device Service Test Data
--- Seed test data for development and testing
+-- Standardized test data following test_data_standard.md
+-- Date: 2025-11-11
 
 -- Insert test devices
 INSERT INTO device.devices (

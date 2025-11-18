@@ -4,31 +4,42 @@ Task Service - Main Application
 任务管理微服务主应用，提供待办事项、任务调度、日历管理等功能
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Query, Path, Body, Header
-from contextlib import asynccontextmanager
-from typing import Optional, Dict, Any, List
 import logging
-import sys
 import os
+import sys
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional
+
 import requests
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Path, Query
 
 # Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
-from isa_common.consul_client import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
-from .routes_registry import get_routes_for_consul, SERVICE_METADATA
+
+from isa_common.consul_client import ConsulRegistry
+
 from .models import (
-    TaskCreateRequest, TaskUpdateRequest, TaskExecutionRequest,
-    TaskResponse, TaskExecutionResponse, TaskTemplateResponse,
-    TaskAnalyticsResponse, TaskListResponse,
-    TaskStatus, TaskType, TaskPriority
+    TaskAnalyticsResponse,
+    TaskCreateRequest,
+    TaskExecutionRequest,
+    TaskExecutionResponse,
+    TaskListResponse,
+    TaskPriority,
+    TaskResponse,
+    TaskStatus,
+    TaskTemplateResponse,
+    TaskType,
+    TaskUpdateRequest,
 )
-from .task_service import TaskService
+from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .task_repository import TaskRepository
-from .events import TaskEventHandler
+from .task_service import TaskService
 
 # 初始化配置
 config_manager = ConfigManager("task_service")
@@ -37,6 +48,7 @@ config = config_manager.get_service_config()
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("task_service")
 logger = app_logger  # for backward compatibility
+
 
 # Service instance
 class TaskMicroservice:
@@ -53,8 +65,10 @@ class TaskMicroservice:
     async def shutdown(self):
         logger.info("Task service shutting down")
 
+
 # Global instance
 microservice = TaskMicroservice()
+
 
 # Lifespan management
 @asynccontextmanager
@@ -66,24 +80,39 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("task_service")
         logger.info("✅ Event bus initialized successfully")
     except Exception as e:
-        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
+        )
         event_bus = None
 
     # Startup - pass config_manager for service discovery
     await microservice.initialize(event_bus=event_bus, config_manager=config_manager)
 
-    # Set up event subscriptions
+    # =============================================================================
+    # Subscribe to events using standardized event handlers
+    # =============================================================================
     if event_bus:
         try:
-            task_repo = TaskRepository(config=config_manager)
-            event_handler = TaskEventHandler(task_repo)
+            from .events import get_event_handlers
 
-            # Subscribe to user.deleted events
-            await event_bus.subscribe(
-                subject="events.user.deleted",
-                callback=lambda msg: event_handler.handle_event(msg)
+            task_repo = TaskRepository(config=config_manager)
+
+            # Get all event handlers from events/handlers.py
+            event_handlers = get_event_handlers(task_repository=task_repo)
+
+            # Subscribe to each event pattern
+            for pattern, handler in event_handlers.items():
+                await event_bus.subscribe_to_events(
+                    pattern=pattern,
+                    handler=handler,
+                    durable=f"task-{pattern.split('.')[-1]}-consumer",
+                )
+                logger.info(f"✅ Subscribed to {pattern}")
+
+            logger.info(
+                f"✅ Task service subscribed to {len(event_handlers)} event types"
             )
-            logger.info("✅ Subscribed to user.deleted events")
+
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 
@@ -95,28 +124,32 @@ async def lifespan(app: FastAPI):
 
             # Merge service metadata
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities'][:5]),  # Limit capabilities
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(
+                    SERVICE_METADATA["capabilities"][:5]
+                ),  # Limit capabilities
+                **route_meta,
             }
 
             microservice.consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=config.service_port,
                 consul_host=config.consul_host,
                 consul_port=config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type="http",
             )
             microservice.consul_registry.register()
-            logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+            logger.info(
+                f"Service registered with Consul: {route_meta.get('route_count', 0)} routes"
+            )
         except Exception as e:
             logger.warning(f"Failed to register with Consul: {e}")
             microservice.consul_registry = None
 
     logger.info("Service discovery via Consul agent sidecar")
-    
+
     yield
 
     # Shutdown
@@ -138,12 +171,13 @@ async def lifespan(app: FastAPI):
 
     await microservice.shutdown()
 
+
 # Create FastAPI application
 app = FastAPI(
     title="Task Service",
     description="用户任务管理微服务 - 待办事项、任务调度、日历管理",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -153,6 +187,7 @@ app = FastAPI(
 # Health Check Endpoints
 # ======================
 
+
 @app.get("/health")
 async def health_check():
     """基础健康检查"""
@@ -160,8 +195,9 @@ async def health_check():
         "status": "healthy",
         "service": "task_service",
         "port": config.service_port,
-        "version": "1.0.0"
+        "version": "1.0.0",
     }
+
 
 @app.get("/health/detailed")
 async def detailed_health_check():
@@ -173,7 +209,7 @@ async def detailed_health_check():
         db_healthy = True
     except:
         pass
-    
+
     return {
         "status": "healthy" if db_healthy else "degraded",
         "service": "task_service",
@@ -181,17 +217,19 @@ async def detailed_health_check():
         "version": "1.0.0",
         "components": {
             "database": "healthy" if db_healthy else "unhealthy",
-            "service": "healthy"
-        }
+            "service": "healthy",
+        },
     }
+
 
 # ======================
 # Dependencies
 # ======================
 
+
 async def get_user_context(
     authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None, alias="x-api-key")
+    x_api_key: Optional[str] = Header(None, alias="x-api-key"),
 ) -> Dict[str, Any]:
     """获取用户上下文信息"""
     logger.debug(f"Auth headers: authorization={authorization}, x_api_key={x_api_key}")
@@ -202,28 +240,32 @@ async def get_user_context(
     # Use config_manager service discovery for auth service
     # Priority: Environment variables → Consul → localhost fallback
     auth_host, auth_port = config_manager.discover_service(
-        service_name='auth_service',
-        default_host='localhost',
+        service_name="auth_service",
+        default_host="localhost",
         default_port=8201,
-        env_host_key='AUTH_SERVICE_HOST',
-        env_port_key='AUTH_SERVICE_PORT'
+        env_host_key="AUTH_SERVICE_HOST",
+        env_port_key="AUTH_SERVICE_PORT",
     )
     auth_service_url = f"http://{auth_host}:{auth_port}"
-    
+
     try:
         if authorization:
             # Verify JWT token
-            token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-            
+            token = (
+                authorization.replace("Bearer ", "")
+                if authorization.startswith("Bearer ")
+                else authorization
+            )
+
             response = requests.post(
                 f"{auth_service_url}/api/v1/auth/verify-token",
-                json={"token": token, "token_type": "jwt"}
+                json={"token": token, "token_type": "jwt"},
             )
-            
+
             if response.status_code != 200:
                 logger.warning(f"Token verification failed: {response.status_code}")
                 raise HTTPException(status_code=401, detail="Invalid token")
-            
+
             result = response.json()
             if not result.get("valid", False):
                 logger.warning("Token verification returned invalid")
@@ -234,57 +276,58 @@ async def get_user_context(
                 "user_id": result.get("user_id", "unknown"),
                 "email": result.get("email"),
                 "subscription_level": result.get("subscription_level", "free"),
-                "organization_id": result.get("organization_id")
+                "organization_id": result.get("organization_id"),
             }
-            
+
         elif x_api_key:
             # Verify API key
             response = requests.post(
                 f"{auth_service_url}/api/v1/auth/verify-api-key",
-                json={"api_key": x_api_key}
+                json={"api_key": x_api_key},
             )
-            
+
             if response.status_code != 200:
                 logger.warning(f"API key verification failed: {response.status_code}")
                 raise HTTPException(status_code=401, detail="Invalid API key")
-            
+
             result = response.json()
             if not result.get("valid", False):
                 logger.warning("API key verification returned invalid")
                 raise HTTPException(status_code=401, detail="Invalid API key")
-            
+
             user_info = result.get("user_info", {})
             return {
                 "user_id": user_info.get("user_id", "unknown"),
                 "email": user_info.get("email"),
                 "subscription_level": user_info.get("subscription_level", "free"),
-                "organization_id": user_info.get("organization_id")
+                "organization_id": user_info.get("organization_id"),
             }
-            
+
     except requests.RequestException as e:
         logger.error(f"Auth service request failed: {e}")
-        raise HTTPException(status_code=503, detail="Authentication service unavailable")
+        raise HTTPException(
+            status_code=503, detail="Authentication service unavailable"
+        )
     except Exception as e:
         logger.error(f"Authentication error: {e}")
         raise HTTPException(status_code=500, detail="Authentication error")
-    
+
     raise HTTPException(status_code=401, detail="Authentication required")
+
 
 # ======================
 # Task CRUD Endpoints
 # ======================
 
+
 @app.post("/api/v1/tasks", response_model=TaskResponse)
 async def create_task(
     request: TaskCreateRequest = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """创建新任务"""
     try:
-        task = await microservice.service.create_task(
-            user_context["user_id"],
-            request
-        )
+        task = await microservice.service.create_task(user_context["user_id"], request)
         if task:
             return task
         raise HTTPException(status_code=400, detail="Failed to create task")
@@ -292,17 +335,15 @@ async def create_task(
         logger.error(f"Error creating task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/v1/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_id: str = Path(..., description="Task ID"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取任务详情"""
     try:
-        task = await microservice.service.get_task(
-            task_id,
-            user_context["user_id"]
-        )
+        task = await microservice.service.get_task(task_id, user_context["user_id"])
         if task:
             return task
         raise HTTPException(status_code=404, detail="Task not found")
@@ -310,18 +351,17 @@ async def get_task(
         logger.error(f"Error getting task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.put("/api/v1/tasks/{task_id}", response_model=TaskResponse)
 async def update_task(
     task_id: str = Path(..., description="Task ID"),
     request: TaskUpdateRequest = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """更新任务"""
     try:
         task = await microservice.service.update_task(
-            task_id,
-            user_context["user_id"],
-            request
+            task_id, user_context["user_id"], request
         )
         if task:
             return task
@@ -330,16 +370,16 @@ async def update_task(
         logger.error(f"Error updating task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.delete("/api/v1/tasks/{task_id}")
 async def delete_task(
     task_id: str = Path(..., description="Task ID"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """删除任务"""
     try:
         success = await microservice.service.delete_task(
-            task_id,
-            user_context["user_id"]
+            task_id, user_context["user_id"]
         )
         if success:
             return {"message": "Task deleted successfully"}
@@ -348,6 +388,7 @@ async def delete_task(
         logger.error(f"Error deleting task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/v1/tasks", response_model=TaskListResponse)
 async def list_tasks(
     status: Optional[TaskStatus] = Query(None, description="Filter by status"),
@@ -355,7 +396,7 @@ async def list_tasks(
     priority: Optional[TaskPriority] = Query(None, description="Filter by priority"),
     limit: int = Query(100, ge=1, le=500, description="Max items to return"),
     offset: int = Query(0, ge=0, description="Number of items to skip"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取用户任务列表"""
     try:
@@ -364,30 +405,30 @@ async def list_tasks(
             status=status.value if status else None,
             task_type=task_type.value if task_type else None,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
-        
+
         return task_list_response
     except Exception as e:
         logger.error(f"Error listing tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ======================
 # Task Execution Endpoints
 # ======================
+
 
 @app.post("/api/v1/tasks/{task_id}/execute", response_model=TaskExecutionResponse)
 async def execute_task(
     task_id: str = Path(..., description="Task ID"),
     request: TaskExecutionRequest = Body(default=TaskExecutionRequest()),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """手动执行任务"""
     try:
         execution = await microservice.service.execute_task(
-            task_id,
-            user_context["user_id"],
-            request
+            task_id, user_context["user_id"], request
         )
         if execution:
             return execution
@@ -396,19 +437,24 @@ async def execute_task(
         logger.error(f"Error executing task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/tasks/{task_id}/executions", response_model=List[TaskExecutionResponse])
+
+@app.get(
+    "/api/v1/tasks/{task_id}/executions", response_model=List[TaskExecutionResponse]
+)
 async def get_task_executions(
     task_id: str = Path(..., description="Task ID"),
     limit: int = Query(50, ge=1, le=200, description="Max executions to return"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取任务执行历史"""
     try:
         # 验证用户对任务的访问权限
-        task = await microservice.repository.get_task_by_id(task_id, user_context["user_id"])
+        task = await microservice.repository.get_task_by_id(
+            task_id, user_context["user_id"]
+        )
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-        
+
         executions = await microservice.repository.get_task_executions(task_id, limit)
         return executions
     except HTTPException:
@@ -417,14 +463,14 @@ async def get_task_executions(
         logger.error(f"Error getting task executions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ======================
 # Task Templates Endpoints
 # ======================
 
+
 @app.get("/api/v1/templates", response_model=List[TaskTemplateResponse])
-async def get_task_templates(
-    user_context: Dict[str, Any] = Depends(get_user_context)
-):
+async def get_task_templates(user_context: Dict[str, Any] = Depends(get_user_context)):
     """获取可用的任务模板"""
     try:
         templates = await microservice.service.get_task_templates(
@@ -435,23 +481,26 @@ async def get_task_templates(
         logger.error(f"Error getting task templates: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/v1/tasks/from-template", response_model=TaskResponse)
 async def create_task_from_template(
     template_id: str = Body(..., embed=True),
     customization: Dict[str, Any] = Body(default={}),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """从模板创建任务"""
     try:
         subscription_level = user_context.get("subscription_level", "free")
-        logger.info(f"Creating task from template {template_id} for user with subscription: {subscription_level}")
-
-        # 获取模板
-        templates = await microservice.repository.get_task_templates(
-            subscription_level
+        logger.info(
+            f"Creating task from template {template_id} for user with subscription: {subscription_level}"
         )
 
-        logger.info(f"Found {len(templates)} templates for subscription level {subscription_level}")
+        # 获取模板
+        templates = await microservice.repository.get_task_templates(subscription_level)
+
+        logger.info(
+            f"Found {len(templates)} templates for subscription level {subscription_level}"
+        )
         logger.debug(f"Template IDs: {[t.template_id for t in templates]}")
 
         template = None
@@ -461,14 +510,21 @@ async def create_task_from_template(
                 break
 
         if not template:
-            logger.warning(f"Template {template_id} not found among {len(templates)} available templates")
-            raise HTTPException(status_code=404, detail=f"Template {template_id} not found for subscription level {subscription_level}")
-        
+            logger.warning(
+                f"Template {template_id} not found among {len(templates)} available templates"
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"Template {template_id} not found for subscription level {subscription_level}",
+            )
+
         # 创建任务
         task_data = {
             "name": customization.get("name", template.name),
             "description": customization.get("description", template.description),
-            "task_type": template.task_type.value if hasattr(template.task_type, 'value') else template.task_type,
+            "task_type": template.task_type.value
+            if hasattr(template.task_type, "value")
+            else template.task_type,
             "config": {**template.default_config, **customization.get("config", {})},
             "credits_per_run": float(template.credits_per_run),
             "priority": customization.get("priority", "medium"),
@@ -476,41 +532,44 @@ async def create_task_from_template(
             "metadata": customization.get("metadata", {}),
             "schedule": customization.get("schedule"),
             "due_date": customization.get("due_date"),
-            "reminder_time": customization.get("reminder_time")
+            "reminder_time": customization.get("reminder_time"),
         }
-        
+
         # Create TaskCreateRequest object
         from .models import TaskCreateRequest
+
         task_request = TaskCreateRequest(**task_data)
-        
+
         task = await microservice.service.create_task(
-            user_context["user_id"],
-            task_request
+            user_context["user_id"], task_request
         )
-        
+
         if task:
             return task
-        raise HTTPException(status_code=400, detail="Failed to create task from template")
+        raise HTTPException(
+            status_code=400, detail="Failed to create task from template"
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error creating task from template: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ======================
 # Analytics Endpoints
 # ======================
 
+
 @app.get("/api/v1/analytics", response_model=TaskAnalyticsResponse)
 async def get_task_analytics(
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取任务分析数据"""
     try:
         analytics = await microservice.service.get_task_analytics(
-            user_context["user_id"],
-            days
+            user_context["user_id"], days
         )
         if analytics:
             return analytics
@@ -522,20 +581,22 @@ async def get_task_analytics(
         logger.error(f"Error getting task analytics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ======================
 # Scheduler Endpoints
 # ======================
 
+
 @app.get("/api/v1/scheduler/pending", response_model=List[TaskResponse])
 async def get_pending_tasks(
     limit: int = Query(50, ge=1, le=200, description="Max tasks to return"),
-    x_internal_key: Optional[str] = None
+    x_internal_key: Optional[str] = None,
 ):
     """获取待执行的任务（内部调度器使用）"""
     # 验证内部密钥
     if x_internal_key != "internal_scheduler_key":  # 实际应该从环境变量读取
         raise HTTPException(status_code=403, detail="Forbidden")
-    
+
     try:
         tasks = await microservice.service.get_pending_tasks(limit)
         return tasks
@@ -543,29 +604,28 @@ async def get_pending_tasks(
         logger.error(f"Error getting pending tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/v1/scheduler/execute/{task_id}")
 async def scheduler_execute_task(
     task_id: str = Path(..., description="Task ID"),
-    x_internal_key: Optional[str] = None
+    x_internal_key: Optional[str] = None,
 ):
     """调度器执行任务（内部使用）"""
     # 验证内部密钥
     if x_internal_key != "internal_scheduler_key":
         raise HTTPException(status_code=403, detail="Forbidden")
-    
+
     try:
         # 获取任务信息
         task = await microservice.repository.get_task_by_id(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-        
+
         # 执行任务
         execution = await microservice.service.execute_task(
-            task_id,
-            task.user_id,
-            {"trigger_type": "scheduler"}
+            task_id, task.user_id, {"trigger_type": "scheduler"}
         )
-        
+
         if execution:
             return {"message": "Task executed", "execution_id": execution.execution_id}
         raise HTTPException(status_code=400, detail="Failed to execute task")
@@ -575,9 +635,11 @@ async def scheduler_execute_task(
         logger.error(f"Error in scheduler execute: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ======================
 # Service Statistics
 # ======================
+
 
 @app.get("/api/v1/service/stats")
 async def get_service_stats():
@@ -592,18 +654,20 @@ async def get_service_stats():
             "execution": 2,
             "templates": 2,
             "analytics": 1,
-            "scheduler": 2
+            "scheduler": 2,
         },
         "features": [
             "todo_management",
-            "task_scheduling", 
+            "task_scheduling",
             "calendar_events",
             "reminders",
             "analytics",
-            "templates"
-        ]
+            "templates",
+        ],
     }
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host=config.service_host, port=config.service_port)

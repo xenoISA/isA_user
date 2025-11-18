@@ -20,7 +20,11 @@ from .models import (
     ComplianceCheckType, ComplianceStatus, RiskLevel, ContentType,
     ModerationCategory, PIIType, CompliancePolicy
 )
-from core.nats_client import Event, EventType, ServiceSource
+from .events.publishers import (
+    publish_compliance_check_performed,
+    publish_compliance_violation_detected,
+    publish_compliance_warning_issued
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,10 +102,52 @@ class ComplianceService:
             
             # 保存到数据库
             await self.repository.create_check(compliance_check)
-            
-            # 发送事件通知（如果需要）
-            if overall_status in [ComplianceStatus.FAIL, ComplianceStatus.FLAGGED]:
-                await self._publish_compliance_event(compliance_check)
+
+            # 发送事件通知
+            # 1. Always publish check performed event
+            await publish_compliance_check_performed(
+                self.event_bus,
+                check_id=check_id,
+                user_id=request.user_id,
+                check_type=compliance_check.check_type.value,
+                content_type=compliance_check.content_type.value,
+                status=overall_status.value,
+                risk_level=risk_level.value,
+                violations_count=len(violations),
+                warnings_count=len(warnings),
+                action_taken=action_taken,
+                organization_id=request.organization_id,
+                processing_time_ms=(time.time() - start_time) * 1000,
+                metadata=request.metadata
+            )
+
+            # 2. If violations detected, publish violation event
+            if overall_status == ComplianceStatus.FAIL and violations:
+                await publish_compliance_violation_detected(
+                    self.event_bus,
+                    check_id=check_id,
+                    user_id=request.user_id,
+                    violations=violations,
+                    risk_level=risk_level.value,
+                    action_taken=action_taken,
+                    organization_id=request.organization_id,
+                    requires_review=(risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]),
+                    blocked_content=(action_taken == "blocked"),
+                    metadata=request.metadata
+                )
+
+            # 3. If warnings issued, publish warning event
+            if warnings:
+                await publish_compliance_warning_issued(
+                    self.event_bus,
+                    check_id=check_id,
+                    user_id=request.user_id,
+                    warnings=warnings,
+                    risk_level=risk_level.value,
+                    organization_id=request.organization_id,
+                    allowed_with_warning=(action_taken not in ["blocked", "blocked"]),
+                    metadata=request.metadata
+                )
             
             # 构建响应
             processing_time = (time.time() - start_time) * 1000
@@ -676,63 +722,6 @@ class ComplianceService:
         except Exception as e:
             logger.error(f"Error getting policy: {e}")
             return None
-    
-    async def _publish_compliance_event(self, check: ComplianceCheck):
-        """发布合规事件到NATS"""
-        if not self.event_bus:
-            return
-
-        try:
-            # Publish compliance check performed event
-            event = Event(
-                event_type=EventType.COMPLIANCE_CHECK_PERFORMED,
-                source=ServiceSource.COMPLIANCE_SERVICE,
-                data={
-                    "check_id": check.check_id,
-                    "user_id": check.user_id,
-                    "check_type": check.check_type.value,
-                    "status": check.status.value,
-                    "risk_level": check.risk_level.value,
-                    "violations_count": len(check.violations),
-                    "warnings_count": len(check.warnings),
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            )
-            await self.event_bus.publish_event(event)
-
-            # If violations detected, publish violation event
-            if check.status == ComplianceStatus.FAIL and check.violations:
-                violation_event = Event(
-                    event_type=EventType.COMPLIANCE_VIOLATION_DETECTED,
-                    source=ServiceSource.COMPLIANCE_SERVICE,
-                    data={
-                        "check_id": check.check_id,
-                        "user_id": check.user_id,
-                        "violations": check.violations,
-                        "risk_level": check.risk_level.value,
-                        "action_taken": check.action_taken,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
-                )
-                await self.event_bus.publish_event(violation_event)
-
-            # If warnings issued, publish warning event
-            if check.warnings:
-                warning_event = Event(
-                    event_type=EventType.COMPLIANCE_WARNING_ISSUED,
-                    source=ServiceSource.COMPLIANCE_SERVICE,
-                    data={
-                        "check_id": check.check_id,
-                        "user_id": check.user_id,
-                        "warnings": check.warnings,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
-                )
-                await self.event_bus.publish_event(warning_event)
-
-            logger.info(f"Published compliance events for check {check.check_id}")
-        except Exception as e:
-            logger.error(f"Error publishing compliance event: {e}")
     
     def _hash_content(self, content: str) -> str:
         """生成内容哈希"""

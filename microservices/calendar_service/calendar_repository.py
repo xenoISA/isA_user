@@ -4,18 +4,22 @@ Calendar Repository
 日历事件数据访问层 - PostgreSQL + gRPC
 """
 
-import uuid
 import logging
 import os
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta, timezone
-
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+
+from core.config_manager import ConfigManager
 
 from isa_common.postgres_client import PostgresClient
-from core.config_manager import ConfigManager
-from .models import CalendarEvent, EventResponse, RecurrenceType, EventCategory
+
+from .models import CalendarEvent, EventCategory, EventResponse, RecurrenceType
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +35,11 @@ class CalendarRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
+            service_name="postgres_grpc_service",
+            default_host="isa-postgres-grpc",
             default_port=50061,
-            env_host_key='POSTGRES_GRPC_HOST',
-            env_port_key='POSTGRES_GRPC_PORT'
+            env_host_key="POSTGRES_GRPC_HOST",
+            env_port_key="POSTGRES_GRPC_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -54,17 +58,19 @@ class CalendarRepository:
             # Handle datetime serialization
             start_time = event_data["start_time"]
             if isinstance(start_time, str):
-                start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
 
             end_time = event_data["end_time"]
             if isinstance(end_time, str):
-                end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
 
             recurrence_end_date = event_data.get("recurrence_end_date")
             if recurrence_end_date and isinstance(recurrence_end_date, str):
-                recurrence_end_date = datetime.fromisoformat(recurrence_end_date.replace('Z', '+00:00'))
+                recurrence_end_date = datetime.fromisoformat(
+                    recurrence_end_date.replace("Z", "+00:00")
+                )
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.table_name} (
                     event_id, user_id, organization_id, title, description, location,
                     start_time, end_time, all_day, timezone, category, color,
@@ -73,7 +79,7 @@ class CalendarRepository:
                     created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
                 RETURNING *
-            '''
+            """
 
             params = [
                 event_id,
@@ -98,7 +104,7 @@ class CalendarRepository:
                 event_data.get("shared_with", []),
                 event_data.get("metadata", {}),
                 now,
-                now
+                now,
             ]
 
             with self.db:
@@ -112,7 +118,9 @@ class CalendarRepository:
             logger.error(f"Failed to create event: {e}", exc_info=True)
             return None
 
-    async def get_event_by_id(self, event_id: str, user_id: str = None) -> Optional[EventResponse]:
+    async def get_event_by_id(
+        self, event_id: str, user_id: str = None
+    ) -> Optional[EventResponse]:
         """获取事件详情"""
         try:
             conditions = ["event_id = $1"]
@@ -125,7 +133,9 @@ class CalendarRepository:
                 params.append(user_id)
 
             where_clause = " AND ".join(conditions)
-            query = f'SELECT * FROM {self.schema}.{self.table_name} WHERE {where_clause}'
+            query = (
+                f"SELECT * FROM {self.schema}.{self.table_name} WHERE {where_clause}"
+            )
 
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
@@ -138,9 +148,15 @@ class CalendarRepository:
             logger.error(f"Failed to get event {event_id}: {e}")
             return None
 
-    async def get_events_by_user(self, user_id: str, start_date: datetime = None,
-                                 end_date: datetime = None, category: str = None,
-                                 limit: int = 100, offset: int = 0) -> List[EventResponse]:
+    async def get_events_by_user(
+        self,
+        user_id: str,
+        start_date: datetime = None,
+        end_date: datetime = None,
+        category: str = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[EventResponse]:
         """查询用户事件"""
         try:
             conditions = ["user_id = $1"]
@@ -164,12 +180,12 @@ class CalendarRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.table_name}
                 WHERE {where_clause}
                 ORDER BY start_time ASC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
 
             params.extend([limit, offset])
 
@@ -184,13 +200,17 @@ class CalendarRepository:
             logger.error(f"Failed to get events for user {user_id}: {e}")
             return []
 
-    async def get_upcoming_events(self, user_id: str, days: int = 7) -> List[EventResponse]:
+    async def get_upcoming_events(
+        self, user_id: str, days: int = 7
+    ) -> List[EventResponse]:
         """获取即将到来的事件"""
         try:
             now = datetime.now(timezone.utc)
             end_date = now + timedelta(days=days)
 
-            return await self.get_events_by_user(user_id, start_date=now, end_date=end_date)
+            return await self.get_events_by_user(
+                user_id, start_date=now, end_date=end_date
+            )
 
         except Exception as e:
             logger.error(f"Failed to get upcoming events: {e}")
@@ -203,13 +223,17 @@ class CalendarRepository:
             start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
             end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-            return await self.get_events_by_user(user_id, start_date=start_of_day, end_date=end_of_day)
+            return await self.get_events_by_user(
+                user_id, start_date=start_of_day, end_date=end_of_day
+            )
 
         except Exception as e:
             logger.error(f"Failed to get today's events: {e}")
             return []
 
-    async def update_event(self, event_id: str, updates: Dict[str, Any]) -> Optional[EventResponse]:
+    async def update_event(
+        self, event_id: str, updates: Dict[str, Any]
+    ) -> Optional[EventResponse]:
         """更新事件"""
         try:
             # Build SET clause dynamically
@@ -220,7 +244,9 @@ class CalendarRepository:
             # Handle datetime serialization
             for key in ["start_time", "end_time", "recurrence_end_date"]:
                 if key in updates and isinstance(updates[key], str):
-                    updates[key] = datetime.fromisoformat(updates[key].replace('Z', '+00:00'))
+                    updates[key] = datetime.fromisoformat(
+                        updates[key].replace("Z", "+00:00")
+                    )
 
             for key, value in updates.items():
                 if key == "updated_at":
@@ -238,12 +264,12 @@ class CalendarRepository:
             param_count += 1
             params.append(event_id)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.table_name}
                 SET {", ".join(set_clauses)}
                 WHERE event_id = ${param_count}
                 RETURNING *
-            '''
+            """
 
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
@@ -269,7 +295,7 @@ class CalendarRepository:
                 params.append(user_id)
 
             where_clause = " AND ".join(conditions)
-            query = f'DELETE FROM {self.schema}.{self.table_name} WHERE {where_clause}'
+            query = f"DELETE FROM {self.schema}.{self.table_name} WHERE {where_clause}"
 
             with self.db:
                 count = self.db.execute(query, params, schema=self.schema)
@@ -280,14 +306,19 @@ class CalendarRepository:
             logger.error(f"Failed to delete event {event_id}: {e}")
             return False
 
-    async def update_sync_status(self, user_id: str, provider: str,
-                                 status: str, synced_count: int = 0,
-                                 error_message: str = None) -> bool:
+    async def update_sync_status(
+        self,
+        user_id: str,
+        provider: str,
+        status: str,
+        synced_count: int = 0,
+        error_message: str = None,
+    ) -> bool:
         """更新同步状态"""
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.sync_table} (
                     user_id, provider, last_sync_time, synced_events_count,
                     status, error_message, created_at, updated_at
@@ -298,9 +329,18 @@ class CalendarRepository:
                     status = EXCLUDED.status,
                     error_message = EXCLUDED.error_message,
                     updated_at = EXCLUDED.updated_at
-            '''
+            """
 
-            params = [user_id, provider, now, synced_count, status, error_message, now, now]
+            params = [
+                user_id,
+                provider,
+                now,
+                synced_count,
+                status,
+                error_message,
+                now,
+                now,
+            ]
 
             with self.db:
                 count = self.db.execute(query, params, schema=self.schema)
@@ -311,7 +351,9 @@ class CalendarRepository:
             logger.error(f"Failed to update sync status: {e}")
             return False
 
-    async def get_sync_status(self, user_id: str, provider: str = None) -> Optional[Dict[str, Any]]:
+    async def get_sync_status(
+        self, user_id: str, provider: str = None
+    ) -> Optional[Dict[str, Any]]:
         """获取同步状态"""
         try:
             conditions = ["user_id = $1"]
@@ -324,7 +366,9 @@ class CalendarRepository:
                 params.append(provider)
 
             where_clause = " AND ".join(conditions)
-            query = f'SELECT * FROM {self.schema}.{self.sync_table} WHERE {where_clause}'
+            query = (
+                f"SELECT * FROM {self.schema}.{self.sync_table} WHERE {where_clause}"
+            )
 
             with self.db:
                 results = self.db.query(query, params, schema=self.schema)
@@ -345,19 +389,26 @@ class CalendarRepository:
         """删除用户所有日历数据（GDPR Article 17: Right to Erasure）"""
         try:
             # Delete calendar events
-            events_query = f'DELETE FROM {self.schema}.{self.table_name} WHERE user_id = $1'
+            events_query = (
+                f"DELETE FROM {self.schema}.{self.table_name} WHERE user_id = $1"
+            )
 
             with self.db:
-                events_count = self.db.execute(events_query, [user_id], schema=self.schema)
+                events_count = self.db.execute(
+                    events_query, [user_id], schema=self.schema
+                )
 
             # Delete sync status
-            sync_query = f'DELETE FROM {self.schema}.{self.sync_table} WHERE user_id = $1'
+            sync_query = (
+                f"DELETE FROM {self.schema}.{self.sync_table} WHERE user_id = $1"
+            )
 
             with self.db:
                 sync_count = self.db.execute(sync_query, [user_id], schema=self.schema)
 
-            total_deleted = (events_count if events_count is not None else 0) + \
-                          (sync_count if sync_count is not None else 0)
+            total_deleted = (events_count if events_count is not None else 0) + (
+                sync_count if sync_count is not None else 0
+            )
 
             logger.info(
                 f"Deleted user {user_id} calendar data: "

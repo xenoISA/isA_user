@@ -78,6 +78,8 @@ from .models import (
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .storage_repository import StorageRepository
 from .storage_service import StorageService
+from .events import handle_file_indexing_request, StorageEventPublisher
+from .clients import StorageOrganizationClient
 
 # Initialize configuration
 config_manager = ConfigManager("storage_service")
@@ -92,128 +94,18 @@ storage_service = None
 intelligence_service = None
 event_bus = None
 consul_registry = None
+event_publisher = None
+org_client = None
 
 
 # ==================== Event Handlers ====================
-
-
-async def handle_file_indexing_request(event: Event):
-    """
-    Event handler for FILE_INDEXING_REQUESTED events
-
-    Processes file indexing asynchronously when a file is uploaded
-    """
-    try:
-        logger.info(f"Received file indexing request: {event.id}")
-
-        # Extract event data
-        data = event.data
-        file_id = data.get("file_id")
-        user_id = data.get("user_id")
-        organization_id = data.get("organization_id")
-        file_name = data.get("file_name")
-        file_type = data.get("file_type")
-        file_size = data.get("file_size")
-        metadata = data.get("metadata", {})
-        tags = data.get("tags", [])
-        bucket_name = data.get("bucket_name")
-        object_name = data.get("object_name")
-
-        if not all([file_id, user_id, file_name, bucket_name, object_name]):
-            logger.error(f"Missing required fields in indexing request: {data}")
-            return
-
-        # Prepare file content/URL based on file type
-        try:
-            # For images and PDFs, pass the presigned URL instead of downloading
-            if file_type.startswith("image/") or file_type == "application/pdf":
-                # Generate presigned URL for MCP to download
-                file_content = storage_service.minio_client.get_presigned_url(
-                    bucket_name=bucket_name,
-                    object_key=object_name,
-                    expiry_seconds=3600,  # 1 hour
-                )
-                if not file_content:
-                    raise Exception("Failed to generate presigned URL")
-                logger.info(
-                    f"Generated presigned URL for {file_type}: {file_content[:100]}..."
-                )
-            else:
-                # For text files, download and decode content
-                file_bytes = storage_service.minio_client.get_object(
-                    bucket_name, object_name
-                )
-                # isa_common MinIOClient returns bytes directly, not a response object
-                if file_bytes is None:
-                    raise Exception("File not found in MinIO")
-                file_content = file_bytes.decode("utf-8", errors="ignore")
-        except Exception as e:
-            logger.error(f"Failed to download file {file_id} from MinIO: {e}")
-            # Publish indexing failed event
-            if event_bus:
-                failed_event = Event(
-                    event_type=EventType.FILE_INDEXING_FAILED,
-                    source=ServiceSource.STORAGE_SERVICE,
-                    data={
-                        "file_id": file_id,
-                        "user_id": user_id,
-                        "error": f"Failed to download file: {str(e)}",
-                    },
-                )
-                await event_bus.publish_event(failed_event)
-            return
-
-        # Index the file via intelligence service
-        try:
-            logger.info(f"Starting async indexing for file {file_id}")
-            await intelligence_service.index_file(
-                file_id=file_id,
-                user_id=user_id,
-                organization_id=organization_id,
-                file_name=file_name,
-                file_content=file_content,
-                file_type=file_type,
-                file_size=file_size,
-                metadata=metadata,
-                tags=tags,
-            )
-
-            logger.info(f"Successfully indexed file {file_id}")
-
-            # Publish success event
-            if event_bus:
-                success_event = Event(
-                    event_type=EventType.FILE_INDEXED,
-                    source=ServiceSource.STORAGE_SERVICE,
-                    data={
-                        "file_id": file_id,
-                        "user_id": user_id,
-                        "file_name": file_name,
-                        "file_size": file_size,
-                        "indexed_at": datetime.utcnow().isoformat(),
-                    },
-                )
-                await event_bus.publish_event(success_event)
-
-        except Exception as e:
-            logger.error(f"Failed to index file {file_id}: {e}")
-            # Publish indexing failed event
-            if event_bus:
-                failed_event = Event(
-                    event_type=EventType.FILE_INDEXING_FAILED,
-                    source=ServiceSource.STORAGE_SERVICE,
-                    data={"file_id": file_id, "user_id": user_id, "error": str(e)},
-                )
-                await event_bus.publish_event(failed_event)
-
-    except Exception as e:
-        logger.error(f"Error handling file indexing request: {e}")
+# Event handlers moved to events/handlers.py
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global storage_service, intelligence_service, event_bus, consul_registry
+    global storage_service, intelligence_service, event_bus, consul_registry, event_publisher, org_client
 
     logger.info("Starting Storage Service with Intelligence capabilities...")
 
@@ -257,18 +149,33 @@ async def lifespan(app: FastAPI):
         )
         event_bus = None
 
+    # 初始化 event publisher
+    if event_bus:
+        event_publisher = StorageEventPublisher(event_bus)
+        logger.info("Event publisher initialized")
+
+    # 初始化 service clients
+    org_client = StorageOrganizationClient()
+    logger.info("Service clients initialized")
+
     # 初始化服务 (使用 ConfigManager 的 service_config)
     storage_service = StorageService(
-        service_config, event_bus=event_bus, config_manager=config_manager
+        service_config, event_bus=event_bus, config_manager=config_manager, event_publisher=event_publisher
     )
     intelligence_service = IntelligenceService(config=config_manager)
 
-    # Subscribe to file indexing events
+    # Subscribe to file indexing events (使用 events/handlers.py 中的 handler)
     if event_bus:
         try:
+            # 创建一个 wrapper handler 来传递依赖
+            async def indexing_handler(event: Event):
+                await handle_file_indexing_request(
+                    event, intelligence_service, storage_service, event_bus
+                )
+
             await event_bus.subscribe_to_events(
                 pattern="storage_service.file.indexing.requested",
-                handler=handle_file_indexing_request,
+                handler=indexing_handler,
                 durable="storage-indexing-consumer",
             )
             logger.info("Subscribed to file indexing events")

@@ -5,38 +5,60 @@ Account management business logic layer for the microservice.
 Handles validation, business rules, and error handling.
 """
 
-from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, timezone
 import logging
 import re
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
-from .account_repository import AccountRepository
-from .models import (
-    AccountEnsureRequest, AccountUpdateRequest, AccountPreferencesRequest,
-    AccountStatusChangeRequest, AccountProfileResponse, AccountSummaryResponse,
-    AccountSearchResponse, AccountStatsResponse, AccountListParams,
-    AccountSearchParams, User, SubscriptionStatus
-)
-from .account_repository import UserNotFoundException, DuplicateEntryException
-from core.nats_client import Event, EventType, ServiceSource
 from core.config_manager import ConfigManager
+
+from .account_repository import (
+    AccountRepository,
+    DuplicateEntryException,
+    UserNotFoundException,
+)
+
 # Database connection now handled by repositories directly
+# Import event publishers from events module
+from .events.publishers import (
+    publish_user_created,
+    publish_user_deleted,
+    publish_user_profile_updated,
+    publish_user_status_changed,
+)
+from .models import (
+    AccountEnsureRequest,
+    AccountListParams,
+    AccountPreferencesRequest,
+    AccountProfileResponse,
+    AccountSearchParams,
+    AccountSearchResponse,
+    AccountStatsResponse,
+    AccountStatusChangeRequest,
+    AccountSummaryResponse,
+    AccountUpdateRequest,
+    SubscriptionStatus,
+    User,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class AccountServiceError(Exception):
     """Base exception for account service errors"""
+
     pass
 
 
 class AccountValidationError(AccountServiceError):
     """Account validation error"""
+
     pass
 
 
 class AccountNotFoundError(AccountServiceError):
     """Account not found error"""
+
     pass
 
 
@@ -51,19 +73,21 @@ class AccountService:
     def __init__(self, event_bus=None, config: Optional[ConfigManager] = None):
         self.account_repo = AccountRepository(config=config)
         self.event_bus = event_bus
-        
+
     # Account Lifecycle Operations
-    
-    async def ensure_account(self, request: AccountEnsureRequest) -> Tuple[AccountProfileResponse, bool]:
+
+    async def ensure_account(
+        self, request: AccountEnsureRequest
+    ) -> Tuple[AccountProfileResponse, bool]:
         """
         Ensure account exists, create if needed
-        
+
         Args:
             request: Account ensure request
-            
+
         Returns:
             Tuple of (account_response, was_created)
-            
+
         Raises:
             AccountValidationError: If request data is invalid
             AccountServiceError: If operation fails
@@ -77,54 +101,53 @@ class AccountService:
                 user_id=request.user_id,
                 email=request.email,
                 name=request.name,
-                subscription_plan=request.subscription_plan or SubscriptionStatus.FREE
+                subscription_plan=request.subscription_plan or SubscriptionStatus.FREE,
             )
-            
+
             # Convert to response
             account_response = self._user_to_profile_response(user)
 
             # Check if it was newly created (simplified logic)
-            was_created = (user.created_at and
-                          (datetime.now(timezone.utc) - user.created_at).total_seconds() < 60)
+            was_created = (
+                user.created_at
+                and (datetime.now(timezone.utc) - user.created_at).total_seconds() < 60
+            )
 
             # Publish USER_CREATED event if account was newly created
             if was_created and self.event_bus:
                 try:
-                    event = Event(
-                        event_type=EventType.USER_CREATED,
-                        source=ServiceSource.ACCOUNT_SERVICE,
-                        data={
-                            "user_id": request.user_id,
-                            "email": request.email,
-                            "name": request.name,
-                            "subscription_plan": request.subscription_plan or SubscriptionStatus.FREE.value,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_user_created(
+                        event_bus=self.event_bus,
+                        user_id=request.user_id,
+                        email=request.email,
+                        name=request.name,
+                        subscription_plan=request.subscription_plan
+                        or SubscriptionStatus.FREE.value,
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published user.created event for user {request.user_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish user.created event: {e}")
 
             logger.info(f"Account ensured: {request.user_id}, created: {was_created}")
             return account_response, was_created
-            
+
         except DuplicateEntryException as e:
-            raise AccountValidationError(f"Account with email already exists: {request.email}")
+            raise AccountValidationError(
+                f"Account with email already exists: {request.email}"
+            )
         except Exception as e:
             logger.error(f"Failed to ensure account: {e}")
             raise AccountServiceError(f"Failed to ensure account: {str(e)}")
-    
+
     async def get_account_profile(self, user_id: str) -> AccountProfileResponse:
         """
         Get detailed account profile
-        
+
         Args:
             user_id: User identifier
-            
+
         Returns:
             Account profile response
-            
+
         Raises:
             AccountNotFoundError: If account not found
         """
@@ -132,26 +155,28 @@ class AccountService:
             user = await self.account_repo.get_account_by_id(user_id)
             if not user:
                 raise AccountNotFoundError(f"Account not found: {user_id}")
-                
+
             return self._user_to_profile_response(user)
-            
+
         except AccountNotFoundError:
             raise
         except Exception as e:
             logger.error(f"Failed to get account profile {user_id}: {e}")
             raise AccountServiceError(f"Failed to get account profile: {str(e)}")
-    
-    async def update_account_profile(self, user_id: str, request: AccountUpdateRequest) -> AccountProfileResponse:
+
+    async def update_account_profile(
+        self, user_id: str, request: AccountUpdateRequest
+    ) -> AccountProfileResponse:
         """
         Update account profile
-        
+
         Args:
             user_id: User identifier
             request: Update request
-            
+
         Returns:
             Updated account profile
-            
+
         Raises:
             AccountNotFoundError: If account not found
             AccountValidationError: If update data is invalid
@@ -159,47 +184,43 @@ class AccountService:
         try:
             # Validate request
             self._validate_account_update_request(request)
-            
+
             # Prepare update data
             update_data = {}
             if request.name is not None:
-                update_data['name'] = request.name
+                update_data["name"] = request.name
             if request.email is not None:
-                update_data['email'] = request.email
+                update_data["email"] = request.email
             if request.preferences is not None:
-                update_data['preferences'] = request.preferences
-                
+                update_data["preferences"] = request.preferences
+
             if not update_data:
                 # No changes, return current profile
                 return await self.get_account_profile(user_id)
-            
+
             # Update account
-            updated_user = await self.account_repo.update_account_profile(user_id, update_data)
+            updated_user = await self.account_repo.update_account_profile(
+                user_id, update_data
+            )
             if not updated_user:
                 raise AccountNotFoundError(f"Account not found: {user_id}")
 
             # Publish USER_PROFILE_UPDATED event
             if self.event_bus:
                 try:
-                    event = Event(
-                        event_type=EventType.USER_PROFILE_UPDATED,
-                        source=ServiceSource.ACCOUNT_SERVICE,
-                        data={
-                            "user_id": user_id,
-                            "updated_fields": list(update_data.keys()),
-                            "email": updated_user.email,
-                            "name": updated_user.name,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_user_profile_updated(
+                        event_bus=self.event_bus,
+                        user_id=user_id,
+                        email=updated_user.email,
+                        name=updated_user.name,
+                        updated_fields=list(update_data.keys()),
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published user.profile_updated event for user {user_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish user.profile_updated event: {e}")
 
             logger.info(f"Account profile updated: {user_id}")
             return self._user_to_profile_response(updated_user)
-            
+
         except AccountNotFoundError:
             raise
         except AccountValidationError:
@@ -209,15 +230,17 @@ class AccountService:
         except Exception as e:
             logger.error(f"Failed to update account profile {user_id}: {e}")
             raise AccountServiceError(f"Failed to update account profile: {str(e)}")
-    
-    async def update_account_preferences(self, user_id: str, request: AccountPreferencesRequest) -> bool:
+
+    async def update_account_preferences(
+        self, user_id: str, request: AccountPreferencesRequest
+    ) -> bool:
         """
         Update account preferences
-        
+
         Args:
             user_id: User identifier
             request: Preferences update request
-            
+
         Returns:
             True if successful
         """
@@ -225,57 +248,85 @@ class AccountService:
             # Validate and prepare preferences
             preferences = {}
             if request.timezone is not None:
-                preferences['timezone'] = request.timezone
+                preferences["timezone"] = request.timezone
             if request.language is not None:
-                preferences['language'] = request.language
+                preferences["language"] = request.language
             if request.notification_email is not None:
-                preferences['notification_email'] = request.notification_email
+                preferences["notification_email"] = request.notification_email
             if request.notification_push is not None:
-                preferences['notification_push'] = request.notification_push
+                preferences["notification_push"] = request.notification_push
             if request.theme is not None:
-                preferences['theme'] = request.theme
-                
+                preferences["theme"] = request.theme
+
             if not preferences:
                 return True  # No changes
-                
-            success = await self.account_repo.update_account_preferences(user_id, preferences)
+
+            success = await self.account_repo.update_account_preferences(
+                user_id, preferences
+            )
             if success:
                 logger.info(f"Account preferences updated: {user_id}")
             return success
-            
+
         except Exception as e:
             logger.error(f"Failed to update account preferences {user_id}: {e}")
             raise AccountServiceError(f"Failed to update account preferences: {str(e)}")
-    
+
     # Account Status Management
-    
-    async def change_account_status(self, user_id: str, request: AccountStatusChangeRequest) -> bool:
+
+    async def change_account_status(
+        self, user_id: str, request: AccountStatusChangeRequest
+    ) -> bool:
         """
         Change account status (admin operation)
-        
+
         Args:
             user_id: User identifier
             request: Status change request
-            
+
         Returns:
             True if successful
         """
         try:
+            # Get user info before status change for event
+            user = None
+            if self.event_bus:
+                try:
+                    user = await self.account_repo.get_account_by_id(user_id)
+                except Exception:
+                    pass
+
             if request.is_active:
                 success = await self.account_repo.activate_account(user_id)
                 action = "activated"
             else:
                 success = await self.account_repo.deactivate_account(user_id)
                 action = "deactivated"
-                
+
             if success:
+                # Publish USER_STATUS_CHANGED event
+                if self.event_bus:
+                    try:
+                        await publish_user_status_changed(
+                            event_bus=self.event_bus,
+                            user_id=user_id,
+                            is_active=request.is_active,
+                            email=user.email if user else None,
+                            reason=request.reason,
+                            changed_by="admin",
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to publish user.status_changed event: {e}"
+                        )
+
                 logger.info(f"Account {action}: {user_id}, reason: {request.reason}")
             return success
-            
+
         except Exception as e:
             logger.error(f"Failed to change account status {user_id}: {e}")
             raise AccountServiceError(f"Failed to change account status: {str(e)}")
-    
+
     async def delete_account(self, user_id: str, reason: Optional[str] = None) -> bool:
         """
         Delete account (soft delete)
@@ -301,18 +352,12 @@ class AccountService:
                 # Publish USER_DELETED event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.USER_DELETED,
-                            source=ServiceSource.ACCOUNT_SERVICE,
-                            data={
-                                "user_id": user_id,
-                                "email": user.email if user else None,
-                                "reason": reason,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_user_deleted(
+                            event_bus=self.event_bus,
+                            user_id=user_id,
+                            email=user.email if user else None,
+                            reason=reason,
                         )
-                        await self.event_bus.publish_event(event)
-                        logger.info(f"Published user.deleted event for user {user_id}")
                     except Exception as e:
                         logger.error(f"Failed to publish user.deleted event: {e}")
 
@@ -322,16 +367,16 @@ class AccountService:
         except Exception as e:
             logger.error(f"Failed to delete account {user_id}: {e}")
             raise AccountServiceError(f"Failed to delete account: {str(e)}")
-    
+
     # Account Query Operations
-    
+
     async def list_accounts(self, params: AccountListParams) -> AccountSearchResponse:
         """
         List accounts with filtering and pagination
-        
+
         Args:
             params: List parameters
-            
+
         Returns:
             Account search response with pagination
         """
@@ -341,56 +386,59 @@ class AccountService:
                 offset=(params.page - 1) * params.page_size,
                 is_active=params.is_active,
                 subscription_status=params.subscription_status,
-                search=params.search
+                search=params.search,
             )
-            
+
             # Convert to summary responses
             accounts = [self._user_to_summary_response(user) for user in users]
-            
+
             # Get total count using repository stats
             stats = await self.account_repo.get_account_stats()
             total_count = stats.get("total_accounts", 0)
             has_next = len(accounts) == params.page_size
-            
+
             return AccountSearchResponse(
                 accounts=accounts,
                 total_count=total_count,
                 page=params.page,
                 page_size=params.page_size,
-                has_next=has_next
+                has_next=has_next,
             )
-            
+
         except Exception as e:
             logger.error(f"Failed to list accounts: {e}")
             raise AccountServiceError(f"Failed to list accounts: {str(e)}")
-    
-    async def search_accounts(self, params: AccountSearchParams) -> List[AccountSummaryResponse]:
+
+    async def search_accounts(
+        self, params: AccountSearchParams
+    ) -> List[AccountSummaryResponse]:
         """
         Search accounts by query
-        
+
         Args:
             params: Search parameters
-            
+
         Returns:
             List of matching accounts
         """
         try:
             users = await self.account_repo.search_accounts(
-                query=params.query,
-                limit=params.limit
+                query=params.query, limit=params.limit
             )
-            
+
             # Filter inactive accounts if requested
             if not params.include_inactive:
                 users = [user for user in users if user.is_active]
-                
+
             return [self._user_to_summary_response(user) for user in users]
-            
+
         except Exception as e:
             logger.error(f"Failed to search accounts: {e}")
             raise AccountServiceError(f"Failed to search accounts: {str(e)}")
-    
-    async def get_account_by_email(self, email: str) -> Optional[AccountProfileResponse]:
+
+    async def get_account_by_email(
+        self, email: str
+    ) -> Optional[AccountProfileResponse]:
         """Get account by email address"""
         try:
             user = await self.account_repo.get_account_by_email(email)
@@ -398,9 +446,9 @@ class AccountService:
         except Exception as e:
             logger.error(f"Failed to get account by email {email}: {e}")
             return None
-    
+
     # Service Operations
-    
+
     async def get_service_stats(self) -> AccountStatsResponse:
         """Get account service statistics"""
         try:
@@ -409,7 +457,7 @@ class AccountService:
         except Exception as e:
             logger.error(f"Failed to get service stats: {e}")
             raise AccountServiceError(f"Failed to get service stats: {str(e)}")
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Health check for the service"""
         try:
@@ -418,19 +466,19 @@ class AccountService:
             return {
                 "status": "healthy",
                 "database": "connected",
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.utcnow(),
             }
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return {
-                "status": "unhealthy", 
+                "status": "unhealthy",
                 "database": "disconnected",
                 "error": str(e),
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.utcnow(),
             }
-    
+
     # Private Helper Methods
-    
+
     def _validate_account_ensure_request(self, request: AccountEnsureRequest) -> None:
         """Validate account ensure request"""
         if not request.user_id or not request.user_id.strip():
@@ -441,16 +489,18 @@ class AccountService:
             raise AccountValidationError("name is required")
 
         # Validate email format (basic check)
-        if not re.match(r'^[^@]+@[^@]+\.[^@]+$', request.email):
+        if not re.match(r"^[^@]+@[^@]+\.[^@]+$", request.email):
             raise AccountValidationError("Invalid email format")
-    
+
     def _validate_account_update_request(self, request: AccountUpdateRequest) -> None:
         """Validate account update request"""
         if request.name is not None and not request.name.strip():
             raise AccountValidationError("name cannot be empty")
-        if request.email is not None and not re.match(r'^[^@]+@[^@]+\.[^@]+$', request.email):
+        if request.email is not None and not re.match(
+            r"^[^@]+@[^@]+\.[^@]+$", request.email
+        ):
             raise AccountValidationError("Invalid email format")
-    
+
     def _user_to_profile_response(self, user: User) -> AccountProfileResponse:
         """Convert User model to AccountProfileResponse"""
         return AccountProfileResponse(
@@ -459,11 +509,11 @@ class AccountService:
             name=user.name,
             subscription_status=user.subscription_status,
             is_active=user.is_active,
-            preferences=getattr(user, 'preferences', {}),
+            preferences=getattr(user, "preferences", {}),
             created_at=user.created_at,
-            updated_at=user.updated_at
+            updated_at=user.updated_at,
         )
-    
+
     def _user_to_summary_response(self, user: User) -> AccountSummaryResponse:
         """Convert User model to AccountSummaryResponse"""
         return AccountSummaryResponse(
@@ -472,5 +522,5 @@ class AccountService:
             name=user.name,
             subscription_status=user.subscription_status,
             is_active=user.is_active,
-            created_at=user.created_at
+            created_at=user.created_at,
         )

@@ -5,21 +5,37 @@ Billing Service Business Logic
 """
 
 import logging
-import httpx
-from typing import Optional, List, Dict, Any, Tuple
+import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
-import uuid
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
+from core.nats_client import Event, ServiceSource
+from core.nats_client import EventType as NATSEventType
 
 from .billing_repository import BillingRepository
 from .models import (
-    BillingRecord, BillingEvent, UsageAggregation, BillingQuota,
-    RecordUsageRequest, BillingCalculationRequest, BillingCalculationResponse,
-    ProcessBillingRequest, ProcessBillingResponse, QuotaCheckRequest, QuotaCheckResponse,
-    UsageStatsRequest, UsageStatsResponse, BillingStats,
-    BillingStatus, BillingMethod, EventType, ServiceType, Currency
+    BillingCalculationRequest,
+    BillingCalculationResponse,
+    BillingEvent,
+    BillingMethod,
+    BillingQuota,
+    BillingRecord,
+    BillingStats,
+    BillingStatus,
+    Currency,
+    EventType,
+    ProcessBillingRequest,
+    ProcessBillingResponse,
+    QuotaCheckRequest,
+    QuotaCheckResponse,
+    RecordUsageRequest,
+    ServiceType,
+    UsageAggregation,
+    UsageStatsRequest,
+    UsageStatsResponse,
 )
-from core.nats_client import Event, EventType as NATSEventType, ServiceSource
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +53,10 @@ class BillingService:
     def _init_service_clients(self):
         """Initialize service clients for inter-service communication"""
         try:
-            import sys
-            import os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+            from .clients import ProductClient, WalletClient
 
-            from microservices.product_service.client import ProductServiceClient
-            from microservices.wallet_service.client import WalletServiceClient
-
-            self.product_client = ProductServiceClient()
-            self.wallet_client = WalletServiceClient()
+            self.wallet_client = WalletClient()
+            self.product_client = ProductClient()
             logger.info("✅ Service clients initialized for billing service")
 
         except Exception as e:
@@ -67,14 +78,20 @@ class BillingService:
     # 使用量记录和计费
     # ====================
 
-    async def record_usage_and_bill(self, request: RecordUsageRequest) -> ProcessBillingResponse:
+    async def record_usage_and_bill(
+        self, request: RecordUsageRequest
+    ) -> ProcessBillingResponse:
         """记录使用量并立即计费（核心功能）"""
         try:
             # 1. 首先记录使用量到 Product Service (non-blocking, optional)
             usage_record_id = await self._record_usage_to_product_service(request)
             if not usage_record_id:
-                logger.warning("Product service unavailable, continuing with billing without usage record")
-                usage_record_id = f"local_{request.user_id}_{int(datetime.utcnow().timestamp())}"
+                logger.warning(
+                    "Product service unavailable, continuing with billing without usage record"
+                )
+                usage_record_id = (
+                    f"local_{request.user_id}_{int(datetime.utcnow().timestamp())}"
+                )
 
             # Publish usage.recorded event
             if self.event_bus:
@@ -89,8 +106,8 @@ class BillingService:
                             "usage_amount": float(request.usage_amount),
                             "service_type": request.service_type,
                             "usage_record_id": usage_record_id,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
@@ -102,25 +119,27 @@ class BillingService:
                 organization_id=request.organization_id,
                 subscription_id=request.subscription_id,
                 product_id=request.product_id,
-                usage_amount=request.usage_amount
+                usage_amount=request.usage_amount,
             )
             calculation = await self.calculate_billing_cost(calc_request)
-            
+
             if not calculation.success:
                 return ProcessBillingResponse(
                     success=False,
-                    message=f"Failed to calculate billing cost: {calculation.message}"
+                    message=f"Failed to calculate billing cost: {calculation.message}",
                 )
 
             # 3. 检查配额
-            quota_check = await self.check_quota(QuotaCheckRequest(
-                user_id=request.user_id,
-                organization_id=request.organization_id,
-                subscription_id=request.subscription_id,
-                service_type=request.service_type,
-                product_id=request.product_id,
-                requested_amount=request.usage_amount
-            ))
+            quota_check = await self.check_quota(
+                QuotaCheckRequest(
+                    user_id=request.user_id,
+                    organization_id=request.organization_id,
+                    subscription_id=request.subscription_id,
+                    service_type=request.service_type,
+                    product_id=request.product_id,
+                    requested_amount=request.usage_amount,
+                )
+            )
 
             if not quota_check.allowed:
                 # 记录配额超出事件
@@ -130,12 +149,18 @@ class BillingService:
                     user_id=request.user_id,
                     organization_id=request.organization_id,
                     subscription_id=request.subscription_id,
-                    service_type=ServiceType(request.service_type) if request.service_type else None,
+                    service_type=ServiceType(request.service_type)
+                    if request.service_type
+                    else None,
                     event_data={
                         "requested_amount": float(request.usage_amount),
-                        "quota_limit": float(quota_check.quota_limit) if quota_check.quota_limit else None,
-                        "quota_used": float(quota_check.quota_used) if quota_check.quota_used else None
-                    }
+                        "quota_limit": float(quota_check.quota_limit)
+                        if quota_check.quota_limit
+                        else None,
+                        "quota_used": float(quota_check.quota_used)
+                        if quota_check.quota_used
+                        else None,
+                    },
                 )
 
                 # Publish quota.exceeded event to NATS
@@ -150,29 +175,36 @@ class BillingService:
                                 "subscription_id": request.subscription_id,
                                 "product_id": request.product_id,
                                 "requested_amount": float(request.usage_amount),
-                                "quota_limit": float(quota_check.quota_limit) if quota_check.quota_limit else None,
-                                "quota_used": float(quota_check.quota_used) if quota_check.quota_used else None,
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
+                                "quota_limit": float(quota_check.quota_limit)
+                                if quota_check.quota_limit
+                                else None,
+                                "quota_used": float(quota_check.quota_used)
+                                if quota_check.quota_used
+                                else None,
+                                "timestamp": datetime.utcnow().isoformat(),
+                            },
                         )
                         await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish quota.exceeded event: {e}")
 
                 return ProcessBillingResponse(
-                    success=False,
-                    message=f"Quota exceeded: {quota_check.message}"
+                    success=False, message=f"Quota exceeded: {quota_check.message}"
                 )
 
             # 4. 如果是免费层、订阅包含或0成本，直接标记为完成
-            if calculation.is_free_tier or calculation.is_included_in_subscription or calculation.total_cost == 0:
+            if (
+                calculation.is_free_tier
+                or calculation.is_included_in_subscription
+                or calculation.total_cost == 0
+            ):
                 billing_record = await self._create_billing_record(
                     usage_record_id=usage_record_id,
                     calculation=calculation,
                     billing_method=BillingMethod.SUBSCRIPTION_INCLUDED,
-                    status=BillingStatus.COMPLETED
+                    status=BillingStatus.COMPLETED,
                 )
-                
+
                 await self._create_billing_event(
                     EventType.BILLING_PROCESSED,
                     "billing_service",
@@ -181,8 +213,10 @@ class BillingService:
                     subscription_id=request.subscription_id,
                     billing_record_id=billing_record.billing_id,
                     amount=calculation.total_cost,
-                    service_type=ServiceType(request.service_type) if request.service_type else None,
-                    event_data={"billing_method": "subscription_included"}
+                    service_type=ServiceType(request.service_type)
+                    if request.service_type
+                    else None,
+                    event_data={"billing_method": "subscription_included"},
                 )
 
                 return ProcessBillingResponse(
@@ -190,29 +224,32 @@ class BillingService:
                     message="Usage billed successfully (included in subscription)",
                     billing_record_id=billing_record.billing_id,
                     amount_charged=calculation.total_cost,
-                    billing_method_used=BillingMethod.SUBSCRIPTION_INCLUDED
+                    billing_method_used=BillingMethod.SUBSCRIPTION_INCLUDED,
                 )
 
             # 5. 需要实际扣费，处理计费
             process_request = ProcessBillingRequest(
                 usage_record_id=usage_record_id,
-                billing_method=calculation.suggested_billing_method
+                billing_method=calculation.suggested_billing_method,
             )
-            
+
             return await self.process_billing(process_request, calculation)
 
         except Exception as e:
             logger.error(f"Error in record_usage_and_bill: {e}")
             return ProcessBillingResponse(
-                success=False,
-                message=f"Internal error: {str(e)}"
+                success=False, message=f"Internal error: {str(e)}"
             )
 
-    async def calculate_billing_cost(self, request: BillingCalculationRequest) -> BillingCalculationResponse:
+    async def calculate_billing_cost(
+        self, request: BillingCalculationRequest
+    ) -> BillingCalculationResponse:
         """计算计费费用"""
         try:
             # 调用 Product Service 获取定价信息
-            pricing_info = await self._get_product_pricing(request.product_id, request.user_id, request.subscription_id)
+            pricing_info = await self._get_product_pricing(
+                request.product_id, request.user_id, request.subscription_id
+            )
             if not pricing_info:
                 return BillingCalculationResponse(
                     success=False,
@@ -223,7 +260,7 @@ class BillingService:
                     total_cost=Decimal("0"),
                     currency=Currency.CREDIT,
                     suggested_billing_method=BillingMethod.WALLET_DEDUCTION,
-                    available_billing_methods=[]
+                    available_billing_methods=[],
                 )
 
             # Parse nested pricing structure from product service
@@ -232,17 +269,23 @@ class BillingService:
             effective_pricing = pricing_info.get("effective_pricing", {})
 
             # Try to get unit price from various locations
-            unit_price = Decimal(str(
-                pricing_info.get("unit_price") or
-                effective_pricing.get("base_unit_price") or
-                pricing_model.get("base_unit_price") or
-                0
-            ))
+            unit_price = Decimal(
+                str(
+                    pricing_info.get("unit_price")
+                    or effective_pricing.get("base_unit_price")
+                    or pricing_model.get("base_unit_price")
+                    or 0
+                )
+            )
 
             total_cost = request.usage_amount * unit_price
 
             # Get currency from pricing_model
-            currency_str = pricing_model.get("currency") or pricing_info.get("currency") or "CREDIT"
+            currency_str = (
+                pricing_model.get("currency")
+                or pricing_info.get("currency")
+                or "CREDIT"
+            )
             currency = Currency(currency_str)
 
             # 检查免费层
@@ -260,7 +303,9 @@ class BillingService:
             # 检查订阅包含
             is_included_in_subscription = False
             if request.subscription_id:
-                subscription_info = await self._get_subscription_info(request.subscription_id)
+                subscription_info = await self._get_subscription_info(
+                    request.subscription_id
+                )
                 if subscription_info and self._is_usage_included_in_subscription(
                     request.product_id, request.usage_amount, subscription_info
                 ):
@@ -268,11 +313,17 @@ class BillingService:
                     total_cost = Decimal("0")
 
             # 获取用户余额信息
-            wallet_balance, credit_balance = await self._get_user_balances(request.user_id)
+            wallet_balance, credit_balance = await self._get_user_balances(
+                request.user_id
+            )
 
             # 确定建议的计费方式
             suggested_method = self._determine_billing_method(
-                total_cost, wallet_balance, credit_balance, is_free_tier, is_included_in_subscription
+                total_cost,
+                wallet_balance,
+                credit_balance,
+                is_free_tier,
+                is_included_in_subscription,
             )
 
             # 可用的计费方式
@@ -302,8 +353,8 @@ class BillingService:
                             "is_free_tier": is_free_tier,
                             "is_included_in_subscription": is_included_in_subscription,
                             "suggested_billing_method": suggested_method.value,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
@@ -323,7 +374,7 @@ class BillingService:
                 suggested_billing_method=suggested_method,
                 available_billing_methods=available_methods,
                 wallet_balance=wallet_balance,
-                credit_balance=credit_balance
+                credit_balance=credit_balance,
             )
 
         except Exception as e:
@@ -337,13 +388,13 @@ class BillingService:
                 total_cost=Decimal("0"),
                 currency=Currency.CREDIT,
                 suggested_billing_method=BillingMethod.WALLET_DEDUCTION,
-                available_billing_methods=[]
+                available_billing_methods=[],
             )
 
     async def process_billing(
-        self, 
-        request: ProcessBillingRequest, 
-        calculation: Optional[BillingCalculationResponse] = None
+        self,
+        request: ProcessBillingRequest,
+        calculation: Optional[BillingCalculationResponse] = None,
     ) -> ProcessBillingResponse:
         """处理计费（实际扣费）"""
         try:
@@ -352,8 +403,7 @@ class BillingService:
                 # 这里需要从 Product Service 获取使用记录信息来计算费用
                 # 简化处理，返回错误
                 return ProcessBillingResponse(
-                    success=False,
-                    message="Calculation required for billing processing"
+                    success=False, message="Calculation required for billing processing"
                 )
 
             # 创建计费记录
@@ -361,25 +411,25 @@ class BillingService:
                 usage_record_id=request.usage_record_id,
                 calculation=calculation,
                 billing_method=request.billing_method,
-                status=BillingStatus.PROCESSING
+                status=BillingStatus.PROCESSING,
             )
 
             # 根据计费方式处理扣费
             if request.billing_method == BillingMethod.WALLET_DEDUCTION:
                 success, transaction_id, error = await self._process_wallet_deduction(
-                    calculation.user_id if hasattr(calculation, 'user_id') else None,
+                    calculation.user_id if hasattr(calculation, "user_id") else None,
                     calculation.total_cost,
-                    billing_record.billing_id
+                    billing_record.billing_id,
                 )
-                
+
                 if success:
                     # 更新计费记录状态
                     updated_record = await self.repository.update_billing_record_status(
                         billing_record.billing_id,
                         BillingStatus.COMPLETED,
-                        wallet_transaction_id=transaction_id
+                        wallet_transaction_id=transaction_id,
                     )
-                    
+
                     await self._create_billing_event(
                         EventType.BILLING_PROCESSED,
                         "billing_service",
@@ -388,7 +438,10 @@ class BillingService:
                         billing_record_id=billing_record.billing_id,
                         amount=calculation.total_cost,
                         service_type=billing_record.service_type,
-                        event_data={"billing_method": "wallet_deduction", "transaction_id": transaction_id}
+                        event_data={
+                            "billing_method": "wallet_deduction",
+                            "transaction_id": transaction_id,
+                        },
                     )
 
                     # Publish billing.processed event to NATS
@@ -399,18 +452,24 @@ class BillingService:
                                 source=ServiceSource.BILLING_SERVICE,
                                 data={
                                     "billing_record_id": billing_record.billing_id,
-                                    "user_id": calculation.user_id if hasattr(calculation, 'user_id') else None,
-                                    "organization_id": calculation.organization_id if hasattr(calculation, 'organization_id') else None,
+                                    "user_id": calculation.user_id
+                                    if hasattr(calculation, "user_id")
+                                    else None,
+                                    "organization_id": calculation.organization_id
+                                    if hasattr(calculation, "organization_id")
+                                    else None,
                                     "amount_charged": float(calculation.total_cost),
                                     "currency": calculation.currency.value,
                                     "billing_method": "wallet_deduction",
                                     "transaction_id": transaction_id,
-                                    "timestamp": datetime.utcnow().isoformat()
-                                }
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                },
                             )
                             await self.event_bus.publish_event(event)
                         except Exception as e:
-                            logger.error(f"Failed to publish billing.processed event: {e}")
+                            logger.error(
+                                f"Failed to publish billing.processed event: {e}"
+                            )
 
                     return ProcessBillingResponse(
                         success=True,
@@ -418,16 +477,16 @@ class BillingService:
                         billing_record_id=billing_record.billing_id,
                         amount_charged=calculation.total_cost,
                         billing_method_used=BillingMethod.WALLET_DEDUCTION,
-                        wallet_transaction_id=transaction_id
+                        wallet_transaction_id=transaction_id,
                     )
                 else:
                     # 扣费失败
                     await self.repository.update_billing_record_status(
                         billing_record.billing_id,
                         BillingStatus.FAILED,
-                        failure_reason=error
+                        failure_reason=error,
                     )
-                    
+
                     await self._create_billing_event(
                         EventType.BILLING_FAILED,
                         "billing_service",
@@ -435,13 +494,16 @@ class BillingService:
                         organization_id=billing_record.organization_id,
                         billing_record_id=billing_record.billing_id,
                         service_type=billing_record.service_type,
-                        event_data={"error": error, "billing_method": "wallet_deduction"}
+                        event_data={
+                            "error": error,
+                            "billing_method": "wallet_deduction",
+                        },
                     )
 
                     return ProcessBillingResponse(
                         success=False,
                         message=f"Wallet deduction failed: {error}",
-                        billing_record_id=billing_record.billing_id
+                        billing_record_id=billing_record.billing_id,
                     )
 
             elif request.billing_method == BillingMethod.PAYMENT_CHARGE:
@@ -450,27 +512,26 @@ class BillingService:
                 await self.repository.update_billing_record_status(
                     billing_record.billing_id,
                     BillingStatus.PENDING,
-                    failure_reason="Payment processing not implemented"
+                    failure_reason="Payment processing not implemented",
                 )
-                
+
                 return ProcessBillingResponse(
                     success=False,
                     message="Payment charge processing not implemented",
-                    billing_record_id=billing_record.billing_id
+                    billing_record_id=billing_record.billing_id,
                 )
 
             else:
                 return ProcessBillingResponse(
                     success=False,
                     message=f"Unsupported billing method: {request.billing_method}",
-                    billing_record_id=billing_record.billing_id
+                    billing_record_id=billing_record.billing_id,
                 )
 
         except Exception as e:
             logger.error(f"Error processing billing: {e}")
             return ProcessBillingResponse(
-                success=False,
-                message=f"Error processing billing: {str(e)}"
+                success=False, message=f"Error processing billing: {str(e)}"
             )
 
     # ====================
@@ -486,15 +547,12 @@ class BillingService:
                 organization_id=request.organization_id,
                 subscription_id=request.subscription_id,
                 service_type=request.service_type,
-                product_id=request.product_id
+                product_id=request.product_id,
             )
 
             if not quota:
                 # 没有配额限制，允许使用
-                return QuotaCheckResponse(
-                    allowed=True,
-                    message="No quota restrictions"
-                )
+                return QuotaCheckResponse(allowed=True, message="No quota restrictions")
 
             # 检查是否超出配额
             remaining = quota.quota_limit - quota.quota_used
@@ -506,7 +564,7 @@ class BillingService:
                     quota_used=quota.quota_used,
                     quota_remaining=remaining,
                     quota_period=quota.quota_period,
-                    next_reset_date=quota.reset_date
+                    next_reset_date=quota.reset_date,
                 )
             else:
                 return QuotaCheckResponse(
@@ -520,15 +578,14 @@ class BillingService:
                     suggested_actions=[
                         "Upgrade subscription plan",
                         "Wait for quota reset",
-                        "Contact support for quota increase"
-                    ]
+                        "Contact support for quota increase",
+                    ],
                 )
 
         except Exception as e:
             logger.error(f"Error checking quota: {e}")
             return QuotaCheckResponse(
-                allowed=False,
-                message=f"Error checking quota: {str(e)}"
+                allowed=False, message=f"Error checking quota: {str(e)}"
             )
 
     # ====================
@@ -536,14 +593,12 @@ class BillingService:
     # ====================
 
     async def get_billing_statistics(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> BillingStats:
         """获取计费统计"""
         try:
             stats_data = await self.repository.get_billing_stats(start_date, end_date)
-            
+
             return BillingStats(
                 total_billing_records=stats_data["total_billing_records"],
                 pending_billing_records=stats_data["pending_billing_records"],
@@ -551,15 +606,17 @@ class BillingService:
                 failed_billing_records=stats_data["failed_billing_records"],
                 total_revenue=Decimal(str(stats_data["total_revenue"])),
                 revenue_by_service={
-                    ServiceType(k): Decimal(str(v)) for k, v in stats_data["revenue_by_service"].items()
+                    ServiceType(k): Decimal(str(v))
+                    for k, v in stats_data["revenue_by_service"].items()
                 },
                 revenue_by_method={
-                    BillingMethod(k): Decimal(str(v)) for k, v in stats_data["revenue_by_method"].items()
+                    BillingMethod(k): Decimal(str(v))
+                    for k, v in stats_data["revenue_by_method"].items()
                 },
                 active_users=stats_data["active_users"],
                 active_organizations=0,  # TODO: 实现
                 stats_period_start=stats_data["period_start"],
-                stats_period_end=stats_data["period_end"]
+                stats_period_end=stats_data["period_end"],
             )
 
         except Exception as e:
@@ -570,7 +627,9 @@ class BillingService:
     # 私有辅助方法
     # ====================
 
-    async def _record_usage_to_product_service(self, request: RecordUsageRequest) -> Optional[str]:
+    async def _record_usage_to_product_service(
+        self, request: RecordUsageRequest
+    ) -> Optional[str]:
         """向 Product Service 记录使用量"""
         try:
             async with httpx.AsyncClient() as client:
@@ -585,23 +644,29 @@ class BillingService:
                         "session_id": request.session_id,
                         "request_id": request.request_id,
                         "usage_details": request.usage_details,
-                        "usage_timestamp": request.usage_timestamp.isoformat() if request.usage_timestamp else None
+                        "usage_timestamp": request.usage_timestamp.isoformat()
+                        if request.usage_timestamp
+                        else None,
                     },
-                    timeout=10.0
+                    timeout=10.0,
                 )
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     return result.get("usage_record_id")
                 else:
-                    logger.error(f"Product service returned {response.status_code}: {response.text}")
+                    logger.error(
+                        f"Product service returned {response.status_code}: {response.text}"
+                    )
                     return None
-                    
+
         except Exception as e:
             logger.error(f"Error recording usage to product service: {e}")
             return None
 
-    async def _get_product_pricing(self, product_id: str, user_id: str, subscription_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    async def _get_product_pricing(
+        self, product_id: str, user_id: str, subscription_id: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
         """从 Product Service 获取产品定价"""
         # Try to use ProductServiceClient first
         if self.product_client:
@@ -609,82 +674,86 @@ class BillingService:
                 pricing = await self.product_client.get_product_pricing(
                     product_id=product_id,
                     user_id=user_id,
-                    subscription_id=subscription_id
+                    subscription_id=subscription_id,
                 )
                 return pricing
             except Exception as e:
-                logger.warning(f"ProductServiceClient failed: {e}, falling back to HTTP")
+                logger.warning(
+                    f"ProductServiceClient failed: {e}, falling back to HTTP"
+                )
 
         # Fallback to HTTP if client not available
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{self._get_service_url('product_service', 8215)}/api/v1/product/products/{product_id}/pricing",
-                    params={
-                        "user_id": user_id,
-                        "subscription_id": subscription_id
-                    },
-                    timeout=10.0
+                    params={"user_id": user_id, "subscription_id": subscription_id},
+                    timeout=10.0,
                 )
 
                 if response.status_code == 200:
                     return response.json()
                 else:
-                    logger.error(f"Product service pricing returned {response.status_code}")
+                    logger.error(
+                        f"Product service pricing returned {response.status_code}"
+                    )
                     return None
 
         except Exception as e:
             logger.error(f"Error getting product pricing: {e}")
             return None
 
-    async def _get_subscription_info(self, subscription_id: str) -> Optional[Dict[str, Any]]:
+    async def _get_subscription_info(
+        self, subscription_id: str
+    ) -> Optional[Dict[str, Any]]:
         """从 Product Service 获取订阅信息"""
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{self._get_service_url('product_service', 8215)}/api/v1/product/subscriptions/{subscription_id}",
-                    timeout=10.0
+                    timeout=10.0,
                 )
-                
+
                 if response.status_code == 200:
                     return response.json()
                 else:
                     return None
-                    
+
         except Exception as e:
             logger.error(f"Error getting subscription info: {e}")
             return None
 
-    async def _get_user_balances(self, user_id: str) -> Tuple[Optional[Decimal], Optional[Decimal]]:
+    async def _get_user_balances(
+        self, user_id: str
+    ) -> Tuple[Optional[Decimal], Optional[Decimal]]:
         """获取用户钱包和积分余额"""
         try:
             async with httpx.AsyncClient() as client:
                 # 获取钱包余额
                 wallet_response = await client.get(
                     f"{self._get_service_url('wallet_service', 8209)}/api/v1/wallets/user/{user_id}/balance",
-                    timeout=5.0
+                    timeout=5.0,
                 )
-                
+
                 wallet_balance = None
                 if wallet_response.status_code == 200:
                     wallet_data = wallet_response.json()
-                    wallet_balance = Decimal(str(wallet_data.get("available_balance", 0)))
+                    wallet_balance = Decimal(
+                        str(wallet_data.get("available_balance", 0))
+                    )
 
                 # 积分余额可以从用户表或其他地方获取
                 # 这里简化处理，假设积分就是钱包余额
                 credit_balance = wallet_balance
 
                 return wallet_balance, credit_balance
-                
+
         except Exception as e:
             logger.error(f"Error getting user balances: {e}")
             return None, None
 
     def _is_usage_included_in_subscription(
-        self, 
-        product_id: str, 
-        usage_amount: Decimal, 
-        subscription_info: Dict[str, Any]
+        self, product_id: str, usage_amount: Decimal, subscription_info: Dict[str, Any]
     ) -> bool:
         """检查使用量是否包含在订阅中"""
         # 简化实现，检查订阅的包含产品
@@ -702,25 +771,22 @@ class BillingService:
         wallet_balance: Optional[Decimal],
         credit_balance: Optional[Decimal],
         is_free_tier: bool,
-        is_included_in_subscription: bool
+        is_included_in_subscription: bool,
     ) -> BillingMethod:
         """确定建议的计费方式"""
         if is_free_tier or is_included_in_subscription:
             return BillingMethod.SUBSCRIPTION_INCLUDED
-        
+
         if wallet_balance and wallet_balance >= total_cost:
             return BillingMethod.WALLET_DEDUCTION
-        
+
         if credit_balance and credit_balance >= total_cost:
             return BillingMethod.CREDIT_CONSUMPTION
-        
+
         return BillingMethod.PAYMENT_CHARGE
 
     async def _process_wallet_deduction(
-        self,
-        user_id: str,
-        amount: Decimal,
-        reference_id: str
+        self, user_id: str, amount: Decimal, reference_id: str
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """处理钱包扣费"""
         # Try to use WalletServiceClient first
@@ -731,7 +797,7 @@ class BillingService:
                     wallet_type="balance",
                     amount=float(amount),
                     description=f"Billing charge for {reference_id}",
-                    reference_id=reference_id
+                    reference_id=reference_id,
                 )
                 if result.get("success"):
                     return True, result.get("transaction_id"), None
@@ -749,9 +815,9 @@ class BillingService:
                         "user_id": user_id,
                         "amount": float(amount),
                         "description": f"Billing charge for {reference_id}",
-                        "usage_record_id": reference_id
+                        "usage_record_id": reference_id,
                     },
-                    timeout=10.0
+                    timeout=10.0,
                 )
 
                 if response.status_code == 200:
@@ -759,9 +825,17 @@ class BillingService:
                     if result.get("success"):
                         return True, result.get("transaction_id"), None
                     else:
-                        return False, None, result.get("message", "Wallet deduction failed")
+                        return (
+                            False,
+                            None,
+                            result.get("message", "Wallet deduction failed"),
+                        )
                 else:
-                    return False, None, f"Wallet service returned {response.status_code}"
+                    return (
+                        False,
+                        None,
+                        f"Wallet service returned {response.status_code}",
+                    )
 
         except Exception as e:
             logger.error(f"Error processing wallet deduction: {e}")
@@ -772,14 +846,14 @@ class BillingService:
         usage_record_id: str,
         calculation: BillingCalculationResponse,
         billing_method: BillingMethod,
-        status: BillingStatus
+        status: BillingStatus,
     ) -> BillingRecord:
         """创建计费记录"""
         billing_record = BillingRecord(
             billing_id=f"bill_{uuid.uuid4().hex[:12]}",
-            user_id=getattr(calculation, 'user_id', ''),
-            organization_id=getattr(calculation, 'organization_id', None),
-            subscription_id=getattr(calculation, 'subscription_id', None),
+            user_id=getattr(calculation, "user_id", ""),
+            organization_id=getattr(calculation, "organization_id", None),
+            subscription_id=getattr(calculation, "subscription_id", None),
             usage_record_id=usage_record_id,
             product_id=calculation.product_id,
             service_type=ServiceType.OTHER,  # 需要从 Product Service 获取
@@ -791,8 +865,8 @@ class BillingService:
             billing_status=status,
             billing_metadata={
                 "is_free_tier": calculation.is_free_tier,
-                "is_included_in_subscription": calculation.is_included_in_subscription
-            }
+                "is_included_in_subscription": calculation.is_included_in_subscription,
+            },
         )
 
         created_record = await self.repository.create_billing_record(billing_record)
@@ -812,8 +886,8 @@ class BillingService:
                         "currency": created_record.currency.value,
                         "billing_method": billing_method.value,
                         "billing_status": status.value,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
                 )
                 await self.event_bus.publish_event(event)
             except Exception as e:
@@ -831,7 +905,7 @@ class BillingService:
         billing_record_id: Optional[str] = None,
         amount: Optional[Decimal] = None,
         service_type: Optional[ServiceType] = None,
-        event_data: Optional[Dict[str, Any]] = None
+        event_data: Optional[Dict[str, Any]] = None,
     ) -> BillingEvent:
         """创建计费事件"""
         billing_event = BillingEvent(
@@ -845,7 +919,7 @@ class BillingService:
             amount=amount,
             service_type=service_type,
             currency=Currency.CREDIT if amount else None,
-            event_data=event_data or {}
+            event_data=event_data or {},
         )
 
         return await self.repository.create_billing_event(billing_event)

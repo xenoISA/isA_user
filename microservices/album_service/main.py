@@ -7,42 +7,49 @@ Handles albums, album photos, and smart frame synchronization
 Port: 8219
 """
 
-import os
-import sys
 import asyncio
 import logging
-from typing import Optional, List
-from datetime import datetime
-
-from fastapi import FastAPI, HTTPException, Query, Depends
-from fastapi.responses import JSONResponse
+import os
+import sys
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import List, Optional
+
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+
 from isa_common.consul_client import ConsulRegistry
 
-from .models import (
-    AlbumCreateRequest, AlbumUpdateRequest, AlbumResponse,
-    AlbumAddPhotosRequest, AlbumRemovePhotosRequest,
-    AlbumSyncRequest, AlbumSyncStatusResponse,
-    AlbumListParams, AlbumListResponse,
-    AlbumServiceStatus
-)
+from .album_repository import AlbumRepository
 from .album_service import (
+    AlbumNotFoundError,
+    AlbumPermissionError,
     AlbumService,
     AlbumServiceError,
-    AlbumNotFoundError,
     AlbumValidationError,
-    AlbumPermissionError
 )
-from .album_repository import AlbumRepository
 from .events import AlbumEventHandler
-from .routes_registry import get_routes_for_consul, SERVICE_METADATA
+from .models import (
+    AlbumAddPhotosRequest,
+    AlbumCreateRequest,
+    AlbumListParams,
+    AlbumListResponse,
+    AlbumRemovePhotosRequest,
+    AlbumResponse,
+    AlbumServiceStatus,
+    AlbumSyncRequest,
+    AlbumSyncStatusResponse,
+    AlbumUpdateRequest,
+)
+from .mqtt.publisher import AlbumMQTTPublisher
+from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Initialize configuration
 config_manager = ConfigManager("album_service")
@@ -52,17 +59,33 @@ service_config = config_manager.get_service_config()
 app_logger = setup_service_logger("album_service")
 logger = app_logger
 
-# Global service instance
+# Global service instances
 album_service = None
 consul_registry: Optional[ConsulRegistry] = None
+mqtt_publisher: Optional[AlbumMQTTPublisher] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    global album_service, consul_registry
+    global album_service, consul_registry, mqtt_publisher
 
     logger.info("Starting Album Service...")
+
+    # Initialize MQTT publisher
+    try:
+        mqtt_host = os.environ.get("MQTT_HOST", "mqtt-grpc")
+        mqtt_port = int(os.environ.get("MQTT_PORT", "50053"))
+        mqtt_publisher = AlbumMQTTPublisher(mqtt_host=mqtt_host, mqtt_port=mqtt_port)
+        await mqtt_publisher.connect()
+        logger.info(
+            f"✅ MQTT publisher initialized (host: {mqtt_host}, port: {mqtt_port})"
+        )
+    except Exception as e:
+        logger.warning(
+            f"⚠️  Failed to initialize MQTT publisher: {e}. Continuing without MQTT notifications."
+        )
+        mqtt_publisher = None
 
     # Initialize event bus
     event_bus = None
@@ -70,7 +93,9 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("album_service")
         logger.info("✅ Event bus initialized successfully")
     except Exception as e:
-        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
+        )
         event_bus = None
 
     # Initialize service with event bus
@@ -86,20 +111,33 @@ async def lifespan(app: FastAPI):
     if event_bus:
         try:
             album_repo = AlbumRepository()
-            event_handler = AlbumEventHandler(album_repo)
+            event_handler = AlbumEventHandler(
+                album_repo, album_service=album_service, mqtt_publisher=mqtt_publisher
+            )
+
+            # Subscribe to file.uploaded.with_ai events (primary use case)
+            await event_bus.subscribe_to_events(
+                pattern="events.*.file.uploaded.with_ai",
+                handler=event_handler.handle_event,
+                durable="album_service_file_uploaded",
+            )
+            logger.info("✅ Subscribed to file.uploaded.with_ai events")
 
             # Subscribe to file.deleted events
-            await event_bus.subscribe(
-                subject="events.file.deleted",
-                callback=lambda msg: event_handler.handle_event(msg)
+            await event_bus.subscribe_to_events(
+                pattern="events.*.file.deleted",
+                handler=event_handler.handle_event,
+                durable="album_service_file_deleted",
             )
             logger.info("✅ Subscribed to file.deleted events")
 
-            # Note: Add device.deleted subscription when DEVICE_DELETED is added to EventType
-            # await event_bus.subscribe(
-            #     subject="events.device.deleted",
-            #     callback=lambda msg: event_handler.handle_event(msg)
-            # )
+            # Subscribe to device.offline events
+            await event_bus.subscribe_to_events(
+                pattern="events.*.device.offline",
+                handler=event_handler.handle_event,
+                durable="album_service_device_offline",
+            )
+            logger.info("✅ Subscribed to device.offline events")
 
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
@@ -112,22 +150,24 @@ async def lifespan(app: FastAPI):
 
             # 合并服务元数据
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
             }
 
             consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=service_config.service_port,
                 consul_host=service_config.consul_host,
                 consul_port=service_config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type="http",
             )
             consul_registry.register()
-            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             consul_registry = None
@@ -137,6 +177,14 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    # Disconnect MQTT publisher
+    if mqtt_publisher:
+        try:
+            await mqtt_publisher.cleanup()
+            logger.info("✅ MQTT publisher disconnected")
+        except Exception as e:
+            logger.error(f"❌ Failed to disconnect MQTT publisher: {e}")
+
     # Consul 注销
     if consul_registry:
         try:
@@ -161,11 +209,12 @@ app = FastAPI(
     title="Album Service",
     description="Album management for smart frame ecosystem",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
 # ==================== Dependency Injection ====================
+
 
 def get_album_service() -> AlbumService:
     """Get album service instance"""
@@ -183,6 +232,7 @@ def get_user_id(user_id: str = Query(..., description="User ID")) -> str:
 
 # ==================== Health Check ====================
 
+
 @app.get("/", response_model=AlbumServiceStatus)
 async def root():
     """Root endpoint - service status"""
@@ -193,7 +243,7 @@ async def root():
         port=service_config.service_port,
         version="1.0.0",
         database_connected=db_connected,
-        timestamp=datetime.now()
+        timestamp=datetime.now(),
     )
 
 
@@ -205,7 +255,7 @@ async def health_check():
         "status": "healthy" if db_connected else "unhealthy",
         "service": "album_service",
         "database": "connected" if db_connected else "disconnected",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
     }
     status_code = 200 if db_connected else 503
     return JSONResponse(content=health, status_code=status_code)
@@ -213,11 +263,12 @@ async def health_check():
 
 # ==================== Album Management ====================
 
+
 @app.post("/api/v1/albums", response_model=AlbumResponse, status_code=201)
 async def create_album(
     request: AlbumCreateRequest,
     user_id: str = Depends(get_user_id),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Create a new album
@@ -242,7 +293,7 @@ async def create_album(
 async def get_album(
     album_id: str,
     user_id: str = Depends(get_user_id),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Get album by ID
@@ -271,8 +322,10 @@ async def list_user_albums(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     organization_id: Optional[str] = Query(None, description="Filter by organization"),
-    is_family_shared: Optional[bool] = Query(None, description="Filter by family sharing"),
-    service: AlbumService = Depends(get_album_service)
+    is_family_shared: Optional[bool] = Query(
+        None, description="Filter by family sharing"
+    ),
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     List albums for a user
@@ -292,9 +345,11 @@ async def list_user_albums(
             page=page,
             page_size=page_size,
             organization_id=organization_id,
-            is_family_shared=is_family_shared
+            is_family_shared=is_family_shared,
         )
-        albums = await service.list_user_albums(user_id, **params.dict(exclude_none=True))
+        albums = await service.list_user_albums(
+            user_id, **params.dict(exclude_none=True)
+        )
         return albums
     except AlbumServiceError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -305,7 +360,7 @@ async def update_album(
     album_id: str,
     request: AlbumUpdateRequest,
     user_id: str = Depends(get_user_id),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Update album
@@ -335,7 +390,7 @@ async def update_album(
 async def delete_album(
     album_id: str,
     user_id: str = Depends(get_user_id),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Delete album
@@ -352,7 +407,7 @@ async def delete_album(
         if success:
             return JSONResponse(
                 content={"success": True, "message": f"Album {album_id} deleted"},
-                status_code=200
+                status_code=200,
             )
         else:
             raise HTTPException(status_code=500, detail="Failed to delete album")
@@ -366,12 +421,13 @@ async def delete_album(
 
 # ==================== Album Photo Management ====================
 
+
 @app.post("/api/v1/albums/{album_id}/photos")
 async def add_photos_to_album(
     album_id: str,
     request: AlbumAddPhotosRequest,
     user_id: str = Depends(get_user_id),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Add photos to album
@@ -402,7 +458,7 @@ async def remove_photos_from_album(
     album_id: str,
     request: AlbumRemovePhotosRequest,
     user_id: str = Depends(get_user_id),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Remove photos from album
@@ -434,7 +490,7 @@ async def get_album_photos(
     user_id: str = Depends(get_user_id),
     limit: int = Query(50, ge=1, le=200, description="Maximum photos to return"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Get photos in album
@@ -450,7 +506,9 @@ async def get_album_photos(
     """
     try:
         photos = await service.get_album_photos(album_id, user_id, limit, offset)
-        return JSONResponse(content={"photos": [p.dict() for p in photos]}, status_code=200)
+        return JSONResponse(
+            content={"photos": [p.dict() for p in photos]}, status_code=200
+        )
     except AlbumNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AlbumPermissionError as e:
@@ -461,12 +519,13 @@ async def get_album_photos(
 
 # ==================== Sync Operations ====================
 
+
 @app.post("/api/v1/albums/{album_id}/sync", response_model=AlbumSyncStatusResponse)
 async def sync_album_to_frame(
     album_id: str,
     request: AlbumSyncRequest,
     user_id: str = Depends(get_user_id),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Sync album to smart frame
@@ -492,12 +551,14 @@ async def sync_album_to_frame(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/albums/{album_id}/sync/{frame_id}", response_model=AlbumSyncStatusResponse)
+@app.get(
+    "/api/v1/albums/{album_id}/sync/{frame_id}", response_model=AlbumSyncStatusResponse
+)
 async def get_album_sync_status(
     album_id: str,
     frame_id: str,
     user_id: str = Depends(get_user_id),
-    service: AlbumService = Depends(get_album_service)
+    service: AlbumService = Depends(get_album_service),
 ):
     """
     Get album sync status for a frame
@@ -525,11 +586,6 @@ async def get_album_sync_status(
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("ALBUM_SERVICE_PORT", "8219"))
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True, log_level="info")

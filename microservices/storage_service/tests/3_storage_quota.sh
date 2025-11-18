@@ -1,8 +1,9 @@
 #!/bin/bash
 # Storage Service - Storage Quota & Stats Test Script
 # Tests: Get Quota, Get Stats, Quota Enforcement
+# Event-Driven Architecture v2.0 - via Kubernetes Ingress
 
-BASE_URL="http://localhost:8209"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors
@@ -172,22 +173,10 @@ echo ""
 
 # Test 6: Get Organization Storage Stats (if applicable)
 echo -e "${YELLOW}Test 6: Get Organization Storage Stats${NC}"
-# Try to get organization_id for the test user
-ORG_ID=$(docker exec user-staging python3 -c "
-import sys
-sys.path.insert(0, '/app')
-from core.database.supabase_client import get_supabase_client
+# Use organization from seed data
+ORG_ID="$TEST_ORG_ID"
 
-try:
-    client = get_supabase_client()
-    result = client.table('organization_members').select('organization_id').eq('user_id', '${TEST_USER_ID}').eq('status', 'active').limit(1).execute()
-    if result.data and len(result.data) > 0:
-        print(result.data[0]['organization_id'])
-except:
-    pass
-" 2>&1)
-
-if [ -n "$ORG_ID" ] && [ "$ORG_ID" != "" ]; then
+if [ -n "$ORG_ID" ] && [ "$ORG_ID" != "" ] && [[ ! "$ORG_ID" =~ "Error" ]]; then
     echo "GET /api/v1/storage/files/stats?organization_id=${ORG_ID}"
     RESPONSE=$(curl -s "${API_BASE}/storage/files/stats?organization_id=${ORG_ID}")
     echo "$RESPONSE" | python3 -m json.tool

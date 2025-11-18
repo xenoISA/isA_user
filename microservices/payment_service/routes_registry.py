@@ -141,7 +141,7 @@ SERVICE_ROUTES = [
         "description": "Stripe webhook handler"
     },
     {
-        "path": "/api/v1/usage",
+        "path": "/api/v1/payments/usage",
         "methods": ["POST"],
         "auth_required": True,
         "description": "Record usage"
@@ -149,13 +149,13 @@ SERVICE_ROUTES = [
 
     # Statistics
     {
-        "path": "/api/v1/stats/revenue",
+        "path": "/api/v1/payments/stats/revenue",
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get revenue statistics"
     },
     {
-        "path": "/api/v1/stats/subscriptions",
+        "path": "/api/v1/payments/stats/subscriptions",
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get subscription statistics"

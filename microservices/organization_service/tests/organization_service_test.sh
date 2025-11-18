@@ -3,7 +3,7 @@
 # Organization Service Testing Script
 # Tests organization creation, member management, family sharing, and context switching
 
-BASE_URL="http://localhost:8212"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors for output
@@ -72,42 +72,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Get Service Info
-print_section "Test 2: Get Service Info"
-echo "GET ${BASE_URL}/info"
-INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/info")
-HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$INFO_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Service info retrieved"
-else
-    print_result 1 "Failed to get service info"
-fi
-
-# Test 3: Create Organization
-print_section "Test 3: Create Organization"
+# Test 1: Create Organization
+print_section "Test 1: Create Organization"
 echo "POST ${API_BASE}/organizations"
 CREATE_ORG_PAYLOAD=$(cat <<EOF
 {
@@ -147,9 +113,9 @@ else
     print_result 1 "Failed to create organization"
 fi
 
-# Test 4: Get Organization
+# Test 2: Get Organization
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 4: Get Organization"
+    print_section "Test 2: Get Organization"
     echo "GET ${API_BASE}/organizations/${TEST_ORG_ID}"
 
     GET_ORG_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/organizations/${TEST_ORG_ID}" \
@@ -173,13 +139,13 @@ if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
         print_result 1 "Failed to retrieve organization"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 4: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 2: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 5: Update Organization
+# Test 3: Update Organization
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 5: Update Organization"
+    print_section "Test 3: Update Organization"
     echo "PUT ${API_BASE}/organizations/${TEST_ORG_ID}"
     UPDATE_ORG_PAYLOAD=$(cat <<EOF
 {
@@ -216,15 +182,15 @@ EOF
         print_result 1 "Failed to update organization"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 5: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 3: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 6: Get User Organizations
-print_section "Test 6: Get User Organizations"
-echo "GET ${API_BASE}/users/organizations"
+# Test 4: Get User Organizations
+print_section "Test 4: Get User Organizations"
+echo "GET ${API_BASE}/organizations (user_id from auth header)"
 
-USER_ORGS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/users/organizations" \
+USER_ORGS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/organizations" \
   -H "X-User-Id: ${TEST_USER_ID}")
 HTTP_CODE=$(echo "$USER_ORGS_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$USER_ORGS_RESPONSE" | sed '$d')
@@ -245,9 +211,9 @@ else
     print_result 1 "Failed to get user organizations"
 fi
 
-# Test 7: Add Organization Member
+# Test 5: Add Organization Member
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 7: Add Organization Member"
+    print_section "Test 5: Add Organization Member"
     echo "POST ${API_BASE}/organizations/${TEST_ORG_ID}/members"
     ADD_MEMBER_PAYLOAD=$(cat <<EOF
 {
@@ -282,13 +248,13 @@ EOF
         print_result 1 "Failed to add member"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 7: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 5: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 8: Get Organization Members
+# Test 6: Get Organization Members
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 8: Get Organization Members"
+    print_section "Test 6: Get Organization Members"
     echo "GET ${API_BASE}/organizations/${TEST_ORG_ID}/members"
 
     GET_MEMBERS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/organizations/${TEST_ORG_ID}/members?limit=50&offset=0" \
@@ -312,13 +278,13 @@ if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
         print_result 1 "Failed to get organization members"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 8: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 6: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 9: Update Organization Member
+# Test 7: Update Organization Member
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 9: Update Organization Member"
+    print_section "Test 7: Update Organization Member"
     echo "PUT ${API_BASE}/organizations/${TEST_ORG_ID}/members/${TEST_MEMBER_ID}"
     UPDATE_MEMBER_PAYLOAD=$(cat <<EOF
 {
@@ -352,13 +318,13 @@ EOF
         print_result 1 "Failed to update member"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 9: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 7: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 10: Switch Organization Context
+# Test 8: Switch Organization Context
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 10: Switch Organization Context"
+    print_section "Test 8: Switch Organization Context"
     echo "POST ${API_BASE}/organizations/context"
     SWITCH_CONTEXT_PAYLOAD=$(cat <<EOF
 {
@@ -391,13 +357,13 @@ EOF
         print_result 1 "Failed to switch context"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 10: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 8: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 11: Get Organization Stats
+# Test 9: Get Organization Stats
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 11: Get Organization Stats"
+    print_section "Test 9: Get Organization Stats"
     echo "GET ${API_BASE}/organizations/${TEST_ORG_ID}/stats"
 
     STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/organizations/${TEST_ORG_ID}/stats" \
@@ -421,13 +387,13 @@ if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
         print_result 1 "Failed to get organization stats"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 11: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 9: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 12: Create Family Sharing Resource
+# Test 10: Create Family Sharing Resource
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 12: Create Family Sharing Resource"
+    print_section "Test 10: Create Family Sharing Resource"
     echo "POST ${API_BASE}/organizations/${TEST_ORG_ID}/sharing"
     CREATE_SHARING_PAYLOAD=$(cat <<EOF
 {
@@ -472,13 +438,13 @@ EOF
         print_result 1 "Failed to create sharing resource"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 12: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 10: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 13: Get Sharing Resource
+# Test 11: Get Sharing Resource
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ] && [ -n "$TEST_SHARING_ID" ] && [ "$TEST_SHARING_ID" != "null" ]; then
-    print_section "Test 13: Get Sharing Resource"
+    print_section "Test 11: Get Sharing Resource"
     echo "GET ${API_BASE}/organizations/${TEST_ORG_ID}/sharing/${TEST_SHARING_ID}"
 
     GET_SHARING_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/organizations/${TEST_ORG_ID}/sharing/${TEST_SHARING_ID}" \
@@ -503,13 +469,13 @@ if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ] && [ -n "$TEST_SHARING_
         print_result 1 "Failed to retrieve sharing resource"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 13: No sharing ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 11: No sharing ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 14: List Organization Sharings
+# Test 12: List Organization Sharings
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 14: List Organization Sharings"
+    print_section "Test 12: List Organization Sharings"
     echo "GET ${API_BASE}/organizations/${TEST_ORG_ID}/sharing"
 
     LIST_SHARING_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/organizations/${TEST_ORG_ID}/sharing?limit=50&offset=0" \
@@ -527,13 +493,13 @@ if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
         print_result 1 "Failed to list organization sharings"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 14: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 12: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 15: Remove Organization Member
+# Test 13: Remove Organization Member
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 15: Remove Organization Member"
+    print_section "Test 13: Remove Organization Member"
     echo "DELETE ${API_BASE}/organizations/${TEST_ORG_ID}/members/${TEST_MEMBER_ID}"
 
     REMOVE_MEMBER_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/organizations/${TEST_ORG_ID}/members/${TEST_MEMBER_ID}" \
@@ -556,13 +522,13 @@ if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
         print_result 1 "Failed to remove member"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 15: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 13: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 16: Delete Organization
+# Test 14: Delete Organization
 if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
-    print_section "Test 16: Delete Organization"
+    print_section "Test 14: Delete Organization"
     echo "DELETE ${API_BASE}/organizations/${TEST_ORG_ID}"
 
     DELETE_ORG_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/organizations/${TEST_ORG_ID}" \
@@ -585,7 +551,7 @@ if [ -n "$TEST_ORG_ID" ] && [ "$TEST_ORG_ID" != "null" ]; then
         print_result 1 "Failed to delete organization"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 16: No organization ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 14: No organization ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

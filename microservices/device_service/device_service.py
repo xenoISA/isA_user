@@ -388,7 +388,7 @@ class DeviceService:
 
             # 从 telemetry_service 获取实际健康数据
             try:
-                from microservices.telemetry_service.client import TelemetryServiceClient
+                from microservices.telemetry_service.clients import TelemetryServiceClient
 
                 async with TelemetryServiceClient() as telemetry_client:
                     # 获取设备统计数据
@@ -578,3 +578,95 @@ class DeviceService:
         except Exception as e:
             logger.error(f"Connection check failed: {e}")
             return False
+
+    # ============================================================================
+    # Device Pairing Methods
+    # ============================================================================
+
+    async def pair_device(
+        self,
+        device_id: str,
+        pairing_token: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        Pair a device with a user using pairing token
+        
+        Args:
+            device_id: Device ID
+            pairing_token: Pairing token from QR code
+            user_id: User ID attempting to pair
+            
+        Returns:
+            Dict with pairing result:
+            {
+                "success": bool,
+                "device": DeviceInfo (if successful),
+                "error": str (if failed)
+            }
+        """
+        try:
+            # 1. Verify pairing token with auth_service
+            from clients import get_auth_client
+            auth_client = get_auth_client()
+            
+            verification = await auth_client.verify_pairing_token(
+                device_id=device_id,
+                pairing_token=pairing_token,
+                user_id=user_id
+            )
+            
+            if not verification.get("valid"):
+                return {
+                    "success": False,
+                    "error": verification.get("error", "Invalid pairing token")
+                }
+            
+            # 2. Get device
+            device = await self.device_repo.get_device(device_id)
+            if not device:
+                return {
+                    "success": False,
+                    "error": "Device not found"
+                }
+            
+            # 3. Update device with owner and status
+            old_status = device.status
+            await self.device_repo.update_device(
+                device_id,
+                {
+                    "owner_id": user_id,
+                    "status": "active"
+                }
+            )
+            
+            # 4. Publish device.paired event
+            if self.event_bus:
+                from events.publishers import publish_device_paired
+                await publish_device_paired(
+                    event_bus=self.event_bus,
+                    device_id=device_id,
+                    user_id=user_id,
+                    device_name=device.device_name,
+                    device_type=device.device_type
+                )
+            
+            # 5. Get updated device
+            updated_device = await self.device_repo.get_device(device_id)
+            
+            logger.info(
+                f"Device {device_id} paired with user {user_id}, "
+                f"status: {old_status} -> active"
+            )
+            
+            return {
+                "success": True,
+                "device": updated_device
+            }
+            
+        except Exception as e:
+            logger.error(f"Error pairing device: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }

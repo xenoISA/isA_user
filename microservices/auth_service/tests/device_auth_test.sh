@@ -4,7 +4,7 @@
 # Device Authentication Testing Script
 # Tests device registration, authentication, token verification, and management
 
-BASE_URL="http://localhost:8201"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/auth"
 
 # Colors for output
@@ -30,12 +30,12 @@ if [ -n "$1" ]; then
     echo -e "${CYAN}Using provided organization: $ORG_ID${NC}"
 else
     # Use test data from seed_test_data.sql
-    ORG_ID="org_test_001"
+    ORG_ID="test_org_001"
     echo -e "${CYAN}Using default test organization: $ORG_ID${NC}"
     echo -e "${YELLOW}Available test organizations (from seed data):${NC}"
-    echo -e "  ${CYAN}org_test_001${NC} - Test Organization 1 (free plan)"
-    echo -e "  ${CYAN}org_test_002${NC} - Test Organization 2 (professional plan)"
-    echo -e "  ${CYAN}org_test_003${NC} - Test Organization 3 (enterprise plan)"
+    echo -e "  ${CYAN}test_org_001${NC} - Test Organization Alpha"
+    echo -e "  ${CYAN}test_org_002${NC} - Test Organization Beta"
+    echo -e "  ${CYAN}test_org_003${NC} - Test Organization Gamma"
     echo ""
     echo -e "${YELLOW}Tip: To test with a different org, run:${NC}"
     echo -e "${YELLOW}  ./device_auth_test.sh <organization_id>${NC}"

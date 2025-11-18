@@ -16,9 +16,12 @@ from .models import (
     SubscriptionUsage, ProductUsageRecord,
     ProductType, PricingType, SubscriptionStatus, BillingCycle, Currency
 )
-from core.nats_client import Event, EventType, ServiceSource
-# ServiceClients not yet implemented
-# from .client import ServiceClients
+from .events.publishers import (
+    publish_subscription_created,
+    publish_subscription_status_changed,
+    publish_product_usage_recorded
+)
+from .clients import AccountClient, OrganizationClient
 
 logger = logging.getLogger(__name__)
 
@@ -26,44 +29,28 @@ logger = logging.getLogger(__name__)
 class ProductService:
     """产品服务核心业务逻辑"""
 
-    def __init__(self, repository: ProductRepository, event_bus=None):
+    def __init__(
+        self,
+        repository: ProductRepository,
+        event_bus=None,
+        account_client: Optional[AccountClient] = None,
+        organization_client: Optional[OrganizationClient] = None
+    ):
+        """
+        Initialize Product Service
+
+        Args:
+            repository: Product repository instance
+            event_bus: NATS event bus instance (optional)
+            account_client: Account service client (optional)
+            organization_client: Organization service client (optional)
+        """
         self.repository = repository
         self.event_bus = event_bus
-        self.consul = None
-        self.service_clients = None
-        self._init_consul()
-        self._init_service_clients()
+        self.account_client = account_client
+        self.organization_client = organization_client
 
-    def _init_consul(self):
-        """Service discovery via Consul agent sidecar"""
-        logger.info("Service discovery via Consul agent sidecar")
-
-    def _init_service_clients(self):
-        """Initialize service clients for inter-service communication"""
-        try:
-            import sys
-            import os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-
-            from microservices.account_service.client import AccountServiceClient
-            from microservices.organization_service.client import OrganizationServiceClient
-
-            self.account_client = AccountServiceClient()
-            self.organization_client = OrganizationServiceClient()
-            logger.info("✅ Service clients initialized for product service")
-
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to initialize service clients: {e}")
-            logger.warning("Product service will skip user/organization validation")
-            self.account_client = None
-            self.organization_client = None
-
-    def _get_service_url(self, service_name: str, fallback_port: int) -> str:
-        """Get service URL via Consul discovery with fallback"""
-        fallback_url = f"http://localhost:{fallback_port}"
-        if self.consul:
-            return self.consul.get_service_address(service_name, fallback_url=fallback_url)
-        return fallback_url
+        logger.info("✅ ProductService initialized")
 
     # ====================
     # 产品目录管理
@@ -194,26 +181,20 @@ class ProductService:
 
             created_subscription = await self.repository.create_subscription(subscription)
 
-            # Publish subscription.created event
-            if self.event_bus and created_subscription:
-                try:
-                    event = Event(
-                        event_type=EventType.SUBSCRIPTION_CREATED,
-                        source=ServiceSource.PRODUCT_SERVICE,
-                        data={
-                            "subscription_id": created_subscription.subscription_id,
-                            "user_id": created_subscription.user_id,
-                            "organization_id": created_subscription.organization_id,
-                            "plan_id": created_subscription.plan_id,
-                            "plan_tier": created_subscription.plan_tier,
-                            "billing_cycle": created_subscription.billing_cycle.value,
-                            "status": created_subscription.status.value,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
-                    )
-                    await self.event_bus.publish_event(event)
-                except Exception as e:
-                    logger.error(f"Failed to publish subscription.created event: {e}")
+            # Publish subscription.created event via publisher
+            await publish_subscription_created(
+                event_bus=self.event_bus,
+                subscription_id=created_subscription.subscription_id,
+                user_id=created_subscription.user_id,
+                organization_id=created_subscription.organization_id,
+                plan_id=created_subscription.plan_id,
+                plan_tier=created_subscription.plan_tier,
+                billing_cycle=created_subscription.billing_cycle.value,
+                status=created_subscription.status.value,
+                current_period_start=created_subscription.current_period_start,
+                current_period_end=created_subscription.current_period_end,
+                metadata=metadata
+            )
 
             return created_subscription
         except Exception as e:
@@ -248,35 +229,16 @@ class ProductService:
             # 这里应该实现更新逻辑，但由于时间关系先简化
             logger.info(f"Would update subscription {subscription_id} to status {status}")
 
-            # Publish appropriate event based on status
-            if self.event_bus:
-                try:
-                    # Determine event type based on status
-                    if status == SubscriptionStatus.ACTIVE:
-                        event_type = EventType.SUBSCRIPTION_ACTIVATED
-                    elif status == SubscriptionStatus.CANCELED:
-                        event_type = EventType.SUBSCRIPTION_CANCELED
-                    elif status == SubscriptionStatus.INCOMPLETE_EXPIRED:
-                        event_type = EventType.SUBSCRIPTION_EXPIRED
-                    else:
-                        event_type = EventType.SUBSCRIPTION_UPDATED
-
-                    event = Event(
-                        event_type=event_type,
-                        source=ServiceSource.PRODUCT_SERVICE,
-                        data={
-                            "subscription_id": subscription_id,
-                            "user_id": subscription.user_id,
-                            "organization_id": subscription.organization_id,
-                            "plan_id": subscription.plan_id,
-                            "old_status": subscription.status.value,
-                            "new_status": status.value,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
-                    )
-                    await self.event_bus.publish_event(event)
-                except Exception as e:
-                    logger.error(f"Failed to publish subscription status event: {e}")
+            # Publish subscription status change event via publisher
+            await publish_subscription_status_changed(
+                event_bus=self.event_bus,
+                subscription_id=subscription_id,
+                user_id=subscription.user_id,
+                organization_id=subscription.organization_id,
+                plan_id=subscription.plan_id,
+                old_status=subscription.status.value,
+                new_status=status.value
+            )
 
             return True
         except Exception as e:
@@ -302,19 +264,18 @@ class ProductService:
         """记录产品使用量"""
         try:
             # Validate user via account service (fail-open for testing)
-            if self.service_clients:
+            if self.account_client:
                 try:
-                    user_valid = await self.service_clients.account.validate_user(user_id)
+                    user_valid = await self.account_client.validate_user(user_id)
                     if not user_valid:
                         logger.warning(f"User {user_id} validation failed, but proceeding with usage recording")
-                        # Don't raise error - allow usage recording for testing
                 except Exception as e:
                     logger.warning(f"User validation error: {e}, proceeding anyway")
 
             # Validate organization if provided (fail-open for testing)
-            if organization_id and self.service_clients:
+            if organization_id and self.organization_client:
                 try:
-                    org_valid = await self.service_clients.organization.validate_organization(organization_id)
+                    org_valid = await self.organization_client.validate_organization(organization_id)
                     if not org_valid:
                         logger.warning(f"Organization {organization_id} validation failed, but proceeding")
                 except Exception as e:
@@ -360,27 +321,20 @@ class ProductService:
 
             logger.info(f"Recorded usage for user {user_id}, product {product_id}, amount {usage_amount}")
 
-            # Publish product.usage.recorded event
-            if self.event_bus:
-                try:
-                    event = Event(
-                        event_type=EventType.PRODUCT_USAGE_RECORDED,
-                        source=ServiceSource.PRODUCT_SERVICE,
-                        data={
-                            "usage_record_id": usage_record_id,
-                            "user_id": user_id,
-                            "organization_id": organization_id,
-                            "subscription_id": subscription_id,
-                            "product_id": product_id,
-                            "usage_amount": float(usage_amount),
-                            "session_id": session_id,
-                            "request_id": request_id,
-                            "timestamp": (usage_timestamp or datetime.utcnow()).isoformat()
-                        }
-                    )
-                    await self.event_bus.publish_event(event)
-                except Exception as e:
-                    logger.error(f"Failed to publish product.usage.recorded event: {e}")
+            # Publish product.usage.recorded event via publisher
+            await publish_product_usage_recorded(
+                event_bus=self.event_bus,
+                usage_record_id=usage_record_id,
+                user_id=user_id,
+                organization_id=organization_id,
+                subscription_id=subscription_id,
+                product_id=product_id,
+                usage_amount=float(usage_amount),
+                session_id=session_id,
+                request_id=request_id,
+                usage_details=usage_details,
+                timestamp=usage_timestamp
+            )
 
             return {
                 "success": True,

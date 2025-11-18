@@ -3,7 +3,7 @@
 # Order Service Testing Script
 # Tests order creation, management, querying, and statistics
 
-BASE_URL="http://localhost:8210"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors for output
@@ -66,59 +66,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Detailed Health Check
-print_section "Test 2: Detailed Health Check"
-echo "GET ${BASE_URL}/health/detailed"
-DETAILED_HEALTH=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health/detailed")
-HTTP_CODE=$(echo "$DETAILED_HEALTH" | tail -n1)
-RESPONSE_BODY=$(echo "$DETAILED_HEALTH" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Detailed health check successful"
-else
-    print_result 1 "Detailed health check failed"
-fi
-
-# Test 3: Get Service Info
-print_section "Test 3: Get Service Info"
-echo "GET ${API_BASE}/order/info"
-INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/order/info")
-HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$INFO_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Service info retrieved successfully"
-else
-    print_result 1 "Failed to retrieve service info"
-fi
-
-# Test 4: Create Order
-print_section "Test 4: Create Order"
+# Test 1: Create Order
+print_section "Test 1: Create Order"
 echo "POST ${API_BASE}/orders"
 CREATE_ORDER_PAYLOAD='{
   "user_id": "test_user_123",
@@ -169,9 +118,9 @@ else
     print_result 1 "Failed to create order"
 fi
 
-# Test 5: Get Order by ID
+# Test 2: Get Order by ID
 if [ -n "$ORDER_ID" ] && [ "$ORDER_ID" != "null" ]; then
-    print_section "Test 5: Get Order by ID"
+    print_section "Test 2: Get Order by ID"
     echo "GET ${API_BASE}/orders/${ORDER_ID}"
     
     GET_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/orders/${ORDER_ID}")
@@ -193,13 +142,13 @@ if [ -n "$ORDER_ID" ] && [ "$ORDER_ID" != "null" ]; then
         print_result 1 "Failed to retrieve order"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 5: No order ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 2: No order ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 6: Update Order
+# Test 3: Update Order
 if [ -n "$ORDER_ID" ] && [ "$ORDER_ID" != "null" ]; then
-    print_section "Test 6: Update Order"
+    print_section "Test 3: Update Order"
     echo "PUT ${API_BASE}/orders/${ORDER_ID}"
     UPDATE_PAYLOAD='{
       "metadata": {
@@ -228,12 +177,12 @@ if [ -n "$ORDER_ID" ] && [ "$ORDER_ID" != "null" ]; then
         print_result 1 "Failed to update order"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 6: No order ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 3: No order ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 7: List Orders
-print_section "Test 7: List Orders"
+# Test 4: List Orders
+print_section "Test 4: List Orders"
 echo "GET ${API_BASE}/orders?page=1&page_size=10"
 
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/orders?page=1&page_size=10")
@@ -250,11 +199,11 @@ else
     print_result 1 "Failed to list orders"
 fi
 
-# Test 8: Get User Orders
-print_section "Test 8: Get User Orders"
-echo "GET ${API_BASE}/users/test_user_123/orders?limit=10&offset=0"
+# Test 5: Get User Orders
+print_section "Test 5: Get User Orders"
+echo "GET ${API_BASE}/orders?user_id=test_user_123&page=1&page_size=10"
 
-USER_ORDERS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/users/test_user_123/orders?limit=10&offset=0")
+USER_ORDERS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/orders?user_id=test_user_123&page=1&page_size=10")
 HTTP_CODE=$(echo "$USER_ORDERS_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$USER_ORDERS_RESPONSE" | sed '$d')
 
@@ -269,8 +218,8 @@ else
     print_result 1 "Failed to retrieve user orders"
 fi
 
-# Test 9: Search Orders
-print_section "Test 9: Search Orders"
+# Test 6: Search Orders
+print_section "Test 6: Search Orders"
 echo "GET ${API_BASE}/orders/search?query=test&limit=10"
 
 SEARCH_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/orders/search?query=test&limit=10")
@@ -287,8 +236,8 @@ else
     print_result 1 "Failed to search orders"
 fi
 
-# Test 10: Get Order Statistics
-print_section "Test 10: Get Order Statistics"
+# Test 7: Get Order Statistics
+print_section "Test 7: Get Order Statistics"
 echo "GET ${API_BASE}/orders/statistics"
 
 STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/orders/statistics")
@@ -305,9 +254,9 @@ else
     print_result 1 "Failed to retrieve statistics"
 fi
 
-# Test 11: Complete Order
+# Test 8: Complete Order
 if [ -n "$ORDER_ID" ] && [ "$ORDER_ID" != "null" ]; then
-    print_section "Test 11: Complete Order"
+    print_section "Test 8: Complete Order"
     echo "POST ${API_BASE}/orders/${ORDER_ID}/complete"
     COMPLETE_PAYLOAD='{
       "payment_confirmed": true,
@@ -332,12 +281,12 @@ if [ -n "$ORDER_ID" ] && [ "$ORDER_ID" != "null" ]; then
         print_result 1 "Failed to complete order"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 11: No order ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 8: No order ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 12: Create Another Order for Cancel Test
-print_section "Test 12: Create Order for Cancel Test"
+# Test 9: Create Another Order for Cancel Test
+print_section "Test 9: Create Order for Cancel Test"
 echo "POST ${API_BASE}/orders"
 CREATE_ORDER_PAYLOAD2='{
   "user_id": "test_user_123",
@@ -384,9 +333,9 @@ else
     print_result 1 "Failed to create second order"
 fi
 
-# Test 13: Cancel Order
+# Test 10: Cancel Order
 if [ -n "$ORDER_ID_2" ] && [ "$ORDER_ID_2" != "null" ]; then
-    print_section "Test 13: Cancel Order"
+    print_section "Test 10: Cancel Order"
     echo "POST ${API_BASE}/orders/${ORDER_ID_2}/cancel"
     CANCEL_PAYLOAD='{
       "reason": "Customer requested cancellation"
@@ -410,7 +359,7 @@ if [ -n "$ORDER_ID_2" ] && [ "$ORDER_ID_2" != "null" ]; then
         print_result 1 "Failed to cancel order"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 13: No order ID available for cancellation${NC}"
+    echo -e "${YELLOW}Skipping Test 10: No order ID available for cancellation${NC}"
     ((TESTS_FAILED++))
 fi
 

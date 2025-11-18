@@ -16,7 +16,6 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from .payment_repository import PaymentRepository
-from core.nats_client import Event, EventType, ServiceSource
 from .models import (
     SubscriptionPlan, Subscription, Payment, Invoice, Refund,
     PaymentMethodInfo, PaymentStatus, SubscriptionStatus,
@@ -28,9 +27,16 @@ from .models import (
     InvoiceResponse, UsageRecord
 )
 
-# Import service clients for synchronous dependencies
-from microservices.account_service.client import AccountServiceClient
-from microservices.wallet_service.client import WalletServiceClient
+# Import event publishers
+from .events.publishers import (
+    publish_payment_completed,
+    publish_payment_failed,
+    publish_subscription_created,
+    publish_subscription_canceled
+)
+
+# Import service clients
+from .clients import AccountClient, WalletClient, BillingClient, ProductClient
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +44,17 @@ logger = logging.getLogger(__name__)
 class PaymentService:
     """支付服务业务逻辑层"""
 
-    def __init__(self, repository: PaymentRepository, stripe_secret_key: Optional[str] = None, event_bus=None, config=None):
+    def __init__(
+        self,
+        repository: PaymentRepository,
+        stripe_secret_key: Optional[str] = None,
+        event_bus=None,
+        account_client: Optional[AccountClient] = None,
+        wallet_client: Optional[WalletClient] = None,
+        billing_client: Optional[BillingClient] = None,
+        product_client: Optional[ProductClient] = None,
+        config=None
+    ):
         """
         初始化支付服务
 
@@ -46,14 +62,20 @@ class PaymentService:
             repository: 数据访问层实例
             stripe_secret_key: Stripe API密钥 (use sk_test_* for testing/development)
             event_bus: NATSEventBus instance for event publishing (optional)
+            account_client: Account service client (optional, dependency injection)
+            wallet_client: Wallet service client (optional, dependency injection)
+            billing_client: Billing service client (optional, dependency injection)
+            product_client: Product service client (optional, dependency injection)
             config: ConfigManager instance for service discovery (optional)
         """
         self.repository = repository
         self.event_bus = event_bus
 
-        # Initialize service clients for synchronous dependencies
-        self.account_client = AccountServiceClient(config=config)
-        self.wallet_client = WalletServiceClient(config=config)
+        # Service clients (dependency injection)
+        self.account_client = account_client
+        self.wallet_client = wallet_client
+        self.billing_client = billing_client
+        self.product_client = product_client
 
         # 初始化Stripe
         if stripe_secret_key:
@@ -829,25 +851,16 @@ class PaymentService:
                     {"stripe_event": event}
                 )
 
-                # Publish payment.completed event
-                if self.event_bus:
-                    try:
-                        payment_event = Event(
-                            event_type=EventType.PAYMENT_COMPLETED,
-                            source=ServiceSource.PAYMENT_SERVICE,
-                            data={
-                                "payment_intent_id": event_data['id'],
-                                "amount": event_data['amount'] / 100,  # Convert from cents
-                                "currency": event_data['currency'],
-                                "customer_id": event_data.get('customer'),
-                                "timestamp": datetime.utcnow().isoformat(),
-                                "metadata": event_data.get('metadata', {})
-                            }
-                        )
-                        await self.event_bus.publish_event(payment_event)
-                        logger.info(f"Published payment.completed event for payment {event_data['id']}")
-                    except Exception as e:
-                        logger.error(f"Failed to publish payment.completed event: {e}")
+                # Publish payment.completed event via publisher
+                await publish_payment_completed(
+                    event_bus=self.event_bus,
+                    payment_intent_id=event_data['id'],
+                    user_id=event_data.get('metadata', {}).get('user_id', ''),
+                    amount=event_data['amount'] / 100,  # Convert from cents
+                    currency=event_data['currency'],
+                    payment_method=event_data.get('payment_method'),
+                    metadata=event_data.get('metadata', {})
+                )
 
             elif event_type == 'payment_intent.payment_failed':
                 await self.fail_payment(
@@ -856,26 +869,16 @@ class PaymentService:
                     event_data.get('last_payment_error', {}).get('code')
                 )
 
-                # Publish payment.failed event
-                if self.event_bus:
-                    try:
-                        payment_event = Event(
-                            event_type=EventType.PAYMENT_FAILED,
-                            source=ServiceSource.PAYMENT_SERVICE,
-                            data={
-                                "payment_intent_id": event_data['id'],
-                                "amount": event_data['amount'] / 100,  # Convert from cents
-                                "currency": event_data['currency'],
-                                "customer_id": event_data.get('customer'),
-                                "error_message": event_data.get('last_payment_error', {}).get('message'),
-                                "error_code": event_data.get('last_payment_error', {}).get('code'),
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
-                        )
-                        await self.event_bus.publish_event(payment_event)
-                        logger.info(f"Published payment.failed event for payment {event_data['id']}")
-                    except Exception as e:
-                        logger.error(f"Failed to publish payment.failed event: {e}")
+                # Publish payment.failed event via publisher
+                await publish_payment_failed(
+                    event_bus=self.event_bus,
+                    payment_intent_id=event_data['id'],
+                    user_id=event_data.get('metadata', {}).get('user_id', ''),
+                    amount=event_data['amount'] / 100,  # Convert from cents
+                    currency=event_data['currency'],
+                    error_message=event_data.get('last_payment_error', {}).get('message'),
+                    error_code=event_data.get('last_payment_error', {}).get('code')
+                )
                 
             elif event_type == 'invoice.payment_succeeded':
                 invoice_id = event_data.get('metadata', {}).get('invoice_id')
@@ -886,51 +889,39 @@ class PaymentService:
                     )
                     
             elif event_type == 'customer.subscription.created':
-                # 处理订阅创建
-                if self.event_bus:
-                    try:
-                        subscription_event = Event(
-                            event_type=EventType.SUBSCRIPTION_CREATED,
-                            source=ServiceSource.PAYMENT_SERVICE,
-                            data={
-                                "subscription_id": event_data['id'],
-                                "customer_id": event_data['customer'],
-                                "status": event_data['status'],
-                                "plan_id": event_data['items']['data'][0]['price']['id'] if event_data.get('items') else None,
-                                "current_period_start": event_data.get('current_period_start'),
-                                "current_period_end": event_data.get('current_period_end'),
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
-                        )
-                        await self.event_bus.publish_event(subscription_event)
-                        logger.info(f"Published subscription.created event for subscription {event_data['id']}")
-                    except Exception as e:
-                        logger.error(f"Failed to publish subscription.created event: {e}")
+                # Publish subscription.created event via publisher
+                period_start = datetime.fromtimestamp(event_data.get('current_period_start', 0))
+                period_end = datetime.fromtimestamp(event_data.get('current_period_end', 0))
+                trial_end = datetime.fromtimestamp(event_data.get('trial_end')) if event_data.get('trial_end') else None
+
+                await publish_subscription_created(
+                    event_bus=self.event_bus,
+                    subscription_id=event_data['id'],
+                    user_id=event_data.get('metadata', {}).get('user_id', ''),
+                    plan_id=event_data['items']['data'][0]['price']['id'] if event_data.get('items') else '',
+                    status=event_data['status'],
+                    current_period_start=period_start,
+                    current_period_end=period_end,
+                    trial_end=trial_end,
+                    metadata=event_data.get('metadata', {})
+                )
 
             elif event_type == 'customer.subscription.updated':
                 # 处理订阅更新
                 pass
 
             elif event_type == 'customer.subscription.deleted':
-                # 处理订阅删除
-                if self.event_bus:
-                    try:
-                        subscription_event = Event(
-                            event_type=EventType.SUBSCRIPTION_CANCELED,
-                            source=ServiceSource.PAYMENT_SERVICE,
-                            data={
-                                "subscription_id": event_data['id'],
-                                "customer_id": event_data['customer'],
-                                "status": event_data['status'],
-                                "canceled_at": event_data.get('canceled_at'),
-                                "cancellation_reason": event_data.get('cancellation_details', {}).get('reason'),
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
-                        )
-                        await self.event_bus.publish_event(subscription_event)
-                        logger.info(f"Published subscription.canceled event for subscription {event_data['id']}")
-                    except Exception as e:
-                        logger.error(f"Failed to publish subscription.canceled event: {e}")
+                # Publish subscription.canceled event via publisher
+                canceled_at = datetime.fromtimestamp(event_data.get('canceled_at')) if event_data.get('canceled_at') else datetime.utcnow()
+
+                await publish_subscription_canceled(
+                    event_bus=self.event_bus,
+                    subscription_id=event_data['id'],
+                    user_id=event_data.get('metadata', {}).get('user_id', ''),
+                    canceled_at=canceled_at,
+                    reason=event_data.get('cancellation_details', {}).get('reason'),
+                    metadata=event_data.get('metadata', {})
+                )
                 
             return {"success": True, "event": event_type}
             

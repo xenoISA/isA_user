@@ -23,15 +23,16 @@ from isa_common.consul_client import ConsulRegistry
 from .models import (
     DeviceRegistrationRequest, DeviceUpdateRequest, DeviceAuthRequest,
     DeviceCommandRequest, BulkCommandRequest, DeviceGroupRequest,
+    DevicePairingRequest, DevicePairingResponse,
     DeviceResponse, DeviceAuthResponse, DeviceStatsResponse,
     DeviceHealthResponse, DeviceGroupResponse, DeviceListResponse,
     DeviceStatus, DeviceType, ConnectivityType
 )
 from .device_service import DeviceService
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
-from microservices.organization_service.client import OrganizationServiceClient
+from microservices.organization_service.clients import OrganizationServiceClient
 from microservices.auth_service.client import AuthServiceClient
-from microservices.telemetry_service.client import TelemetryServiceClient
+from microservices.telemetry_service.clients import TelemetryServiceClient
 
 # Initialize configuration
 config_manager = ConfigManager("device_service")
@@ -815,3 +816,67 @@ if __name__ == "__main__":
         port=config.service_port,
         log_level=config.log_level.lower()
     )
+
+# ============================================================================
+# Device Pairing API
+# ============================================================================
+
+@app.post("/api/v1/devices/{device_id}/pair", response_model=DevicePairingResponse)
+async def pair_device(
+    device_id: str = Path(..., description="Device ID to pair"),
+    request: DevicePairingRequest = Body(...),
+    user_context: Dict[str, Any] = Depends(get_user_context)
+):
+    """
+    Pair a device with a user using pairing token from QR code
+    
+    This endpoint is called by the mobile app after scanning the QR code
+    displayed on the EmoFrame device.
+    
+    Flow:
+    1. Mobile user scans QR code on Display device
+    2. QR code contains: EMOFRAME:deviceId:pairingToken
+    3. Mobile app calls this endpoint with device_id and pairing_token
+    4. This endpoint verifies token with auth_service
+    5. If valid, updates device owner and status to 'active'
+    6. Publishes device.paired event
+    
+    Args:
+        device_id: Device ID from QR code
+        request: Pairing request with token and user_id
+        user_context: User context from authentication
+        
+    Returns:
+        DevicePairingResponse with success status and device info
+    """
+    try:
+        # Get device service instance
+        device_service = app.state.microservice.service
+        
+        # Call pairing method
+        result = await device_service.pair_device(
+            device_id=device_id,
+            pairing_token=request.pairing_token,
+            user_id=request.user_id
+        )
+        
+        if not result.get("success"):
+            return DevicePairingResponse(
+                success=False,
+                error=result.get("error", "Device pairing failed")
+            )
+        
+        logger.info(f"Device {device_id} successfully paired with user {request.user_id}")
+        
+        return DevicePairingResponse(
+            success=True,
+            device=result.get("device"),
+            message=f"Device {device_id} successfully paired"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in pair_device endpoint: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to pair device: {str(e)}"
+        )

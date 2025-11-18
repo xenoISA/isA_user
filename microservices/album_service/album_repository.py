@@ -5,15 +5,21 @@ Handles database operations for albums, album photos, and sync status
 Uses PostgresClient with gRPC for PostgreSQL access
 """
 
+import json
 import logging
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
-import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sys
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+
+from core.config_manager import ConfigManager
 
 from isa_common.postgres_client import PostgresClient
-from core.config_manager import ConfigManager
+
 from .models import Album, AlbumPhoto, AlbumSyncStatus, SyncStatus
 
 logger = logging.getLogger(__name__)
@@ -31,15 +37,15 @@ class AlbumRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
+            service_name="postgres_grpc_service",
+            default_host="isa-postgres-grpc",
             default_port=50061,
-            env_host_key='POSTGRES_GRPC_HOST',
-            env_port_key='POSTGRES_GRPC_PORT'
+            env_host_key="POSTGRES_GRPC_HOST",
+            env_port_key="POSTGRES_GRPC_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id='album_service')
+        self.db = PostgresClient(host=host, port=port, user_id="album_service")
 
         # Table names (album schema)
         self.schema = "album"
@@ -68,14 +74,18 @@ class AlbumRepository:
                 "metadata": album_data.metadata or {},
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-                "last_synced_at": None
+                "last_synced_at": None,
             }
 
             with self.db:
-                count = self.db.insert_into(self.albums_table, [data], schema=self.schema)
+                count = self.db.insert_into(
+                    self.albums_table, [data], schema=self.schema
+                )
 
             if count is not None and count > 0:
-                return await self.get_album_by_id(album_data.album_id, album_data.user_id)
+                return await self.get_album_by_id(
+                    album_data.album_id, album_data.user_id
+                )
             # Even if count is None, try to get the album (might have been inserted)
             return await self.get_album_by_id(album_data.album_id, album_data.user_id)
 
@@ -83,7 +93,9 @@ class AlbumRepository:
             logger.error(f"Error creating album: {e}")
             raise
 
-    async def get_album_by_id(self, album_id: str, user_id: Optional[str] = None) -> Optional[Album]:
+    async def get_album_by_id(
+        self, album_id: str, user_id: Optional[str] = None
+    ) -> Optional[Album]:
         """Get album by album_id"""
         try:
             if user_id:
@@ -116,7 +128,7 @@ class AlbumRepository:
         organization_id: Optional[str] = None,
         is_family_shared: Optional[bool] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Album]:
         """List albums for a user with optional filters"""
         try:
@@ -152,10 +164,7 @@ class AlbumRepository:
             return []
 
     async def update_album(
-        self,
-        album_id: str,
-        user_id: str,
-        update_data: Dict[str, Any]
+        self, album_id: str, user_id: str, update_data: Dict[str, Any]
     ) -> bool:
         """Update album"""
         try:
@@ -244,35 +253,33 @@ class AlbumRepository:
     # ==================== Album Photos Operations ====================
 
     async def add_photos_to_album(
-        self,
-        album_id: str,
-        photo_ids: List[str],
-        added_by: str
+        self, album_id: str, photo_ids: List[str], added_by: str
     ) -> int:
         """Add photos to album (returns number of photos added)"""
         try:
             # Prepare data for bulk insert
             data_list = []
             for idx, photo_id in enumerate(photo_ids):
-                data_list.append({
-                    "album_id": album_id,
-                    "photo_id": photo_id,
-                    "added_by": added_by,
-                    "added_at": datetime.now(timezone.utc),
-                    "is_featured": False,
-                    "display_order": idx,
-                    "ai_tags": [],
-                    "ai_objects": [],
-                    "ai_scenes": [],
-                    "face_detection_results": None
-                })
+                data_list.append(
+                    {
+                        "album_id": album_id,
+                        "photo_id": photo_id,
+                        "added_by": added_by,
+                        "added_at": datetime.now(timezone.utc),
+                        "is_featured": False,
+                        "display_order": idx,
+                        "ai_tags": json.dumps([]),  # Convert to JSON string for JSONB
+                        "ai_objects": json.dumps(
+                            []
+                        ),  # Convert to JSON string for JSONB
+                        "ai_scenes": json.dumps([]),  # Convert to JSON string for JSONB
+                        "face_detection_results": None,
+                    }
+                )
 
             with self.db:
                 count = self.db.insert_into(
-                    self.album_photos_table,
-                    data_list,
-                    schema=self.schema,
-                    on_conflict="DO NOTHING"  # Ignore duplicates
+                    self.album_photos_table, data_list, schema=self.schema
                 )
 
             # Update album photo count
@@ -286,14 +293,12 @@ class AlbumRepository:
             raise
 
     async def remove_photos_from_album(
-        self,
-        album_id: str,
-        photo_ids: List[str]
+        self, album_id: str, photo_ids: List[str]
     ) -> int:
         """Remove photos from album (returns number of photos removed)"""
         try:
             # Build IN clause
-            placeholders = ",".join([f"${i+2}" for i in range(len(photo_ids))])
+            placeholders = ",".join([f"${i + 2}" for i in range(len(photo_ids))])
             query = f"""
                 DELETE FROM {self.schema}.{self.album_photos_table}
                 WHERE album_id = $1 AND photo_id IN ({placeholders})
@@ -314,10 +319,7 @@ class AlbumRepository:
             raise
 
     async def get_album_photos(
-        self,
-        album_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, album_id: str, limit: int = 50, offset: int = 0
     ) -> List[AlbumPhoto]:
         """Get photos in an album"""
         try:
@@ -361,9 +363,7 @@ class AlbumRepository:
     # ==================== Album Sync Status Operations ====================
 
     async def get_album_sync_status(
-        self,
-        album_id: str,
-        frame_id: str
+        self, album_id: str, frame_id: str
     ) -> Optional[AlbumSyncStatus]:
         """Get sync status for album and frame"""
         try:
@@ -385,11 +385,7 @@ class AlbumRepository:
             return None
 
     async def update_album_sync_status(
-        self,
-        album_id: str,
-        frame_id: str,
-        user_id: str,
-        status_data: Dict[str, Any]
+        self, album_id: str, frame_id: str, user_id: str, status_data: Dict[str, Any]
     ) -> bool:
         """Update or create album sync status"""
         try:
@@ -445,11 +441,13 @@ class AlbumRepository:
                     "sync_status": status_data.get("sync_status", "pending"),
                     "error_message": status_data.get("error_message"),
                     "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
 
                 with self.db:
-                    count = self.db.insert_into(self.sync_status_table, [data], schema=self.schema)
+                    count = self.db.insert_into(
+                        self.sync_status_table, [data], schema=self.schema
+                    )
 
                 return count is not None and count > 0
 
@@ -461,7 +459,7 @@ class AlbumRepository:
         self,
         album_id: Optional[str] = None,
         frame_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> List[AlbumSyncStatus]:
         """List album sync statuses with optional filters"""
         try:

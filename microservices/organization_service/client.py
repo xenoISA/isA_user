@@ -4,10 +4,12 @@ Organization Service Client
 Client library for other microservices to interact with organization service
 """
 
-import httpx
 import logging
 import os
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+import httpx
+
 from isa_common.consul_client import ConsulRegistry
 
 logger = logging.getLogger(__name__)
@@ -25,32 +27,53 @@ class OrganizationServiceClient:
             use_internal_auth: 使用内部服务认证 (默认 True，用于服务间调用)
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use Consul service discovery with isa-common
             try:
-                consul_host = os.getenv('CONSUL_HOST', 'localhost')
-                consul_port = int(os.getenv('CONSUL_PORT', 8500))
+                consul_host = os.getenv("CONSUL_HOST", "localhost")
+                consul_port = int(os.getenv("CONSUL_PORT", 8500))
 
-                consul = ConsulRegistry(consul_host=consul_host, consul_port=consul_port)
+                consul = ConsulRegistry(
+                    consul_host=consul_host, consul_port=consul_port
+                )
                 endpoint = consul.get_service_endpoint("organization_service")
 
                 if endpoint:
                     self.base_url = endpoint
                     logger.debug(f"Discovered organization_service at {self.base_url}")
                 else:
-                    logger.warning("Organization service not found in Consul, using fallback")
-                    self.base_url = "http://localhost:8212"
+                    # Fallback: use K8s service name if in K8s, otherwise localhost
+                    org_host = os.getenv(
+                        "ORGANIZATION_SERVICE_HOST",
+                        "organization.isa-cloud-staging.svc.cluster.local",
+                    )
+                    org_port = os.getenv("ORGANIZATION_SERVICE_PORT", "8212")
+                    self.base_url = f"http://{org_host}:{org_port}"
+                    logger.warning(
+                        f"Organization service not found in Consul, using fallback: {self.base_url}"
+                    )
             except Exception as e:
-                logger.warning(f"Service discovery failed, using fallback: {e}")
-                self.base_url = "http://localhost:8212"
+                # Fallback: use K8s service name if in K8s, otherwise localhost
+                org_host = os.getenv(
+                    "ORGANIZATION_SERVICE_HOST",
+                    "organization.isa-cloud-staging.svc.cluster.local",
+                )
+                org_port = os.getenv("ORGANIZATION_SERVICE_PORT", "8212")
+                self.base_url = f"http://{org_host}:{org_port}"
+                logger.warning(
+                    f"Service discovery failed, using fallback: {self.base_url} - {e}"
+                )
 
         # 设置默认 headers（包括内部服务认证）
         default_headers = {}
         if use_internal_auth:
             from core.internal_service_auth import InternalServiceAuth
+
             default_headers.update(InternalServiceAuth.get_internal_service_headers())
-            logger.debug("Using internal service authentication for organization service calls")
+            logger.debug(
+                "Using internal service authentication for organization service calls"
+            )
 
         self.client = httpx.AsyncClient(timeout=30.0, headers=default_headers)
 
@@ -74,7 +97,7 @@ class OrganizationServiceClient:
         org_name: str,
         org_type: str = "family",
         description: Optional[str] = None,
-        settings: Optional[Dict[str, Any]] = None
+        settings: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create new organization
@@ -98,11 +121,7 @@ class OrganizationServiceClient:
             ... )
         """
         try:
-            payload = {
-                "user_id": user_id,
-                "org_name": org_name,
-                "org_type": org_type
-            }
+            payload = {"user_id": user_id, "org_name": org_name, "org_type": org_type}
 
             if description:
                 payload["description"] = description
@@ -110,8 +129,7 @@ class OrganizationServiceClient:
                 payload["settings"] = settings
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/organizations",
-                json=payload
+                f"{self.base_url}/api/v1/organizations", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -124,9 +142,7 @@ class OrganizationServiceClient:
             return None
 
     async def get_organization(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get organization by ID
@@ -144,7 +160,7 @@ class OrganizationServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/organizations/{organization_id}",
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -157,8 +173,7 @@ class OrganizationServiceClient:
             return None
 
     async def get_user_organizations(
-        self,
-        user_id: str
+        self, user_id: str
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get user's organizations
@@ -175,7 +190,7 @@ class OrganizationServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/users/organizations",
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             result = response.json()
@@ -197,7 +212,7 @@ class OrganizationServiceClient:
         organization_id: str,
         user_id: str,
         member_user_id: str,
-        role: str = "member"
+        role: str = "member",
     ) -> Optional[Dict[str, Any]]:
         """
         Add member to organization
@@ -222,11 +237,8 @@ class OrganizationServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/members",
-                json={
-                    "member_user_id": member_user_id,
-                    "role": role
-                },
-                headers={"user-id": user_id}
+                json={"member_user_id": member_user_id, "role": role},
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -239,9 +251,7 @@ class OrganizationServiceClient:
             return None
 
     async def get_members(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get organization members
@@ -259,7 +269,7 @@ class OrganizationServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/members",
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             result = response.json()
@@ -288,7 +298,7 @@ class OrganizationServiceClient:
         default_permission: str = "read_write",
         custom_permissions: Optional[Dict[str, str]] = None,
         quota_settings: Optional[Dict[str, Any]] = None,
-        restrictions: Optional[Dict[str, Any]] = None
+        restrictions: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create resource sharing within organization
@@ -328,7 +338,7 @@ class OrganizationServiceClient:
                 "share_with_all_members": share_with_all_members,
                 "default_permission": default_permission,
                 "quota_settings": quota_settings or {},
-                "restrictions": restrictions or {}
+                "restrictions": restrictions or {},
             }
 
             if shared_with_members:
@@ -339,7 +349,7 @@ class OrganizationServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/sharing",
                 json=payload,
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -352,10 +362,7 @@ class OrganizationServiceClient:
             return None
 
     async def get_sharing(
-        self,
-        organization_id: str,
-        sharing_id: str,
-        user_id: str
+        self, organization_id: str, sharing_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get sharing resource details
@@ -374,7 +381,7 @@ class OrganizationServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/sharing/{sharing_id}",
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -391,7 +398,7 @@ class OrganizationServiceClient:
         organization_id: str,
         sharing_id: str,
         user_id: str,
-        updates: Dict[str, Any]
+        updates: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
         """
         Update sharing resource
@@ -417,7 +424,7 @@ class OrganizationServiceClient:
             response = await self.client.put(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/sharing/{sharing_id}",
                 json=updates,
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -430,10 +437,7 @@ class OrganizationServiceClient:
             return None
 
     async def delete_sharing(
-        self,
-        organization_id: str,
-        sharing_id: str,
-        user_id: str
+        self, organization_id: str, sharing_id: str, user_id: str
     ) -> bool:
         """
         Delete/revoke sharing resource
@@ -452,7 +456,7 @@ class OrganizationServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/sharing/{sharing_id}",
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return True
@@ -465,10 +469,7 @@ class OrganizationServiceClient:
             return False
 
     async def list_shared_resources(
-        self,
-        organization_id: str,
-        user_id: str,
-        resource_type: Optional[str] = None
+        self, organization_id: str, user_id: str, resource_type: Optional[str] = None
     ) -> Optional[List[Dict[str, Any]]]:
         """
         List shared resources in organization
@@ -496,7 +497,7 @@ class OrganizationServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/sharing",
                 params=params,
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -513,7 +514,7 @@ class OrganizationServiceClient:
         organization_id: str,
         member_user_id: str,
         user_id: str,
-        resource_type: Optional[str] = None
+        resource_type: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get shared resources accessible to a specific member
@@ -543,13 +544,15 @@ class OrganizationServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/members/{member_user_id}/shared-resources",
                 params=params,
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get member shared resources: {e.response.status_code}")
+            logger.error(
+                f"Failed to get member shared resources: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting member shared resources: {e}")
@@ -560,7 +563,7 @@ class OrganizationServiceClient:
         resource_type: str,
         resource_id: str,
         user_id: str,
-        required_permission: str = "read"
+        required_permission: str = "read",
     ) -> bool:
         """
         Check if user has access to shared resource
@@ -589,8 +592,8 @@ class OrganizationServiceClient:
                     "resource_type": resource_type,
                     "resource_id": resource_id,
                     "user_id": user_id,
-                    "required_permission": required_permission
-                }
+                    "required_permission": required_permission,
+                },
             )
 
             if response.status_code == 200:
@@ -607,9 +610,7 @@ class OrganizationServiceClient:
     # =============================================================================
 
     async def get_organization_stats(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get organization statistics
@@ -627,7 +628,7 @@ class OrganizationServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/stats",
-                headers={"user-id": user_id}
+                headers={"user-id": user_id},
             )
             response.raise_for_status()
             return response.json()

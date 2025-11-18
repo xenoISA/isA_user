@@ -319,12 +319,12 @@ async def delete_organization(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/users/organizations", response_model=OrganizationListResponse)
+@app.get("/api/v1/organizations", response_model=OrganizationListResponse)
 async def get_user_organizations(
     user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
-    """获取用户所属的所有组织"""
+    """获取用户所属的所有组织 (user_id from auth)"""
     try:
         return await service.get_user_organizations(user_id)
     except OrganizationServiceError as e:

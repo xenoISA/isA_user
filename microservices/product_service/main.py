@@ -43,33 +43,56 @@ product_service: Optional[ProductService] = None
 repository: Optional[ProductRepository] = None
 consul_registry: Optional[ConsulRegistry] = None
 event_bus = None  # NATS event bus
+account_client = None  # Account service client
+organization_client = None  # Organization service client
 SERVICE_PORT = config.service_port or 8215
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global product_service, repository, consul_registry, event_bus
+    global product_service, repository, consul_registry, event_bus, account_client, organization_client
 
     try:
         # 初始化数据库连接 with config_manager
         repository = ProductRepository(config=config_manager)
         await repository.initialize()
 
+        # Initialize service clients
+        try:
+            from .clients import AccountClient, OrganizationClient
+            account_client = AccountClient()
+            organization_client = OrganizationClient()
+            logger.info("✅ Service clients initialized successfully")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to initialize service clients: {e}")
+            account_client = None
+            organization_client = None
+
         # Initialize NATS JetStream event bus
         try:
             event_bus = await get_event_bus("product_service")
             logger.info("✅ Event bus initialized successfully")
-
-            # 初始化业务服务 with event bus
-            product_service = ProductService(repository, event_bus=event_bus)
-
         except Exception as e:
             logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
             event_bus = None
 
-            # 初始化业务服务 without event bus
-            product_service = ProductService(repository, event_bus=None)
+        # 初始化业务服务 with event bus and service clients
+        product_service = ProductService(
+            repository,
+            event_bus=event_bus,
+            account_client=account_client,
+            organization_client=organization_client
+        )
+
+        # Register event handlers
+        if event_bus:
+            try:
+                from .events.handlers import register_event_handlers
+                await register_event_handlers(event_bus, product_service)
+                logger.info("✅ Event handlers registered successfully")
+            except Exception as e:
+                logger.error(f"⚠️  Failed to register event handlers: {e}")
 
         # Register with Consul
         if config.consul_enabled:
@@ -115,6 +138,21 @@ async def lifespan(app: FastAPI):
                 logger.info("Service deregistered from Consul")
             except Exception as e:
                 logger.error(f"Failed to deregister from Consul: {e}")
+
+        # Close service clients
+        if account_client:
+            try:
+                await account_client.close()
+                logger.info("Account client closed")
+            except Exception as e:
+                logger.error(f"Error closing account client: {e}")
+
+        if organization_client:
+            try:
+                await organization_client.close()
+                logger.info("Organization client closed")
+            except Exception as e:
+                logger.error(f"Error closing organization client: {e}")
 
         if event_bus:
             try:

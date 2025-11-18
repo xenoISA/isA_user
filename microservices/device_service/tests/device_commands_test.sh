@@ -3,9 +3,9 @@
 # Device Commands Testing Script
 # Tests device command sending and smart frame operations
 
-BASE_URL="http://localhost:8220"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/devices"
-AUTH_URL="http://localhost:8201/api/v1/auth"
+AUTH_URL="http://localhost/api/v1/auth"
 
 # Colors for output
 GREEN='\033[0;32m'

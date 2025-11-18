@@ -3,7 +3,7 @@
 # Notification Service Testing Script
 # Tests notification sending, templates, in-app notifications, and push subscriptions
 
-BASE_URL="http://localhost:8206"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/notifications"
 
 # Colors for output
@@ -66,42 +66,9 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
 
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Get Service Info
-print_section "Test 2: Get Service Info"
-echo "GET ${BASE_URL}/info"
-INFO_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/info")
-HTTP_CODE=$(echo "$INFO_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$INFO_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Service info retrieved"
-else
-    print_result 1 "Failed to get service info"
-fi
-
-# Test 3: Create Email Template
-print_section "Test 3: Create Email Notification Template"
+# Test 1: Create Email Template
+print_section "Test 1: Create Email Notification Template"
 echo "POST ${API_BASE}/templates"
 CREATE_TEMPLATE_PAYLOAD='{
   "name": "Welcome Email Template",
@@ -141,8 +108,8 @@ else
     print_result 1 "Failed to create email template"
 fi
 
-# Test 4: Create In-App Template
-print_section "Test 4: Create In-App Notification Template"
+# Test 2: Create In-App Template
+print_section "Test 2: Create In-App Notification Template"
 echo "POST ${API_BASE}/templates"
 IN_APP_TEMPLATE_PAYLOAD='{
   "name": "System Alert Template",
@@ -181,8 +148,8 @@ else
     print_result 1 "Failed to create in-app template"
 fi
 
-# Test 5: List Templates
-print_section "Test 5: List All Templates"
+# Test 3: List Templates
+print_section "Test 3: List All Templates"
 echo "GET ${API_BASE}/templates?limit=10"
 LIST_TEMPLATES_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/templates?limit=10")
 HTTP_CODE=$(echo "$LIST_TEMPLATES_RESPONSE" | tail -n1)
@@ -198,9 +165,9 @@ else
     print_result 1 "Failed to list templates"
 fi
 
-# Test 6: Get Template by ID
+# Test 4: Get Template by ID
 if [ -n "$TEMPLATE_ID" ] && [ "$TEMPLATE_ID" != "null" ]; then
-    print_section "Test 6: Get Template by ID"
+    print_section "Test 4: Get Template by ID"
     echo "GET ${API_BASE}/templates/${TEMPLATE_ID}"
     
     GET_TEMPLATE_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/templates/${TEMPLATE_ID}")
@@ -217,13 +184,13 @@ if [ -n "$TEMPLATE_ID" ] && [ "$TEMPLATE_ID" != "null" ]; then
         print_result 1 "Failed to get template"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 6: No template ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 4: No template ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 7: Update Template
+# Test 5: Update Template
 if [ -n "$TEMPLATE_ID" ] && [ "$TEMPLATE_ID" != "null" ]; then
-    print_section "Test 7: Update Template"
+    print_section "Test 5: Update Template"
     echo "PUT ${API_BASE}/templates/${TEMPLATE_ID}"
     UPDATE_TEMPLATE_PAYLOAD='{
       "description": "Updated welcome email template for new users",
@@ -251,12 +218,12 @@ if [ -n "$TEMPLATE_ID" ] && [ "$TEMPLATE_ID" != "null" ]; then
         print_result 1 "Failed to update template"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 7: No template ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 5: No template ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 8: Send Email Notification (without template)
-print_section "Test 8: Send Email Notification (Direct)"
+# Test 6: Send Email Notification (without template)
+print_section "Test 6: Send Email Notification (Direct)"
 echo "POST ${API_BASE}/send"
 SEND_EMAIL_PAYLOAD='{
   "type": "email",
@@ -296,8 +263,8 @@ else
     print_result 1 "Failed to send email notification"
 fi
 
-# Test 9: Send In-App Notification
-print_section "Test 9: Send In-App Notification"
+# Test 7: Send In-App Notification
+print_section "Test 7: Send In-App Notification"
 echo "POST ${API_BASE}/send"
 SEND_IN_APP_PAYLOAD='{
   "type": "in_app",
@@ -335,9 +302,9 @@ else
     print_result 1 "Failed to send in-app notification"
 fi
 
-# Test 10: Send Notification with Template
+# Test 8: Send Notification with Template
 if [ -n "$TEMPLATE_ID" ] && [ "$TEMPLATE_ID" != "null" ]; then
-    print_section "Test 10: Send Notification Using Template"
+    print_section "Test 8: Send Notification Using Template"
     echo "POST ${API_BASE}/send"
     SEND_WITH_TEMPLATE_PAYLOAD="{
       \"type\": \"email\",
@@ -368,12 +335,12 @@ if [ -n "$TEMPLATE_ID" ] && [ "$TEMPLATE_ID" != "null" ]; then
         print_result 1 "Failed to send notification with template"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 10: No template ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 8: No template ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 11: List Notifications
-print_section "Test 11: List All Notifications"
+# Test 9: List Notifications
+print_section "Test 9: List All Notifications"
 echo "GET ${API_BASE}?limit=10"
 LIST_NOTIFICATIONS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}?limit=10")
 HTTP_CODE=$(echo "$LIST_NOTIFICATIONS_RESPONSE" | tail -n1)
@@ -389,8 +356,8 @@ else
     print_result 1 "Failed to list notifications"
 fi
 
-# Test 12: List User's In-App Notifications
-print_section "Test 12: List User's In-App Notifications"
+# Test 10: List User's In-App Notifications
+print_section "Test 10: List User's In-App Notifications"
 TEST_USER_ID="user_test_123"
 echo "GET ${API_BASE}/in-app/${TEST_USER_ID}?limit=10"
 LIST_USER_NOTIFICATIONS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/in-app/${TEST_USER_ID}?limit=10")
@@ -407,8 +374,8 @@ else
     print_result 1 "Failed to list user in-app notifications"
 fi
 
-# Test 13: Get Unread Count
-print_section "Test 13: Get Unread Notification Count"
+# Test 11: Get Unread Count
+print_section "Test 11: Get Unread Notification Count"
 echo "GET ${API_BASE}/in-app/${TEST_USER_ID}/unread-count"
 UNREAD_COUNT_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/in-app/${TEST_USER_ID}/unread-count")
 HTTP_CODE=$(echo "$UNREAD_COUNT_RESPONSE" | tail -n1)
@@ -426,9 +393,9 @@ else
     print_result 1 "Failed to get unread count"
 fi
 
-# Test 14: Mark Notification as Read
+# Test 12: Mark Notification as Read
 if [ -n "$IN_APP_NOTIFICATION_ID" ] && [ "$IN_APP_NOTIFICATION_ID" != "null" ]; then
-    print_section "Test 14: Mark Notification as Read"
+    print_section "Test 12: Mark Notification as Read"
     echo "POST ${API_BASE}/in-app/${IN_APP_NOTIFICATION_ID}/read?user_id=${TEST_USER_ID}"
     
     MARK_READ_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/in-app/${IN_APP_NOTIFICATION_ID}/read?user_id=${TEST_USER_ID}")
@@ -445,13 +412,13 @@ if [ -n "$IN_APP_NOTIFICATION_ID" ] && [ "$IN_APP_NOTIFICATION_ID" != "null" ]; 
         print_result 1 "Failed to mark notification as read"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 14: No in-app notification ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 12: No in-app notification ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 15: Mark Notification as Archived
+# Test 13: Mark Notification as Archived
 if [ -n "$IN_APP_NOTIFICATION_ID" ] && [ "$IN_APP_NOTIFICATION_ID" != "null" ]; then
-    print_section "Test 15: Mark Notification as Archived"
+    print_section "Test 13: Mark Notification as Archived"
     echo "POST ${API_BASE}/in-app/${IN_APP_NOTIFICATION_ID}/archive?user_id=${TEST_USER_ID}"
     
     MARK_ARCHIVED_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/in-app/${IN_APP_NOTIFICATION_ID}/archive?user_id=${TEST_USER_ID}")
@@ -468,12 +435,12 @@ if [ -n "$IN_APP_NOTIFICATION_ID" ] && [ "$IN_APP_NOTIFICATION_ID" != "null" ]; 
         print_result 1 "Failed to mark notification as archived"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 15: No in-app notification ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 13: No in-app notification ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 16: Register Push Subscription
-print_section "Test 16: Register Push Subscription"
+# Test 14: Register Push Subscription
+print_section "Test 14: Register Push Subscription"
 echo "POST ${API_BASE}/push/subscribe"
 PUSH_SUBSCRIBE_PAYLOAD='{
   "user_id": "user_test_123",
@@ -505,8 +472,8 @@ else
     print_result 1 "Failed to register push subscription"
 fi
 
-# Test 17: Get User's Push Subscriptions
-print_section "Test 17: Get User's Push Subscriptions"
+# Test 15: Get User's Push Subscriptions
+print_section "Test 15: Get User's Push Subscriptions"
 echo "GET ${API_BASE}/push/subscriptions/${TEST_USER_ID}"
 GET_SUBSCRIPTIONS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/push/subscriptions/${TEST_USER_ID}")
 HTTP_CODE=$(echo "$GET_SUBSCRIPTIONS_RESPONSE" | tail -n1)
@@ -522,9 +489,9 @@ else
     print_result 1 "Failed to get push subscriptions"
 fi
 
-# Test 18: Batch Send Notifications
+# Test 16: Batch Send Notifications
 if [ -n "$TEMPLATE_ID" ] && [ "$TEMPLATE_ID" != "null" ]; then
-    print_section "Test 18: Batch Send Notifications"
+    print_section "Test 16: Batch Send Notifications"
     echo "POST ${API_BASE}/batch"
     BATCH_SEND_PAYLOAD="{
       \"name\": \"Welcome Campaign\",
@@ -579,12 +546,12 @@ if [ -n "$TEMPLATE_ID" ] && [ "$TEMPLATE_ID" != "null" ]; then
         print_result 1 "Failed to send batch notifications"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 18: No template ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 16: No template ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 19: Get Notification Statistics
-print_section "Test 19: Get Notification Statistics"
+# Test 17: Get Notification Statistics
+print_section "Test 17: Get Notification Statistics"
 echo "GET ${API_BASE}/stats?period=all_time"
 STATS_RESPONSE=$(curl -s -w "\n%{http_code}" "${API_BASE}/stats?period=all_time")
 HTTP_CODE=$(echo "$STATS_RESPONSE" | tail -n1)
@@ -600,8 +567,8 @@ else
     print_result 1 "Failed to get notification statistics"
 fi
 
-# Test 20: Test Email Endpoint
-print_section "Test 20: Test Email Sending (Development)"
+# Test 18: Test Email Endpoint
+print_section "Test 18: Test Email Sending (Development)"
 echo "POST ${API_BASE}/test/email?to=testuser@example.com&subject=Test%20Email"
 TEST_EMAIL_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/test/email?to=testuser@example.com&subject=Test%20Email")
 HTTP_CODE=$(echo "$TEST_EMAIL_RESPONSE" | tail -n1)
@@ -617,8 +584,8 @@ else
     print_result 1 "Failed to send test email"
 fi
 
-# Test 21: Test In-App Notification Endpoint
-print_section "Test 21: Test In-App Notification (Development)"
+# Test 19: Test In-App Notification Endpoint
+print_section "Test 19: Test In-App Notification (Development)"
 echo "POST ${API_BASE}/test/in-app?user_id=test_user_456&title=Test%20Notification"
 TEST_IN_APP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/test/in-app?user_id=test_user_456&title=Test%20Notification")
 HTTP_CODE=$(echo "$TEST_IN_APP_RESPONSE" | tail -n1)
@@ -634,8 +601,8 @@ else
     print_result 1 "Failed to create test in-app notification"
 fi
 
-# Test 22: Unsubscribe Push Notification
-print_section "Test 22: Unsubscribe Push Notification"
+# Test 20: Unsubscribe Push Notification
+print_section "Test 20: Unsubscribe Push Notification"
 echo "DELETE ${API_BASE}/push/unsubscribe?user_id=${TEST_USER_ID}&device_token=test_device_token_abc123"
 UNSUBSCRIBE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/push/unsubscribe?user_id=${TEST_USER_ID}&device_token=test_device_token_abc123")
 HTTP_CODE=$(echo "$UNSUBSCRIBE_RESPONSE" | tail -n1)

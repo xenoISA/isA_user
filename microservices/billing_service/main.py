@@ -4,31 +4,41 @@ Billing Microservice API
 专注于使用量跟踪、费用计算和计费处理的REST API服务
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Request
-from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional, List
+import asyncio
 import logging
 import os
 import sys
-import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 # 添加父目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+
 from isa_common.consul_client import ConsulRegistry
 
 from .billing_repository import BillingRepository
 from .billing_service import BillingService
-from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
-    RecordUsageRequest, BillingCalculationRequest, BillingCalculationResponse,
-    ProcessBillingRequest, ProcessBillingResponse, QuotaCheckRequest, QuotaCheckResponse,
-    UsageStatsRequest, UsageStatsResponse, BillingStats,
-    HealthResponse, ServiceInfo
+    BillingCalculationRequest,
+    BillingCalculationResponse,
+    BillingStats,
+    HealthResponse,
+    ProcessBillingRequest,
+    ProcessBillingResponse,
+    QuotaCheckRequest,
+    QuotaCheckResponse,
+    RecordUsageRequest,
+    ServiceInfo,
+    UsageStatsRequest,
+    UsageStatsResponse,
 )
+from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # 初始化配置管理器
 config_manager = ConfigManager("billing_service")
@@ -63,7 +73,7 @@ async def lifespan(app: FastAPI):
         # 初始化并启动事件订阅器 (CRITICAL for event-driven billing)
         # Initialize NATS JetStream event bus
         try:
-            from .event_handlers import BillingEventHandlers
+            from .events import get_event_handlers
 
             event_bus = await get_event_bus("billing_service")
             logger.info("✅ Event bus initialized successfully")
@@ -71,26 +81,27 @@ async def lifespan(app: FastAPI):
             # 初始化业务服务 with event bus
             billing_service = BillingService(repository, event_bus=event_bus)
 
-            # Initialize event handlers
-            event_handlers = BillingEventHandlers(billing_service)
+            # Get event handlers
+            handler_map = get_event_handlers(billing_service, event_bus)
 
             # Subscribe to events
-            handler_map = event_handlers.get_event_handler_map()
-            for event_type, handler_func in handler_map.items():
-                # Subscribe to each event type
-                # Convert event type like "session.tokens_used" to subscription pattern "*.session.tokens_used"
+            for pattern, handler_func in handler_map.items():
                 await event_bus.subscribe_to_events(
-                    pattern=f"*.{event_type}",
-                    handler=handler_func
+                    pattern=pattern,
+                    handler=handler_func,
+                    durable=f"billing-{pattern.replace('.', '-').replace('*', 'all')}-consumer",
                 )
-                logger.info(f"✅ Subscribed to {event_type} events")
+                logger.info(f"✅ Subscribed to {pattern}")
 
-            logger.info(f"✅ Billing event subscriber started ({len(handler_map)} event types)")
+            logger.info(
+                f"✅ Billing event subscriber started ({len(handler_map)} event patterns)"
+            )
 
         except Exception as e:
-            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event subscriptions.")
+            logger.warning(
+                f"⚠️  Failed to initialize event bus: {e}. Continuing without event subscriptions."
+            )
             event_bus = None
-            event_handlers = None
 
             # 初始化业务服务 without event bus
             billing_service = BillingService(repository, event_bus=None)
@@ -103,29 +114,31 @@ async def lifespan(app: FastAPI):
 
                 # Merge service metadata
                 consul_meta = {
-                    'version': SERVICE_METADATA['version'],
-                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                    **route_meta
+                    "version": SERVICE_METADATA["version"],
+                    "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                    **route_meta,
                 }
 
                 consul_registry = ConsulRegistry(
-                    service_name=SERVICE_METADATA['service_name'],
+                    service_name=SERVICE_METADATA["service_name"],
                     service_port=config.service_port,
                     consul_host=config.consul_host,
                     consul_port=config.consul_port,
-                    tags=SERVICE_METADATA['tags'],
+                    tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type='http'
+                    health_check_type="http",
                 )
                 consul_registry.register()
-                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+                logger.info(
+                    f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+                )
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
                 consul_registry = None
 
         logger.info(f"✅ Billing service started on port {SERVICE_PORT}")
         yield
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize billing service: {e}")
         raise
@@ -156,13 +169,14 @@ app = FastAPI(
     title="Billing Service",
     description="专注于使用量跟踪、费用计算和计费处理",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
 # ====================
 # 依赖注入
 # ====================
+
 
 async def get_billing_service() -> BillingService:
     """获取计费服务实例"""
@@ -174,6 +188,7 @@ async def get_billing_service() -> BillingService:
 # ====================
 # 健康检查和服务信息
 # ====================
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -192,11 +207,13 @@ async def health_check():
         dependencies["database"] = "unhealthy"
 
     return HealthResponse(
-        status="healthy" if all(v == "healthy" for v in dependencies.values()) else "degraded",
+        status="healthy"
+        if all(v == "healthy" for v in dependencies.values())
+        else "degraded",
         service="billing_service",
         port=SERVICE_PORT,
         version="1.0.0",
-        dependencies=dependencies
+        dependencies=dependencies,
     )
 
 
@@ -212,7 +229,7 @@ async def get_service_info():
             "cost_calculation",
             "billing_processing",
             "quota_management",
-            "billing_analytics"
+            "billing_analytics",
         ],
         supported_services=[
             "model_inference",
@@ -220,14 +237,14 @@ async def get_service_info():
             "agent_execution",
             "storage_minio",
             "api_gateway",
-            "notification"
+            "notification",
         ],
         supported_billing_methods=[
             "wallet_deduction",
             "payment_charge",
             "credit_consumption",
-            "subscription_included"
-        ]
+            "subscription_included",
+        ],
     )
 
 
@@ -235,10 +252,10 @@ async def get_service_info():
 # 核心计费API
 # ====================
 
+
 @app.post("/api/v1/billing/usage/record", response_model=ProcessBillingResponse)
 async def record_usage_and_bill(
-    request: RecordUsageRequest,
-    service: BillingService = Depends(get_billing_service)
+    request: RecordUsageRequest, service: BillingService = Depends(get_billing_service)
 ):
     """记录使用量并立即计费（核心API）"""
     try:
@@ -259,13 +276,13 @@ async def record_usage_and_bill(
 @app.post("/api/v1/billing/calculate", response_model=BillingCalculationResponse)
 async def calculate_billing_cost(
     request: BillingCalculationRequest,
-    service: BillingService = Depends(get_billing_service)
+    service: BillingService = Depends(get_billing_service),
 ):
     """计算计费费用"""
     try:
         result = await service.calculate_billing_cost(request)
         return result
-        
+
     except Exception as e:
         logger.error(f"Error calculating billing cost: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -274,17 +291,17 @@ async def calculate_billing_cost(
 @app.post("/api/v1/billing/process", response_model=ProcessBillingResponse)
 async def process_billing(
     request: ProcessBillingRequest,
-    service: BillingService = Depends(get_billing_service)
+    service: BillingService = Depends(get_billing_service),
 ):
     """处理计费（实际扣费）"""
     try:
         result = await service.process_billing(request)
-        
+
         if not result.success:
             raise HTTPException(status_code=400, detail=result.message)
-        
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -296,10 +313,10 @@ async def process_billing(
 # 配额管理API
 # ====================
 
+
 @app.post("/api/v1/billing/quota/check", response_model=QuotaCheckResponse)
 async def check_quota(
-    request: QuotaCheckRequest,
-    service: BillingService = Depends(get_billing_service)
+    request: QuotaCheckRequest, service: BillingService = Depends(get_billing_service)
 ):
     """检查配额"""
     try:
@@ -315,6 +332,7 @@ async def check_quota(
 # 查询和统计API
 # ====================
 
+
 @app.get("/api/v1/billing/records/user/{user_id}")
 async def get_user_billing_records(
     user_id: str,
@@ -324,15 +342,15 @@ async def get_user_billing_records(
     end_date: Optional[datetime] = None,
     limit: int = 100,
     offset: int = 0,
-    service: BillingService = Depends(get_billing_service)
+    service: BillingService = Depends(get_billing_service),
 ):
     """获取用户计费记录"""
     try:
         from .models import BillingStatus, ServiceType
-        
+
         billing_status = BillingStatus(status) if status else None
         billing_service_type = ServiceType(service_type) if service_type else None
-        
+
         records = await service.repository.get_user_billing_records(
             user_id=user_id,
             status=billing_status,
@@ -340,17 +358,17 @@ async def get_user_billing_records(
             start_date=start_date,
             end_date=end_date,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
-        
+
         return {
             "user_id": user_id,
             "records": [record.model_dump() for record in records],
             "total_count": len(records),
             "limit": limit,
-            "offset": offset
+            "offset": offset,
         }
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid parameter: {str(e)}")
     except Exception as e:
@@ -360,18 +378,17 @@ async def get_user_billing_records(
 
 @app.get("/api/v1/billing/record/{billing_id}")
 async def get_billing_record(
-    billing_id: str,
-    service: BillingService = Depends(get_billing_service)
+    billing_id: str, service: BillingService = Depends(get_billing_service)
 ):
     """获取单个计费记录"""
     try:
         record = await service.repository.get_billing_record(billing_id)
-        
+
         if not record:
             raise HTTPException(status_code=404, detail="Billing record not found")
-        
+
         return record.model_dump()
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -389,14 +406,14 @@ async def get_usage_aggregations(
     period_end: Optional[datetime] = None,
     period_type: Optional[str] = None,
     limit: int = 100,
-    service: BillingService = Depends(get_billing_service)
+    service: BillingService = Depends(get_billing_service),
 ):
     """获取使用量聚合数据"""
     try:
         from .models import ServiceType
-        
+
         billing_service_type = ServiceType(service_type) if service_type else None
-        
+
         aggregations = await service.repository.get_usage_aggregations(
             user_id=user_id,
             organization_id=organization_id,
@@ -405,9 +422,9 @@ async def get_usage_aggregations(
             period_start=period_start,
             period_end=period_end,
             period_type=period_type,
-            limit=limit
+            limit=limit,
         )
-        
+
         return {
             "aggregations": [agg.model_dump() for agg in aggregations],
             "total_count": len(aggregations),
@@ -418,10 +435,10 @@ async def get_usage_aggregations(
                 "service_type": service_type,
                 "period_start": period_start,
                 "period_end": period_end,
-                "period_type": period_type
-            }
+                "period_type": period_type,
+            },
         }
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid parameter: {str(e)}")
     except Exception as e:
@@ -433,13 +450,13 @@ async def get_usage_aggregations(
 async def get_billing_statistics(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    service: BillingService = Depends(get_billing_service)
+    service: BillingService = Depends(get_billing_service),
 ):
     """获取计费统计"""
     try:
         stats = await service.get_billing_statistics(start_date, end_date)
         return stats
-        
+
     except Exception as e:
         logger.error(f"Error getting billing statistics: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -449,6 +466,7 @@ async def get_billing_statistics(
 # 管理API
 # ====================
 
+
 @app.put("/api/v1/billing/record/{billing_id}/status")
 async def update_billing_record_status(
     billing_id: str,
@@ -456,31 +474,31 @@ async def update_billing_record_status(
     failure_reason: Optional[str] = None,
     wallet_transaction_id: Optional[str] = None,
     payment_transaction_id: Optional[str] = None,
-    service: BillingService = Depends(get_billing_service)
+    service: BillingService = Depends(get_billing_service),
 ):
     """更新计费记录状态（管理员功能）"""
     try:
         from .models import BillingStatus
-        
+
         billing_status = BillingStatus(status)
-        
+
         updated_record = await service.repository.update_billing_record_status(
             billing_id=billing_id,
             status=billing_status,
             failure_reason=failure_reason,
             wallet_transaction_id=wallet_transaction_id,
-            payment_transaction_id=payment_transaction_id
+            payment_transaction_id=payment_transaction_id,
         )
-        
+
         if not updated_record:
             raise HTTPException(status_code=404, detail="Billing record not found")
-        
+
         return {
             "success": True,
             "message": "Billing record status updated",
-            "billing_record": updated_record.model_dump()
+            "billing_record": updated_record.model_dump(),
         }
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid status: {str(e)}")
     except HTTPException:
@@ -494,22 +512,21 @@ async def update_billing_record_status(
 # 错误处理
 # ====================
 
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """全局异常处理"""
     logger.error(f"Unhandled exception in {request.url}: {exc}", exc_info=True)
-    return HTTPException(
-        status_code=500,
-        detail="Internal server error occurred"
-    )
+    return HTTPException(status_code=500, detail="Internal server error occurred")
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "microservices.billing_service.main:app",
         host="0.0.0.0",
         port=SERVICE_PORT,
         reload=config.debug,
-        log_level=config.log_level.lower()
+        log_level=config.log_level.lower(),
     )

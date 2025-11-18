@@ -40,7 +40,7 @@ from .models import (
     MemoryServiceStatus
 )
 from .memory_service import MemoryService
-from .event_handlers import MemoryEventHandlers
+from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize configuration

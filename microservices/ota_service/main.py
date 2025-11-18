@@ -39,15 +39,33 @@ config = config_manager.get_service_config()
 app_logger = setup_service_logger("ota_service")
 logger = app_logger  # for backward compatibility
 
+# Global client instances
+device_client = None
+storage_client = None
+notification_client = None
+
 # Service instance
 class OTAMicroservice:
     def __init__(self):
         self.service = None
         self.event_bus = None
 
-    async def initialize(self, event_bus=None, config=None):
+    async def initialize(
+        self,
+        event_bus=None,
+        config=None,
+        device_client=None,
+        storage_client=None,
+        notification_client=None
+    ):
         self.event_bus = event_bus
-        self.service = OTAService(event_bus=event_bus, config=config)
+        self.service = OTAService(
+            event_bus=event_bus,
+            config=config,
+            device_client=device_client,
+            storage_client=storage_client,
+            notification_client=notification_client
+        )
         logger.info("OTA service initialized")
 
     async def shutdown(self):
@@ -66,6 +84,7 @@ microservice = OTAMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    global device_client, storage_client, notification_client
     consul_registry = None
 
     # Initialize event bus
@@ -77,8 +96,29 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
 
+    # Initialize service clients
+    try:
+        from .clients import DeviceClient, StorageClient, NotificationClient
+
+        device_client = DeviceClient(config=config_manager)
+        storage_client = StorageClient(config=config_manager)
+        notification_client = NotificationClient(config=config_manager)
+
+        logger.info("✅ Service clients initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize service clients: {e}")
+        device_client = None
+        storage_client = None
+        notification_client = None
+
     # Startup
-    await microservice.initialize(event_bus=event_bus, config=config_manager)
+    await microservice.initialize(
+        event_bus=event_bus,
+        config=config_manager,
+        device_client=device_client,
+        storage_client=storage_client,
+        notification_client=notification_client
+    )
 
     # Set up event subscriptions
     if event_bus:
@@ -127,18 +167,45 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    if consul_registry:
-        try:
-            consul_registry.deregister()
-            logger.info("✅ OTA service deregistered from Consul")
-        except Exception as e:
-            logger.error(f"❌ Failed to deregister from Consul: {e}")
+    try:
+        # Consul deregistration
+        if consul_registry:
+            try:
+                consul_registry.deregister()
+                logger.info("✅ OTA service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
 
-    if event_bus:
-        await event_bus.close()
+        # Close service clients
+        if device_client:
+            try:
+                await device_client.close()
+                logger.info("✅ Device client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close device client: {e}")
 
-    await microservice.shutdown()
-    logger.info("OTA Service shutting down...")
+        if storage_client:
+            try:
+                await storage_client.close()
+                logger.info("✅ Storage client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close storage client: {e}")
+
+        if notification_client:
+            try:
+                await notification_client.close()
+                logger.info("✅ Notification client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close notification client: {e}")
+
+        if event_bus:
+            await event_bus.close()
+
+        await microservice.shutdown()
+        logger.info("OTA Service shutting down...")
+
+    except Exception as e:
+        logger.error(f"❌ Error during shutdown: {e}")
 
 # Create FastAPI application
 app = FastAPI(
@@ -277,7 +344,7 @@ async def get_user_context(
 # Firmware Management
 # ======================
 
-@app.post("/api/v1/firmware", response_model=FirmwareResponse)
+@app.post("/api/v1/ota/firmware", response_model=FirmwareResponse)
 async def upload_firmware(
     metadata: str = Body(..., description="Firmware metadata as JSON string"),
     file: UploadFile = File(..., description="Firmware binary file"),
@@ -311,7 +378,7 @@ async def upload_firmware(
         logger.error(f"Error uploading firmware: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/firmware/{firmware_id}", response_model=FirmwareResponse)
+@app.get("/api/v1/ota/firmware/{firmware_id}", response_model=FirmwareResponse)
 async def get_firmware(
     firmware_id: str = Path(..., description="Firmware ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -326,7 +393,7 @@ async def get_firmware(
         logger.error(f"Error getting firmware: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/firmware")
+@app.get("/api/v1/ota/firmware")
 async def list_firmware(
     device_model: Optional[str] = Query(None, description="Filter by device model"),
     manufacturer: Optional[str] = Query(None, description="Filter by manufacturer"),
@@ -392,7 +459,7 @@ async def list_firmware(
         logger.error(f"Error listing firmware: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/firmware/{firmware_id}/download")
+@app.get("/api/v1/ota/firmware/{firmware_id}/download")
 async def download_firmware(
     firmware_id: str = Path(..., description="Firmware ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -416,7 +483,7 @@ async def download_firmware(
         logger.error(f"Error downloading firmware: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/v1/firmware/{firmware_id}")
+@app.delete("/api/v1/ota/firmware/{firmware_id}")
 async def delete_firmware(
     firmware_id: str = Path(..., description="Firmware ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -434,7 +501,7 @@ async def delete_firmware(
 # Update Campaigns
 # ======================
 
-@app.post("/api/v1/campaigns", response_model=UpdateCampaignResponse)
+@app.post("/api/v1/ota/campaigns", response_model=UpdateCampaignResponse)
 async def create_campaign(
     request: UpdateCampaignRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -452,7 +519,7 @@ async def create_campaign(
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/campaigns/{campaign_id}", response_model=UpdateCampaignResponse)
+@app.get("/api/v1/ota/campaigns/{campaign_id}", response_model=UpdateCampaignResponse)
 async def get_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -467,7 +534,7 @@ async def get_campaign(
         logger.error(f"Error getting campaign: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/campaigns")
+@app.get("/api/v1/ota/campaigns")
 async def list_campaigns(
     status: Optional[UpdateStatus] = Query(None, description="Filter by status"),
     priority: Optional[Priority] = Query(None, description="Filter by priority"),
@@ -545,7 +612,7 @@ async def list_campaigns(
         logger.error(f"Error listing campaigns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/campaigns/{campaign_id}/start")
+@app.post("/api/v1/ota/campaigns/{campaign_id}/start")
 async def start_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -560,7 +627,7 @@ async def start_campaign(
         logger.error(f"Error starting campaign: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/campaigns/{campaign_id}/pause")
+@app.post("/api/v1/ota/campaigns/{campaign_id}/pause")
 async def pause_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -568,7 +635,7 @@ async def pause_campaign(
     """暂停更新活动"""
     return {"message": f"Campaign {campaign_id} paused"}
 
-@app.post("/api/v1/campaigns/{campaign_id}/cancel")
+@app.post("/api/v1/ota/campaigns/{campaign_id}/cancel")
 async def cancel_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -576,7 +643,7 @@ async def cancel_campaign(
     """取消更新活动"""
     return {"message": f"Campaign {campaign_id} cancelled"}
 
-@app.post("/api/v1/campaigns/{campaign_id}/approve", response_model=UpdateCampaignResponse)
+@app.post("/api/v1/ota/campaigns/{campaign_id}/approve", response_model=UpdateCampaignResponse)
 async def approve_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     request: UpdateApprovalRequest = Body(...),
@@ -602,7 +669,7 @@ async def approve_campaign(
 # Device Updates
 # ======================
 
-@app.post("/api/v1/devices/{device_id}/update", response_model=DeviceUpdateResponse)
+@app.post("/api/v1/ota/devices/{device_id}/update", response_model=DeviceUpdateResponse)
 async def update_device(
     device_id: str = Path(..., description="Device ID"),
     request: DeviceUpdateRequest = Body(...),
@@ -625,7 +692,7 @@ async def update_device(
         logger.error(f"Error updating device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/updates/{update_id}", response_model=DeviceUpdateResponse)
+@app.get("/api/v1/ota/updates/{update_id}", response_model=DeviceUpdateResponse)
 async def get_update_progress(
     update_id: str = Path(..., description="Update ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -642,7 +709,7 @@ async def get_update_progress(
         logger.error(f"Error getting update progress: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/{device_id}/updates", response_model=UpdateHistoryResponse)
+@app.get("/api/v1/ota/devices/{device_id}/updates", response_model=UpdateHistoryResponse)
 async def get_device_update_history(
     device_id: str = Path(..., description="Device ID"),
     limit: int = Query(50, ge=1, le=200, description="Max updates to return"),
@@ -659,7 +726,7 @@ async def get_device_update_history(
         last_update=None
     )
 
-@app.post("/api/v1/updates/{update_id}/cancel")
+@app.post("/api/v1/ota/updates/{update_id}/cancel")
 async def cancel_update(
     update_id: str = Path(..., description="Update ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -674,7 +741,7 @@ async def cancel_update(
         logger.error(f"Error cancelling update: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/updates/{update_id}/retry")
+@app.post("/api/v1/ota/updates/{update_id}/retry")
 async def retry_update(
     update_id: str = Path(..., description="Update ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -686,7 +753,7 @@ async def retry_update(
 # Rollback Operations
 # ======================
 
-@app.post("/api/v1/devices/{device_id}/rollback", response_model=RollbackResponse)
+@app.post("/api/v1/ota/devices/{device_id}/rollback", response_model=RollbackResponse)
 async def rollback_device(
     device_id: str = Path(..., description="Device ID"),
     to_version: str = Body(..., embed=True),
@@ -703,7 +770,7 @@ async def rollback_device(
         logger.error(f"Error rolling back device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/campaigns/{campaign_id}/rollback")
+@app.post("/api/v1/ota/campaigns/{campaign_id}/rollback")
 async def rollback_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     reason: str = Body("Campaign rollback", embed=True),
@@ -716,7 +783,7 @@ async def rollback_campaign(
 # Statistics & Analytics
 # ======================
 
-@app.get("/api/v1/stats", response_model=UpdateStatsResponse)
+@app.get("/api/v1/ota/stats", response_model=UpdateStatsResponse)
 async def get_update_stats(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
@@ -730,7 +797,7 @@ async def get_update_stats(
         logger.error(f"Error getting update stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/stats/campaigns/{campaign_id}")
+@app.get("/api/v1/ota/stats/campaigns/{campaign_id}")
 async def get_campaign_stats(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -750,7 +817,7 @@ async def get_campaign_stats(
 # Batch Operations
 # ======================
 
-@app.post("/api/v1/devices/bulk/update")
+@app.post("/api/v1/ota/devices/bulk/update")
 async def bulk_update_devices(
     device_ids: List[str] = Body(..., embed=True),
     firmware_id: str = Body(..., embed=True),
@@ -784,7 +851,7 @@ async def bulk_update_devices(
 # Service Statistics
 # ======================
 
-@app.get("/api/v1/service/stats")
+@app.get("/api/v1/ota/service/stats")
 async def get_service_stats():
     """获取服务统计信息"""
     return {

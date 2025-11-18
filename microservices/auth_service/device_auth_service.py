@@ -59,8 +59,29 @@ class DeviceAuthService:
             
             # 创建设备凭证
             result = await self.repository.create_device_credential(credential_data)
-            
+
             if result:
+                # Publish device.registered event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type=EventType.DEVICE_REGISTERED,
+                            source=ServiceSource.AUTH_SERVICE,
+                            data={
+                                "device_id": result['device_id'],
+                                "organization_id": result['organization_id'],
+                                "device_name": result.get('device_name'),
+                                "device_type": result.get('device_type'),
+                                "status": result['status'],
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published device.registered event for device {result['device_id']}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish device.registered event: {e}")
+                        # Don't fail registration if event publishing fails
+
                 # 返回包含明文密钥的结果（仅在注册时返回）
                 return {
                     'success': True,
@@ -349,3 +370,115 @@ class DeviceAuthService:
                 'error': str(e),
                 'logs': []
             }
+    # ============================================================================
+    # Device Pairing Methods
+    # ============================================================================
+
+    async def generate_pairing_token(self, device_id: str) -> Dict[str, Any]:
+        """
+        Generate a temporary pairing token for a device
+        
+        Args:
+            device_id: Device ID
+            
+        Returns:
+            Dict with pairing token and expiration
+        """
+        import secrets
+        from datetime import datetime, timedelta, timezone
+        
+        try:
+            # Generate random pairing token (URL-safe)
+            pairing_token = secrets.token_urlsafe(32)
+            
+            # Set expiration (5 minutes from now)
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+            
+            # Store in database
+            token_data = await self.repository.create_pairing_token(
+                device_id=device_id,
+                pairing_token=pairing_token,
+                expires_at=expires_at
+            )
+            
+            if not token_data:
+                return {
+                    "success": False,
+                    "error": "Failed to create pairing token"
+                }
+            
+            # Publish event (if event bus available)
+            if self.event_bus:
+                from events.publishers import publish_device_pairing_token_generated
+                await publish_device_pairing_token_generated(
+                    event_bus=self.event_bus,
+                    device_id=device_id,
+                    pairing_token=pairing_token,
+                    expires_at=expires_at
+                )
+            
+            logger.info(f"Generated pairing token for device {device_id}")
+            
+            return {
+                "success": True,
+                "pairing_token": pairing_token,
+                "expires_at": expires_at.isoformat(),
+                "expires_in": 300
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating pairing token: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def verify_pairing_token(
+        self,
+        device_id: str,
+        pairing_token: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        Verify a device pairing token
+        """
+        from datetime import datetime, timezone
+        
+        try:
+            token_data = await self.repository.get_pairing_token(pairing_token)
+            
+            if not token_data:
+                return {"valid": False, "error": "Invalid pairing token"}
+            
+            if token_data['device_id'] != device_id:
+                return {"valid": False, "error": "Token does not match device"}
+            
+            if token_data['used']:
+                return {"valid": False, "error": "Token has already been used"}
+            
+            now = datetime.now(timezone.utc)
+            if token_data['expires_at'] < now:
+                return {"valid": False, "error": "Token has expired"}
+            
+            await self.repository.mark_pairing_token_used(pairing_token, user_id)
+            
+            if self.event_bus:
+                from events.publishers import publish_device_pairing_token_verified
+                await publish_device_pairing_token_verified(
+                    event_bus=self.event_bus,
+                    device_id=device_id,
+                    user_id=user_id,
+                    pairing_token=pairing_token
+                )
+            
+            logger.info(f"Pairing token verified for device {device_id}, user {user_id}")
+            
+            return {
+                "valid": True,
+                "device_id": device_id,
+                "user_id": user_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error verifying pairing token: {e}", exc_info=True)
+            return {"valid": False, "error": str(e)}

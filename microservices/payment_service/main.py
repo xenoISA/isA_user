@@ -48,21 +48,40 @@ if config.debug:
 # 全局变量
 payment_service: Optional[PaymentService] = None
 consul_registry = None
+account_client = None
+wallet_client = None
+billing_client = None
+product_client = None
 SERVICE_PORT = config.service_port
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    global payment_service, consul_registry
+    global payment_service, consul_registry, account_client, wallet_client, billing_client, product_client
+
+    # Initialize service clients
+    try:
+        from .clients import AccountClient, WalletClient, BillingClient, ProductClient
+        account_client = AccountClient(config=config_manager)
+        wallet_client = WalletClient(config=config_manager)
+        billing_client = BillingClient(config=config_manager)
+        product_client = ProductClient(config=config_manager)
+        logger.info("✅ Service clients initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize service clients: {e}")
+        account_client = None
+        wallet_client = None
+        billing_client = None
+        product_client = None
 
     # Initialize event bus for event-driven communication
     event_bus = None
     try:
         event_bus = await get_event_bus("payment_service")
-        logger.info("Event bus initialized successfully")
+        logger.info("✅ Event bus initialized successfully")
     except Exception as e:
-        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
 
     # 初始化数据访问层
     repository = PaymentRepository(config=config_manager)
@@ -75,8 +94,21 @@ async def lifespan(app: FastAPI):
         repository=repository,
         stripe_secret_key=stripe_key,
         event_bus=event_bus,
+        account_client=account_client,
+        wallet_client=wallet_client,
+        billing_client=billing_client,
+        product_client=product_client,
         config=config_manager
     )
+
+    # Register event handlers
+    if event_bus:
+        try:
+            from .events.handlers import register_event_handlers
+            await register_event_handlers(event_bus, payment_service)
+            logger.info("✅ Event handlers registered successfully")
+        except Exception as e:
+            logger.error(f"⚠️  Failed to register event handlers: {e}")
 
     # Consul service registration
     if config.consul_enabled:
@@ -111,6 +143,35 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    # Close service clients
+    if account_client:
+        try:
+            await account_client.close()
+            logger.info("Account client closed")
+        except Exception as e:
+            logger.error(f"Error closing account client: {e}")
+
+    if wallet_client:
+        try:
+            await wallet_client.close()
+            logger.info("Wallet client closed")
+        except Exception as e:
+            logger.error(f"Error closing wallet client: {e}")
+
+    if billing_client:
+        try:
+            await billing_client.close()
+            logger.info("Billing client closed")
+        except Exception as e:
+            logger.error(f"Error closing billing client: {e}")
+
+    if product_client:
+        try:
+            await product_client.close()
+            logger.info("Product client closed")
+        except Exception as e:
+            logger.error(f"Error closing product client: {e}")
+
     # Consul deregistration
     if consul_registry:
         try:
@@ -545,7 +606,7 @@ async def handle_stripe_webhook(
 # 使用量记录
 # ====================
 
-@app.post("/api/v1/usage")
+@app.post("/api/v1/payments/usage")
 async def record_usage(
     user_id: str = Body(...),
     subscription_id: str = Body(...),
@@ -571,7 +632,7 @@ async def record_usage(
 # 统计和报告
 # ====================
 
-@app.get("/api/v1/stats/revenue")
+@app.get("/api/v1/payments/stats/revenue")
 async def get_revenue_stats(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None
@@ -579,17 +640,17 @@ async def get_revenue_stats(
     """获取收入统计"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    
+
     stats = await payment_service.get_revenue_stats(start_date, end_date)
     return stats
 
 
-@app.get("/api/v1/stats/subscriptions")
+@app.get("/api/v1/payments/stats/subscriptions")
 async def get_subscription_stats():
     """获取订阅统计"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    
+
     stats = await payment_service.get_subscription_stats()
     return stats
 

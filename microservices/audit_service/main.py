@@ -24,6 +24,7 @@ from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
 
 from .audit_service import AuditService
+from .events.handlers import AuditEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     AuditEventCreateRequest, AuditEventResponse, AuditQueryRequest, AuditQueryResponse,
@@ -68,10 +69,13 @@ async def lifespan(app: FastAPI):
             event_bus = await get_event_bus("audit_service")
             logger.info("✅ Event bus initialized successfully")
 
+            # Initialize event handlers
+            event_handlers = AuditEventHandlers(audit_service)
+
             # Subscribe to ALL events using wildcard pattern
             await event_bus.subscribe_to_events(
                 pattern="*.*",  # Subscribe to all events from all services
-                handler=audit_service.handle_nats_event
+                handler=event_handlers.handle_nats_event
             )
             logger.info("✅ Subscribed to all NATS events (*.*) for audit logging")
 

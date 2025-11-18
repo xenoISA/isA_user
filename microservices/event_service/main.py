@@ -83,52 +83,13 @@ async def lifespan(app: FastAPI):
         event_service = EventService(event_bus=event_bus, config_manager=config_manager)
         event_repository = event_service.repository
         await event_repository.initialize()
-        
-        # 连接NATS（可选）
-        try:
-            if config.nats_enabled and config.nats_url:
-                print(f"[event-service] Connecting to NATS at {config.nats_url}...")
 
-                # Connect with or without credentials based on configuration
-                connect_args = {
-                    "servers": [config.nats_url],
-                    "name": "event-service"
-                }
+        # All NATS access goes through isa_common nats_client (get_event_bus)
+        # No direct nats.connect() calls in microservices
+        print(f"[event-service] Using centralized event bus (NATS via gRPC)")
+        nats_client = None
+        js = None
 
-                # Only add credentials if explicitly configured
-                if hasattr(config, 'nats_username') and config.nats_username:
-                    connect_args["user"] = config.nats_username
-                if hasattr(config, 'nats_password') and config.nats_password:
-                    connect_args["password"] = config.nats_password
-
-                nats_client = await nats.connect(**connect_args)
-                js = nats_client.jetstream()
-            else:
-                print(f"[event-service] NATS disabled or not configured")
-                nats_client = None
-                js = None
-                raise Exception("NATS not enabled")
-            
-            # 创建NATS流
-            try:
-                await js.add_stream(
-                    name="EVENTS",
-                    subjects=["events.>"],
-                    retention="limits",
-                    max_msgs=1000000,
-                    max_age=30 * 24 * 60 * 60  # 30天
-                )
-            except Exception as e:
-                print(f"Stream might already exist: {e}")
-            
-            # 订阅NATS事件
-            await subscribe_to_nats_events()
-            print(f"[event-service] Connected to NATS successfully")
-        except Exception as e:
-            print(f"[event-service] NATS connection failed (will work without NATS): {e}")
-            nats_client = None
-            js = None
-        
         # 启动后台任务
         batch_size = int(config.get("batch_size", 100))
         asyncio.create_task(process_pending_events(batch_size))

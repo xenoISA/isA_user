@@ -3,7 +3,7 @@
 # Procedural Memory Testing Script
 # Tests procedural memory extraction and storage capabilities
 
-BASE_URL="http://localhost:8223"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/memories"
 
 # Colors for output
@@ -65,25 +65,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Extract Procedural Memory from Dialog
-print_section "Test 2: Extract Procedural Memory from Dialog (AI-Powered)"
+# Test 1: Extract Procedural Memory from Dialog
+print_section "Test 1: Extract Procedural Memory from Dialog (AI-Powered)"
 echo "POST ${API_BASE}/procedural/extract"
 EXTRACT_PAYLOAD='{
   "user_id": "test_user_789",
@@ -122,9 +105,9 @@ else
     print_result 1 "Failed to extract procedural memory"
 fi
 
-# Test 3: Get Procedural Memory by ID
+# Test 2: Get Procedural Memory by ID
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 3: Get Procedural Memory by ID"
+    print_section "Test 2: Get Procedural Memory by ID"
     echo "GET ${API_BASE}/procedural/${MEMORY_ID}?user_id=test_user_789"
 
     GET_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/procedural/${MEMORY_ID}?user_id=test_user_789")
@@ -146,12 +129,12 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to retrieve procedural memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 3: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 2: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 4: List All Procedural Memories
-print_section "Test 4: List All Procedural Memories for User"
+# Test 3: List All Procedural Memories
+print_section "Test 3: List All Procedural Memories for User"
 echo "GET ${API_BASE}?user_id=test_user_789&memory_type=procedural&limit=50"
 
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}?user_id=test_user_789&memory_type=procedural&limit=50")
@@ -169,8 +152,8 @@ else
     print_result 1 "Failed to list procedural memories"
 fi
 
-# Test 5: Extract Complex Procedure
-print_section "Test 5: Extract Complex Procedure with Multiple Steps"
+# Test 4: Extract Complex Procedure
+print_section "Test 4: Extract Complex Procedure with Multiple Steps"
 echo "POST ${API_BASE}/procedural/extract"
 COMPLEX_PAYLOAD='{
   "user_id": "test_user_789",
@@ -201,8 +184,8 @@ else
     print_result 1 "Failed to extract complex procedure"
 fi
 
-# Test 6: Extract Recipe Procedure
-print_section "Test 6: Extract Recipe Procedure"
+# Test 5: Extract Recipe Procedure
+print_section "Test 5: Extract Recipe Procedure"
 echo "POST ${API_BASE}/procedural/extract"
 RECIPE_PAYLOAD='{
   "user_id": "test_user_789",
@@ -233,9 +216,9 @@ else
     print_result 1 "Failed to extract recipe procedure"
 fi
 
-# Test 7: Update Procedural Memory
+# Test 6: Update Procedural Memory
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 7: Update Procedural Memory"
+    print_section "Test 6: Update Procedural Memory"
     echo "PUT ${API_BASE}/procedural/${MEMORY_ID}?user_id=test_user_789"
     UPDATE_PAYLOAD='{
       "importance_score": 0.95,
@@ -265,13 +248,13 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to update procedural memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 7: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 6: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 8: Delete Procedural Memory
+# Test 7: Delete Procedural Memory
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 8: Delete Procedural Memory"
+    print_section "Test 7: Delete Procedural Memory"
     echo "DELETE ${API_BASE}/procedural/${MEMORY_ID}?user_id=test_user_789"
 
     DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/procedural/${MEMORY_ID}?user_id=test_user_789")
@@ -293,7 +276,7 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to delete procedural memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 8: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 7: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

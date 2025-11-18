@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session
+  namespace: isa-cloud-staging
+  labels:
+    app: session
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: session
+  template:
+    metadata:
+      labels:
+        app: session
+        tier: applications
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: session
+          image: isa-session:latest
+          imagePullPolicy: IfNotPresent
+          
+          ports:
+            - name: http
+              containerPort: 8203
+          
+          envFrom:
+            - configMapRef:
+                name: user-config
+            - configMapRef:
+                name: data-config
+          
+          env:
+            - name: SERVICE_NAME
+              value: "session_service"
+            - name: SESSION_SERVICE_PORT
+              value: "8203"
+            - name: SERVICE_HOST
+              value: "session.isa-cloud-staging.svc.cluster.local"
+          
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8203
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8203
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: session
+  namespace: isa-cloud-staging
+  labels:
+    app: session
+    tier: applications
+spec:
+  type: ClusterIP
+  selector:
+    app: session
+  ports:
+    - name: http
+      port: 8203
+      targetPort: 8203
+      protocol: TCP

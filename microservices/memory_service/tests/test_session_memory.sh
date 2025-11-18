@@ -3,7 +3,7 @@
 # Session Memory Testing Script
 # Tests session memory operations (conversation context)
 
-BASE_URL="http://localhost:8223"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/memories"
 
 # Colors for output
@@ -69,25 +69,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Create First Session Memory
-print_section "Test 2: Create First Session Memory"
+# Test 1: Create First Session Memory
+print_section "Test 1: Create First Session Memory"
 echo "POST ${API_BASE}"
 
 # Create payload using heredoc to avoid escaping issues
@@ -133,8 +116,8 @@ else
     print_result 1 "Failed to create first session memory"
 fi
 
-# Test 3: Create Second Session Memory (Response)
-print_section "Test 3: Create Second Session Memory (Response)"
+# Test 2: Create Second Session Memory (Response)
+print_section "Test 2: Create Second Session Memory (Response)"
 echo "POST ${API_BASE}"
 
 CREATE2_PAYLOAD=$(cat <<EOF
@@ -176,8 +159,8 @@ else
     print_result 1 "Failed to create second session memory"
 fi
 
-# Test 4: Create Third Session Memory
-print_section "Test 4: Create Third Session Memory"
+# Test 3: Create Third Session Memory
+print_section "Test 3: Create Third Session Memory"
 echo "POST ${API_BASE}"
 
 CREATE3_PAYLOAD=$(cat <<EOF
@@ -219,8 +202,8 @@ else
     print_result 1 "Failed to create third session memory"
 fi
 
-# Test 5: Get Session Memories
-print_section "Test 5: Get All Memories for Session"
+# Test 4: Get Session Memories
+print_section "Test 4: Get All Memories for Session"
 echo "GET ${API_BASE}/session/${SESSION_ID}?user_id=test_user_session"
 
 SESSION_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/session/${SESSION_ID}?user_id=test_user_session")
@@ -242,20 +225,20 @@ else
     print_result 1 "Failed to get session memories"
 fi
 
-# Test 6: Get Session Memory by ID (via generic endpoint)
+# Test 5: Get Session Memory by ID (via generic endpoint)
 if [ -n "$MEMORY_ID_1" ] && [ "$MEMORY_ID_1" != "null" ]; then
-    print_section "Test 6: Get Session Memory by ID"
+    print_section "Test 5: Get Session Memory by ID"
     # Note: Session memories are typically accessed via session_id, not individual memory_id
     # Skipping this test as it conflicts with session-specific routes
     echo -e "${YELLOW}Skipping: Session memories are accessed by session_id, not individual memory_id${NC}"
     print_result 0 "Test skipped (by design)"
 else
-    echo -e "${YELLOW}Skipping Test 6: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 5: No memory ID available${NC}"
     print_result 0 "Test skipped"
 fi
 
-# Test 7: List All Session Memories
-print_section "Test 7: List All Session Memories for User"
+# Test 6: List All Session Memories
+print_section "Test 6: List All Session Memories for User"
 echo "GET ${API_BASE}?user_id=test_user_session&memory_type=session&limit=50"
 
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}?user_id=test_user_session&memory_type=session&limit=50")
@@ -273,9 +256,9 @@ else
     print_result 1 "Failed to list session memories"
 fi
 
-# Test 8: Update Session Memory
+# Test 7: Update Session Memory
 if [ -n "$MEMORY_ID_1" ] && [ "$MEMORY_ID_1" != "null" ]; then
-    print_section "Test 8: Update Session Memory"
+    print_section "Test 7: Update Session Memory"
     echo "PUT ${API_BASE}/session/${MEMORY_ID_1}?user_id=test_user_session"
     UPDATE_PAYLOAD='{
       "importance_score": 0.8,
@@ -308,12 +291,12 @@ if [ -n "$MEMORY_ID_1" ] && [ "$MEMORY_ID_1" != "null" ]; then
         print_result 1 "Failed to update session memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 8: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 7: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 9: Deactivate Session
-print_section "Test 9: Deactivate Session"
+# Test 8: Deactivate Session
+print_section "Test 8: Deactivate Session"
 echo "POST ${API_BASE}/session/${SESSION_ID}/deactivate?user_id=test_user_session"
 
 DEACTIVATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/session/${SESSION_ID}/deactivate?user_id=test_user_session")
@@ -335,9 +318,9 @@ else
     print_result 1 "Failed to deactivate session"
 fi
 
-# Test 10: Delete Session Memory
+# Test 9: Delete Session Memory
 if [ -n "$MEMORY_ID_1" ] && [ "$MEMORY_ID_1" != "null" ]; then
-    print_section "Test 10: Delete Session Memory"
+    print_section "Test 9: Delete Session Memory"
     echo "DELETE ${API_BASE}/session/${MEMORY_ID_1}?user_id=test_user_session"
 
     DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/session/${MEMORY_ID_1}?user_id=test_user_session")
@@ -359,7 +342,7 @@ if [ -n "$MEMORY_ID_1" ] && [ "$MEMORY_ID_1" != "null" ]; then
         print_result 1 "Failed to delete session memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 10: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 9: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

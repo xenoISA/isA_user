@@ -2,7 +2,7 @@
 # Media Service - Photo Version Management Test Script
 # Tests: Create Version, Get Version, List Versions
 
-BASE_URL="http://localhost:8222"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors
@@ -34,23 +34,10 @@ echo -e "${CYAN}       STORAGE SERVICE - PHOTO VERSION MANAGEMENT TEST${NC}"
 echo -e "${CYAN}======================================================================${NC}"
 echo ""
 
-# Auto-discover test user
-echo -e "${CYAN}Fetching test user from database...${NC}"
-TEST_USER=$(docker exec user-staging python3 -c "
-import sys
-sys.path.insert(0, '/app')
-from core.database.supabase_client import get_supabase_client
-
-try:
-    client = get_supabase_client()
-    result = client.table('users').select('user_id').eq('is_active', True).limit(1).execute()
-    if result.data and len(result.data) > 0:
-        print(result.data[0]['user_id'])
-except Exception as e:
-    print('test_user_001', file=sys.stderr)
-" 2>&1)
-
-TEST_USER_ID="$TEST_USER"
+# Use test user
+echo -e "${CYAN}Setting up test user...${NC}"
+# Use a known test user ID for testing
+TEST_USER_ID="test_user_001"
 echo -e "${GREEN}✓ Using test user: $TEST_USER_ID${NC}"
 echo ""
 
@@ -67,7 +54,7 @@ fi
 
 # Test 1: Upload Original Photo
 echo -e "${YELLOW}Test 1: Upload Original Photo${NC}"
-UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/files/upload" \
+UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/media/files/upload" \
   -F "file=@${TEST_PHOTO}" \
   -F "user_id=${TEST_USER_ID}" \
   -F "access_level=private" \
@@ -119,7 +106,7 @@ if [ -n "$PHOTO_ID" ]; then
 EOF
 )
 
-    VERSION_RESPONSE=$(curl -s -X POST "${API_BASE}/photos/versions/save" \
+    VERSION_RESPONSE=$(curl -s -X POST "${API_BASE}/media/photos/versions/save" \
       -H "Content-Type: application/json" \
       -d "$SAVE_REQUEST")
 
@@ -162,7 +149,7 @@ if [ -n "$PHOTO_ID" ]; then
 EOF
 )
 
-    VERSION_RESPONSE_2=$(curl -s -X POST "${API_BASE}/photos/versions/save" \
+    VERSION_RESPONSE_2=$(curl -s -X POST "${API_BASE}/media/photos/versions/save" \
       -H "Content-Type: application/json" \
       -d "$SAVE_REQUEST_2")
 
@@ -186,9 +173,9 @@ fi
 # Test 4: Get All Photo Versions
 if [ -n "$PHOTO_ID" ]; then
     echo -e "${YELLOW}Test 4: Get All Photo Versions${NC}"
-    echo "POST /api/v1/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}"
+    echo "POST /api/v1/media/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}"
 
-    VERSIONS_RESPONSE=$(curl -s -X POST "${API_BASE}/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}" \
+    VERSIONS_RESPONSE=$(curl -s -X POST "${API_BASE}/media/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}" \
       -H "Content-Type: application/json")
 
     echo "$VERSIONS_RESPONSE" | python3 -m json.tool
@@ -209,9 +196,9 @@ fi
 # Test 5: Switch to Different Version
 if [ -n "$PHOTO_ID" ] && [ -n "$VERSION_ID_1" ]; then
     echo -e "${YELLOW}Test 5: Switch to Enhanced Version${NC}"
-    echo "PUT /api/v1/photos/${PHOTO_ID}/versions/${VERSION_ID_1}/switch?user_id=${TEST_USER_ID}"
+    echo "PUT /api/v1/media/photos/${PHOTO_ID}/versions/${VERSION_ID_1}/switch?user_id=${TEST_USER_ID}"
 
-    SWITCH_RESPONSE=$(curl -s -X PUT "${API_BASE}/photos/${PHOTO_ID}/versions/${VERSION_ID_1}/switch?user_id=${TEST_USER_ID}")
+    SWITCH_RESPONSE=$(curl -s -X PUT "${API_BASE}/media/photos/${PHOTO_ID}/versions/${VERSION_ID_1}/switch?user_id=${TEST_USER_ID}")
 
     echo "$SWITCH_RESPONSE" | python3 -m json.tool
 
@@ -231,7 +218,7 @@ fi
 if [ -n "$PHOTO_ID" ]; then
     echo -e "${YELLOW}Test 6: Verify Current Version After Switch${NC}"
 
-    VERSIONS_RESPONSE=$(curl -s -X POST "${API_BASE}/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}" \
+    VERSIONS_RESPONSE=$(curl -s -X POST "${API_BASE}/media/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}" \
       -H "Content-Type: application/json")
 
     echo "$VERSIONS_RESPONSE" | python3 -m json.tool | head -30
@@ -254,9 +241,9 @@ fi
 # Test 7: Delete a Photo Version
 if [ -n "$VERSION_ID_2" ]; then
     echo -e "${YELLOW}Test 7: Delete Photo Version${NC}"
-    echo "DELETE /api/v1/photos/versions/${VERSION_ID_2}?user_id=${TEST_USER_ID}"
+    echo "DELETE /api/v1/media/versions/${VERSION_ID_2}?user_id=${TEST_USER_ID}"
 
-    DELETE_RESPONSE=$(curl -s -X DELETE "${API_BASE}/photos/versions/${VERSION_ID_2}?user_id=${TEST_USER_ID}")
+    DELETE_RESPONSE=$(curl -s -X DELETE "${API_BASE}/media/versions/${VERSION_ID_2}?user_id=${TEST_USER_ID}")
 
     echo "$DELETE_RESPONSE" | python3 -m json.tool
 
@@ -276,7 +263,7 @@ fi
 if [ -n "$PHOTO_ID" ] && [ -n "$VERSION_ID_2" ]; then
     echo -e "${YELLOW}Test 8: Verify Version is Deleted${NC}"
 
-    VERSIONS_RESPONSE=$(curl -s -X POST "${API_BASE}/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}" \
+    VERSIONS_RESPONSE=$(curl -s -X POST "${API_BASE}/media/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}" \
       -H "Content-Type: application/json")
 
     echo "$VERSIONS_RESPONSE" | python3 -m json.tool | head -30
@@ -299,7 +286,7 @@ if [ -n "$PHOTO_ID" ]; then
     echo -e "${YELLOW}Test 9: Attempt to Delete Original Version (Should Fail)${NC}"
 
     # First, get the original version ID
-    VERSIONS_RESPONSE=$(curl -s -X POST "${API_BASE}/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}" \
+    VERSIONS_RESPONSE=$(curl -s -X POST "${API_BASE}/media/photos/${PHOTO_ID}/versions?user_id=${TEST_USER_ID}" \
       -H "Content-Type: application/json")
 
     ORIGINAL_VERSION_ID=$(echo "$VERSIONS_RESPONSE" | python3 -c "
@@ -312,7 +299,7 @@ for v in data.get('versions', []):
 " 2>/dev/null)
 
     if [ -n "$ORIGINAL_VERSION_ID" ]; then
-        DELETE_RESPONSE=$(curl -s -X DELETE "${API_BASE}/photos/versions/${ORIGINAL_VERSION_ID}?user_id=${TEST_USER_ID}")
+        DELETE_RESPONSE=$(curl -s -X DELETE "${API_BASE}/media/versions/${ORIGINAL_VERSION_ID}?user_id=${TEST_USER_ID}")
         echo "$DELETE_RESPONSE" | python3 -m json.tool
 
         if echo "$DELETE_RESPONSE" | grep -qi "cannot delete original\|error\|not allowed"; then

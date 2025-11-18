@@ -380,7 +380,7 @@ async def resend_invitation(
 
 # ============ Admin Endpoints ============
 
-@app.post("/api/v1/admin/expire-invitations")
+@app.post("/api/v1/invitations/admin/expire-invitations")
 async def expire_old_invitations(
     invitation_service: InvitationService = Depends(get_invitation_service)
 ):

@@ -3,7 +3,7 @@
 # Location Service Testing Script
 # Tests location tracking, place management, and query capabilities
 
-BASE_URL="http://localhost:8224"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/locations"
 
 # Colors for output
@@ -65,25 +65,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Report Location
-print_section "Test 2: Report Device Location (San Francisco)"
+# Test 1: Report Location
+print_section "Test 1: Report Device Location (San Francisco)"
 echo "POST ${API_BASE}"
 LOCATION_PAYLOAD='{
   "device_id": "test_device_001",
@@ -132,8 +115,8 @@ fi
 # Sleep to ensure data is committed
 sleep 1
 
-# Test 3: Report Another Location (New York)
-print_section "Test 3: Report Another Location (New York)"
+# Test 2: Report Another Location (New York)
+print_section "Test 2: Report Another Location (New York)"
 echo "POST ${API_BASE}"
 NY_PAYLOAD='{
   "device_id": "test_device_002",
@@ -168,8 +151,8 @@ fi
 
 sleep 1
 
-# Test 4: Get Latest Location for Device
-print_section "Test 4: Get Latest Device Location"
+# Test 3: Get Latest Location for Device
+print_section "Test 3: Get Latest Device Location"
 echo "GET ${API_BASE}/device/test_device_001/latest"
 
 LATEST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/device/test_device_001/latest")
@@ -191,8 +174,8 @@ else
     print_result 1 "Failed to retrieve latest location"
 fi
 
-# Test 5: Get Location History
-print_section "Test 5: Get Location History for Device"
+# Test 4: Get Location History
+print_section "Test 4: Get Location History for Device"
 echo "GET ${API_BASE}/device/test_device_001/history?limit=10"
 
 HISTORY_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/device/test_device_001/history?limit=10")
@@ -214,8 +197,8 @@ else
     print_result 1 "Failed to retrieve location history"
 fi
 
-# Test 6: Get All User Locations
-print_section "Test 6: Get All User Locations"
+# Test 5: Get All User Locations
+print_section "Test 5: Get All User Locations"
 echo "GET ${API_BASE}/user/test_user_sf"
 
 USER_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/user/test_user_sf")
@@ -232,8 +215,8 @@ else
     print_result 1 "Failed to retrieve user locations"
 fi
 
-# Test 7: Create a Place (Home)
-print_section "Test 7: Create a Place (Home)"
+# Test 6: Create a Place (Home)
+print_section "Test 6: Create a Place (Home)"
 echo "POST ${BASE_URL}/api/v1/places"
 PLACE_PAYLOAD='{
   "user_id": "test_user_sf",
@@ -276,8 +259,8 @@ fi
 
 sleep 1
 
-# Test 8: List User Places
-print_section "Test 8: List User Places"
+# Test 7: List User Places
+print_section "Test 7: List User Places"
 echo "GET ${BASE_URL}/api/v1/places/user/test_user_sf"
 
 PLACES_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BASE_URL}/api/v1/places/user/test_user_sf")
@@ -299,8 +282,8 @@ else
     print_result 1 "Failed to list user places"
 fi
 
-# Test 9: Calculate Distance Between Two Points
-print_section "Test 9: Calculate Distance (SF to NY)"
+# Test 8: Calculate Distance Between Two Points
+print_section "Test 8: Calculate Distance (SF to NY)"
 echo "GET ${BASE_URL}/api/v1/distance?lat1=37.7749&lon1=-122.4194&lat2=40.7128&lon2=-74.0060"
 
 DISTANCE_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BASE_URL}/api/v1/distance?lat1=37.7749&lon1=-122.4194&lat2=40.7128&lon2=-74.0060")
@@ -323,9 +306,9 @@ else
     print_result 1 "Failed to calculate distance"
 fi
 
-# Test 10: Update Place
+# Test 9: Update Place
 if [ -n "$PLACE_ID" ] && [ "$PLACE_ID" != "null" ]; then
-    print_section "Test 10: Update Place"
+    print_section "Test 9: Update Place"
     echo "PUT ${BASE_URL}/api/v1/places/${PLACE_ID}"
     UPDATE_PLACE_PAYLOAD='{
       "name": "Home Sweet Home",
@@ -355,13 +338,13 @@ if [ -n "$PLACE_ID" ] && [ "$PLACE_ID" != "null" ]; then
         print_result 1 "Failed to update place"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 10: No place ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 9: No place ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 11: Delete Place
+# Test 10: Delete Place
 if [ -n "$PLACE_ID" ] && [ "$PLACE_ID" != "null" ]; then
-    print_section "Test 11: Delete Place"
+    print_section "Test 10: Delete Place"
     echo "DELETE ${BASE_URL}/api/v1/places/${PLACE_ID}"
 
     DELETE_PLACE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${BASE_URL}/api/v1/places/${PLACE_ID}")
@@ -383,7 +366,7 @@ if [ -n "$PLACE_ID" ] && [ "$PLACE_ID" != "null" ]; then
         print_result 1 "Failed to delete place"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 11: No place ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 10: No place ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

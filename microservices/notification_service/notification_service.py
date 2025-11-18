@@ -25,6 +25,8 @@ from .models import (
     RecipientType, PushSubscription, PushPlatform,
     RegisterPushSubscriptionRequest
 )
+from .events.publishers import NotificationEventPublishers
+from .clients import AccountServiceClient, OrganizationServiceClient
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,14 @@ class NotificationService:
         """
         self.repository = NotificationRepository(config=config_manager)
         self.event_bus = event_bus
+        self.config_manager = config_manager
+
+        # Initialize event publishers
+        self.event_publishers = NotificationEventPublishers(event_bus) if event_bus else None
+
+        # Initialize service clients
+        self.account_client = AccountServiceClient(config_manager)
+        self.organization_client = OrganizationServiceClient(config_manager)
 
         # Resend API配置
         self.resend_api_key = os.environ.get("RESEND_API_KEY")
@@ -408,8 +418,17 @@ class NotificationService:
                 )
                 logger.info(f"Email sent successfully: {notification.notification_id}")
 
-                # Publish notification.sent event
-                await self._publish_notification_sent_event(notification)
+                # Publish notification.sent event using publishers
+                if self.event_publishers:
+                    await self.event_publishers.publish_notification_sent(
+                        notification_id=notification.notification_id,
+                        notification_type=notification.type.value,
+                        recipient_id=notification.recipient_id,
+                        recipient_email=notification.recipient_email,
+                        status=notification.status.value,
+                        subject=notification.subject,
+                        priority=notification.priority.value
+                    )
             else:
                 error_message = f"Email API error: {response.status_code} - {response.text}"
                 await self.repository.update_notification_status(
@@ -453,8 +472,17 @@ class NotificationService:
 
             logger.info(f"In-app notification created: {notification.notification_id}")
 
-            # Publish notification.sent event
-            await self._publish_notification_sent_event(notification)
+            # Publish notification.sent event using publishers
+            if self.event_publishers:
+                await self.event_publishers.publish_notification_sent(
+                    notification_id=notification.notification_id,
+                    notification_type=notification.type.value,
+                    recipient_id=notification.recipient_id,
+                    recipient_email=notification.recipient_email,
+                    status=notification.status.value,
+                    subject=notification.subject,
+                    priority=notification.priority.value
+                )
             
         except Exception as e:
             logger.error(f"Failed to send in-app notification {notification.notification_id}: {str(e)}")
@@ -500,8 +528,17 @@ class NotificationService:
                     )
                     logger.info(f"Webhook sent successfully: {notification.notification_id}")
 
-                    # Publish notification.sent event
-                    await self._publish_notification_sent_event(notification)
+                    # Publish notification.sent event using publishers
+                    if self.event_publishers:
+                        await self.event_publishers.publish_notification_sent(
+                            notification_id=notification.notification_id,
+                            notification_type=notification.type.value,
+                            recipient_id=notification.recipient_id,
+                            recipient_email=notification.recipient_email,
+                            status=notification.status.value,
+                            subject=notification.subject,
+                            priority=notification.priority.value
+                        )
                 else:
                     error_message = f"Webhook error: {response.status_code}"
                     await self.repository.update_notification_status(
@@ -608,8 +645,17 @@ class NotificationService:
                     provider_message_id=f"push_{success_count}_devices"
                 )
 
-                # Publish notification.sent event
-                await self._publish_notification_sent_event(notification)
+                # Publish notification.sent event using publishers
+                if self.event_publishers:
+                    await self.event_publishers.publish_notification_sent(
+                        notification_id=notification.notification_id,
+                        notification_type=notification.type.value,
+                        recipient_id=notification.recipient_id,
+                        recipient_email=notification.recipient_email,
+                        status=notification.status.value,
+                        subject=notification.subject,
+                        priority=notification.priority.value
+                    )
             else:
                 await self.repository.update_notification_status(
                     notification.notification_id,
@@ -874,39 +920,6 @@ class NotificationService:
     # 辅助方法
     # ====================
 
-    async def _publish_notification_sent_event(self, notification: Notification):
-        """Publish NOTIFICATION_SENT event after successful notification delivery"""
-        if not self.event_bus:
-            return
-
-        try:
-            # Import Event and EventType
-            import sys
-            import os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-            from core.nats_client import Event, EventType, ServiceSource
-
-            event = Event(
-                event_type=EventType.NOTIFICATION_SENT,
-                source=ServiceSource.NOTIFICATION_SERVICE,
-                data={
-                    "notification_id": notification.notification_id,
-                    "notification_type": notification.type.value,
-                    "recipient_id": notification.recipient_id,
-                    "recipient_email": notification.recipient_email,
-                    "status": notification.status.value,
-                    "subject": notification.subject,
-                    "priority": notification.priority.value,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            )
-
-            await self.event_bus.publish_event(event)
-            logger.info(f"Published notification.sent event for notification {notification.notification_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to publish notification.sent event: {e}")
-
     def _replace_template_variables(
         self,
         content: str,
@@ -929,3 +942,9 @@ class NotificationService:
         """清理资源"""
         if self.email_client:
             await self.email_client.aclose()
+
+        # Close service clients
+        if self.account_client:
+            await self.account_client.close()
+        if self.organization_client:
+            await self.organization_client.close()

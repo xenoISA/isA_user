@@ -22,7 +22,14 @@ from .models import (
     UpdateStatsResponse, RollbackResponse
 )
 from .ota_repository import OTARepository
-from core.nats_client import Event, EventType, ServiceSource
+from .events.publishers import (
+    publish_firmware_uploaded,
+    publish_campaign_created,
+    publish_campaign_started,
+    publish_update_cancelled,
+    publish_rollback_initiated
+)
+from .clients import DeviceClient, StorageClient, NotificationClient
 
 logger = logging.getLogger("ota_service")
 
@@ -30,16 +37,23 @@ logger = logging.getLogger("ota_service")
 class OTAService:
     """OTA更新服务"""
 
-    def __init__(self, event_bus=None, config=None):
+    def __init__(
+        self,
+        event_bus=None,
+        config=None,
+        device_client: Optional[DeviceClient] = None,
+        storage_client: Optional[StorageClient] = None,
+        notification_client: Optional[NotificationClient] = None
+    ):
         self.storage_path = "/var/ota/firmware"  # 固件存储路径 (legacy)
         self.max_file_size = 500 * 1024 * 1024  # 500MB
         self.supported_formats = ['.bin', '.hex', '.elf', '.tar.gz', '.zip']
 
         # Initialize repository and clients
         self.repository = OTARepository(config=config)
-        self.device_client = None  # Will be initialized with async context
-        self.storage_client = None
-        self.notification_client = None
+        self.device_client = device_client
+        self.storage_client = storage_client
+        self.notification_client = notification_client
         self.event_bus = event_bus
         
     async def upload_firmware(self, user_id: str, firmware_data: Dict[str, Any], file_content: bytes) -> Optional[FirmwareResponse]:
@@ -75,10 +89,10 @@ class OTAService:
 
             # Upload firmware binary to Storage Service (MinIO/S3)
             file_url = f"/api/v1/firmware/{firmware_id}/download"  # Default
-            try:
-                async with StorageServiceClient() as storage_client:
+            if self.storage_client:
+                try:
                     filename = f"{firmware_data.get('name', 'firmware')}_v{firmware_data.get('version', '1.0.0')}.bin"
-                    storage_result = await storage_client.upload_firmware(
+                    storage_result = await self.storage_client.upload_firmware(
                         firmware_id=firmware_id,
                         file_content=file_content,
                         filename=filename,
@@ -96,8 +110,10 @@ class OTAService:
                         logger.info(f"Firmware binary uploaded to storage: {file_url}")
                     else:
                         logger.warning(f"Failed to upload to storage service, using local URL")
-            except Exception as storage_error:
-                logger.warning(f"Storage service error: {storage_error}, continuing with local storage")
+                except Exception as storage_error:
+                    logger.warning(f"Storage service error: {storage_error}, continuing with local storage")
+            else:
+                logger.warning("Storage client not initialized, using local storage URL")
 
             # Save firmware metadata to database using repository
             firmware_db_data = {
@@ -157,22 +173,16 @@ class OTAService:
             # Publish firmware.uploaded event
             if self.event_bus:
                 try:
-                    event = Event(
-                        event_type=EventType.FIRMWARE_UPLOADED,
-                        source=ServiceSource.OTA_SERVICE,
-                        data={
-                            "firmware_id": firmware_id,
-                            "name": firmware.name,
-                            "version": firmware.version,
-                            "device_model": firmware.device_model,
-                            "file_size": firmware.file_size,
-                            "is_security_update": firmware.is_security_update,
-                            "uploaded_by": user_id,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_firmware_uploaded(
+                        event_bus=self.event_bus,
+                        firmware_id=firmware_id,
+                        name=firmware.name,
+                        version=firmware.version,
+                        device_model=firmware.device_model,
+                        file_size=firmware.file_size,
+                        is_security_update=firmware.is_security_update,
+                        uploaded_by=user_id
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published firmware.uploaded event for firmware {firmware_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish firmware.uploaded event: {e}")
 
@@ -285,23 +295,17 @@ class OTAService:
             # Publish campaign.created event
             if self.event_bus:
                 try:
-                    event = Event(
-                        event_type=EventType.CAMPAIGN_CREATED,
-                        source=ServiceSource.OTA_SERVICE,
-                        data={
-                            "campaign_id": campaign_id,
-                            "name": campaign.name,
-                            "firmware_id": campaign.firmware.firmware_id,
-                            "firmware_version": campaign.firmware.version,
-                            "target_device_count": campaign.target_device_count,
-                            "deployment_strategy": campaign.deployment_strategy.value,
-                            "priority": campaign.priority.value,
-                            "created_by": user_id,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_campaign_created(
+                        event_bus=self.event_bus,
+                        campaign_id=campaign_id,
+                        name=campaign.name,
+                        firmware_id=campaign.firmware.firmware_id,
+                        firmware_version=campaign.firmware.version,
+                        target_device_count=campaign.target_device_count,
+                        deployment_strategy=campaign.deployment_strategy.value,
+                        priority=campaign.priority.value,
+                        created_by=user_id
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published campaign.created event for campaign {campaign_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish campaign.created event: {e}")
 
@@ -332,20 +336,14 @@ class OTAService:
             # Publish campaign.started event
             if self.event_bus:
                 try:
-                    event = Event(
-                        event_type=EventType.CAMPAIGN_STARTED,
-                        source=ServiceSource.OTA_SERVICE,
-                        data={
-                            "campaign_id": campaign_id,
-                            "name": campaign.name,
-                            "firmware_id": campaign.firmware.firmware_id,
-                            "firmware_version": campaign.firmware.version,
-                            "target_device_count": campaign.target_device_count,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_campaign_started(
+                        event_bus=self.event_bus,
+                        campaign_id=campaign_id,
+                        name=campaign.name,
+                        firmware_id=campaign.firmware.firmware_id,
+                        firmware_version=campaign.firmware.version,
+                        target_device_count=campaign.target_device_count
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published campaign.started event for campaign {campaign_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish campaign.started event: {e}")
 
@@ -368,17 +366,17 @@ class OTAService:
 
             # Validate device exists via Device Service (microservices pattern)
             from_version = None
-            try:
-                async with DeviceServiceClient() as device_client:
-                    device = await device_client.get_device(device_id)
+            if self.device_client:
+                try:
+                    device = await self.device_client.get_device(device_id)
                     if not device:
                         raise ValueError(f"Device '{device_id}' not found. Device must be registered in Device Service first.")
 
                     # Get current firmware version
-                    from_version = await device_client.get_device_firmware_version(device_id)
+                    from_version = await self.device_client.get_device_firmware_version(device_id)
 
                     # Optional: Check firmware compatibility
-                    is_compatible = await device_client.check_firmware_compatibility(
+                    is_compatible = await self.device_client.check_firmware_compatibility(
                         device_id,
                         firmware.device_model,
                         firmware.min_hardware_version
@@ -386,10 +384,12 @@ class OTAService:
                     if not is_compatible:
                         logger.warning(f"Firmware may not be compatible with device {device_id}")
 
-            except Exception as e:
-                logger.error(f"Device Service validation failed: {e}")
-                # If Device Service is unavailable, proceed but log warning
-                logger.warning(f"Proceeding with update without device validation (Device Service unavailable)")
+                except Exception as e:
+                    logger.error(f"Device Service validation failed: {e}")
+                    # If Device Service is unavailable, proceed but log warning
+                    logger.warning(f"Proceeding with update without device validation (Device Service unavailable)")
+            else:
+                logger.warning("Device client not initialized, skipping device validation")
 
             # Prepare data for database
             timeout_at = datetime.utcnow() + timedelta(minutes=update_data.get("timeout_minutes", 60))
@@ -522,20 +522,14 @@ class OTAService:
             # Publish update.cancelled event
             if self.event_bus and update:
                 try:
-                    event = Event(
-                        event_type=EventType.UPDATE_CANCELLED,
-                        source=ServiceSource.OTA_SERVICE,
-                        data={
-                            "update_id": update_id,
-                            "device_id": update.device_id,
-                            "firmware_id": update.firmware.firmware_id,
-                            "firmware_version": update.firmware.version,
-                            "campaign_id": update.campaign_id,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_update_cancelled(
+                        event_bus=self.event_bus,
+                        update_id=update_id,
+                        device_id=update.device_id,
+                        firmware_id=update.firmware.firmware_id,
+                        firmware_version=update.firmware.version,
+                        campaign_id=update.campaign_id
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published update.cancelled event for update {update_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish update.cancelled event: {e}")
 
@@ -572,20 +566,14 @@ class OTAService:
             # Publish rollback.initiated event
             if self.event_bus:
                 try:
-                    event = Event(
-                        event_type=EventType.ROLLBACK_INITIATED,
-                        source=ServiceSource.OTA_SERVICE,
-                        data={
-                            "rollback_id": rollback_id,
-                            "device_id": device_id,
-                            "from_version": rollback.from_version,
-                            "to_version": to_version,
-                            "trigger": "manual",
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                    await publish_rollback_initiated(
+                        event_bus=self.event_bus,
+                        rollback_id=rollback_id,
+                        device_id=device_id,
+                        from_version=rollback.from_version,
+                        to_version=to_version,
+                        trigger="manual"
                     )
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published rollback.initiated event for rollback {rollback_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish rollback.initiated event: {e}")
 

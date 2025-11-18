@@ -3,7 +3,7 @@
 # Factual Memory Testing Script
 # Tests factual memory extraction and storage capabilities
 
-BASE_URL="http://localhost:8223"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/memories"
 
 # Colors for output
@@ -95,25 +95,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Extract Factual Memory from Dialog
-print_section "Test 2: Extract Factual Memory from Dialog (AI-Powered)"
+# Test 1: Extract Factual Memory from Dialog
+print_section "Test 1: Extract Factual Memory from Dialog (AI-Powered)"
 echo "POST ${API_BASE}/factual/extract"
 EXTRACT_PAYLOAD='{
   "user_id": "test_user_123",
@@ -152,9 +135,9 @@ else
     print_result 1 "Failed to extract factual memory"
 fi
 
-# Test 3: Get Factual Memory by ID
+# Test 2: Get Factual Memory by ID
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 3: Get Factual Memory by ID"
+    print_section "Test 2: Get Factual Memory by ID"
     echo "GET ${API_BASE}/factual/${MEMORY_ID}?user_id=test_user_123"
 
     GET_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/factual/${MEMORY_ID}?user_id=test_user_123")
@@ -176,12 +159,12 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to retrieve factual memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 3: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 2: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 4: Search Facts by Subject
-print_section "Test 4: Search Facts by Subject"
+# Test 3: Search Facts by Subject
+print_section "Test 3: Search Facts by Subject"
 echo "GET ${API_BASE}/factual/search/subject?user_id=test_user_123&subject=programming&limit=10"
 
 SEARCH_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/factual/search/subject?user_id=test_user_123&subject=programming&limit=10")
@@ -199,8 +182,8 @@ else
     print_result 1 "Failed to search factual memories"
 fi
 
-# Test 5: List All Factual Memories
-print_section "Test 5: List All Factual Memories for User"
+# Test 4: List All Factual Memories
+print_section "Test 4: List All Factual Memories for User"
 echo "GET ${API_BASE}?user_id=test_user_123&memory_type=factual&limit=50"
 
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}?user_id=test_user_123&memory_type=factual&limit=50")
@@ -218,8 +201,8 @@ else
     print_result 1 "Failed to list factual memories"
 fi
 
-# Test 6: Extract Multiple Facts
-print_section "Test 6: Extract Multiple Facts from Complex Dialog"
+# Test 5: Extract Multiple Facts
+print_section "Test 5: Extract Multiple Facts from Complex Dialog"
 echo "POST ${API_BASE}/factual/extract"
 COMPLEX_PAYLOAD='{
   "user_id": "test_user_123",
@@ -250,9 +233,9 @@ else
     print_result 1 "Failed to extract multiple facts"
 fi
 
-# Test 7: Update Factual Memory
+# Test 6: Update Factual Memory
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 7: Update Factual Memory"
+    print_section "Test 6: Update Factual Memory"
     echo "PUT ${API_BASE}/factual/${MEMORY_ID}?user_id=test_user_123"
     UPDATE_PAYLOAD='{
       "importance_score": 0.95,
@@ -282,13 +265,13 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to update factual memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 7: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 6: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 8: Delete Factual Memory
+# Test 7: Delete Factual Memory
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 8: Delete Factual Memory"
+    print_section "Test 7: Delete Factual Memory"
     echo "DELETE ${API_BASE}/factual/${MEMORY_ID}?user_id=test_user_123"
 
     DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/factual/${MEMORY_ID}?user_id=test_user_123")
@@ -310,7 +293,7 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to delete factual memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 8: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 7: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

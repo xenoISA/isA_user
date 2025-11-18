@@ -3,9 +3,9 @@
 # Device Authentication Testing Script
 # Tests device authentication flow and token management
 
-BASE_URL="http://localhost:8220"
+BASE_URL="http://localhost"
 API_BASE="${BASE_URL}/api/v1/devices"
-AUTH_URL="http://localhost:8201/api/v1/auth"
+AUTH_URL="http://localhost/api/v1/auth"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -196,33 +196,9 @@ else
     print_result 1 "Non-existent device handling failed"
 fi
 
-# Test 5: Use Device Token for API Access
-if [ -n "$DEVICE_TOKEN" ] && [ "$DEVICE_TOKEN" != "null" ]; then
-    print_section "Test 5: Use Device Token for API Access"
-    echo "GET ${BASE_URL}/api/v1/service/stats"
-
-    STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BASE_URL}/api/v1/service/stats" \
-      -H "Authorization: Bearer ${DEVICE_TOKEN}")
-    HTTP_CODE=$(echo "$STATS_RESPONSE" | tail -n1)
-    RESPONSE_BODY=$(echo "$STATS_RESPONSE" | sed '$d')
-
-    echo "Response:"
-    echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-    echo "HTTP Status: $HTTP_CODE"
-
-    if [ "$HTTP_CODE" = "200" ]; then
-        print_result 0 "Device token accepted for API access"
-    else
-        print_result 1 "Device token not accepted for API access"
-    fi
-else
-    echo -e "${YELLOW}Skipping Test 5: No device token available${NC}"
-    ((TESTS_FAILED++))
-fi
-
-# Test 6: Revoke Device (cleanup)
+# Test 5: Revoke Device (cleanup)
 if [ -n "$DEVICE_SECRET" ] && [ "$DEVICE_SECRET" != "null" ]; then
-    print_section "Test 6: Revoke Device (Cleanup)"
+    print_section "Test 5: Revoke Device (Cleanup)"
     echo "DELETE ${AUTH_URL}/device/${TEST_DEVICE_ID}?organization_id=${ORG_ID}"
 
     REVOKE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \

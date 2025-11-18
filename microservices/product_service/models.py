@@ -18,10 +18,15 @@ from pydantic import BaseModel, Field
 class ProductType(str, Enum):
     """产品类型"""
     MODEL = "model"                      # AI模型
+    MODEL_INFERENCE = "model_inference"  # AI模型推理
     STORAGE = "storage"                  # 存储服务
+    STORAGE_MINIO = "storage_minio"      # MinIO对象存储
     AGENT = "agent"                      # AI代理
+    AGENT_EXECUTION = "agent_execution"  # AI代理执行
     MCP_TOOL = "mcp_tool"               # MCP工具
+    MCP_SERVICE = "mcp_service"          # MCP服务
     API_SERVICE = "api_service"          # API服务
+    API_GATEWAY = "api_gateway"          # API网关
     NOTIFICATION = "notification"        # 通知服务
     COMPUTATION = "computation"          # 计算服务
     DATA_PROCESSING = "data_processing"  # 数据处理

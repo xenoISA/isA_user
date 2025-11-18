@@ -21,7 +21,16 @@ from .episodic_service import EpisodicMemoryService
 from .semantic_service import SemanticMemoryService
 from .working_service import WorkingMemoryService
 from .session_service import SessionMemoryService
-from core.nats_client import Event, EventType, ServiceSource
+from .events.publishers import (
+    publish_memory_created,
+    publish_memory_updated,
+    publish_memory_deleted,
+    publish_factual_memory_stored,
+    publish_episodic_memory_stored,
+    publish_procedural_memory_stored,
+    publish_semantic_memory_stored,
+    publish_session_memory_deactivated
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,18 +177,16 @@ class MemoryService:
                 # Publish memory.created event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.MEMORY_CREATED,
-                            source=ServiceSource.MEMORY_SERVICE,
-                            data={
-                                "memory_id": result['id'],
-                                "user_id": request.user_id,
-                                "memory_type": request.memory_type.value,
-                                "importance_score": request.importance_score,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_memory_created(
+                            event_bus=self.event_bus,
+                            memory_id=result['id'],
+                            memory_type=request.memory_type.value,
+                            user_id=request.user_id,
+                            content=memory_data.get('content', ''),
+                            importance_score=request.importance_score,
+                            tags=memory_data.get('tags'),
+                            metadata=memory_data.get('metadata')
                         )
-                        await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish memory.created event: {e}")
 
@@ -350,18 +357,13 @@ class MemoryService:
                 # Publish memory.updated event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.MEMORY_UPDATED,
-                            source=ServiceSource.MEMORY_SERVICE,
-                            data={
-                                "memory_id": memory_id,
-                                "user_id": user_id,
-                                "memory_type": memory_type.value,
-                                "updated_fields": list(updates.keys()),
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_memory_updated(
+                            event_bus=self.event_bus,
+                            memory_id=memory_id,
+                            memory_type=memory_type.value,
+                            user_id=user_id,
+                            updated_fields=list(updates.keys())
                         )
-                        await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish memory.updated event: {e}")
 
@@ -421,17 +423,12 @@ class MemoryService:
                 # Publish memory.deleted event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.MEMORY_DELETED,
-                            source=ServiceSource.MEMORY_SERVICE,
-                            data={
-                                "memory_id": memory_id,
-                                "user_id": user_id,
-                                "memory_type": memory_type.value,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_memory_deleted(
+                            event_bus=self.event_bus,
+                            memory_id=memory_id,
+                            memory_type=memory_type.value,
+                            user_id=user_id
                         )
-                        await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish memory.deleted event: {e}")
 
@@ -474,17 +471,13 @@ class MemoryService:
         # Publish memory.factual.stored event
         if result.success and self.event_bus:
             try:
-                event = Event(
-                    event_type=EventType.FACTUAL_MEMORY_STORED,
-                    source=ServiceSource.MEMORY_SERVICE,
-                    data={
-                        "user_id": user_id,
-                        "count": result.count,
-                        "importance_score": importance_score,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
+                await publish_factual_memory_stored(
+                    event_bus=self.event_bus,
+                    user_id=user_id,
+                    count=result.count,
+                    importance_score=importance_score,
+                    source="dialog"
                 )
-                await self.event_bus.publish_event(event)
             except Exception as e:
                 logger.error(f"Failed to publish memory.factual.stored event: {e}")
 
@@ -504,17 +497,13 @@ class MemoryService:
         # Publish memory.episodic.stored event
         if result.success and self.event_bus:
             try:
-                event = Event(
-                    event_type=EventType.EPISODIC_MEMORY_STORED,
-                    source=ServiceSource.MEMORY_SERVICE,
-                    data={
-                        "user_id": user_id,
-                        "count": result.count,
-                        "importance_score": importance_score,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
+                await publish_episodic_memory_stored(
+                    event_bus=self.event_bus,
+                    user_id=user_id,
+                    count=result.count,
+                    importance_score=importance_score,
+                    source="dialog"
                 )
-                await self.event_bus.publish_event(event)
             except Exception as e:
                 logger.error(f"Failed to publish memory.episodic.stored event: {e}")
 
@@ -534,17 +523,13 @@ class MemoryService:
         # Publish memory.procedural.stored event
         if result.success and self.event_bus:
             try:
-                event = Event(
-                    event_type=EventType.PROCEDURAL_MEMORY_STORED,
-                    source=ServiceSource.MEMORY_SERVICE,
-                    data={
-                        "user_id": user_id,
-                        "count": result.count,
-                        "importance_score": importance_score,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
+                await publish_procedural_memory_stored(
+                    event_bus=self.event_bus,
+                    user_id=user_id,
+                    count=result.count,
+                    importance_score=importance_score,
+                    source="dialog"
                 )
-                await self.event_bus.publish_event(event)
             except Exception as e:
                 logger.error(f"Failed to publish memory.procedural.stored event: {e}")
 
@@ -564,17 +549,13 @@ class MemoryService:
         # Publish memory.semantic.stored event
         if result.success and self.event_bus:
             try:
-                event = Event(
-                    event_type=EventType.SEMANTIC_MEMORY_STORED,
-                    source=ServiceSource.MEMORY_SERVICE,
-                    data={
-                        "user_id": user_id,
-                        "count": result.count,
-                        "importance_score": importance_score,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
+                await publish_semantic_memory_stored(
+                    event_bus=self.event_bus,
+                    user_id=user_id,
+                    count=result.count,
+                    importance_score=importance_score,
+                    source="dialog"
                 )
-                await self.event_bus.publish_event(event)
             except Exception as e:
                 logger.error(f"Failed to publish memory.semantic.stored event: {e}")
 
@@ -723,16 +704,11 @@ class MemoryService:
                 # Publish memory.session.deactivated event
                 if self.event_bus:
                     try:
-                        event = Event(
-                            event_type=EventType.SESSION_MEMORY_DEACTIVATED,
-                            source=ServiceSource.MEMORY_SERVICE,
-                            data={
-                                "user_id": user_id,
-                                "session_id": session_id,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                        await publish_session_memory_deactivated(
+                            event_bus=self.event_bus,
+                            user_id=user_id,
+                            session_id=session_id
                         )
-                        await self.event_bus.publish_event(event)
                     except Exception as e:
                         logger.error(f"Failed to publish memory.session.deactivated event: {e}")
 

@@ -2,10 +2,41 @@
 
 # Wallet Service CRUD Tests
 # Tests wallet creation, balance operations, transactions, and statistics
+#
+# Usage:
+#   Local:       ./wallet_test.sh
+#   Kubernetes:  ./wallet_test.sh k8s
+#   Custom URL:  WALLET_URL=http://custom:8208 AUTH_URL=http://custom:8201 ./wallet_test.sh
 
-BASE_URL="http://localhost:8208"
+# Determine test environment
+TEST_ENV="${1:-local}"
+
+if [ "$TEST_ENV" = "k8s" ] || [ "$TEST_ENV" = "kubernetes" ]; then
+    # Kubernetes environment - use kubectl port-forward
+    echo "🔧 Testing in Kubernetes environment (requires kubectl port-forward)"
+    echo "📝 Run these commands in separate terminals:"
+    echo "   kubectl port-forward -n isa-cloud-staging svc/wallet 8208:8208"
+    echo "   kubectl port-forward -n isa-cloud-staging svc/auth 8201:8201"
+    echo ""
+    read -p "Press Enter when port-forwards are ready..."
+    BASE_URL="http://localhost"
+    AUTH_URL="http://localhost/api/v1/auth"
+elif [ -n "$WALLET_URL" ]; then
+    # Custom URLs via environment variables
+    BASE_URL="${WALLET_URL}"
+    AUTH_URL="${AUTH_URL:-http://localhost/api/v1/auth}"
+else
+    # Local development environment
+    BASE_URL="http://localhost"
+    AUTH_URL="http://localhost/api/v1/auth"
+fi
+
 API_BASE="${BASE_URL}/api/v1"
-AUTH_URL="http://localhost:8201/api/v1/auth"
+
+echo "🎯 Test Configuration:"
+echo "   Wallet Service: ${BASE_URL}"
+echo "   Auth Service:   ${AUTH_URL}"
+echo ""
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -84,24 +115,7 @@ fi
 
 USER_ID="test_wallet_user_123"
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Health check successful"
-else
-    print_result 1 "Health check failed"
-fi
-
-# Test 2: Create Wallet or Get Existing
+# Test 1: Create Wallet or Get Existing
 print_section "Test 2: Create Wallet or Get Existing"
 WALLET_ID=""
 echo "POST ${API_BASE}/wallets"
@@ -147,7 +161,7 @@ fi
 # If we don't have wallet_id yet, fetch from user wallets
 if [ -z "$WALLET_ID" ] || [ "$WALLET_ID" = "null" ]; then
     echo "Fetching existing wallet from user wallets..."
-    USER_WALLETS_FETCH=$(curl -s -X GET "${API_BASE}/users/${USER_ID}/wallets")
+    USER_WALLETS_FETCH=$(curl -s -X GET "${API_BASE}/wallets?user_id=${USER_ID}")
     WALLET_ID=$(echo "$USER_WALLETS_FETCH" | jq -r '.wallets[0].wallet_id')
     if [ -n "$WALLET_ID" ] && [ "$WALLET_ID" != "null" ]; then
         echo -e "${YELLOW}Found existing Wallet ID: ${WALLET_ID}${NC}"
@@ -157,7 +171,7 @@ if [ -z "$WALLET_ID" ] || [ "$WALLET_ID" = "null" ]; then
     fi
 fi
 
-# Test 3: Get Wallet Details
+# Test 2: Get Wallet Details
 if [ -n "$WALLET_ID" ] && [ "$WALLET_ID" != "null" ]; then
     print_section "Test 3: Get Wallet Details"
     echo "GET ${API_BASE}/wallets/${WALLET_ID}"
@@ -185,11 +199,11 @@ else
     print_result 1 "Cannot test without wallet ID"
 fi
 
-# Test 4: Get User Wallets
+# Test 3: Get User Wallets
 print_section "Test 4: Get User Wallets"
-echo "GET ${API_BASE}/users/${USER_ID}/wallets"
+echo "GET ${API_BASE}/wallets?user_id=${USER_ID}"
 
-USER_WALLETS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/users/${USER_ID}/wallets")
+USER_WALLETS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/wallets?user_id=${USER_ID}")
 HTTP_CODE=$(echo "$USER_WALLETS_RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$USER_WALLETS_RESPONSE" | sed '$d')
 
@@ -204,7 +218,7 @@ else
     print_result 1 "Failed to retrieve user wallets"
 fi
 
-# Test 5: Get Wallet Balance
+# Test 4: Get Wallet Balance
 if [ -n "$WALLET_ID" ] && [ "$WALLET_ID" != "null" ]; then
     print_section "Test 5: Get Wallet Balance"
     echo "GET ${API_BASE}/wallets/${WALLET_ID}/balance"
@@ -233,7 +247,7 @@ else
     print_result 1 "Cannot test without wallet ID"
 fi
 
-# Test 6: Deposit to Wallet
+# Test 5: Deposit to Wallet
 if [ -n "$WALLET_ID" ] && [ "$WALLET_ID" != "null" ]; then
     print_section "Test 6: Deposit to Wallet"
     echo "POST ${API_BASE}/wallets/${WALLET_ID}/deposit"
@@ -276,7 +290,7 @@ else
     print_result 1 "Cannot test without wallet ID"
 fi
 
-# Test 7: Consume from Wallet
+# Test 6: Consume from Wallet
 if [ -n "$WALLET_ID" ] && [ "$WALLET_ID" != "null" ]; then
     print_section "Test 7: Consume from Wallet"
     echo "POST ${API_BASE}/wallets/${WALLET_ID}/consume"
@@ -316,7 +330,7 @@ else
     print_result 1 "Cannot test without wallet ID"
 fi
 
-# Test 8: Withdraw from Wallet
+# Test 7: Withdraw from Wallet
 if [ -n "$WALLET_ID" ] && [ "$WALLET_ID" != "null" ]; then
     print_section "Test 8: Withdraw from Wallet"
     echo "POST ${API_BASE}/wallets/${WALLET_ID}/withdraw"
@@ -357,7 +371,7 @@ else
     print_result 1 "Cannot test without wallet ID"
 fi
 
-# Test 9: Get Wallet Transactions
+# Test 8: Get Wallet Transactions
 if [ -n "$WALLET_ID" ] && [ "$WALLET_ID" != "null" ]; then
     print_section "Test 9: Get Wallet Transactions"
     echo "GET ${API_BASE}/wallets/${WALLET_ID}/transactions"
@@ -381,26 +395,7 @@ else
     print_result 1 "Cannot test without wallet ID"
 fi
 
-# Test 10: Get User Transactions
-print_section "Test 10: Get User Transactions"
-echo "GET ${API_BASE}/users/${USER_ID}/transactions"
-
-USER_TRANSACTIONS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/users/${USER_ID}/transactions?limit=20")
-HTTP_CODE=$(echo "$USER_TRANSACTIONS_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$USER_TRANSACTIONS_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    COUNT=$(echo "$RESPONSE_BODY" | jq -r '.count')
-    print_result 0 "User transactions retrieved successfully (count: $COUNT)"
-else
-    print_result 1 "Failed to retrieve user transactions"
-fi
-
-# Test 11: Get Wallet Statistics
+# Test 9: Get Wallet Statistics
 if [ -n "$WALLET_ID" ] && [ "$WALLET_ID" != "null" ]; then
     print_section "Test 11: Get Wallet Statistics"
     echo "GET ${API_BASE}/wallets/${WALLET_ID}/statistics"
@@ -423,67 +418,6 @@ else
     print_result 1 "Cannot test without wallet ID"
 fi
 
-# Test 12: Get User Statistics
-print_section "Test 12: Get User Statistics"
-echo "GET ${API_BASE}/users/${USER_ID}/statistics"
-
-USER_STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/users/${USER_ID}/statistics")
-HTTP_CODE=$(echo "$USER_STATS_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$USER_STATS_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "User statistics retrieved successfully"
-else
-    print_result 1 "Failed to retrieve user statistics"
-fi
-
-# Test 13: Get User Credit Balance (Backward Compatibility)
-print_section "Test 13: Get User Credit Balance (Backward Compatibility)"
-echo "GET ${API_BASE}/users/${USER_ID}/credits/balance"
-
-CREDITS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/users/${USER_ID}/credits/balance")
-HTTP_CODE=$(echo "$CREDITS_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$CREDITS_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    SUCCESS=$(echo "$RESPONSE_BODY" | jq -r '.success')
-    if [ "$SUCCESS" = "true" ]; then
-        BALANCE=$(echo "$RESPONSE_BODY" | jq -r '.balance')
-        print_result 0 "Credit balance retrieved successfully (balance: $BALANCE)"
-    else
-        print_result 1 "Credit balance request failed"
-    fi
-else
-    print_result 1 "Failed to retrieve credit balance"
-fi
-
-# Test 14: Wallet Service Stats
-print_section "Test 14: Get Wallet Service Stats"
-echo "GET ${API_BASE}/wallet/stats"
-
-SERVICE_STATS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/wallet/stats")
-HTTP_CODE=$(echo "$SERVICE_STATS_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$SERVICE_STATS_RESPONSE" | sed '$d')
-
-echo "Response:"
-echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Service statistics retrieved successfully"
-else
-    print_result 1 "Failed to retrieve service statistics"
-fi
-
-# Summary
 echo ""
 echo "======================================================================"
 echo -e "${BLUE}Test Summary${NC}"

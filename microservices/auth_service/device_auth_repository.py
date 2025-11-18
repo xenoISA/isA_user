@@ -270,3 +270,114 @@ class DeviceAuthRepository:
         except Exception as e:
             logger.error(f"Error getting device auth logs: {e}")
             return []
+    # ============================================================================
+    # Device Pairing Token Methods
+    # ============================================================================
+
+    async def create_pairing_token(
+        self,
+        device_id: str,
+        pairing_token: str,
+        expires_at: 'datetime'
+    ) -> Dict[str, Any]:
+        """
+        Create a new pairing token for a device
+        
+        Args:
+            device_id: Device ID
+            pairing_token: Generated pairing token
+            expires_at: Token expiration time
+            
+        Returns:
+            Dict with pairing token data
+        """
+        query = """
+            INSERT INTO device_pairing_tokens 
+            (device_id, pairing_token, expires_at)
+            VALUES ($1, $2, $3)
+            RETURNING id, device_id, pairing_token, expires_at, created_at
+        """
+        
+        try:
+            row = await self.db.fetchrow(query, device_id, pairing_token, expires_at)
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error creating pairing token: {e}")
+            raise
+
+    async def get_pairing_token(self, pairing_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Get pairing token by token string
+        
+        Args:
+            pairing_token: Pairing token
+            
+        Returns:
+            Dict with pairing token data or None
+        """
+        query = """
+            SELECT id, device_id, pairing_token, expires_at, created_at, used, used_at, user_id
+            FROM device_pairing_tokens
+            WHERE pairing_token = $1
+        """
+        
+        try:
+            row = await self.db.fetchrow(query, pairing_token)
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting pairing token: {e}")
+            return None
+
+    async def mark_pairing_token_used(
+        self,
+        pairing_token: str,
+        user_id: str
+    ) -> bool:
+        """
+        Mark pairing token as used
+        
+        Args:
+            pairing_token: Pairing token
+            user_id: User ID who used the token
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        from datetime import datetime, timezone
+        
+        query = """
+            UPDATE device_pairing_tokens
+            SET used = TRUE, used_at = $1, user_id = $2
+            WHERE pairing_token = $3
+        """
+        
+        try:
+            await self.db.execute(query, datetime.now(timezone.utc), user_id, pairing_token)
+            return True
+        except Exception as e:
+            logger.error(f"Error marking pairing token as used: {e}")
+            return False
+
+    async def delete_expired_pairing_tokens(self) -> int:
+        """
+        Delete expired pairing tokens (cleanup job)
+        
+        Returns:
+            Number of deleted tokens
+        """
+        from datetime import datetime, timezone
+        
+        query = """
+            DELETE FROM device_pairing_tokens
+            WHERE expires_at < $1
+        """
+        
+        try:
+            result = await self.db.execute(query, datetime.now(timezone.utc))
+            # Extract number from result string like "DELETE 5"
+            count = int(result.split()[-1]) if result else 0
+            logger.info(f"Deleted {count} expired pairing tokens")
+            return count
+        except Exception as e:
+            logger.error(f"Error deleting expired pairing tokens: {e}")
+            return 0
