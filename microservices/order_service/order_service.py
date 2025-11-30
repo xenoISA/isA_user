@@ -347,7 +347,6 @@ class OrderService:
                             total_amount=float(existing_order.total_amount),
                             currency=existing_order.currency,
                             transaction_id=request.transaction_id,
-                            payment_confirmed=request.payment_confirmed,
                             credits_added=request.credits_added if request.credits_added else 0
                         )
                         logger.info(f"Published order.completed event for order {order_id}")

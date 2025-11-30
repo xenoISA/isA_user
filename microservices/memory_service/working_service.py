@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import os
 
 from isa_model.inference_client import AsyncISAModel
-from isa_common.qdrant_client import QdrantClient
+from isa_common import AsyncQdrantClient
 
 from .models import WorkingMemory, MemoryOperationResult
 from .working_repository import WorkingMemoryRepository
@@ -27,13 +27,13 @@ class WorkingMemoryService:
         self.consul_registry = None  # Service discovery handled by ConfigManager now
         self.model_url = self._get_model_url()
 
-        # Initialize Qdrant client for vector storage
-        self.qdrant = QdrantClient(
+        # Initialize Qdrant client (async) - lazy connection
+        self.qdrant = AsyncQdrantClient(
             host=os.getenv('QDRANT_HOST', 'isa-qdrant-grpc'),
             port=int(os.getenv('QDRANT_PORT', 50062)),
             user_id='memory_service'
         )
-        self._ensure_collection()
+        self._collection_initialized = False  # Track if collection is ready
 
         logger.info(f"Working Memory Service initialized with ISA Model URL: {self.model_url}")
 
@@ -52,16 +52,33 @@ class WorkingMemoryService:
                 logger.warning(f"Failed to discover model_service via Consul: {e}")
         return "http://localhost:8082"
 
-    def _ensure_collection(self):
-        """Ensure Qdrant collection exists for working memories"""
+    async def _ensure_collection(self):
+        """Ensure Qdrant collection exists (lazy async init)"""
+        if self._collection_initialized:
+            return
+
         collection_name = 'working_memories'
         try:
-            if not self.qdrant.get_collection_info(collection_name):
-                self.qdrant.create_collection(collection_name, vector_size=1536, distance='Cosine')
-                logger.info(f"Created Qdrant collection: {collection_name}")
-                self.qdrant.create_field_index(collection_name, 'user_id', 'keyword')
-                self.qdrant.create_field_index(collection_name, 'task_id', 'keyword')
-                logger.info(f"Created indexes on {collection_name}")
+            async with self.qdrant:
+                info = await self.qdrant.get_collection_info(collection_name)
+                if not info:
+                    await self.qdrant.create_collection(
+                        collection_name=collection_name,
+                        vector_size=1536,
+                        distance='Cosine'
+                    )
+                    await self.qdrant.create_field_index(
+                        collection_name=collection_name,
+                        field_name='user_id',
+                        field_type='keyword'
+                    )
+                    await self.qdrant.create_field_index(
+                        collection_name=collection_name,
+                        field_name='task_id',
+                        field_type='keyword'
+                    )
+                    logger.info(f"Created Qdrant collection: {collection_name}")
+            self._collection_initialized = True
         except Exception as e:
             logger.warning(f"Error ensuring Qdrant collection: {e}")
 
@@ -89,6 +106,9 @@ class WorkingMemoryService:
             MemoryOperationResult
         """
         try:
+            # Ensure collection exists (lazy init)
+            await self._ensure_collection()
+
             memory_id = str(uuid.uuid4())
 
             # Generate embedding
@@ -121,19 +141,20 @@ class WorkingMemoryService:
             result = await self.repository.create(memory_data)
 
             if result:
-                # Store embedding to Qdrant
+                # Store embedding to Qdrant - ASYNC
                 try:
-                    self.qdrant.upsert_points('working_memories', [{
-                        'id': memory_id,
-                        'vector': embedding,
-                        'payload': {
-                            'user_id': user_id,
-                            'task_id': task_id,
-                            'priority': priority,
-                            'expires_at': expires_at.isoformat(),
-                            'created_at': datetime.now(timezone.utc).isoformat()
-                        }
-                    }])
+                    async with self.qdrant:
+                        await self.qdrant.upsert_points('working_memories', [{
+                            'id': memory_id,
+                            'vector': embedding,
+                            'payload': {
+                                'user_id': user_id,
+                                'task_id': task_id,
+                                'priority': priority,
+                                'expires_at': expires_at.isoformat(),
+                                'created_at': datetime.now(timezone.utc).isoformat()
+                            }
+                        }])
                     logger.info(f"Stored embedding to Qdrant for working memory {memory_id}")
                 except Exception as e:
                     logger.error(f"Failed to store embedding to Qdrant: {e}")

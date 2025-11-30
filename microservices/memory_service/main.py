@@ -246,7 +246,7 @@ class StoreSessionMessageRequest(BaseModel):
     role: str = "user"
 
 
-@app.post("/memories/factual/extract", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories/factual/extract", response_model=MemoryOperationResult)
 async def store_factual_memory(request: StoreFactualMemoryRequest):
     """Extract and store factual memories from dialog using AI"""
     try:
@@ -261,7 +261,7 @@ async def store_factual_memory(request: StoreFactualMemoryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/memories/episodic/extract", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories/episodic/extract", response_model=MemoryOperationResult)
 async def store_episodic_memory(request: StoreEpisodicMemoryRequest):
     """Extract and store episodic memories from dialog using AI"""
     try:
@@ -276,7 +276,7 @@ async def store_episodic_memory(request: StoreEpisodicMemoryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/memories/procedural/extract", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories/procedural/extract", response_model=MemoryOperationResult)
 async def store_procedural_memory(request: StoreProceduralMemoryRequest):
     """Extract and store procedural memories from dialog using AI"""
     try:
@@ -291,7 +291,7 @@ async def store_procedural_memory(request: StoreProceduralMemoryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/memories/semantic/extract", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories/semantic/extract", response_model=MemoryOperationResult)
 async def store_semantic_memory(request: StoreSemanticMemoryRequest):
     """Extract and store semantic memories from dialog using AI"""
     try:
@@ -308,7 +308,7 @@ async def store_semantic_memory(request: StoreSemanticMemoryRequest):
 
 # ==================== General Memory Operations ====================
 
-@app.post("/memories", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories", response_model=MemoryOperationResult)
 async def create_memory(request: MemoryCreateRequest):
     """Create a new memory"""
     try:
@@ -321,7 +321,7 @@ async def create_memory(request: MemoryCreateRequest):
 
 # ==================== Session-specific Routes (must come before generic routes) ====================
 
-@app.post("/memories/session/store", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories/session/store", response_model=MemoryOperationResult)
 async def store_session_message(request: StoreSessionMessageRequest):
     """Store session message"""
     try:
@@ -350,7 +350,7 @@ async def store_session_message(request: StoreSessionMessageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/memories/session/{session_id}/context")
+@app.get("/api/v1/memories/session/{session_id}/context")
 async def get_session_context(
     session_id: str,
     user_id: str = Query(...),
@@ -387,7 +387,7 @@ async def get_session_context(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/memories/session/{session_id}")
+@app.get("/api/v1/memories/session/{session_id}")
 async def get_session_memories(
     session_id: str,
     user_id: str = Query(...)
@@ -401,7 +401,7 @@ async def get_session_memories(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/memories/session/{session_id}/deactivate", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories/session/{session_id}/deactivate", response_model=MemoryOperationResult)
 async def deactivate_session(
     session_id: str,
     user_id: str = Query(...)
@@ -417,7 +417,7 @@ async def deactivate_session(
 
 # ==================== Working Memory-specific Routes (must come before generic routes) ====================
 
-@app.post("/memories/working/store", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories/working/store", response_model=MemoryOperationResult)
 async def store_working_memory(request: StoreWorkingMemoryRequest):
     """Store working memory from dialog"""
     try:
@@ -443,7 +443,7 @@ async def store_working_memory(request: StoreWorkingMemoryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/memories/working/active")
+@app.get("/api/v1/memories/working/active")
 async def get_active_working_memories(user_id: str = Query(...)):
     """Get active working memories"""
     try:
@@ -454,7 +454,7 @@ async def get_active_working_memories(user_id: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/memories/working/cleanup", response_model=MemoryOperationResult)
+@app.post("/api/v1/memories/working/cleanup", response_model=MemoryOperationResult)
 async def cleanup_expired_memories(user_id: Optional[str] = Query(None)):
     """Clean up expired working memories"""
     try:
@@ -467,7 +467,7 @@ async def cleanup_expired_memories(user_id: Optional[str] = Query(None)):
 
 # ==================== Generic Memory Routes ====================
 
-@app.get("/memories/{memory_type}/{memory_id}")
+@app.get("/api/v1/memories/{memory_type}/{memory_id}")
 async def get_memory(
     memory_type: MemoryType,
     memory_id: str,
@@ -486,7 +486,7 @@ async def get_memory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/memories")
+@app.get("/api/v1/memories")
 async def list_memories(
     user_id: str = Query(...),
     memory_type: Optional[MemoryType] = Query(None),
@@ -510,7 +510,7 @@ async def list_memories(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult)
+@app.put("/api/v1/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult)
 async def update_memory(
     memory_type: MemoryType,
     memory_id: str,
@@ -531,7 +531,7 @@ async def update_memory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult)
+@app.delete("/api/v1/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult)
 async def delete_memory(
     memory_type: MemoryType,
     memory_id: str,
@@ -548,7 +548,7 @@ async def delete_memory(
 
 # ==================== Search Operations ====================
 
-@app.get("/memories/factual/search/subject")
+@app.get("/api/v1/memories/factual/search/subject")
 async def search_facts_by_subject(
     user_id: str = Query(...),
     subject: str = Query(...),
@@ -563,7 +563,7 @@ async def search_facts_by_subject(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/memories/episodic/search/event_type")
+@app.get("/api/v1/memories/episodic/search/event_type")
 async def search_episodes_by_event_type(
     user_id: str = Query(...),
     event_type: str = Query(...),
@@ -578,7 +578,7 @@ async def search_episodes_by_event_type(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/memories/semantic/search/category")
+@app.get("/api/v1/memories/semantic/search/category")
 async def search_concepts_by_category(
     user_id: str = Query(...),
     category: str = Query(...),
@@ -593,7 +593,7 @@ async def search_concepts_by_category(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/memories/search")
+@app.get("/api/v1/memories/search")
 async def search_all_memories(
     user_id: str = Query(...),
     query: str = Query(...),
@@ -694,7 +694,7 @@ async def search_all_memories(
 
 # ==================== Statistics ====================
 
-@app.get("/memories/statistics")
+@app.get("/api/v1/memories/statistics")
 async def get_memory_statistics(user_id: str = Query(...)):
     """Get memory statistics for a user"""
     try:

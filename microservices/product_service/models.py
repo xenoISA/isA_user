@@ -543,3 +543,135 @@ class ProductStats(BaseModel):
     active_service_plans: int
     total_subscriptions: int
     active_subscriptions: int
+
+
+# ====================
+# Subscription Tier Models
+# ====================
+
+class SupportLevel(str, Enum):
+    """Support level types"""
+    COMMUNITY = "community"
+    EMAIL = "email"
+    PRIORITY = "priority"
+    DEDICATED = "dedicated"
+
+
+class SubscriptionTier(BaseModel):
+    """Subscription tier model - represents a subscription plan"""
+    id: Optional[int] = None
+    tier_id: str = Field(..., description="Unique tier identifier")
+
+    # Tier Information
+    tier_name: str = Field(..., description="Display name (Free, Pro, Max, etc.)")
+    tier_code: str = Field(..., description="Code identifier (free, pro, max, etc.)")
+    description: Optional[str] = None
+
+    # Pricing (USD)
+    monthly_price_usd: Decimal = Field(default=Decimal("0"), ge=0)
+    yearly_price_usd: Optional[Decimal] = Field(default=None, ge=0)
+
+    # Credits (1 Credit = $0.00001 USD)
+    monthly_credits: int = Field(default=0, ge=0, description="Credits included per month")
+    credit_rollover: bool = Field(default=False, description="Whether unused credits roll over")
+    max_rollover_credits: Optional[int] = Field(default=None, description="Max credits that can roll over")
+
+    # Target Audience
+    target_audience: TargetAudience = TargetAudience.INDIVIDUAL
+    min_seats: int = Field(default=1, ge=1)
+    max_seats: Optional[int] = None
+    per_seat_price_usd: Optional[Decimal] = None
+
+    # Features and Limits
+    features: List[str] = Field(default_factory=list)
+    usage_limits: Dict[str, Any] = Field(default_factory=dict)
+
+    # Support
+    support_level: SupportLevel = SupportLevel.COMMUNITY
+    priority_queue: bool = False
+
+    # Status
+    is_active: bool = True
+    is_public: bool = True
+    display_order: int = 0
+
+    # Trial
+    trial_days: int = 0
+
+    # Metadata
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CostDefinition(BaseModel):
+    """Cost definition model - defines credit cost for each service usage"""
+    id: Optional[int] = None
+    cost_id: str = Field(..., description="Unique cost definition identifier")
+
+    # Product/Service Reference
+    product_id: Optional[str] = None
+
+    # Cost Identification
+    service_type: str = Field(..., description="Service type (model_inference, storage_minio, etc.)")
+    provider: Optional[str] = None  # anthropic, openai, google, internal, etc.
+    model_name: Optional[str] = None  # claude-sonnet-4-20250514, gpt-4o, etc.
+    operation_type: Optional[str] = None  # input, output, request, storage_gb_month, etc.
+
+    # Cost Configuration (in Credits - 1 Credit = $0.00001 USD)
+    cost_per_unit: int = Field(..., ge=0, description="Credits per unit")
+    unit_type: str = Field(..., description="token, request, gb_month, minute, etc.")
+    unit_size: int = Field(default=1, ge=1, description="Units per charge (e.g., 1000 for per 1K tokens)")
+
+    # Original Cost Reference
+    original_cost_usd: Optional[Decimal] = None
+    margin_percentage: Decimal = Field(default=Decimal("30.0"))
+
+    # Effective Period
+    effective_from: Optional[datetime] = None
+    effective_until: Optional[datetime] = None
+
+    # Free Tier
+    free_tier_limit: int = Field(default=0, ge=0)
+    free_tier_period: str = Field(default="monthly")
+
+    # Status
+    is_active: bool = True
+
+    # Metadata
+    description: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+# ====================
+# Cost Lookup Request/Response
+# ====================
+
+class CostLookupRequest(BaseModel):
+    """Request to look up cost for a specific usage"""
+    service_type: str
+    provider: Optional[str] = None
+    model_name: Optional[str] = None
+    operation_type: Optional[str] = None
+
+
+class CostLookupResponse(BaseModel):
+    """Response with cost information"""
+    success: bool
+    message: str
+    cost_definition: Optional[CostDefinition] = None
+    cost_per_unit: Optional[int] = None  # Credits
+    unit_type: Optional[str] = None
+    unit_size: Optional[int] = None
+    free_tier_limit: Optional[int] = None
+    free_tier_period: Optional[str] = None
+
+
+class SubscriptionTierResponse(BaseModel):
+    """Response with subscription tier information"""
+    success: bool
+    message: str
+    tiers: List[SubscriptionTier] = Field(default_factory=list)
+    recommended_tier: Optional[str] = None

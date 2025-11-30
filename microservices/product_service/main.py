@@ -85,12 +85,20 @@ async def lifespan(app: FastAPI):
             organization_client=organization_client
         )
 
-        # Register event handlers
+        # Subscribe to events using new API
         if event_bus:
             try:
-                from .events.handlers import register_event_handlers
-                await register_event_handlers(event_bus, product_service)
-                logger.info("✅ Event handlers registered successfully")
+                from .events import get_event_handlers
+                handler_map = get_event_handlers(product_service)
+
+                for event_pattern, handler_func in handler_map.items():
+                    await event_bus.subscribe_to_events(
+                        pattern=event_pattern,
+                        handler=handler_func
+                    )
+                    logger.info(f"Subscribed to {event_pattern} events")
+
+                logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
             except Exception as e:
                 logger.error(f"⚠️  Failed to register event handlers: {e}")
 
@@ -403,7 +411,7 @@ async def create_subscription(
             billing_cycle_enum = BillingCycle(billing_cycle)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid billing_cycle: {billing_cycle}")
-        
+
         return await service.create_subscription(
             user_id=user_id,
             plan_id=plan_id,
@@ -417,6 +425,38 @@ async def create_subscription(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error creating subscription: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.put("/api/v1/product/subscriptions/{subscription_id}/status")
+async def update_subscription_status(
+    subscription_id: str,
+    status: str = Body(..., embed=True),
+    service: ProductService = Depends(get_product_service)
+):
+    """更新订阅状态"""
+    try:
+        # Validate status
+        try:
+            status_enum = SubscriptionStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+        success = await service.update_subscription_status(
+            subscription_id=subscription_id,
+            status=status_enum
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        # Get updated subscription to return
+        subscription = await service.get_subscription(subscription_id)
+        return subscription
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating subscription status: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

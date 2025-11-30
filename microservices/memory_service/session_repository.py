@@ -42,8 +42,8 @@ class SessionMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, session_id]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             # Deserialize all rows
             return [self._deserialize_row(row) for row in (results or [])]
@@ -76,8 +76,8 @@ class SessionMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, session_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params, schema=self.schema)
 
             return self._deserialize_row(result) if result else None
 
@@ -113,8 +113,8 @@ class SessionMemoryRepository(BaseMemoryRepository):
                 "created_at": summary_data.get("created_at")
             }
 
-            with self.db:
-                count = self.db.insert_into(
+            async with self.db:
+                count = await self.db.insert_into(
                     "session_summaries",
                     [data],
                     schema=self.schema
@@ -151,8 +151,8 @@ class SessionMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, session_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count > 0
 
@@ -186,8 +186,8 @@ class SessionMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, session_type]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -216,8 +216,8 @@ class SessionMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return [row['session_id'] for row in results] if results else []
 

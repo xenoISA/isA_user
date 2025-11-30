@@ -11,8 +11,10 @@ import os
 from datetime import datetime, timezone
 from decimal import Decimal
 
-# Add parent directories to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+# Add project root to path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from microservices.session_service.session_service import SessionService
 from microservices.session_service.models import (

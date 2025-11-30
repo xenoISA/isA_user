@@ -14,7 +14,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     InvitationStatus, OrganizationRole,
@@ -43,7 +43,7 @@ class InvitationRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="invitation_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="invitation_service")
 
         self.schema = "invitation"
         self.invitations_table = "organization_invitations"
@@ -88,8 +88,8 @@ class InvitationRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 return InvitationResponse(**results[0])
@@ -107,8 +107,8 @@ class InvitationRepository:
                 WHERE invitation_id = $1
             '''
 
-            with self.db:
-                results = self.db.query(query, [invitation_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [invitation_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return InvitationResponse(**results[0])
@@ -126,8 +126,8 @@ class InvitationRepository:
                 WHERE invitation_token = $1
             '''
 
-            with self.db:
-                results = self.db.query(query, [invitation_token], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [invitation_token], schema=self.schema)
 
             if results and len(results) > 0:
                 return InvitationResponse(**results[0])
@@ -173,8 +173,8 @@ class InvitationRepository:
                 LIMIT 1
             '''
 
-            with self.db:
-                results = self.db.query(
+            async with self.db:
+                results = await self.db.query(
                     query,
                     [email, organization_id, InvitationStatus.PENDING.value],
                     schema=self.schema
@@ -203,8 +203,8 @@ class InvitationRepository:
                 LIMIT $2 OFFSET $3
             '''
 
-            with self.db:
-                results = self.db.query(query, [organization_id, limit, offset], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [organization_id, limit, offset], schema=self.schema)
 
             if results:
                 # 返回基本邀请响应
@@ -246,8 +246,8 @@ class InvitationRepository:
                 WHERE invitation_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -274,8 +274,8 @@ class InvitationRepository:
                 InvitationStatus.PENDING.value
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -312,8 +312,8 @@ class InvitationRepository:
                 now
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count if count is not None else 0
 
@@ -329,8 +329,8 @@ class InvitationRepository:
                 WHERE invitation_id = $1
             '''
 
-            with self.db:
-                count = self.db.execute(query, [invitation_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [invitation_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -361,8 +361,8 @@ class InvitationRepository:
                 GROUP BY status
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             stats = {"total": 0, "pending": 0, "accepted": 0, "expired": 0, "cancelled": 0}
 
@@ -399,8 +399,8 @@ class InvitationRepository:
                 AND status = $3
             '''
 
-            with self.db:
-                count = self.db.execute(
+            async with self.db:
+                count = await self.db.execute(
                     query,
                     [InvitationStatus.CANCELLED.value, organization_id, InvitationStatus.PENDING.value],
                     schema=self.schema
@@ -431,8 +431,8 @@ class InvitationRepository:
                 AND status = $3
             '''
 
-            with self.db:
-                count = self.db.execute(
+            async with self.db:
+                count = await self.db.execute(
                     query,
                     [InvitationStatus.CANCELLED.value, user_id, InvitationStatus.PENDING.value],
                     schema=self.schema

@@ -1,7 +1,7 @@
 """
 Product Repository
 
-数据访问层 - PostgreSQL + gRPC
+数据访问层 - PostgreSQL + gRPC (Async)
 """
 
 import logging
@@ -10,10 +10,12 @@ import sys
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
+import uuid
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import Product, PricingModel, ProductType, Currency, ProductCategory
 
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProductRepository:
-    """产品数据访问仓库 - PostgreSQL"""
+    """产品数据访问仓库 - PostgreSQL (Async)"""
 
     def __init__(self, config: Optional[ConfigManager] = None):
         """
@@ -45,7 +47,7 @@ class ProductRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=postgres_host,
             port=postgres_port,
             user_id="product_service"
@@ -67,7 +69,6 @@ class ProductRepository:
     async def create_product(self, product: Product) -> Optional[Product]:
         """创建产品"""
         try:
-            import json
             query = f'''
                 INSERT INTO {self.schema}.{self.products_table} (
                     product_id, product_name, product_code, description, category,
@@ -90,8 +91,8 @@ class ProductRepository:
                 product.tags, now, now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return self._row_to_product(results[0])
@@ -109,11 +110,11 @@ class ProductRepository:
                 WHERE product_id = $1
             '''
 
-            with self.db:
-                results = self.db.query(query, [product_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=[product_id])
 
-            if results and len(results) > 0:
-                return self._row_to_product(results[0])
+            if result:
+                return self._row_to_product(result)
             return None
 
         except Exception as e:
@@ -160,8 +161,8 @@ class ProductRepository:
 
             params.extend([limit, offset])
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return [self._row_to_product(row) for row in results] if results else []
 
@@ -172,7 +173,6 @@ class ProductRepository:
     async def update_product(self, product_id: str, updates: Dict[str, Any]) -> Optional[Product]:
         """更新产品"""
         try:
-            import json
             set_clauses = []
             params = []
             param_count = 0
@@ -198,8 +198,8 @@ class ProductRepository:
                 RETURNING *
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return self._row_to_product(results[0])
@@ -217,8 +217,8 @@ class ProductRepository:
                 WHERE product_id = $1
             '''
 
-            with self.db:
-                count = self.db.execute(query, [product_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=[product_id])
 
             return count is not None and count > 0
 
@@ -254,8 +254,8 @@ class ProductRepository:
                 ORDER BY category
             '''
 
-            with self.db:
-                results = self.db.query(query, [], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=[])
 
             if results:
                 categories = []
@@ -301,26 +301,25 @@ class ProductRepository:
                 WHERE product_id = $1 AND is_active = true
             '''
 
-            with self.db:
-                results = self.db.query(query, [product_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=[product_id])
 
-            if not results or len(results) == 0:
+            if not result:
                 return None
 
-            row = results[0]
-            base_price = float(row.get("base_price", 0.0))
+            base_price = float(result.get("base_price", 0.0))
 
             # Build pricing information
             pricing = {
-                "product_id": row.get("product_id"),
-                "product_name": row.get("name"),
+                "product_id": result.get("product_id"),
+                "product_name": result.get("name"),
                 "base_price": base_price,
-                "currency": row.get("currency", "USD"),
-                "billing_interval": row.get("billing_interval", "per_unit"),
+                "currency": result.get("currency", "USD"),
+                "billing_interval": result.get("billing_interval", "per_unit"),
                 "pricing_type": "usage_based",
                 "tiers": [],
-                "features": row.get("features") or [],
-                "quota_limits": row.get("quota_limits") or {}
+                "features": result.get("features") or [],
+                "quota_limits": result.get("quota_limits") or {}
             }
 
             # Add tiered pricing structure
@@ -355,7 +354,7 @@ class ProductRepository:
             return None
 
     # ==================== Service Plan Operations ====================
-    
+
     async def get_service_plan(self, plan_id: str) -> Optional[Dict[str, Any]]:
         """获取服务计划"""
         try:
@@ -380,7 +379,7 @@ class ProductRepository:
         except Exception as e:
             logger.error(f"Error getting service plan: {e}")
             return None
-    
+
     # ==================== Subscription Operations ====================
 
     async def create_subscription(self, subscription: Any) -> Any:
@@ -410,6 +409,26 @@ class ProductRepository:
             logger.error(f"Error getting subscription: {e}")
             return None
 
+    async def update_subscription_status(self, subscription_id: str, new_status: str) -> bool:
+        """更新订阅状态"""
+        try:
+            # TODO: Implement actual subscription update when subscriptions table exists
+            # For now, update in memory cache
+            subscription = self._subscriptions_cache.get(subscription_id)
+            if not subscription:
+                logger.warning(f"Mock: Subscription {subscription_id} not found for update")
+                return False
+
+            # Update the status
+            from .models import SubscriptionStatus
+            subscription.status = SubscriptionStatus(new_status)
+            self._subscriptions_cache[subscription_id] = subscription
+            logger.info(f"Mock: Updated subscription {subscription_id} status to {new_status}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating subscription status: {e}")
+            return False
+
     async def get_user_subscriptions(
         self,
         user_id: str,
@@ -425,6 +444,29 @@ class ProductRepository:
             return []
 
     # ==================== Usage Records Operations ====================
+
+    async def record_product_usage(
+        self,
+        user_id: str,
+        organization_id: Optional[str],
+        subscription_id: Optional[str],
+        product_id: str,
+        usage_amount: Any,
+        session_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+        usage_details: Optional[Dict[str, Any]] = None,
+        usage_timestamp: Optional[Any] = None
+    ) -> str:
+        """记录产品使用量"""
+        try:
+            # TODO: Implement actual usage recording when usage_records table exists
+            # For now, generate a mock usage record ID
+            usage_record_id = f"usage_{uuid.uuid4().hex[:16]}"
+            logger.info(f"Mock: Recorded product usage {usage_record_id} for user {user_id}, product {product_id}, amount {usage_amount}")
+            return usage_record_id
+        except Exception as e:
+            logger.error(f"Error recording product usage: {e}")
+            raise
 
     async def get_usage_records(
         self,

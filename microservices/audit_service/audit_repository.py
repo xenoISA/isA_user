@@ -1,7 +1,7 @@
 """
-Audit Repository
+Audit Repository - Async Version
 
-数据访问层 - PostgreSQL + gRPC
+Data access layer for audit service using AsyncPostgresClient.
 """
 
 import logging
@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     AuditEvent, UserActivity, SecurityEvent, ComplianceReport,
@@ -23,15 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 class AuditRepository:
-    """审计数据访问仓库 - PostgreSQL"""
+    """Audit data repository - AsyncPostgresClient"""
 
     def __init__(self, config: Optional[ConfigManager] = None):
-        # Use config_manager for service discovery
         if config is None:
             config = ConfigManager("audit_service")
 
-        # Discover PostgreSQL service
-        # Priority: environment variables → Consul → localhost fallback
         host, port = config.discover_service(
             service_name='postgres_grpc_service',
             default_host='isa-postgres-grpc',
@@ -41,7 +38,7 @@ class AuditRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id="audit_service"
@@ -50,16 +47,54 @@ class AuditRepository:
         self.audit_events_table = "audit_events"
 
     async def check_connection(self) -> bool:
-        """检查数据库连接"""
+        """Check database connection"""
         try:
-            result = self.db.health_check(detailed=False)
-            return result is not None and result.get('healthy', False)
+            async with self.db:
+                result = await self.db.query_row("SELECT 1 as connected", params=[])
+            return result is not None
         except Exception as e:
-            logger.error(f"数据库连接检查失败: {e}")
+            logger.error(f"Database connection check failed: {e}")
             return False
 
+    def _parse_json_field(self, value, expected_type='dict'):
+        """Parse JSON field from database - handles both string and protobuf types"""
+        if value is None:
+            return [] if expected_type == 'list' else None
+
+        if isinstance(value, dict):
+            if expected_type == 'list' and (not value or value == {}):
+                return []
+            return value if expected_type == 'dict' else None
+        if isinstance(value, list):
+            return value if expected_type == 'list' else None
+
+        if isinstance(value, str):
+            import json
+            try:
+                parsed = json.loads(value)
+                if expected_type == 'list' and not isinstance(parsed, list):
+                    return [] if not parsed else None
+                if expected_type == 'dict' and not isinstance(parsed, dict):
+                    return None
+                return parsed
+            except:
+                return [] if expected_type == 'list' else None
+
+        try:
+            if hasattr(value, 'items'):
+                result = dict(value.items())
+                if expected_type == 'list' and (not result or result == {}):
+                    return []
+                return result if expected_type == 'dict' else None
+            elif hasattr(value, '__iter__'):
+                return list(value) if expected_type == 'list' else None
+        except:
+            pass
+
+        return [] if expected_type == 'list' else None
+
     async def create_audit_event(self, event: AuditEvent) -> Optional[AuditEvent]:
-        """创建审计事件"""
+        """Create audit event"""
         try:
             import json
             query = f'''
@@ -74,28 +109,55 @@ class AuditRepository:
                           $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
                 RETURNING *
             '''
-            
+
             params = [
                 event.id, event.event_type.value, event.category.value,
                 event.severity.value, event.status.value,
                 event.user_id, event.organization_id, event.session_id,
                 event.ip_address, event.user_agent, event.action,
                 event.resource_type, event.resource_id, event.resource_name,
-                None,  # status_code - not in model
+                None,  # status_code
                 event.error_message,
-                "{}",  # changes_made - not in model
-                0.0,  # risk_score - not in model
-                "[]",  # threat_indicators - not in model
+                "{}",  # changes_made
+                0.0,  # risk_score
+                "[]",  # threat_indicators
                 json.dumps(event.compliance_flags) if event.compliance_flags else "[]",
                 json.dumps(event.metadata) if event.metadata else "{}",
                 event.tags, event.timestamp, datetime.now(timezone.utc)
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
-                return AuditEvent(**results[0])
+                row = results[0]
+                return AuditEvent(
+                    id=row.get('event_id'),
+                    event_type=EventType(row.get('event_type')),
+                    category=AuditCategory(row.get('event_category')),
+                    severity=EventSeverity(row.get('event_severity')),
+                    status=EventStatus(row.get('event_status')),
+                    action=row.get('action'),
+                    description=row.get('description'),
+                    user_id=row.get('user_id'),
+                    session_id=row.get('session_id'),
+                    organization_id=row.get('organization_id'),
+                    resource_type=row.get('resource_type'),
+                    resource_id=row.get('resource_id'),
+                    resource_name=row.get('resource_name'),
+                    ip_address=row.get('ip_address'),
+                    user_agent=row.get('user_agent'),
+                    api_endpoint=row.get('api_endpoint'),
+                    http_method=row.get('http_method'),
+                    success=row.get('success', True),
+                    error_code=row.get('error_code'),
+                    error_message=row.get('error_message'),
+                    metadata=self._parse_json_field(row.get('metadata'), expected_type='dict'),
+                    tags=row.get('tags'),
+                    timestamp=row.get('event_timestamp'),
+                    retention_policy=row.get('retention_policy'),
+                    compliance_flags=self._parse_json_field(row.get('compliance_flags'), expected_type='list')
+                )
             return None
 
         except Exception as e:
@@ -112,7 +174,7 @@ class AuditRepository:
         limit: int = 100,
         offset: int = 0
     ) -> List[AuditEvent]:
-        """获取审计事件列表"""
+        """Get audit events list"""
         try:
             conditions = []
             params = []
@@ -154,8 +216,8 @@ class AuditRepository:
 
             params.extend([limit, offset])
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return [AuditEvent(**event) for event in results] if results else []
 
@@ -163,13 +225,12 @@ class AuditRepository:
             logger.error(f"Error getting audit events: {e}")
             return []
 
-    async def get_security_events(
+    async def get_security_events_by_severity(
         self,
         severity: Optional[EventSeverity] = None,
         limit: int = 100
     ) -> List[SecurityEvent]:
-        """获取安全事件"""
-        # Convert AuditEvent to SecurityEvent
+        """Get security events by severity"""
         events = await self.get_audit_events(
             event_type=EventType.SECURITY_EVENT,
             limit=limit
@@ -182,7 +243,7 @@ class AuditRepository:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None
     ) -> Dict[str, Any]:
-        """获取审计统计"""
+        """Get audit statistics"""
         try:
             conditions = []
             params = []
@@ -215,8 +276,8 @@ class AuditRepository:
                 {where_clause}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return results[0]
@@ -227,17 +288,23 @@ class AuditRepository:
             logger.error(f"Error getting audit statistics: {e}")
             return {"total_events": 0, "critical_events": 0, "error_events": 0, "failed_events": 0}
 
-
     async def query_audit_events(self, query: Dict[str, Any]) -> List[AuditEvent]:
-        """查询审计事件 (别名方法)"""
+        """Query audit events (alias method)"""
+        if hasattr(query, 'model_dump'):
+            query_dict = query.model_dump()
+        elif hasattr(query, 'dict'):
+            query_dict = query.dict()
+        else:
+            query_dict = query
+
         return await self.get_audit_events(
-            user_id=query.get('user_id'),
-            organization_id=query.get('organization_id'),
-            event_type=query.get('event_type'),
-            start_time=query.get('start_time'),
-            end_time=query.get('end_time'),
-            limit=query.get('limit', 100),
-            offset=query.get('offset', 0)
+            user_id=query_dict.get('user_id'),
+            organization_id=query_dict.get('organization_id'),
+            event_type=query_dict.get('event_type'),
+            start_time=query_dict.get('start_time'),
+            end_time=query_dict.get('end_time'),
+            limit=query_dict.get('limit', 100),
+            offset=query_dict.get('offset', 0)
         )
 
     async def get_user_activities(
@@ -246,7 +313,7 @@ class AuditRepository:
         days: int = 30,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
-        """获取用户活动"""
+        """Get user activities"""
         try:
             from datetime import timedelta
             start_time = datetime.now(timezone.utc) - timedelta(days=days)
@@ -258,10 +325,12 @@ class AuditRepository:
                 LIMIT $3
             '''
 
-            with self.db:
-                results = self.db.query(query, [user_id, start_time, limit], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=[user_id, start_time, limit])
 
-            return results if results else []
+            if results:
+                return [dict(row) if hasattr(row, 'keys') else row for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error getting user activities: {e}")
@@ -272,7 +341,7 @@ class AuditRepository:
         user_id: str,
         days: int = 30
     ) -> Dict[str, Any]:
-        """获取用户活动摘要"""
+        """Get user activity summary"""
         try:
             from datetime import timedelta
             start_time = datetime.now(timezone.utc) - timedelta(days=days)
@@ -287,8 +356,8 @@ class AuditRepository:
                 WHERE user_id = $1 AND event_timestamp >= $2
             '''
 
-            with self.db:
-                results = self.db.query(query, [user_id, start_time], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=[user_id, start_time])
 
             if results and len(results) > 0:
                 return results[0]
@@ -299,17 +368,19 @@ class AuditRepository:
             return {}
 
     async def create_security_event(self, security_event: 'SecurityEvent') -> Optional['SecurityEvent']:
-        """创建安全事件 (转换为审计事件)"""
+        """Create security event (converted to audit event)"""
         try:
-            # 转换为AuditEvent
+            import uuid
             audit_event = AuditEvent(
+                id=str(uuid.uuid4()),
                 event_type=EventType.SECURITY_ALERT,
                 category=AuditCategory.SECURITY,
                 severity=EventSeverity.HIGH,
                 action="security_alert",
                 description=getattr(security_event, 'description', None),
                 metadata=getattr(security_event, 'metadata', None),
-                tags=getattr(security_event, 'tags', None)
+                tags=getattr(security_event, 'tags', None),
+                timestamp=datetime.now(timezone.utc)
             )
 
             created = await self.create_audit_event(audit_event)
@@ -324,7 +395,7 @@ class AuditRepository:
         days: int = 7,
         severity: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """获取安全事件"""
+        """Get security events"""
         try:
             from datetime import timedelta
             start_time = datetime.now(timezone.utc) - timedelta(days=days)
@@ -347,8 +418,8 @@ class AuditRepository:
                 LIMIT 100
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return results if results else []
 
@@ -357,17 +428,17 @@ class AuditRepository:
             return []
 
     async def get_event_statistics(self, days: int = 30) -> Dict[str, Any]:
-        """获取事件统计 (别名方法)"""
+        """Get event statistics (alias method)"""
         from datetime import timedelta
         start_time = datetime.now(timezone.utc) - timedelta(days=days)
-        return await self.get_audit_statistics(
+        return await self.get_statistics(
             organization_id=None,
             start_time=start_time,
             end_time=None
         )
 
     async def cleanup_old_events(self, retention_days: int = 365) -> int:
-        """清理旧事件"""
+        """Cleanup old events"""
         try:
             from datetime import timedelta
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
@@ -377,8 +448,8 @@ class AuditRepository:
                 WHERE event_timestamp < $1
             '''
 
-            with self.db:
-                count = self.db.execute(query, [cutoff_date], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=[cutoff_date])
 
             return count if count else 0
 

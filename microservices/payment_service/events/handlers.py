@@ -8,8 +8,6 @@ import logging
 from typing import Dict, Any
 from datetime import datetime
 
-from core.nats_client import EventType
-
 logger = logging.getLogger(__name__)
 
 
@@ -159,62 +157,24 @@ async def handle_user_upgraded(event_data: Dict[str, Any], payment_service) -> N
         logger.error(f"❌ Error handling user.upgraded event: {e}")
 
 
-async def register_event_handlers(event_bus, payment_service) -> None:
+def get_event_handlers(payment_service) -> Dict[str, callable]:
     """
-    Register all event handlers for payment service
+    Return a mapping of event patterns to handler functions
+
+    Event patterns include the service prefix for proper event routing.
+    This will be used in main.py to register event subscriptions.
 
     Args:
-        event_bus: NATS event bus instance
-        payment_service: PaymentService instance
+        payment_service: PaymentService instance for data access
+
+    Returns:
+        Dict mapping event patterns to handler functions
     """
-    if not event_bus:
-        logger.warning("Event bus not available, skipping event handler registration")
-        return
-
-    try:
-        # Register handler for order.created
-        await event_bus.subscribe(
-            EventType.ORDER_CREATED,
-            lambda data: handle_order_created(data, payment_service)
-        )
-        logger.info("✅ Registered handler for order.created event")
-
-        # Register handler for wallet.balance_changed
-        await event_bus.subscribe(
-            EventType.WALLET_BALANCE_CHANGED,
-            lambda data: handle_wallet_balance_changed(data, payment_service)
-        )
-        logger.info("✅ Registered handler for wallet.balance_changed event")
-
-        # Register handler for wallet.insufficient_funds
-        await event_bus.subscribe(
-            EventType.WALLET_INSUFFICIENT_FUNDS,
-            lambda data: handle_wallet_insufficient_funds(data, payment_service)
-        )
-        logger.info("✅ Registered handler for wallet.insufficient_funds event")
-
-        # Register handler for subscription.usage_exceeded
-        await event_bus.subscribe(
-            EventType.PRODUCT_USAGE_EXCEEDED,
-            lambda data: handle_subscription_usage_exceeded(data, payment_service)
-        )
-        logger.info("✅ Registered handler for subscription.usage_exceeded event")
-
-        # Register handler for user.deleted
-        await event_bus.subscribe(
-            EventType.USER_DELETED,
-            lambda data: handle_user_deleted(data, payment_service)
-        )
-        logger.info("✅ Registered handler for user.deleted event")
-
-        # Register handler for user.upgraded
-        await event_bus.subscribe(
-            EventType.USER_UPGRADED,
-            lambda data: handle_user_upgraded(data, payment_service)
-        )
-        logger.info("✅ Registered handler for user.upgraded event")
-
-        logger.info("✅ All payment service event handlers registered successfully")
-
-    except Exception as e:
-        logger.error(f"❌ Error registering event handlers: {e}")
+    return {
+        "order_service.order.created": lambda event: handle_order_created(event.data, payment_service),
+        "wallet_service.wallet.balance_changed": lambda event: handle_wallet_balance_changed(event.data, payment_service),
+        "wallet_service.wallet.insufficient_funds": lambda event: handle_wallet_insufficient_funds(event.data, payment_service),
+        "product_service.subscription.usage_exceeded": lambda event: handle_subscription_usage_exceeded(event.data, payment_service),
+        "account_service.user.deleted": lambda event: handle_user_deleted(event.data, payment_service),
+        "account_service.user.upgraded": lambda event: handle_user_upgraded(event.data, payment_service),
+    }

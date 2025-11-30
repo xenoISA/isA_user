@@ -1,11 +1,9 @@
 """
-Organization Service Clients Module
+Organization Service Clients
 
-HTTP clients for synchronous communication with other microservices.
+Re-exports OrganizationServiceClient from parent module.
 """
 
-from .organization_client import OrganizationServiceClient
+from ..client import OrganizationServiceClient
 
-__all__ = [
-    "OrganizationServiceClient",
-]
+__all__ = ["OrganizationServiceClient"]

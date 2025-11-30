@@ -226,8 +226,20 @@ class ProductService:
                 logger.warning(f"Subscription {subscription_id} not found")
                 return False
 
-            # 这里应该实现更新逻辑，但由于时间关系先简化
-            logger.info(f"Would update subscription {subscription_id} to status {status}")
+            # Store old status before update
+            old_status = subscription.status.value
+
+            # Update the subscription status in repository
+            success = await self.repository.update_subscription_status(
+                subscription_id=subscription_id,
+                new_status=status.value
+            )
+
+            if not success:
+                logger.error(f"Failed to update subscription {subscription_id} status")
+                return False
+
+            logger.info(f"Updated subscription {subscription_id} from {old_status} to {status.value}")
 
             # Publish subscription status change event via publisher
             await publish_subscription_status_changed(
@@ -236,7 +248,7 @@ class ProductService:
                 user_id=subscription.user_id,
                 organization_id=subscription.organization_id,
                 plan_id=subscription.plan_id,
-                old_status=subscription.status.value,
+                old_status=old_status,
                 new_status=status.value
             )
 

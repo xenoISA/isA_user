@@ -112,7 +112,7 @@ class StorageServiceClient:
                 data["auto_delete_after_days"] = auto_delete_after_days
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/files/upload",
+                f"{self.base_url}/api/v1/storage/files/upload",
                 files=files,
                 data=data
             )
@@ -146,7 +146,7 @@ class StorageServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/files/{file_id}",
+                f"{self.base_url}/api/v1/storage/files/{file_id}",
                 params={"user_id": user_id}
             )
             response.raise_for_status()
@@ -195,7 +195,7 @@ class StorageServiceClient:
                 params["status"] = status
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/files",
+                f"{self.base_url}/api/v1/storage/files",
                 params=params
             )
             response.raise_for_status()
@@ -231,7 +231,7 @@ class StorageServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/files/{file_id}/download",
+                f"{self.base_url}/api/v1/storage/files/{file_id}/download",
                 params={"user_id": user_id, "expires_minutes": expires_minutes}
             )
             response.raise_for_status()
@@ -266,7 +266,7 @@ class StorageServiceClient:
         """
         try:
             response = await self.client.delete(
-                f"{self.base_url}/api/v1/files/{file_id}",
+                f"{self.base_url}/api/v1/storage/files/{file_id}",
                 params={"user_id": user_id, "permanent": permanent}
             )
             response.raise_for_status()
@@ -337,7 +337,7 @@ class StorageServiceClient:
                 data["max_downloads"] = max_downloads
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/files/{file_id}/share",
+                f"{self.base_url}/api/v1/storage/files/{file_id}/share",
                 data=data
             )
             response.raise_for_status()
@@ -378,7 +378,7 @@ class StorageServiceClient:
                 params["password"] = password
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/shares/{share_id}",
+                f"{self.base_url}/api/v1/storage/shares/{share_id}",
                 params=params
             )
             response.raise_for_status()

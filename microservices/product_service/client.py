@@ -5,9 +5,10 @@ Client library for other microservices to interact with product service
 """
 
 import httpx
-from core.service_discovery import get_service_discovery
 import logging
 from typing import Optional, List, Dict, Any
+
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -15,23 +16,30 @@ logger = logging.getLogger(__name__)
 class ProductServiceClient:
     """Product Service HTTP client"""
 
-    def __init__(self, base_url: str = None):
+    def __init__(self, base_url: str = None, config: Optional[ConfigManager] = None):
         """
         Initialize Product Service client
 
         Args:
             base_url: Product service base URL, defaults to service discovery
+            config: ConfigManager instance for service discovery
         """
         if base_url:
             self.base_url = base_url.rstrip('/')
         else:
-            # Use service discovery
-            try:
-                sd = get_service_discovery()
-                self.base_url = sd.get_service_url("product_service")
-            except Exception as e:
-                logger.warning(f"Service discovery failed, using default: {e}")
-                self.base_url = "http://localhost:8210"
+            # Use ConfigManager for service discovery (env → Consul → fallback)
+            if config is None:
+                config = ConfigManager("product_service_client")
+
+            host, port = config.discover_service(
+                service_name='product_service',
+                default_host='product.isa-cloud-staging.svc.cluster.local',
+                default_port=8215,
+                env_host_key='PRODUCT_SERVICE_HOST',
+                env_port_key='PRODUCT_SERVICE_PORT'
+            )
+            self.base_url = f"http://{host}:{port}"
+            logger.info(f"ProductServiceClient using: {self.base_url}")
 
         self.client = httpx.AsyncClient(timeout=30.0)
 

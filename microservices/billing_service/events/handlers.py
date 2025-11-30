@@ -85,27 +85,39 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
             f"usage {usage_data.usage_amount} {usage_data.unit_type}"
         )
 
-        # 调用 billing_service 的业务逻辑处理
-        billing_result = await billing_service.record_usage(
+        # 从 usage_details 中提取 service_type，默认为 MODEL_INFERENCE
+        service_type_str = usage_data.usage_details.get("service_type", "model_inference")
+        try:
+            service_type = ServiceType(service_type_str)
+        except ValueError:
+            service_type = ServiceType.MODEL_INFERENCE
+
+        # 构建 RecordUsageRequest
+        request = RecordUsageRequest(
             user_id=usage_data.user_id,
             organization_id=usage_data.organization_id,
-            product_id=usage_data.product_id,
-            usage_amount=usage_data.usage_amount,
-            unit_type=usage_data.unit_type.value,
-            usage_details=usage_data.usage_details,
-            session_id=usage_data.session_id,
             subscription_id=usage_data.subscription_id,
+            product_id=usage_data.product_id,
+            service_type=service_type,
+            usage_amount=usage_data.usage_amount,
+            session_id=usage_data.session_id,
+            usage_details=usage_data.usage_details,
+            usage_timestamp=usage_data.timestamp,
         )
 
-        if not billing_result:
-            logger.error(f"Failed to process usage for user {usage_data.user_id}")
+        # 调用 billing_service 的业务逻辑处理
+        billing_result = await billing_service.record_usage_and_bill(request)
+
+        if not billing_result or not billing_result.success:
+            error_msg = billing_result.message if billing_result else "No response from billing service"
+            logger.error(f"Failed to process usage for user {usage_data.user_id}: {error_msg}")
             # 发布错误事件
             await publish_billing_error(
                 event_bus=event_bus,
                 user_id=usage_data.user_id,
                 product_id=usage_data.product_id,
                 error_code="BILLING_PROCESSING_FAILED",
-                error_message="Failed to process usage record",
+                error_message=error_msg,
                 usage_event_id=event.id,
             )
             return
@@ -114,27 +126,28 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
         mark_event_processed(event.id)
 
         # 发布计费计算完成事件
+        # ProcessBillingResponse 包含: billing_record_id, amount_charged, billing_method_used 等
         await publish_billing_calculated(
             event_bus=event_bus,
-            user_id=billing_result.get("user_id"),
-            billing_record_id=billing_result.get("billing_record_id"),
-            product_id=billing_result.get("product_id"),
-            actual_usage=Decimal(str(billing_result.get("usage_amount"))),
-            unit_type=UnitType(billing_result.get("unit_type")),
-            token_equivalent=Decimal(str(billing_result.get("token_equivalent"))),
-            cost_usd=Decimal(str(billing_result.get("cost_usd"))),
-            unit_price=Decimal(str(billing_result.get("unit_price", 0))),
-            token_conversion_rate=Decimal(
-                str(billing_result.get("token_conversion_rate", 1))
-            ),
-            is_free_tier=billing_result.get("is_free_tier", False),
-            is_included_in_subscription=billing_result.get(
-                "is_included_in_subscription", False
-            ),
+            user_id=usage_data.user_id,
+            billing_record_id=billing_result.billing_record_id or str(event.id),
+            product_id=usage_data.product_id,
+            actual_usage=usage_data.usage_amount,
+            unit_type=usage_data.unit_type,
+            token_equivalent=usage_data.usage_amount,  # 简化：直接使用 usage_amount
+            cost_usd=billing_result.amount_charged or Decimal("0"),
+            unit_price=Decimal("0"),  # 简化：从 product_service 获取的价格
+            token_conversion_rate=Decimal("1"),
+            is_free_tier=False,
+            is_included_in_subscription=False,
             usage_event_id=event.id,
         )
 
-        logger.info(f"✅ Successfully processed usage event {event.id}")
+        logger.info(
+            f"✅ Successfully processed usage event {event.id}, "
+            f"charged: ${billing_result.amount_charged}, "
+            f"method: {billing_result.billing_method_used}"
+        )
 
     except Exception as e:
         logger.error(f"❌ Error handling usage_recorded event: {e}", exc_info=True)

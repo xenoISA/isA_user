@@ -6,6 +6,7 @@ Audit Service Business Logic
 
 import logging
 import asyncio
+import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
@@ -64,33 +65,34 @@ class AuditService:
             
             # 创建审计事件对象
             audit_event = AuditEvent(
+                id=str(uuid.uuid4()),
                 event_type=request.event_type,
                 category=request.category,
                 severity=request.severity,
                 status=EventStatus.SUCCESS if request.success else EventStatus.FAILURE,
                 action=request.action,
                 description=request.description,
-                
+
                 user_id=request.user_id,
                 session_id=request.session_id,
                 organization_id=request.organization_id,
-                
+
                 resource_type=request.resource_type,
                 resource_id=request.resource_id,
                 resource_name=request.resource_name,
-                
+
                 ip_address=request.ip_address,
                 user_agent=request.user_agent,
                 api_endpoint=request.api_endpoint,
                 http_method=request.http_method,
-                
+
                 success=request.success,
                 error_code=request.error_code,
                 error_message=request.error_message,
-                
+
                 metadata=request.metadata,
                 tags=request.tags,
-                
+
                 timestamp=datetime.utcnow()
             )
             
@@ -250,19 +252,20 @@ class AuditService:
             logger.warning(f"创建安全告警: {alert.threat_type} - {alert.severity.value}")
             
             security_event = SecurityEvent(
+                id=str(uuid.uuid4()),
                 event_type=EventType.SECURITY_ALERT,
                 severity=alert.severity,
                 threat_level=self._calculate_threat_level(alert.severity),
-                
+
                 source_ip=alert.source_ip,
                 target_resource=alert.target_resource,
-                
+
                 detection_method="manual_report",
                 confidence_score=0.8,
-                
+
                 response_action="investigation_required",
                 investigation_status="open",
-                
+
                 detected_at=datetime.utcnow(),
                 metadata=alert.metadata
             )

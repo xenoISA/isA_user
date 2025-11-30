@@ -14,7 +14,7 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import ListValue, Struct
@@ -46,7 +46,7 @@ class VaultRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="vault_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="vault_service")
         self.schema = "vault"
         self.vault_table = "vault_items"
         self.access_log_table = "vault_access_logs"
@@ -134,8 +134,8 @@ class VaultRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 item_data = self._parse_vault_item(results[0], include_encrypted=False)
@@ -152,8 +152,8 @@ class VaultRepository:
         try:
             query = f'SELECT * FROM {self.schema}.{self.vault_table} WHERE vault_id = $1'
 
-            with self.db:
-                results = self.db.query(query, [vault_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [vault_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return self._parse_vault_item(results[0], include_encrypted=True)
@@ -213,8 +213,8 @@ class VaultRepository:
                 LIMIT {limit_param} OFFSET {offset_param}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 items = []
@@ -261,8 +261,8 @@ class VaultRepository:
                 WHERE vault_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -281,8 +281,8 @@ class VaultRepository:
                 WHERE vault_id = $3
             '''
 
-            with self.db:
-                count = self.db.execute(query, [False, now, vault_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [False, now, vault_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -303,8 +303,8 @@ class VaultRepository:
                 WHERE vault_id = $3
             '''
 
-            with self.db:
-                count = self.db.execute(query, [now, now, vault_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [now, now, vault_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -341,8 +341,8 @@ class VaultRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 data = results[0]
@@ -405,8 +405,8 @@ class VaultRepository:
                 LIMIT {limit_param} OFFSET {offset_param}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 logs = []
@@ -459,8 +459,8 @@ class VaultRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 data = results[0]
@@ -490,8 +490,8 @@ class VaultRepository:
                 WHERE vault_id = $1 AND is_active = $2
             '''
 
-            with self.db:
-                results = self.db.query(query, [vault_id, True], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [vault_id, True], schema=self.schema)
 
             if results and len(results) > 0:
                 shares = []
@@ -523,8 +523,8 @@ class VaultRepository:
                 WHERE shared_with_user_id = $1 AND is_active = $2
             '''
 
-            with self.db:
-                results = self.db.query(query, [user_id, True], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [user_id, True], schema=self.schema)
 
             if results and len(results) > 0:
                 shares = []
@@ -557,8 +557,8 @@ class VaultRepository:
                 WHERE share_id = $2
             '''
 
-            with self.db:
-                count = self.db.execute(query, [False, share_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [False, share_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -608,8 +608,8 @@ class VaultRepository:
                 {where_clause}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if not results or len(results) == 0:
                 return {
@@ -660,8 +660,8 @@ class VaultRepository:
                     WHERE owner_user_id = $1 AND is_active = $2
                 '''
 
-                with self.db:
-                    share_results = self.db.query(share_query, [user_id, True], schema=self.schema)
+                async with self.db:
+                    share_results = await self.db.query(share_query, [user_id, True], schema=self.schema)
 
                 if share_results and len(share_results) > 0:
                     stats['shared_secrets'] = share_results[0].get('count', 0)
@@ -688,8 +688,8 @@ class VaultRepository:
                 ORDER BY expires_at ASC
             '''
 
-            with self.db:
-                results = self.db.query(query, [user_id, True, now, future_date], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [user_id, True, now, future_date], schema=self.schema)
 
             if results and len(results) > 0:
                 items = []
@@ -714,26 +714,26 @@ class VaultRepository:
             # Delete vault items
             items_query = f'DELETE FROM {self.schema}.{self.vault_table} WHERE user_id = $1'
 
-            with self.db:
-                items_count = self.db.execute(items_query, [user_id], schema=self.schema)
+            async with self.db:
+                items_count = await self.db.execute(items_query, [user_id], schema=self.schema)
 
             # Delete shares where user is the owner
             shares_query = f'DELETE FROM {self.schema}.{self.share_table} WHERE shared_by = $1'
 
-            with self.db:
-                shares_count = self.db.execute(shares_query, [user_id], schema=self.schema)
+            async with self.db:
+                shares_count = await self.db.execute(shares_query, [user_id], schema=self.schema)
 
             # Delete shares where user is the recipient
             shares_to_query = f'DELETE FROM {self.schema}.{self.share_table} WHERE shared_with = $1'
 
-            with self.db:
-                shares_to_count = self.db.execute(shares_to_query, [user_id], schema=self.schema)
+            async with self.db:
+                shares_to_count = await self.db.execute(shares_to_query, [user_id], schema=self.schema)
 
             # Delete access logs
             logs_query = f'DELETE FROM {self.schema}.{self.access_log_table} WHERE user_id = $1'
 
-            with self.db:
-                logs_count = self.db.execute(logs_query, [user_id], schema=self.schema)
+            async with self.db:
+                logs_count = await self.db.execute(logs_query, [user_id], schema=self.schema)
 
             total_deleted = (
                 (items_count if items_count is not None else 0) +

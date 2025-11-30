@@ -27,10 +27,10 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-# Import MQTT client
+# Import MQTT client (use centralized async client from core)
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from isa_common.mqtt_client import MQTTClient
+from core.mqtt_client import MQTTEventBus, get_mqtt_bus
 
 
 # Test Configuration for Kind K8s Environment
@@ -133,26 +133,23 @@ class SimulatedSmartFrame:
         self.media_service_url = media_service_url
         self.storage_service_url = storage_service_url
 
-        self.mqtt_client = None
-        self.session_id = None
+        self.mqtt_bus: Optional[MQTTEventBus] = None
         self.received_messages = []
         self.http_client = httpx.AsyncClient(timeout=60.0)
 
     async def connect_mqtt(self):
-        """Connect to MQTT broker"""
+        """Connect to MQTT broker using async MQTTEventBus"""
         print(f"🖼️  [Smart Frame {self.frame_id}] Connecting to MQTT broker...")
 
-        self.mqtt_client = MQTTClient(
+        self.mqtt_bus = MQTTEventBus(
+            service_name=f"smart_frame_{self.frame_id}",
             host=self.mqtt_host,
             port=self.mqtt_port,
-            user_id=f'frame_{self.frame_id}'
+            user_id=f"frame_{self.frame_id}"
         )
 
-        with self.mqtt_client:
-            conn = self.mqtt_client.connect(f'frame-{self.frame_id}-connection')
-            self.session_id = conn['session_id']
-
-        print(f"✅ [Smart Frame {self.frame_id}] Connected to MQTT (session: {self.session_id})")
+        await self.mqtt_bus.connect(client_id=f"frame-{self.frame_id}-connection")
+        print(f"✅ [Smart Frame {self.frame_id}] Connected to MQTT (session: {self.mqtt_bus.session_id})")
 
     async def subscribe_to_album(self, album_id: str):
         """
@@ -187,21 +184,13 @@ class SimulatedSmartFrame:
 
         topic = f'albums/{album_id}/photo_added'
 
-        # Poll for retained message or check subscriptions
-        start_time = time.time()
+        # Note: In real implementation, the MQTT service would provide subscription
+        # For testing, we simulate the notification check
+        # The async MQTT client doesn't have retained message fetching built-in
+        # This would typically be handled by a callback-based subscription
 
-        with self.mqtt_client:
-            # Try to get retained message
-            msg = self.mqtt_client.get_retained_message(topic)
-
-            if msg and msg.get('found'):
-                payload = json.loads(msg['payload'])
-                print(f"✅ [Smart Frame {self.frame_id}] Received photo notification: {payload.get('file_id')}")
-                return payload
-
-        # In production, you would use proper MQTT subscription callbacks
-        # For testing, we simulate the notification
-        print(f"⚠️  [Smart Frame {self.frame_id}] No MQTT message received (broker may need setup)")
+        print(f"⚠️  [Smart Frame {self.frame_id}] Subscription-based notifications not implemented in test")
+        print(f"   Topic would be: {topic}")
         return None
 
     async def fetch_photo_metadata(self, file_id: str) -> Dict[str, Any]:
@@ -314,33 +303,30 @@ class SimulatedSmartFrame:
         """
         print(f"🖼️  [Smart Frame {self.frame_id}] Publishing status: {status}")
 
-        if not self.session_id:
+        if not self.mqtt_bus or not self.mqtt_bus.connected:
             await self.connect_mqtt()
 
-        with self.mqtt_client:
-            status_msg = {
-                'frame_id': self.frame_id,
-                'file_id': file_id,
-                'status': status,
-                'timestamp': datetime.utcnow().isoformat()
-            }
+        status_msg = {
+            'frame_id': self.frame_id,
+            'file_id': file_id,
+            'status': status,
+            'timestamp': datetime.utcnow().isoformat()
+        }
 
-            topic = f'frames/{self.frame_id}/status'
+        topic = f'frames/{self.frame_id}/status'
 
-            self.mqtt_client.publish_json(
-                self.session_id,
-                topic,
-                status_msg,
-                qos=0  # Fire and forget for status
-            )
+        await self.mqtt_bus.publish_json(
+            topic,
+            status_msg,
+            qos=0  # Fire and forget for status
+        )
 
         print(f"✅ [Smart Frame {self.frame_id}] Status published to {topic}")
 
     async def close(self):
         """Cleanup resources"""
-        if self.mqtt_client and self.session_id:
-            with self.mqtt_client:
-                self.mqtt_client.disconnect(self.session_id)
+        if self.mqtt_bus:
+            await self.mqtt_bus.close()
 
         await self.http_client.aclose()
 

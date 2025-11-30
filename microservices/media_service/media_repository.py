@@ -17,7 +17,8 @@ sys.path.append(
 
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import ListValue, Struct
-from isa_common.postgres_client import PostgresClient
+
+from isa_common import AsyncPostgresClient
 
 from core.config_manager import ConfigManager
 
@@ -56,7 +57,7 @@ class MediaRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="media_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="media_service")
 
         # Table names (media schema)
         self.schema = "media"
@@ -82,32 +83,44 @@ class MediaRepository:
     ) -> Optional[PhotoVersion]:
         """Create a new photo version"""
         try:
-            data = {
-                "version_id": version_data.version_id,
-                "photo_id": version_data.photo_id,
-                "user_id": version_data.user_id,
-                "organization_id": version_data.organization_id,
-                "version_name": version_data.version_name,
-                "version_type": version_data.version_type.value
+            now = datetime.now(timezone.utc)
+            version_type = (
+                version_data.version_type.value
                 if hasattr(version_data.version_type, "value")
-                else str(version_data.version_type),
-                "processing_mode": version_data.processing_mode or "",
-                "file_id": version_data.file_id,
-                "cloud_url": version_data.cloud_url or "",
-                "local_path": version_data.local_path or "",
-                "file_size": version_data.file_size or 0,
-                "processing_params": version_data.processing_params or {},
-                "metadata": version_data.metadata or {},
-                "is_current": version_data.is_current or False,
-                "version_number": version_data.version_number or 1,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
+                else str(version_data.version_type)
+            )
 
-            with self.db:
-                count = self.db.insert_into(
-                    self.versions_table, [data], schema=self.schema
-                )
+            query = f"""
+                INSERT INTO {self.schema}.{self.versions_table} (
+                    version_id, photo_id, user_id, organization_id, version_name,
+                    version_type, processing_mode, file_id, cloud_url, local_path,
+                    file_size, processing_params, metadata, is_current, version_number,
+                    created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            """
+
+            params = [
+                version_data.version_id,
+                version_data.photo_id,
+                version_data.user_id,
+                version_data.organization_id,
+                version_data.version_name,
+                version_type,
+                version_data.processing_mode or "",
+                version_data.file_id,
+                version_data.cloud_url or "",
+                version_data.local_path or "",
+                version_data.file_size or 0,
+                version_data.processing_params or {},
+                version_data.metadata or {},
+                version_data.is_current or False,
+                version_data.version_number or 1,
+                now,
+                now,
+            ]
+
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             if count is not None and count > 0:
                 return await self.get_photo_version(version_data.version_id)
@@ -127,8 +140,8 @@ class MediaRepository:
             """
             params = [version_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 return PhotoVersion.model_validate(result)
@@ -150,16 +163,18 @@ class MediaRepository:
             """
             params = [photo_id, user_id]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             # Convert protobuf JSONB fields
-            for row in results:
-                for field in ["processing_params", "metadata"]:
-                    if field in row:
-                        row[field] = self._convert_protobuf_to_native(row[field])
+            if results:
+                for row in results:
+                    for field in ["processing_params", "metadata"]:
+                        if field in row:
+                            row[field] = self._convert_protobuf_to_native(row[field])
 
-            return [PhotoVersion.model_validate(row) for row in results]
+                return [PhotoVersion.model_validate(row) for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error listing photo versions: {e}")
@@ -174,8 +189,8 @@ class MediaRepository:
             """
             params = [version_id, user_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -208,45 +223,52 @@ class MediaRepository:
         self, metadata_data: PhotoMetadata
     ) -> Optional[PhotoMetadata]:
         """Create new metadata"""
-        # Pass Python objects directly - insert_into will handle conversion
-        # Note: datetime objects must be converted to ISO strings for protobuf
         now = datetime.now(timezone.utc)
-        data = {
-            "file_id": metadata_data.file_id,
-            "user_id": metadata_data.user_id,
-            "organization_id": metadata_data.organization_id,
-            "camera_make": metadata_data.camera_make,
-            "camera_model": metadata_data.camera_model,
-            "lens_model": metadata_data.lens_model,
-            "focal_length": metadata_data.focal_length,
-            "aperture": metadata_data.aperture,
-            "shutter_speed": metadata_data.shutter_speed,
-            "iso": metadata_data.iso,
-            "flash_used": metadata_data.flash_used,
-            "latitude": metadata_data.latitude,
-            "longitude": metadata_data.longitude,
-            "location_name": metadata_data.location_name,
-            "photo_taken_at": metadata_data.photo_taken_at.isoformat()
-            if metadata_data.photo_taken_at
-            else None,
-            # Pass Python objects directly for JSONB fields
-            "ai_labels": metadata_data.ai_labels or [],
-            "ai_objects": metadata_data.ai_objects or [],
-            "ai_scenes": metadata_data.ai_scenes or [],
-            "ai_colors": metadata_data.ai_colors or [],
-            "face_detection": metadata_data.face_detection or {},
-            "text_detection": metadata_data.text_detection or {},
-            "quality_score": metadata_data.quality_score,
-            "blur_score": metadata_data.blur_score,
-            "brightness": metadata_data.brightness,
-            "contrast": metadata_data.contrast,
-            "full_metadata": metadata_data.full_metadata or {},
-            "created_at": now.isoformat(),
-            "updated_at": now.isoformat(),
-        }
 
-        with self.db:
-            count = self.db.insert_into(self.metadata_table, [data], schema=self.schema)
+        query = f"""
+            INSERT INTO {self.schema}.{self.metadata_table} (
+                file_id, user_id, organization_id, camera_make, camera_model,
+                lens_model, focal_length, aperture, shutter_speed, iso,
+                flash_used, latitude, longitude, location_name, photo_taken_at,
+                ai_labels, ai_objects, ai_scenes, ai_colors, face_detection,
+                text_detection, quality_score, blur_score, brightness, contrast,
+                full_metadata, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+        """
+
+        params = [
+            metadata_data.file_id,
+            metadata_data.user_id,
+            metadata_data.organization_id,
+            metadata_data.camera_make,
+            metadata_data.camera_model,
+            metadata_data.lens_model,
+            metadata_data.focal_length,
+            metadata_data.aperture,
+            metadata_data.shutter_speed,
+            metadata_data.iso,
+            metadata_data.flash_used,
+            metadata_data.latitude,
+            metadata_data.longitude,
+            metadata_data.location_name,
+            metadata_data.photo_taken_at,
+            metadata_data.ai_labels or [],
+            metadata_data.ai_objects or [],
+            metadata_data.ai_scenes or [],
+            metadata_data.ai_colors or [],
+            metadata_data.face_detection or {},
+            metadata_data.text_detection or {},
+            metadata_data.quality_score,
+            metadata_data.blur_score,
+            metadata_data.brightness,
+            metadata_data.contrast,
+            metadata_data.full_metadata or {},
+            now,
+            now,
+        ]
+
+        async with self.db:
+            count = await self.db.execute(query, params=params)
 
         if count is not None and count > 0:
             return await self.get_photo_metadata(metadata_data.file_id)
@@ -254,7 +276,6 @@ class MediaRepository:
             logger.error(
                 f"PostgreSQL insert returned None for file_id={metadata_data.file_id}"
             )
-            logger.error(f"Data causing error: {data}")
             raise Exception(
                 "Database insert failed - check PostgreSQL logs for type mismatch"
             )
@@ -298,7 +319,7 @@ class MediaRepository:
 
         param_count += 1
         set_clauses.append(f"updated_at = ${param_count}")
-        params.append(datetime.now(timezone.utc).isoformat())
+        params.append(datetime.now(timezone.utc))
 
         param_count += 1
         params.append(metadata_data.file_id)
@@ -310,8 +331,8 @@ class MediaRepository:
             WHERE file_id = ${param_count}
         """
 
-        with self.db:
-            self.db.execute(query, params, schema=self.schema)
+        async with self.db:
+            await self.db.execute(query, params=params)
 
         return await self.get_photo_metadata(metadata_data.file_id)
 
@@ -324,8 +345,8 @@ class MediaRepository:
             """
             params = [file_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 # Convert protobuf JSONB fields to native Python types
@@ -358,28 +379,39 @@ class MediaRepository:
     async def create_playlist(self, playlist_data: Playlist) -> Optional[Playlist]:
         """Create a new playlist"""
         try:
-            data = {
-                "playlist_id": playlist_data.playlist_id,
-                "name": playlist_data.name,
-                "description": playlist_data.description or "",
-                "user_id": playlist_data.user_id,
-                "organization_id": playlist_data.organization_id,
-                "playlist_type": playlist_data.playlist_type.value
+            now = datetime.now(timezone.utc)
+            playlist_type = (
+                playlist_data.playlist_type.value
                 if hasattr(playlist_data.playlist_type, "value")
-                else str(playlist_data.playlist_type),
-                "smart_criteria": playlist_data.smart_criteria or {},
-                "photo_ids": playlist_data.photo_ids or [],
-                "shuffle": playlist_data.shuffle or False,
-                "loop": playlist_data.loop or True,
-                "transition_duration": playlist_data.transition_duration or 5,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
+                else str(playlist_data.playlist_type)
+            )
 
-            with self.db:
-                count = self.db.insert_into(
-                    self.playlists_table, [data], schema=self.schema
-                )
+            query = f"""
+                INSERT INTO {self.schema}.{self.playlists_table} (
+                    playlist_id, name, description, user_id, organization_id,
+                    playlist_type, smart_criteria, photo_ids, shuffle, loop,
+                    transition_duration, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            """
+
+            params = [
+                playlist_data.playlist_id,
+                playlist_data.name,
+                playlist_data.description or "",
+                playlist_data.user_id,
+                playlist_data.organization_id,
+                playlist_type,
+                playlist_data.smart_criteria or {},
+                playlist_data.photo_ids or [],
+                playlist_data.shuffle or False,
+                playlist_data.loop if playlist_data.loop is not None else True,
+                playlist_data.transition_duration or 5,
+                now,
+                now,
+            ]
+
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             if count is not None and count > 0:
                 return await self.get_playlist(playlist_data.playlist_id)
@@ -399,8 +431,8 @@ class MediaRepository:
             """
             params = [playlist_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 # Convert protobuf JSONB fields
@@ -427,16 +459,18 @@ class MediaRepository:
             """
             params = [user_id]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             # Convert protobuf JSONB fields
-            for row in results:
-                for field in ["smart_criteria", "photo_ids"]:
-                    if field in row:
-                        row[field] = self._convert_protobuf_to_native(row[field])
+            if results:
+                for row in results:
+                    for field in ["smart_criteria", "photo_ids"]:
+                        if field in row:
+                            row[field] = self._convert_protobuf_to_native(row[field])
 
-            return [Playlist.model_validate(row) for row in results]
+                return [Playlist.model_validate(row) for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error listing playlists: {e}")
@@ -451,10 +485,10 @@ class MediaRepository:
             """
             params = [playlist_id, user_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            return count > 0
+            return count is not None and count > 0
 
         except Exception as e:
             logger.error(f"Error deleting playlist: {e}")
@@ -467,28 +501,39 @@ class MediaRepository:
     ) -> Optional[RotationSchedule]:
         """Create a new rotation schedule"""
         try:
-            data = {
-                "schedule_id": schedule_data.schedule_id,
-                "user_id": schedule_data.user_id,
-                "frame_id": schedule_data.frame_id,
-                "playlist_id": schedule_data.playlist_id,
-                "schedule_type": schedule_data.schedule_type.value
+            now = datetime.now(timezone.utc)
+            schedule_type = (
+                schedule_data.schedule_type.value
                 if hasattr(schedule_data.schedule_type, "value")
-                else str(schedule_data.schedule_type),
-                "start_time": schedule_data.start_time,
-                "end_time": schedule_data.end_time,
-                "days_of_week": schedule_data.days_of_week or [],
-                "rotation_interval": schedule_data.rotation_interval or 10,
-                "shuffle": schedule_data.shuffle or False,
-                "is_active": schedule_data.is_active or True,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
+                else str(schedule_data.schedule_type)
+            )
 
-            with self.db:
-                count = self.db.insert_into(
-                    self.schedules_table, [data], schema=self.schema
-                )
+            query = f"""
+                INSERT INTO {self.schema}.{self.schedules_table} (
+                    schedule_id, user_id, frame_id, playlist_id, schedule_type,
+                    start_time, end_time, days_of_week, rotation_interval,
+                    shuffle, is_active, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            """
+
+            params = [
+                schedule_data.schedule_id,
+                schedule_data.user_id,
+                schedule_data.frame_id,
+                schedule_data.playlist_id,
+                schedule_type,
+                schedule_data.start_time,
+                schedule_data.end_time,
+                schedule_data.days_of_week or [],
+                schedule_data.rotation_interval or 10,
+                schedule_data.shuffle or False,
+                schedule_data.is_active if schedule_data.is_active is not None else True,
+                now,
+                now,
+            ]
+
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             if count is not None and count > 0:
                 return await self.get_rotation_schedule(schedule_data.schedule_id)
@@ -516,8 +561,8 @@ class MediaRepository:
             """
             params = [schedule_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 return RotationSchedule.model_validate(result)
@@ -545,10 +590,12 @@ class MediaRepository:
             """
             params = [frame_id, user_id]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
-            return [RotationSchedule.model_validate(row) for row in results]
+            if results:
+                return [RotationSchedule.model_validate(row) for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error listing frame schedules: {e}")
@@ -566,10 +613,10 @@ class MediaRepository:
             """
             params = [is_active, datetime.now(timezone.utc), schedule_id, user_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            if count > 0:
+            if count is not None and count > 0:
                 return await self.get_rotation_schedule(schedule_id)
             return None
 
@@ -586,10 +633,10 @@ class MediaRepository:
             """
             params = [schedule_id, user_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            return count > 0
+            return count is not None and count > 0
 
         except Exception as e:
             logger.error(f"Error deleting rotation schedule: {e}")
@@ -600,35 +647,47 @@ class MediaRepository:
     async def create_photo_cache(self, cache_data: PhotoCache) -> Optional[PhotoCache]:
         """Create a new photo cache entry"""
         try:
-            data = {
-                "cache_id": cache_data.cache_id,
-                "user_id": cache_data.user_id,
-                "frame_id": cache_data.frame_id,
-                "photo_id": cache_data.photo_id,
-                "version_id": cache_data.version_id,
-                "cache_status": cache_data.cache_status.value
+            now = datetime.now(timezone.utc)
+            cache_status = (
+                cache_data.cache_status.value
                 if hasattr(cache_data.cache_status, "value")
-                else cache_data.cache_status,
-                "cached_url": cache_data.cached_url,
-                "local_path": cache_data.local_path,
-                "cache_size": cache_data.cache_size,
-                "cache_format": cache_data.cache_format,
-                "cache_quality": cache_data.cache_quality,
-                "hit_count": cache_data.hit_count,
-                "last_accessed_at": cache_data.last_accessed_at,
-                "error_message": cache_data.error_message,
-                "retry_count": cache_data.retry_count,
-                "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-                "expires_at": cache_data.expires_at,
-            }
+                else cache_data.cache_status
+            )
 
-            with self.db:
-                count = self.db.insert_into(
-                    self.cache_table, [data], schema=self.schema
-                )
+            query = f"""
+                INSERT INTO {self.schema}.{self.cache_table} (
+                    cache_id, user_id, frame_id, photo_id, version_id,
+                    cache_status, cached_url, local_path, cache_size,
+                    cache_format, cache_quality, hit_count, last_accessed_at,
+                    error_message, retry_count, created_at, updated_at, expires_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            """
 
-            if count > 0:
+            params = [
+                cache_data.cache_id,
+                cache_data.user_id,
+                cache_data.frame_id,
+                cache_data.photo_id,
+                cache_data.version_id,
+                cache_status,
+                cache_data.cached_url,
+                cache_data.local_path,
+                cache_data.cache_size,
+                cache_data.cache_format,
+                cache_data.cache_quality,
+                cache_data.hit_count,
+                cache_data.last_accessed_at,
+                cache_data.error_message,
+                cache_data.retry_count,
+                now,
+                now,
+                cache_data.expires_at,
+            ]
+
+            async with self.db:
+                count = await self.db.execute(query, params=params)
+
+            if count is not None and count > 0:
                 return await self.get_photo_cache(cache_data.cache_id)
             return None
 
@@ -645,8 +704,8 @@ class MediaRepository:
             """
             params = [cache_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 return PhotoCache.model_validate(result)
@@ -669,8 +728,8 @@ class MediaRepository:
             """
             params = [frame_id, photo_id, user_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 return PhotoCache.model_validate(result)
@@ -704,10 +763,12 @@ class MediaRepository:
                 """
                 params = [frame_id, user_id]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
-            return [PhotoCache.model_validate(row) for row in results]
+            if results:
+                return [PhotoCache.model_validate(row) for row in results]
+            return []
 
         except Exception as e:
             logger.error(f"Error listing frame cache: {e}")
@@ -732,10 +793,10 @@ class MediaRepository:
                 cache_id,
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            if count > 0:
+            if count is not None and count > 0:
                 return await self.get_photo_cache(cache_id)
             return None
 
@@ -755,10 +816,10 @@ class MediaRepository:
             """
             params = [datetime.now(timezone.utc), cache_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            return count > 0
+            return count is not None and count > 0
 
         except Exception as e:
             logger.error(f"Error incrementing cache hit: {e}")
@@ -773,10 +834,10 @@ class MediaRepository:
             """
             params = [cache_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            return count > 0
+            return count is not None and count > 0
 
         except Exception as e:
             logger.error(f"Error deleting photo cache: {e}")
@@ -791,10 +852,10 @@ class MediaRepository:
             """
             params = [datetime.now(timezone.utc)]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            return count
+            return count if count is not None else 0
 
         except Exception as e:
             logger.error(f"Error cleaning up expired cache: {e}")
@@ -836,10 +897,10 @@ class MediaRepository:
                 WHERE playlist_id = ${param_count - 1} AND user_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            if count > 0:
+            if count is not None and count > 0:
                 return await self.get_playlist(playlist_id)
             return None
 
@@ -852,8 +913,8 @@ class MediaRepository:
     async def check_connection(self) -> bool:
         """Check database connection"""
         try:
-            with self.db:
-                result = self.db.query_row("SELECT 1 as connected", [])
+            async with self.db:
+                result = await self.db.query_row("SELECT 1 as connected", params=[])
             return result is not None
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")

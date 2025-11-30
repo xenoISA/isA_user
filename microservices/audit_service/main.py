@@ -9,7 +9,7 @@ import uvicorn
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 
@@ -341,12 +341,27 @@ async def get_user_activities(
         
         activities = await svc.get_user_activities(user_id, days, limit)
         
+        # Convert activities to JSON-serializable format
+        serializable_activities = []
+        for activity in activities:
+            if isinstance(activity, dict):
+                # Convert any datetime objects to ISO format
+                serialized = {}
+                for k, v in activity.items():
+                    if isinstance(v, datetime):
+                        serialized[k] = v.isoformat()
+                    else:
+                        serialized[k] = v
+                serializable_activities.append(serialized)
+            else:
+                serializable_activities.append(activity)
+
         return {
             "user_id": user_id,
-            "activities": activities,
+            "activities": serializable_activities,
             "total_count": len(activities),
             "period_days": days,
-            "query_timestamp": datetime.utcnow()
+            "query_timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:

@@ -54,7 +54,7 @@ python-dotenv>=1.0.0
 
 # Shared Infrastructure Library
 # Updated to latest version with Consul client support
-isa-common==0.1.8
+isa-common==0.2.0
 
 # ISA Model Client (cloud version for AI-powered memory extraction)
 isa-model[cloud]

@@ -45,8 +45,8 @@ class FactualMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, f"%{subject}%"]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -80,8 +80,8 @@ class FactualMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, fact_type]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -115,8 +115,8 @@ class FactualMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, min_confidence]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -150,8 +150,8 @@ class FactualMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, f"%{source}%"]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -185,8 +185,8 @@ class FactualMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, verification_status]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -232,8 +232,8 @@ class FactualMemoryRepository(BaseMemoryRepository):
                 """
                 params = [user_id, subject, predicate]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             # Return first result if any
             return results[0] if results and len(results) > 0 else None
@@ -268,8 +268,8 @@ class FactualMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, f"%{predicate}%"]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 

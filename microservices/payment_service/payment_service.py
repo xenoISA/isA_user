@@ -31,6 +31,7 @@ from .models import (
 from .events.publishers import (
     publish_payment_completed,
     publish_payment_failed,
+    publish_payment_intent_created,
     publish_subscription_created,
     publish_subscription_canceled
 )
@@ -313,14 +314,30 @@ class PaymentService:
         )
         
         created_subscription = await self.repository.create_subscription(subscription)
-        
+
+        # Publish subscription.created event
+        try:
+            await publish_subscription_created(
+                event_bus=self.event_bus,
+                subscription_id=created_subscription.subscription_id,
+                user_id=created_subscription.user_id,
+                plan_id=created_subscription.plan_id,
+                status=created_subscription.status.value,
+                current_period_start=created_subscription.current_period_start,
+                current_period_end=created_subscription.current_period_end,
+                trial_end=created_subscription.trial_end,
+                metadata=created_subscription.metadata or {}
+            )
+        except Exception as e:
+            logger.error(f"Failed to publish subscription.created event: {e}")
+
         # 准备响应
         response = SubscriptionResponse(
             subscription=created_subscription,
             plan=plan,
             payment_method=None
         )
-        
+
         logger.info(f"Subscription created for user {request.user_id}: {created_subscription.subscription_id}")
         return response
     
@@ -443,7 +460,21 @@ class PaymentService:
             request.immediate,
             request.reason
         )
-        
+
+        # Publish subscription.canceled event
+        try:
+            await publish_subscription_canceled(
+                event_bus=self.event_bus,
+                subscription_id=cancelled_subscription.subscription_id,
+                user_id=cancelled_subscription.user_id,
+                canceled_at=cancelled_subscription.canceled_at,
+                plan_id=cancelled_subscription.plan_id,
+                reason=request.reason,
+                metadata=cancelled_subscription.metadata or {}
+            )
+        except Exception as e:
+            logger.error(f"Failed to publish subscription.canceled event: {e}")
+
         logger.info(f"Subscription cancelled: {subscription_id}")
         return cancelled_subscription
     
@@ -514,7 +545,20 @@ class PaymentService:
         )
         
         await self.repository.create_payment(payment)
-        
+
+        # Publish payment.intent.created event
+        try:
+            await publish_payment_intent_created(
+                event_bus=self.event_bus,
+                payment_intent_id=payment_intent_id,
+                user_id=request.user_id,
+                amount=request.amount,
+                currency=request.currency.value,
+                metadata=request.metadata or {}
+            )
+        except Exception as e:
+            logger.error(f"Failed to publish payment.intent.created event: {e}")
+
         response = PaymentIntentResponse(
             payment_intent_id=payment_intent_id,
             client_secret=client_secret,
@@ -523,7 +567,7 @@ class PaymentService:
             status=PaymentStatus.PENDING,
             metadata=request.metadata
         )
-        
+
         logger.info(f"Payment intent created: {payment_intent_id}")
         return response
     
@@ -571,6 +615,21 @@ class PaymentService:
 
         if not updated_payment:
             raise ValueError(f"Failed to update payment status for {payment_id}")
+
+        # Publish payment.completed event
+        try:
+            await publish_payment_completed(
+                event_bus=self.event_bus,
+                payment_intent_id=updated_payment.payment_id,
+                user_id=updated_payment.user_id,
+                amount=float(updated_payment.amount),
+                currency=updated_payment.currency.value,
+                payment_id=updated_payment.payment_id,
+                payment_method=updated_payment.payment_method.value,
+                metadata=updated_payment.processor_response or {}
+            )
+        except Exception as e:
+            logger.error(f"Failed to publish payment.completed event: {e}")
 
         logger.info(f"Payment confirmed: {payment_id}")
         return updated_payment

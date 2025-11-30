@@ -1,12 +1,7 @@
 """
-Memory Service Client
+Memory Service Clients
 
-Provides HTTP client for interacting with Memory Service
+Clients for calling external services from Memory Service.
 """
 
-from .memory_client import MemoryServiceClient, MemoryServiceSyncClient
-
-__all__ = [
-    'MemoryServiceClient',
-    'MemoryServiceSyncClient',
-]
+__all__ = []

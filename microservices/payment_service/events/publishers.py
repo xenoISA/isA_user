@@ -172,13 +172,13 @@ async def publish_payment_intent_created(
         )
 
         event = Event(
-            event_type=EventType.PAYMENT_INTENT_CREATED,
+            event_type=EventType.PAYMENT_INITIATED,
             source=ServiceSource.PAYMENT_SERVICE,
             data=event_data.model_dump(mode='json')
         )
 
         await event_bus.publish_event(event)
-        logger.info(f"✅ Published payment.intent.created event for {payment_intent_id}")
+        logger.info(f"✅ Published payment.initiated event for {payment_intent_id}")
         return True
 
     except Exception as e:

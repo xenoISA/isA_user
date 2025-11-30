@@ -3,6 +3,9 @@ Account Service Business Logic
 
 Account management business logic layer for the microservice.
 Handles validation, business rules, and error handling.
+
+Note: Account service is the identity anchor only.
+Subscription data is managed by subscription_service.
 """
 
 import logging
@@ -18,8 +21,6 @@ from .account_repository import (
     UserNotFoundException,
 )
 
-# Database connection now handled by repositories directly
-# Import event publishers from events module
 from .events.publishers import (
     publish_user_created,
     publish_user_deleted,
@@ -37,7 +38,6 @@ from .models import (
     AccountStatusChangeRequest,
     AccountSummaryResponse,
     AccountUpdateRequest,
-    SubscriptionStatus,
     User,
 )
 
@@ -46,19 +46,16 @@ logger = logging.getLogger(__name__)
 
 class AccountServiceError(Exception):
     """Base exception for account service errors"""
-
     pass
 
 
 class AccountValidationError(AccountServiceError):
     """Account validation error"""
-
     pass
 
 
 class AccountNotFoundError(AccountServiceError):
     """Account not found error"""
-
     pass
 
 
@@ -68,11 +65,15 @@ class AccountService:
 
     Handles all account-related business operations while delegating
     data access to the AccountRepository layer.
+
+    Note: This service handles identity data only. For subscription info,
+    use the subscription_client to query subscription_service.
     """
 
-    def __init__(self, event_bus=None, config: Optional[ConfigManager] = None):
+    def __init__(self, event_bus=None, config: Optional[ConfigManager] = None, subscription_client=None):
         self.account_repo = AccountRepository(config=config)
         self.event_bus = event_bus
+        self.subscription_client = subscription_client
 
     # Account Lifecycle Operations
 
@@ -93,36 +94,43 @@ class AccountService:
             AccountServiceError: If operation fails
         """
         try:
-            # Validate request
             self._validate_account_ensure_request(request)
 
-            # Ensure account exists
             user = await self.account_repo.ensure_account_exists(
                 user_id=request.user_id,
                 email=request.email,
                 name=request.name,
-                subscription_plan=request.subscription_plan or SubscriptionStatus.FREE,
             )
 
-            # Convert to response
             account_response = self._user_to_profile_response(user)
 
-            # Check if it was newly created (simplified logic)
             was_created = (
                 user.created_at
                 and (datetime.now(timezone.utc) - user.created_at).total_seconds() < 60
             )
 
-            # Publish USER_CREATED event if account was newly created
             if was_created and self.event_bus:
                 try:
+                    # Get subscription tier from subscription_service
+                    subscription_plan = "free"  # Default
+                    if self.subscription_client:
+                        try:
+                            # Try to get or create subscription for the new user
+                            sub_result = await self.subscription_client.get_or_create_subscription(
+                                user_id=request.user_id,
+                                tier_code="free"
+                            )
+                            if sub_result and sub_result.get("subscription"):
+                                subscription_plan = sub_result["subscription"].get("tier_code", "free")
+                        except Exception as sub_e:
+                            logger.warning(f"Failed to get subscription for user {request.user_id}: {sub_e}")
+
                     await publish_user_created(
                         event_bus=self.event_bus,
                         user_id=request.user_id,
                         email=request.email,
                         name=request.name,
-                        subscription_plan=request.subscription_plan
-                        or SubscriptionStatus.FREE.value,
+                        subscription_plan=subscription_plan,
                     )
                 except Exception as e:
                     logger.error(f"Failed to publish user.created event: {e}")
@@ -182,10 +190,8 @@ class AccountService:
             AccountValidationError: If update data is invalid
         """
         try:
-            # Validate request
             self._validate_account_update_request(request)
 
-            # Prepare update data
             update_data = {}
             if request.name is not None:
                 update_data["name"] = request.name
@@ -195,17 +201,14 @@ class AccountService:
                 update_data["preferences"] = request.preferences
 
             if not update_data:
-                # No changes, return current profile
                 return await self.get_account_profile(user_id)
 
-            # Update account
             updated_user = await self.account_repo.update_account_profile(
                 user_id, update_data
             )
             if not updated_user:
                 raise AccountNotFoundError(f"Account not found: {user_id}")
 
-            # Publish USER_PROFILE_UPDATED event
             if self.event_bus:
                 try:
                     await publish_user_profile_updated(
@@ -245,7 +248,6 @@ class AccountService:
             True if successful
         """
         try:
-            # Validate and prepare preferences
             preferences = {}
             if request.timezone is not None:
                 preferences["timezone"] = request.timezone
@@ -259,7 +261,7 @@ class AccountService:
                 preferences["theme"] = request.theme
 
             if not preferences:
-                return True  # No changes
+                return True
 
             success = await self.account_repo.update_account_preferences(
                 user_id, preferences
@@ -288,7 +290,6 @@ class AccountService:
             True if successful
         """
         try:
-            # Get user info before status change for event
             user = None
             if self.event_bus:
                 try:
@@ -304,7 +305,6 @@ class AccountService:
                 action = "deactivated"
 
             if success:
-                # Publish USER_STATUS_CHANGED event
                 if self.event_bus:
                     try:
                         await publish_user_status_changed(
@@ -339,17 +339,15 @@ class AccountService:
             True if successful
         """
         try:
-            # Get account info before deletion for event
             user = None
             if self.event_bus:
                 try:
                     user = await self.account_repo.get_account_by_id(user_id)
                 except Exception:
-                    pass  # Continue with deletion even if we can't get user info
+                    pass
 
             success = await self.account_repo.delete_account(user_id)
             if success:
-                # Publish USER_DELETED event
                 if self.event_bus:
                     try:
                         await publish_user_deleted(
@@ -385,14 +383,11 @@ class AccountService:
                 limit=params.page_size,
                 offset=(params.page - 1) * params.page_size,
                 is_active=params.is_active,
-                subscription_status=params.subscription_status,
                 search=params.search,
             )
 
-            # Convert to summary responses
             accounts = [self._user_to_summary_response(user) for user in users]
 
-            # Get total count using repository stats
             stats = await self.account_repo.get_account_stats()
             total_count = stats.get("total_accounts", 0)
             has_next = len(accounts) == params.page_size
@@ -426,7 +421,6 @@ class AccountService:
                 query=params.query, limit=params.limit
             )
 
-            # Filter inactive accounts if requested
             if not params.include_inactive:
                 users = [user for user in users if user.is_active]
 
@@ -461,7 +455,6 @@ class AccountService:
     async def health_check(self) -> Dict[str, Any]:
         """Health check for the service"""
         try:
-            # Simple health check - try to query database
             await self.account_repo.get_account_stats()
             return {
                 "status": "healthy",
@@ -488,7 +481,6 @@ class AccountService:
         if not request.name or not request.name.strip():
             raise AccountValidationError("name is required")
 
-        # Validate email format (basic check)
         if not re.match(r"^[^@]+@[^@]+\.[^@]+$", request.email):
             raise AccountValidationError("Invalid email format")
 
@@ -507,7 +499,6 @@ class AccountService:
             user_id=user.user_id,
             email=user.email,
             name=user.name,
-            subscription_status=user.subscription_status,
             is_active=user.is_active,
             preferences=getattr(user, "preferences", {}),
             created_at=user.created_at,
@@ -520,7 +511,6 @@ class AccountService:
             user_id=user.user_id,
             email=user.email,
             name=user.name,
-            subscription_status=user.subscription_status,
             is_active=user.is_active,
             created_at=user.created_at,
         )

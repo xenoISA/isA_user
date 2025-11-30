@@ -100,12 +100,13 @@ async def handle_billing_subscription_changed(event_data: Dict[str, Any]):
 
 def get_event_handlers() -> Dict[str, callable]:
     """
-    Return a mapping of event types to handler functions
+    Return a mapping of event patterns to handler functions
 
-    This will be used in main.py to register event subscriptions
+    Event patterns include the service prefix for proper event routing.
+    This will be used in main.py to register event subscriptions.
     """
     return {
-        "user.deleted": handle_user_deleted,
-        "album.deleted": handle_album_deleted,
-        "billing.subscription_changed": handle_billing_subscription_changed,
+        "account_service.user.deleted": lambda event: handle_user_deleted(event.data),
+        "album_service.album.deleted": lambda event: handle_album_deleted(event.data),
+        "billing_service.billing.subscription_changed": lambda event: handle_billing_subscription_changed(event.data),
     }

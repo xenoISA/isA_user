@@ -53,17 +53,19 @@ class BillingService:
     def _init_service_clients(self):
         """Initialize service clients for inter-service communication"""
         try:
-            from .clients import ProductClient, WalletClient
+            from .clients import ProductClient, WalletClient, SubscriptionClient
 
             self.wallet_client = WalletClient()
             self.product_client = ProductClient()
-            logger.info("✅ Service clients initialized for billing service")
+            self.subscription_client = SubscriptionClient()
+            logger.info("✅ Service clients initialized for billing service (including SubscriptionClient)")
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to initialize service clients: {e}")
             logger.warning("Billing service will fall back to HTTP calls")
             self.product_client = None
             self.wallet_client = None
+            self.subscription_client = None
 
     def _init_consul(self):
         """Service discovery via Consul agent sidecar"""
@@ -254,6 +256,9 @@ class BillingService:
                 return BillingCalculationResponse(
                     success=False,
                     message="Product pricing not found",
+                    user_id=request.user_id,
+                    organization_id=request.organization_id,
+                    subscription_id=request.subscription_id,
                     product_id=request.product_id,
                     usage_amount=request.usage_amount,
                     unit_price=Decimal("0"),
@@ -312,16 +317,26 @@ class BillingService:
                     is_included_in_subscription = True
                     total_cost = Decimal("0")
 
-            # 获取用户余额信息
-            wallet_balance, credit_balance = await self._get_user_balances(
-                request.user_id
+            # 获取用户余额信息 (subscription_credits, purchased_credits, wallet_balance)
+            subscription_credits, purchased_credits, wallet_balance = await self._get_user_balances(
+                request.user_id, request.organization_id
             )
 
-            # 确定建议的计费方式
+            # Calculate total cost in credits (1 Credit = $0.00001 USD)
+            # For CREDIT currency, total_cost is already in credits
+            # For USD currency, convert to credits
+            if currency == Currency.CREDIT:
+                total_cost_credits = int(total_cost)
+            else:
+                # Convert USD to credits: $1 = 100,000 credits
+                total_cost_credits = int(total_cost * Decimal("100000"))
+
+            # 确定建议的计费方式 (priority: subscription -> purchased -> wallet -> payment)
             suggested_method = self._determine_billing_method(
-                total_cost,
+                total_cost_credits,
+                subscription_credits,
+                purchased_credits,
                 wallet_balance,
-                credit_balance,
                 is_free_tier,
                 is_included_in_subscription,
             )
@@ -330,11 +345,19 @@ class BillingService:
             available_methods = []
             if is_free_tier or is_included_in_subscription:
                 available_methods.append(BillingMethod.SUBSCRIPTION_INCLUDED)
-            if wallet_balance and wallet_balance >= total_cost:
-                available_methods.append(BillingMethod.WALLET_DEDUCTION)
-            if credit_balance and credit_balance >= total_cost:
+            if subscription_credits >= total_cost_credits:
+                available_methods.append(BillingMethod.SUBSCRIPTION_INCLUDED)
+            if purchased_credits >= total_cost_credits:
                 available_methods.append(BillingMethod.CREDIT_CONSUMPTION)
+            if wallet_balance and wallet_balance >= Decimal(str(total_cost_credits * 0.00001)):
+                available_methods.append(BillingMethod.WALLET_DEDUCTION)
             available_methods.append(BillingMethod.PAYMENT_CHARGE)
+
+            # De-duplicate available methods
+            available_methods = list(dict.fromkeys(available_methods))
+
+            # For credit_balance in response, use sum of subscription + purchased credits
+            credit_balance = Decimal(str(subscription_credits + purchased_credits))
 
             # Publish billing.calculated event
             if self.event_bus:
@@ -363,6 +386,9 @@ class BillingService:
             return BillingCalculationResponse(
                 success=True,
                 message="Billing cost calculated successfully",
+                user_id=request.user_id,
+                organization_id=request.organization_id,
+                subscription_id=request.subscription_id,
                 product_id=request.product_id,
                 usage_amount=request.usage_amount,
                 unit_price=unit_price,
@@ -382,6 +408,9 @@ class BillingService:
             return BillingCalculationResponse(
                 success=False,
                 message=f"Error calculating cost: {str(e)}",
+                user_id=request.user_id,
+                organization_id=request.organization_id,
+                subscription_id=request.subscription_id,
                 product_id=request.product_id,
                 usage_amount=request.usage_amount,
                 unit_price=Decimal("0"),
@@ -724,33 +753,71 @@ class BillingService:
             return None
 
     async def _get_user_balances(
-        self, user_id: str
-    ) -> Tuple[Optional[Decimal], Optional[Decimal]]:
-        """获取用户钱包和积分余额"""
-        try:
-            async with httpx.AsyncClient() as client:
-                # 获取钱包余额
-                wallet_response = await client.get(
-                    f"{self._get_service_url('wallet_service', 8209)}/api/v1/wallets/user/{user_id}/balance",
-                    timeout=5.0,
-                )
+        self, user_id: str, organization_id: Optional[str] = None
+    ) -> Tuple[Optional[int], Optional[int], Optional[Decimal]]:
+        """
+        获取用户的各类余额
 
-                wallet_balance = None
-                if wallet_response.status_code == 200:
-                    wallet_data = wallet_response.json()
-                    wallet_balance = Decimal(
-                        str(wallet_data.get("available_balance", 0))
+        Returns:
+            Tuple of (subscription_credits, purchased_credits, wallet_balance)
+            - subscription_credits: Credits from active subscription (int)
+            - purchased_credits: Purchased credits from wallet credit_accounts (int)
+            - wallet_balance: Traditional wallet balance (Decimal)
+        """
+        subscription_credits = 0
+        purchased_credits = 0
+        wallet_balance = None
+
+        try:
+            # 1. 获取订阅信用额度 (highest priority)
+            if self.subscription_client:
+                try:
+                    credit_balance = await self.subscription_client.get_credit_balance(
+                        user_id=user_id,
+                        organization_id=organization_id
+                    )
+                    if credit_balance and credit_balance.get("success"):
+                        subscription_credits = credit_balance.get("subscription_credits_remaining", 0)
+                        logger.debug(f"User {user_id} subscription credits: {subscription_credits}")
+                except Exception as e:
+                    logger.warning(f"Failed to get subscription credits: {e}")
+
+            # 2. 获取钱包余额和购买的信用额度
+            try:
+                async with httpx.AsyncClient() as client:
+                    # 获取钱包余额
+                    wallet_response = await client.get(
+                        f"{self._get_service_url('wallet_service', 8209)}/api/v1/wallets/user/{user_id}/balance",
+                        timeout=5.0,
                     )
 
-                # 积分余额可以从用户表或其他地方获取
-                # 这里简化处理，假设积分就是钱包余额
-                credit_balance = wallet_balance
+                    if wallet_response.status_code == 200:
+                        wallet_data = wallet_response.json()
+                        wallet_balance = Decimal(
+                            str(wallet_data.get("available_balance", 0))
+                        )
 
-                return wallet_balance, credit_balance
+                    # 获取购买的积分 (credit_accounts)
+                    credit_response = await client.get(
+                        f"{self._get_service_url('wallet_service', 8209)}/api/v1/credits/balance",
+                        params={"user_id": user_id},
+                        timeout=5.0,
+                    )
+
+                    if credit_response.status_code == 200:
+                        credit_data = credit_response.json()
+                        if credit_data.get("success"):
+                            purchased_credits = credit_data.get("total_credits", 0)
+                            logger.debug(f"User {user_id} purchased credits: {purchased_credits}")
+
+            except Exception as e:
+                logger.warning(f"Failed to get wallet/credit balance: {e}")
+
+            return subscription_credits, purchased_credits, wallet_balance
 
         except Exception as e:
             logger.error(f"Error getting user balances: {e}")
-            return None, None
+            return 0, 0, None
 
     def _is_usage_included_in_subscription(
         self, product_id: str, usage_amount: Decimal, subscription_info: Dict[str, Any]
@@ -767,22 +834,38 @@ class BillingService:
 
     def _determine_billing_method(
         self,
-        total_cost: Decimal,
+        total_cost_credits: int,
+        subscription_credits: int,
+        purchased_credits: int,
         wallet_balance: Optional[Decimal],
-        credit_balance: Optional[Decimal],
         is_free_tier: bool,
         is_included_in_subscription: bool,
     ) -> BillingMethod:
-        """确定建议的计费方式"""
+        """
+        确定建议的计费方式
+
+        Credit deduction priority:
+        1. Subscription credits (included in subscription plan)
+        2. Purchased credits (from credit_accounts)
+        3. Wallet balance (traditional wallet)
+        4. Payment charge (external payment)
+        """
         if is_free_tier or is_included_in_subscription:
             return BillingMethod.SUBSCRIPTION_INCLUDED
 
-        if wallet_balance and wallet_balance >= total_cost:
-            return BillingMethod.WALLET_DEDUCTION
+        # Priority 1: Use subscription credits
+        if subscription_credits >= total_cost_credits:
+            return BillingMethod.SUBSCRIPTION_INCLUDED
 
-        if credit_balance and credit_balance >= total_cost:
+        # Priority 2: Use purchased credits
+        if purchased_credits >= total_cost_credits:
             return BillingMethod.CREDIT_CONSUMPTION
 
+        # Priority 3: Use wallet balance
+        if wallet_balance and wallet_balance >= Decimal(str(total_cost_credits * 0.00001)):
+            return BillingMethod.WALLET_DEDUCTION
+
+        # Priority 4: External payment required
         return BillingMethod.PAYMENT_CHARGE
 
     async def _process_wallet_deduction(
@@ -839,6 +922,97 @@ class BillingService:
 
         except Exception as e:
             logger.error(f"Error processing wallet deduction: {e}")
+            return False, None, str(e)
+
+    async def _process_subscription_credit_consumption(
+        self,
+        user_id: str,
+        organization_id: Optional[str],
+        credits_amount: int,
+        service_type: str,
+        reference_id: str
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Process subscription credit consumption
+
+        Args:
+            user_id: User ID
+            organization_id: Optional organization ID
+            credits_amount: Amount of credits to consume
+            service_type: Type of service (e.g., model_inference)
+            reference_id: Billing record reference
+
+        Returns:
+            Tuple of (success, transaction_id, error_message)
+        """
+        if not self.subscription_client:
+            logger.warning("SubscriptionClient not available")
+            return False, None, "Subscription client not available"
+
+        try:
+            result = await self.subscription_client.consume_credits(
+                user_id=user_id,
+                credits_amount=credits_amount,
+                service_type=service_type,
+                description=f"Billing charge for {reference_id}",
+                usage_record_id=reference_id,
+                organization_id=organization_id
+            )
+
+            if result and result.get("success"):
+                return True, result.get("transaction_id"), None
+            else:
+                error_msg = result.get("message", "Subscription credit consumption failed") if result else "No response"
+                return False, None, error_msg
+
+        except Exception as e:
+            logger.error(f"Error consuming subscription credits: {e}")
+            return False, None, str(e)
+
+    async def _process_purchased_credit_consumption(
+        self,
+        user_id: str,
+        credits_amount: int,
+        service_type: str,
+        reference_id: str
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Process purchased credit consumption from wallet credit_accounts
+
+        Args:
+            user_id: User ID
+            credits_amount: Amount of credits to consume
+            service_type: Type of service
+            reference_id: Billing record reference
+
+        Returns:
+            Tuple of (success, transaction_id, error_message)
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self._get_service_url('wallet_service', 8209)}/api/v1/credits/consume",
+                    json={
+                        "user_id": user_id,
+                        "credits_amount": credits_amount,
+                        "service_type": service_type,
+                        "description": f"Billing charge for {reference_id}",
+                        "usage_record_id": reference_id
+                    },
+                    timeout=10.0,
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("success"):
+                        return True, result.get("transaction_id"), None
+                    else:
+                        return False, None, result.get("message", "Credit consumption failed")
+                else:
+                    return False, None, f"Wallet service returned {response.status_code}"
+
+        except Exception as e:
+            logger.error(f"Error consuming purchased credits: {e}")
             return False, None, str(e)
 
     async def _create_billing_record(

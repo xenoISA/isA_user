@@ -171,7 +171,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
 
     return {
         "route_count": str(len(SERVICE_ROUTES)),
-        "base_path": "/memories",
+        "api_path": "/api/v1/memories",
         "health": ",".join(health_routes),
         "extraction": ",".join(extraction_routes),
         "session": "|".join(session_routes[:5]),  # 限制长度

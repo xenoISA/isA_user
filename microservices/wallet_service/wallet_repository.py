@@ -15,7 +15,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     WalletBalance, WalletTransaction, WalletCreate,
@@ -46,7 +46,7 @@ class WalletRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id="wallet_service"
@@ -81,8 +81,8 @@ class WalletRepository:
                 'updated_at': now.isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.wallets_table, [wallet_dict], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.wallets_table, [wallet_dict], schema=self.schema)
 
             if count is not None and count > 0:
                 # Create initial transaction if balance > 0
@@ -113,8 +113,8 @@ class WalletRepository:
         try:
             query = f"SELECT * FROM {self.schema}.{self.wallets_table} WHERE wallet_id = $1"
 
-            with self.db:
-                result = self.db.query_row(query, [wallet_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [wallet_id], schema=self.schema)
 
             if result:
                 return self._dict_to_wallet_balance(result)
@@ -142,8 +142,8 @@ class WalletRepository:
                 ORDER BY created_at DESC
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             wallets = []
             if results:
@@ -185,8 +185,8 @@ class WalletRepository:
                 WHERE wallet_id = $3
             """
 
-            with self.db:
-                count = self.db.execute(
+            async with self.db:
+                count = await self.db.execute(
                     query,
                     [float(new_balance), datetime.now(timezone.utc).isoformat(), wallet_id],
                     schema=self.schema
@@ -338,8 +338,8 @@ class WalletRepository:
                 WHERE transaction_id = $1
             """
 
-            with self.db:
-                original = self.db.query_row(query, [original_transaction_id], schema=self.schema)
+            async with self.db:
+                original = await self.db.query_row(query, [original_transaction_id], schema=self.schema)
 
             if not original:
                 return None
@@ -435,8 +435,8 @@ class WalletRepository:
                 LIMIT {filter_params.limit} OFFSET {filter_params.offset}
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             transactions = []
             if results:
@@ -557,13 +557,13 @@ class WalletRepository:
                 'updated_at': datetime.now(timezone.utc).isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.transactions_table, [transaction_dict], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.transactions_table, [transaction_dict], schema=self.schema)
 
             if count is not None and count > 0:
                 query = f"SELECT * FROM {self.schema}.{self.transactions_table} WHERE transaction_id = $1"
-                with self.db:
-                    result = self.db.query_row(query, [transaction_id], schema=self.schema)
+                async with self.db:
+                    result = await self.db.query_row(query, [transaction_id], schema=self.schema)
                 if result:
                     return self._dict_to_transaction(result)
 

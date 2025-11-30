@@ -42,7 +42,10 @@ CREATE INDEX idx_working_memories_user_id ON memory.working_memories(user_id);
 CREATE INDEX idx_working_memories_task_id ON memory.working_memories(task_id);
 CREATE INDEX idx_working_memories_priority ON memory.working_memories(priority DESC);
 CREATE INDEX idx_working_memories_expires_at ON memory.working_memories(expires_at);
-CREATE INDEX idx_working_memories_active ON memory.working_memories(user_id, expires_at) WHERE expires_at > NOW();
+-- Note: Cannot use NOW() in index predicate as it's not IMMUTABLE
+-- CREATE INDEX idx_working_memories_active ON memory.working_memories(user_id, expires_at) WHERE expires_at > NOW();
+-- Instead, create a simple index on expires_at which can be used with WHERE clause in queries
+CREATE INDEX idx_working_memories_user_expires ON memory.working_memories(user_id, expires_at);
 CREATE INDEX idx_working_memories_created_at ON memory.working_memories(created_at DESC);
 
 -- Trigger for updated_at

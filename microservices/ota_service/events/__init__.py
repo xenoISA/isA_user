@@ -4,7 +4,7 @@ OTA Service Events
 Exports event models, publishers, and handlers
 """
 
-from .handlers import OTAEventHandler
+from .handlers import get_event_handlers
 from .models import (
     FirmwareUploadedEvent,
     CampaignCreatedEvent,
@@ -22,7 +22,7 @@ from .publishers import (
 
 __all__ = [
     # Handler
-    'OTAEventHandler',
+    'get_event_handlers',
     # Models
     'FirmwareUploadedEvent',
     'CampaignCreatedEvent',

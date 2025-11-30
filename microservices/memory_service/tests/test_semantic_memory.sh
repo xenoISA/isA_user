@@ -4,7 +4,7 @@
 # Tests semantic memory extraction and storage capabilities
 
 BASE_URL="http://localhost"
-API_BASE="${BASE_URL}/memories"
+API_BASE="${BASE_URL}/api/v1/memories"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -216,9 +216,46 @@ else
     print_result 1 "Failed to extract conceptual knowledge"
 fi
 
-# Test 6: Update Semantic Memory
+# Test 6: Search Semantic Memories by Category
+print_section "Test 6: Search Semantic Memories by Category"
+echo "GET ${API_BASE}/semantic/search/category?user_id=test_user_abc&category=technology&limit=10"
+
+SEARCH_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/semantic/search/category?user_id=test_user_abc&category=technology&limit=10")
+HTTP_CODE=$(echo "$SEARCH_RESPONSE" | tail -n1)
+RESPONSE_BODY=$(echo "$SEARCH_RESPONSE" | sed '$d')
+
+echo "Response:"
+pretty_json "$RESPONSE_BODY"
+echo "HTTP Status: $HTTP_CODE"
+
+if [ "$HTTP_CODE" = "200" ]; then
+    COUNT=$(json_value "$RESPONSE_BODY" "count")
+    print_result 0 "Search by category completed (found: $COUNT)"
+else
+    print_result 1 "Failed to search semantic memories by category"
+fi
+
+# Test 7: Universal Search Across All Memory Types
+print_section "Test 7: Universal Search Across All Memory Types"
+echo "GET ${API_BASE}/search?user_id=test_user_abc&query=learning&limit=10"
+
+UNIVERSAL_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/search?user_id=test_user_abc&query=learning&limit=10")
+HTTP_CODE=$(echo "$UNIVERSAL_RESPONSE" | tail -n1)
+RESPONSE_BODY=$(echo "$UNIVERSAL_RESPONSE" | sed '$d')
+
+echo "Response:"
+pretty_json "$RESPONSE_BODY"
+echo "HTTP Status: $HTTP_CODE"
+
+if [ "$HTTP_CODE" = "200" ]; then
+    print_result 0 "Universal search completed successfully"
+else
+    print_result 1 "Failed to perform universal search"
+fi
+
+# Test 8: Update Semantic Memory
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 6: Update Semantic Memory"
+    print_section "Test 8: Update Semantic Memory"
     echo "PUT ${API_BASE}/semantic/${MEMORY_ID}?user_id=test_user_abc"
     UPDATE_PAYLOAD='{
       "importance_score": 0.9,
@@ -248,13 +285,13 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to update semantic memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 6: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 8: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 
-# Test 7: Delete Semantic Memory
+# Test 9: Delete Semantic Memory
 if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
-    print_section "Test 7: Delete Semantic Memory"
+    print_section "Test 9: Delete Semantic Memory"
     echo "DELETE ${API_BASE}/semantic/${MEMORY_ID}?user_id=test_user_abc"
 
     DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${API_BASE}/semantic/${MEMORY_ID}?user_id=test_user_abc")
@@ -276,7 +313,7 @@ if [ -n "$MEMORY_ID" ] && [ "$MEMORY_ID" != "null" ]; then
         print_result 1 "Failed to delete semantic memory"
     fi
 else
-    echo -e "${YELLOW}Skipping Test 7: No memory ID available${NC}"
+    echo -e "${YELLOW}Skipping Test 9: No memory ID available${NC}"
     ((TESTS_FAILED++))
 fi
 

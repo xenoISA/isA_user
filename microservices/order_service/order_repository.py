@@ -14,7 +14,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     Order, OrderStatus, OrderType, PaymentStatus,
@@ -53,7 +53,7 @@ class OrderRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="order_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="order_service")
 
         self.schema = "orders"  # Using "orders" instead of "order" (reserved keyword)
         self.orders_table = "orders"
@@ -109,8 +109,8 @@ class OrderRepository:
                 "cancelled_by": None
             }
 
-            with self.db:
-                count = self.db.insert_into(self.orders_table, [order_data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.orders_table, [order_data], schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_order(order_id)
@@ -131,8 +131,8 @@ class OrderRepository:
         try:
             query = f'SELECT * FROM "{self.schema}".{self.orders_table} WHERE order_id = $1'
 
-            with self.db:
-                result = self.db.query_row(query, [order_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [order_id], schema=self.schema)
 
             if result:
                 return self._dict_to_order(result)
@@ -188,8 +188,8 @@ class OrderRepository:
                 WHERE order_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_order(order_id)
@@ -242,8 +242,8 @@ class OrderRepository:
                 LIMIT {limit} OFFSET {offset}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results:
                 return [self._dict_to_order(order_data) for order_data in results]
@@ -297,8 +297,8 @@ class OrderRepository:
                 LIMIT {limit}
             '''
 
-            with self.db:
-                results = self.db.query(sql_query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(sql_query, params, schema=self.schema)
 
             if results:
                 return [self._dict_to_order(order_data) for order_data in results]
@@ -313,8 +313,8 @@ class OrderRepository:
         try:
             query = f'SELECT * FROM "{self.schema}".{self.orders_table} WHERE payment_intent_id = $1'
 
-            with self.db:
-                results = self.db.query(query, [payment_intent_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [payment_intent_id], schema=self.schema)
 
             if results:
                 return [self._dict_to_order(order_data) for order_data in results]
@@ -338,8 +338,8 @@ class OrderRepository:
         try:
             query = f'SELECT * FROM "{self.schema}".{self.orders_table} WHERE subscription_id = $1'
 
-            with self.db:
-                results = self.db.query(query, [subscription_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [subscription_id], schema=self.schema)
 
             if results:
                 return [self._dict_to_order(order_data) for order_data in results]
@@ -392,30 +392,30 @@ class OrderRepository:
         try:
             # Get total orders
             total_query = f'SELECT COUNT(*) as count FROM "{self.schema}".{self.orders_table}'
-            with self.db:
-                total_result = self.db.query_row(total_query, [], schema=self.schema)
+            async with self.db:
+                total_result = await self.db.query_row(total_query, [], schema=self.schema)
             total_orders = int(total_result.get("count", 0)) if total_result else 0
 
             # Get orders by status
             status_stats = {}
             for status in OrderStatus:
                 status_query = f'SELECT COUNT(*) as count FROM "{self.schema}".{self.orders_table} WHERE status = $1'
-                with self.db:
-                    status_result = self.db.query_row(status_query, [status.value], schema=self.schema)
+                async with self.db:
+                    status_result = await self.db.query_row(status_query, [status.value], schema=self.schema)
                 status_stats[status.value] = int(status_result.get("count", 0)) if status_result else 0
 
             # Get orders by type
             type_stats = {}
             for order_type in OrderType:
                 type_query = f'SELECT COUNT(*) as count FROM "{self.schema}".{self.orders_table} WHERE order_type = $1'
-                with self.db:
-                    type_result = self.db.query_row(type_query, [order_type.value], schema=self.schema)
+                async with self.db:
+                    type_result = await self.db.query_row(type_query, [order_type.value], schema=self.schema)
                 type_stats[order_type.value] = int(type_result.get("count", 0)) if type_result else 0
 
             # Get revenue (completed orders only)
             revenue_query = f'SELECT total_amount, currency FROM "{self.schema}".{self.orders_table} WHERE status = $1'
-            with self.db:
-                revenue_results = self.db.query(revenue_query, [OrderStatus.COMPLETED.value], schema=self.schema)
+            async with self.db:
+                revenue_results = await self.db.query(revenue_query, [OrderStatus.COMPLETED.value], schema=self.schema)
 
             total_revenue = Decimal(0)
             revenue_by_currency = {}

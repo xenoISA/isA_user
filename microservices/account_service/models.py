@@ -2,6 +2,7 @@
 Account Service Models
 
 Independent models for account management microservice.
+Account service is the identity anchor - subscription data is managed by subscription_service.
 """
 
 from typing import Optional, Dict, Any, List
@@ -9,29 +10,22 @@ from pydantic import BaseModel, Field, EmailStr, field_validator
 from datetime import datetime
 import json
 
-# Internal microservice models
-from enum import Enum
-
-class SubscriptionStatus(str, Enum):
-    """Subscription status enumeration"""
-    FREE = "free"
-    BASIC = "basic"
-    PREMIUM = "premium"
-    ENTERPRISE = "enterprise"
-    PRO = "pro"
-    ACTIVE = "active"
 
 class User(BaseModel):
-    """User model for account service"""
+    """
+    User model for account service
+
+    Note: This is the identity anchor only. Subscription information
+    is managed by subscription_service and should be queried from there.
+    """
     user_id: str
     email: Optional[str] = None
     name: Optional[str] = None
-    subscription_status: SubscriptionStatus = SubscriptionStatus.FREE
     is_active: bool = True
     preferences: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
     @field_validator('preferences', mode='before')
     @classmethod
     def parse_preferences(cls, v):
@@ -41,9 +35,10 @@ class User(BaseModel):
             except json.JSONDecodeError:
                 return {}
         return v if v is not None else {}
-    
+
     class Config:
         from_attributes = True
+
 
 # Account Service Specific Request Models
 
@@ -52,10 +47,6 @@ class AccountEnsureRequest(BaseModel):
     user_id: str = Field(..., description="User ID (from auth service)")
     email: EmailStr = Field(..., description="User email")
     name: str = Field(..., description="User name")
-    subscription_plan: Optional[SubscriptionStatus] = Field(
-        SubscriptionStatus.FREE,
-        description="Initial subscription plan"
-    )
 
 
 class AccountUpdateRequest(BaseModel):
@@ -83,16 +74,19 @@ class AccountStatusChangeRequest(BaseModel):
 # Account Service Specific Response Models
 
 class AccountProfileResponse(BaseModel):
-    """Detailed account profile response"""
+    """
+    Detailed account profile response
+
+    Note: For subscription information, query subscription_service directly.
+    """
     user_id: str
     email: Optional[str] = None
     name: Optional[str] = None
-    subscription_status: SubscriptionStatus
     is_active: bool
     preferences: Dict[str, Any] = {}
-    created_at: Optional[datetime]
-    updated_at: Optional[datetime]
-    
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
@@ -102,10 +96,9 @@ class AccountSummaryResponse(BaseModel):
     user_id: str
     email: Optional[str] = None
     name: Optional[str] = None
-    subscription_status: SubscriptionStatus
     is_active: bool
-    created_at: Optional[datetime]
-    
+    created_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
@@ -124,7 +117,6 @@ class AccountStatsResponse(BaseModel):
     total_accounts: int
     active_accounts: int
     inactive_accounts: int
-    accounts_by_subscription: Dict[str, int]
     recent_registrations_7d: int
     recent_registrations_30d: int
 
@@ -136,7 +128,7 @@ class AccountServiceStatus(BaseModel):
     service: str = "account_service"
     status: str = "operational"
     port: int = 8202
-    version: str = "1.0.0"
+    version: str = "1.1.0"
     database_connected: bool
     timestamp: datetime
 
@@ -148,7 +140,6 @@ class AccountListParams(BaseModel):
     page: int = Field(1, ge=1, description="Page number")
     page_size: int = Field(50, ge=1, le=100, description="Items per page")
     is_active: Optional[bool] = Field(None, description="Filter by active status")
-    subscription_status: Optional[SubscriptionStatus] = Field(None, description="Filter by subscription")
     search: Optional[str] = Field(None, description="Search in name/email", max_length=100)
 
 
@@ -161,7 +152,7 @@ class AccountSearchParams(BaseModel):
 
 # Export all models
 __all__ = [
-    'User', 'SubscriptionStatus',
+    'User',
     'AccountEnsureRequest', 'AccountUpdateRequest', 'AccountPreferencesRequest',
     'AccountStatusChangeRequest', 'AccountProfileResponse', 'AccountSummaryResponse',
     'AccountSearchResponse', 'AccountStatsResponse', 'AccountServiceStatus',

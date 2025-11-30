@@ -74,11 +74,11 @@ async def publish_billing_calculated(
             usage_event_id=usage_event_id,
         )
 
-        # 创建事件对象
+        # 创建事件对象 - 使用 mode='json' 确保 datetime/Decimal 被正确序列化
         event = Event(
             event_type=EventType.BILLING_CALCULATED,
             source=ServiceSource.BILLING_SERVICE,
-            data=event_data.model_dump(),
+            data=event_data.model_dump(mode='json'),
         )
 
         # 发布事件
@@ -137,11 +137,11 @@ async def publish_billing_error(
             timestamp=datetime.utcnow(),
         )
 
-        # 创建事件对象
+        # 创建事件对象 - 使用 mode='json' 确保 datetime 被正确序列化
         event = Event(
             event_type=EventType.BILLING_RECORD_CREATED,  # 临时使用现有类型
             source=ServiceSource.BILLING_SERVICE,
-            data=error_data.model_dump(),
+            data=error_data.model_dump(mode='json'),
         )
 
         # 修改为自定义类型

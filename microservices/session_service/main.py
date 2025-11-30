@@ -133,14 +133,14 @@ async def lifespan(app: FastAPI):
             event_handlers = SessionEventHandlers(session_microservice.session_service)
             handler_map = event_handlers.get_event_handler_map()
 
-            for event_type, handler_func in handler_map.items():
-                # Subscribe to each event type
+            for event_pattern, handler_func in handler_map.items():
+                # Subscribe to each event pattern
                 await event_bus.subscribe_to_events(
-                    pattern=f"*.{event_type}", handler=handler_func
+                    pattern=event_pattern, handler=handler_func
                 )
-                logger.info(f"✅ Subscribed to {event_type} events")
+                logger.info(f"Subscribed to {event_pattern} events")
 
-            logger.info(f"✅ Subscribed to {len(handler_map)} event types")
+            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
         except Exception as e:
             logger.warning(f"⚠️  Failed to subscribe to events: {e}")
 

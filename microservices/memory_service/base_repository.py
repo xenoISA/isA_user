@@ -1,7 +1,7 @@
 """
 Base Memory Repository
 Base class for all memory repositories with common database operations
-Uses PostgresClient with gRPC for PostgreSQL access
+Uses AsyncPostgresClient with gRPC for PostgreSQL access
 """
 
 import logging
@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 
@@ -46,7 +46,7 @@ class BaseMemoryRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id='memory_service')
+        self.db = AsyncPostgresClient(host=host, port=port, user_id='memory_service')
         self.schema = schema
         self.table_name = table_name
 
@@ -197,8 +197,8 @@ class BaseMemoryRepository:
             # Serialize data for gRPC
             serialized_data = self._serialize_data(data)
 
-            with self.db:
-                count = self.db.insert_into(self.table_name, [serialized_data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.table_name, [serialized_data], schema=self.schema)
 
             if count is not None and count > 0:
                 # Retrieve the created record
@@ -238,8 +238,8 @@ class BaseMemoryRepository:
                 """
                 params = [memory_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params, schema=self.schema)
 
             return self._deserialize_row(result)
 
@@ -287,8 +287,8 @@ class BaseMemoryRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             # Deserialize all rows
             return [self._deserialize_row(row) for row in (results or [])]
@@ -350,8 +350,8 @@ class BaseMemoryRepository:
                 WHERE {where_clause}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count > 0
 
@@ -388,8 +388,8 @@ class BaseMemoryRepository:
                 """
                 params = [memory_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count > 0
 
@@ -414,8 +414,8 @@ class BaseMemoryRepository:
             """
             params = [user_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params, schema=self.schema)
 
             return result.get('count', 0) if result else 0
 
@@ -431,8 +431,8 @@ class BaseMemoryRepository:
             True if connected
         """
         try:
-            with self.db:
-                result = self.db.query_row("SELECT 1 as connected", [])
+            async with self.db:
+                result = await self.db.query_row("SELECT 1 as connected", [])
             return result is not None
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")
@@ -471,8 +471,8 @@ class BaseMemoryRepository:
                 """
                 params = [datetime.now(timezone.utc), memory_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count > 0
 

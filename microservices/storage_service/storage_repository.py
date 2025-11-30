@@ -2,8 +2,8 @@
 Storage Repository - Data access layer for storage service
 Handles database operations for file storage, sharing, and quotas
 
-Uses PostgresClient with gRPC for PostgreSQL access
-Migrated from Supabase to PostgresClient - 2025-10-24
+Uses AsyncPostgresClient with gRPC for true non-blocking PostgreSQL access
+Migrated to AsyncPostgresClient - 2025-11-30
 """
 
 import logging
@@ -13,7 +13,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     StoredFile, FileShare, StorageQuota,
@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class StorageRepository:
-    """Storage repository - data access layer for file storage operations"""
+    """Storage repository - data access layer for file storage operations using async PostgreSQL"""
 
     def __init__(self, config: Optional[ConfigManager] = None):
-        """Initialize storage repository with PostgresClient"""
+        """Initialize storage repository with AsyncPostgresClient"""
         # 使用 config_manager 进行服务发现
         if config is None:
             config = ConfigManager("storage_service")
@@ -43,7 +43,7 @@ class StorageRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id='storage_service')
+        self.db = AsyncPostgresClient(host=host, port=port, user_id='storage_service')
         # Table names (storage schema)
         self.schema = "storage"
         self.files_table = "storage_files"
@@ -81,8 +81,8 @@ class StorageRepository:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.files_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.files_table, [data], schema=self.schema)
 
             if count and count > 0:
                 # Fetch the created file
@@ -109,8 +109,8 @@ class StorageRepository:
                 """
                 params = [file_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 return StoredFile.model_validate(result)
@@ -165,10 +165,10 @@ class StorageRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
-            return [StoredFile.model_validate(row) for row in results]
+            return [StoredFile.model_validate(row) for row in results] if results else []
 
         except Exception as e:
             logger.error(f"Error listing user files: {e}")
@@ -201,10 +201,10 @@ class StorageRepository:
                 """
                 params = [status_value, datetime.now(timezone.utc), file_id, user_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            return count > 0
+            return count > 0 if count else False
 
         except Exception as e:
             logger.error(f"Error updating file status: {e}")
@@ -220,10 +220,10 @@ class StorageRepository:
             """
             params = [datetime.now(timezone.utc), file_id, user_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            return count > 0
+            return count > 0 if count else False
 
         except Exception as e:
             logger.error(f"Error deleting file: {e}")
@@ -261,8 +261,8 @@ class StorageRepository:
                 "accessed_at": None
             }
 
-            with self.db:
-                count = self.db.insert_into(self.shares_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.shares_table, [data], schema=self.schema)
 
             logger.info(f"Insert file share result: count={count}, share_id={share_data.share_id}")
 
@@ -302,8 +302,8 @@ class StorageRepository:
                 logger.error("Either share_id or (file_id + user_id) must be provided")
                 return None
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             logger.info(f"Query result for share_id={share_id}: {result}")
 
@@ -379,8 +379,11 @@ class StorageRepository:
                 ORDER BY created_at DESC
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
+
+            if not results:
+                return []
 
             # Convert permissions array to dict format for each result
             shares = []
@@ -425,10 +428,10 @@ class StorageRepository:
             """
             params = [datetime.now(timezone.utc), share_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
-            return count > 0
+            return count > 0 if count else False
 
         except Exception as e:
             logger.error(f"Error incrementing share download: {e}")
@@ -449,8 +452,8 @@ class StorageRepository:
             """
             params = [quota_type, entity_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 return StorageQuota.model_validate(result)
@@ -483,8 +486,8 @@ class StorageRepository:
                 "updated_at": datetime.now(timezone.utc)
             }
 
-            with self.db:
-                count = self.db.insert_into(self.quotas_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.quotas_table, [data], schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_storage_quota(quota_type, entity_id)
@@ -528,8 +531,8 @@ class StorageRepository:
             """
             params = [bytes_delta, file_count_delta, datetime.now(timezone.utc), quota_type, entity_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -586,8 +589,8 @@ class StorageRepository:
             """
             params = [user_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 stats["total_files"] = result.get("file_count", 0)
@@ -604,8 +607,8 @@ class StorageRepository:
     async def check_connection(self) -> bool:
         """Check database connection"""
         try:
-            with self.db:
-                result = self.db.query_row("SELECT 1 as connected", [])
+            async with self.db:
+                result = await self.db.query_row("SELECT 1 as connected", params=[])
             return result is not None
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")

@@ -16,7 +16,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import Session, SessionMessage
 
@@ -48,7 +48,7 @@ class SessionRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id='session_service'
@@ -75,8 +75,8 @@ class SessionRepository:
                 "last_activity": datetime.now(timezone.utc).isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(
+            async with self.db:
+                count = await self.db.insert_into(
                     self.sessions_table,
                     [data],
                     schema=self.schema
@@ -99,8 +99,8 @@ class SessionRepository:
             query = f"SELECT * FROM {self.schema}.{self.sessions_table} WHERE session_id = $1"
             params = [session_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params, schema=self.schema)
 
             if result:
                 return Session.model_validate(result)
@@ -136,8 +136,8 @@ class SessionRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                result = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, params, schema=self.schema)
 
             sessions = []
             if result:
@@ -181,8 +181,8 @@ class SessionRepository:
                 WHERE session_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -201,8 +201,8 @@ class SessionRepository:
             """
             params = [now, now, session_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -237,8 +237,8 @@ class SessionRepository:
                 session_id
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -259,8 +259,8 @@ class SessionRepository:
             """
             params = ["expired", False, now, cutoff_time, True]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count if count is not None else 0
 
@@ -289,7 +289,7 @@ class SessionMessageRepository:
         )
 
         logger.info(f"SessionMessageRepository connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id='session_service'
@@ -316,8 +316,8 @@ class SessionMessageRepository:
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(
+            async with self.db:
+                count = await self.db.insert_into(
                     self.messages_table,
                     [data],
                     schema=self.schema
@@ -326,8 +326,8 @@ class SessionMessageRepository:
             if count is not None and count > 0:
                 # Query the inserted message
                 query = f"SELECT * FROM {self.schema}.{self.messages_table} WHERE id = $1"
-                with self.db:
-                    result = self.db.query_row(query, [message_id], schema=self.schema)
+                async with self.db:
+                    result = await self.db.query_row(query, [message_id], schema=self.schema)
 
                 if result:
                     # Map database columns to SessionMessage model
@@ -367,8 +367,8 @@ class SessionMessageRepository:
             """
             params = [session_id]
 
-            with self.db:
-                result = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, params, schema=self.schema)
 
             messages = []
             if result:

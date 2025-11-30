@@ -2,7 +2,7 @@
 Device Repository - Data access layer for device service
 Handles database operations for devices, groups, commands, and frame configs
 
-Uses PostgresClient with gRPC for PostgreSQL access
+Uses AsyncPostgresClient with gRPC for PostgreSQL access (Async)
 """
 
 import logging
@@ -13,7 +13,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     DeviceResponse, DeviceStatus, DeviceType, ConnectivityType, SecurityLevel,
@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class DeviceRepository:
-    """Device repository - data access layer for device operations"""
+    """Device repository - data access layer for device operations (Async)"""
 
     def __init__(self, config: Optional[ConfigManager] = None):
-        """Initialize device repository with PostgresClient"""
+        """Initialize device repository with AsyncPostgresClient"""
         # Use config_manager for service discovery
         if config is None:
             config = ConfigManager("device_service")
@@ -43,7 +43,7 @@ class DeviceRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id='device_service'
@@ -55,15 +55,12 @@ class DeviceRepository:
         self.commands_table = "device_commands"
         self.frame_configs_table = "frame_configs"
 
-        # Ensure schema exists
-        self._ensure_schema()
-
-    def _ensure_schema(self):
+    async def _ensure_schema(self):
         """Ensure device schema and tables exist"""
         try:
             # Create schema
-            with self.db:
-                self.db.execute("CREATE SCHEMA IF NOT EXISTS device", schema='public')
+            async with self.db:
+                await self.db.execute("CREATE SCHEMA IF NOT EXISTS device")
                 logger.info("Device schema ensured")
 
             # Create devices table
@@ -99,8 +96,8 @@ class DeviceRepository:
                     CONSTRAINT valid_security_level CHECK (security_level IN ('none', 'basic', 'standard', 'high', 'critical'))
                 )
             '''
-            with self.db:
-                self.db.execute(create_devices_table, schema=self.schema)
+            async with self.db:
+                await self.db.execute(create_devices_table)
                 logger.info("Devices table ensured")
 
         except Exception as e:
@@ -122,41 +119,63 @@ class DeviceRepository:
             if isinstance(last_seen, datetime):
                 last_seen = last_seen.isoformat()
 
-            data = {
-                "device_id": device_data["device_id"],
-                "user_id": device_data["user_id"],
-                "organization_id": device_data.get("organization_id"),
-                "device_name": device_data["device_name"],
-                "device_type": device_data["device_type"],
-                "manufacturer": device_data["manufacturer"],
-                "model": device_data["model"],
-                "serial_number": device_data["serial_number"],
-                "firmware_version": device_data["firmware_version"],
-                "hardware_version": device_data.get("hardware_version"),
-                "mac_address": device_data.get("mac_address"),
-                "connectivity_type": device_data["connectivity_type"],
-                "security_level": device_data.get("security_level", "standard"),
-                "status": device_data.get("status", "pending"),
-                "last_seen": last_seen,
-                "location": json.dumps(location) if isinstance(location, dict) else location,
-                "group_id": device_data.get("group_id"),
-                "tags": tags if isinstance(tags, list) else [],
-                "metadata": json.dumps(metadata) if isinstance(metadata, dict) else metadata,
-                "total_commands": 0,
-                "total_telemetry_points": 0,
-                "uptime_percentage": 0.0,
-                "registered_at": now.isoformat(),
-                "updated_at": now.isoformat()
-            }
+            query = f"""
+                INSERT INTO {self.schema}.{self.devices_table} (
+                    device_id, user_id, organization_id, device_name, device_type,
+                    manufacturer, model, serial_number, firmware_version, hardware_version,
+                    mac_address, connectivity_type, security_level, status, last_seen,
+                    location, group_id, tags, metadata, total_commands,
+                    total_telemetry_points, uptime_percentage, registered_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                    $21, $22, $23, $24
+                )
+                RETURNING *
+            """
 
-            with self.db:
-                count = self.db.insert_into(self.devices_table, [data], schema=self.schema)
+            params = [
+                device_data["device_id"],
+                device_data["user_id"],
+                device_data.get("organization_id"),
+                device_data["device_name"],
+                device_data["device_type"],
+                device_data["manufacturer"],
+                device_data["model"],
+                device_data["serial_number"],
+                device_data["firmware_version"],
+                device_data.get("hardware_version"),
+                device_data.get("mac_address"),
+                device_data["connectivity_type"],
+                device_data.get("security_level", "standard"),
+                device_data.get("status", "pending"),
+                last_seen,
+                json.dumps(location) if isinstance(location, dict) else location,
+                device_data.get("group_id"),
+                tags if isinstance(tags, list) else [],
+                json.dumps(metadata) if isinstance(metadata, dict) else metadata,
+                0,  # total_commands
+                0,  # total_telemetry_points
+                0.0,  # uptime_percentage
+                now,
+                now
+            ]
 
-            if count is not None and count > 0:
-                return await self.get_device_by_id(device_data["device_id"])
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
-            # Even if count is None, try to get the device (might have been inserted)
-            return await self.get_device_by_id(device_data["device_id"])
+            if results and len(results) > 0:
+                row = results[0]
+                # Deserialize JSONB fields
+                if 'location' in row and isinstance(row['location'], str):
+                    row['location'] = json.loads(row['location'])
+                if 'metadata' in row and isinstance(row['metadata'], str):
+                    row['metadata'] = json.loads(row['metadata'])
+                if 'uptime_percentage' in row and row['uptime_percentage'] is not None:
+                    row['uptime_percentage'] = float(row['uptime_percentage'])
+                return DeviceResponse(**row)
+
+            return None
 
         except Exception as e:
             logger.error(f"Error creating device: {e}")
@@ -171,8 +190,8 @@ class DeviceRepository:
             """
             params = [device_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 # Deserialize JSONB fields from JSON strings to dicts
@@ -230,20 +249,21 @@ class DeviceRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             # Deserialize JSONB fields for each row
             devices = []
-            for row in results:
-                if 'location' in row and isinstance(row['location'], str):
-                    row['location'] = json.loads(row['location'])
-                if 'metadata' in row and isinstance(row['metadata'], str):
-                    row['metadata'] = json.loads(row['metadata'])
-                # Convert numeric types to float
-                if 'uptime_percentage' in row and row['uptime_percentage'] is not None:
-                    row['uptime_percentage'] = float(row['uptime_percentage'])
-                devices.append(DeviceResponse(**row))
+            if results:
+                for row in results:
+                    if 'location' in row and isinstance(row['location'], str):
+                        row['location'] = json.loads(row['location'])
+                    if 'metadata' in row and isinstance(row['metadata'], str):
+                        row['metadata'] = json.loads(row['metadata'])
+                    # Convert numeric types to float
+                    if 'uptime_percentage' in row and row['uptime_percentage'] is not None:
+                        row['uptime_percentage'] = float(row['uptime_percentage'])
+                    devices.append(DeviceResponse(**row))
 
             return devices
 
@@ -283,8 +303,8 @@ class DeviceRepository:
                 WHERE device_id = ${device_id_param}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -336,27 +356,35 @@ class DeviceRepository:
             metadata = group_data.get("metadata", {})
             now = datetime.now(timezone.utc)
 
-            data = {
-                "group_id": group_data["group_id"],
-                "user_id": group_data["user_id"],
-                "organization_id": group_data.get("organization_id"),
-                "group_name": group_data["group_name"],
-                "description": group_data.get("description"),
-                "parent_group_id": group_data.get("parent_group_id"),
-                "tags": tags if isinstance(tags, list) else [],
-                "metadata": json.dumps(metadata) if isinstance(metadata, dict) else metadata,
-                "device_count": 0,
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
-            }
+            query = f"""
+                INSERT INTO {self.schema}.{self.groups_table} (
+                    group_id, user_id, organization_id, group_name, description,
+                    parent_group_id, tags, metadata, device_count, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                RETURNING *
+            """
 
-            with self.db:
-                count = self.db.insert_into(self.groups_table, [data], schema=self.schema)
+            params = [
+                group_data["group_id"],
+                group_data["user_id"],
+                group_data.get("organization_id"),
+                group_data["group_name"],
+                group_data.get("description"),
+                group_data.get("parent_group_id"),
+                tags if isinstance(tags, list) else [],
+                json.dumps(metadata) if isinstance(metadata, dict) else metadata,
+                0,  # device_count
+                now,
+                now
+            ]
 
-            if count is not None and count > 0:
-                return await self.get_device_group_by_id(group_data["group_id"])
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
-            return await self.get_device_group_by_id(group_data["group_id"])
+            if results and len(results) > 0:
+                return DeviceGroupResponse(**results[0])
+
+            return None
 
         except Exception as e:
             logger.error(f"Error creating device group: {e}")
@@ -371,8 +399,8 @@ class DeviceRepository:
             """
             params = [group_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 return DeviceGroupResponse(**result)
@@ -387,39 +415,69 @@ class DeviceRepository:
     async def create_frame_config(self, device_id: str, config_data: Dict[str, Any]) -> bool:
         """Create or update frame configuration"""
         try:
-            data = {
-                "device_id": device_id,
-                "brightness": config_data.get("brightness", 80),
-                "contrast": config_data.get("contrast", 100),
-                "auto_brightness": config_data.get("auto_brightness", True),
-                "orientation": config_data.get("orientation", "auto"),
-                "slideshow_interval": config_data.get("slideshow_interval", 30),
-                "slideshow_transition": config_data.get("slideshow_transition", "fade"),
-                "shuffle_photos": config_data.get("shuffle_photos", True),
-                "show_metadata": config_data.get("show_metadata", False),
-                "sleep_schedule": config_data.get("sleep_schedule", {"start": "23:00", "end": "07:00"}),
-                "auto_sleep": config_data.get("auto_sleep", True),
-                "motion_detection": config_data.get("motion_detection", True),
-                "auto_sync_albums": config_data.get("auto_sync_albums", []),
-                "sync_frequency": config_data.get("sync_frequency", "hourly"),
-                "wifi_only_sync": config_data.get("wifi_only_sync", True),
-                "display_mode": config_data.get("display_mode", "photo_slideshow"),
-                "location": config_data.get("location"),
-                "timezone": config_data.get("timezone", "UTC"),
-                "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
-            }
+            now = datetime.now(timezone.utc)
+            sleep_schedule = config_data.get("sleep_schedule", {"start": "23:00", "end": "07:00"})
+            auto_sync_albums = config_data.get("auto_sync_albums", [])
 
-            with self.db:
-                count = self.db.insert_into(
-                    self.frame_configs_table,
-                    [data],
-                    schema=self.schema,
-                    on_conflict="ON CONFLICT (device_id) DO UPDATE SET " +
-                               ", ".join([f"{k} = EXCLUDED.{k}" for k in data.keys() if k != "device_id"])
+            query = f"""
+                INSERT INTO {self.schema}.{self.frame_configs_table} (
+                    device_id, brightness, contrast, auto_brightness, orientation,
+                    slideshow_interval, slideshow_transition, shuffle_photos, show_metadata,
+                    sleep_schedule, auto_sleep, motion_detection, auto_sync_albums,
+                    sync_frequency, wifi_only_sync, display_mode, location, timezone,
+                    created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
                 )
+                ON CONFLICT (device_id) DO UPDATE SET
+                    brightness = EXCLUDED.brightness,
+                    contrast = EXCLUDED.contrast,
+                    auto_brightness = EXCLUDED.auto_brightness,
+                    orientation = EXCLUDED.orientation,
+                    slideshow_interval = EXCLUDED.slideshow_interval,
+                    slideshow_transition = EXCLUDED.slideshow_transition,
+                    shuffle_photos = EXCLUDED.shuffle_photos,
+                    show_metadata = EXCLUDED.show_metadata,
+                    sleep_schedule = EXCLUDED.sleep_schedule,
+                    auto_sleep = EXCLUDED.auto_sleep,
+                    motion_detection = EXCLUDED.motion_detection,
+                    auto_sync_albums = EXCLUDED.auto_sync_albums,
+                    sync_frequency = EXCLUDED.sync_frequency,
+                    wifi_only_sync = EXCLUDED.wifi_only_sync,
+                    display_mode = EXCLUDED.display_mode,
+                    location = EXCLUDED.location,
+                    timezone = EXCLUDED.timezone,
+                    updated_at = EXCLUDED.updated_at
+            """
 
-            return count is not None and count > 0
+            params = [
+                device_id,
+                config_data.get("brightness", 80),
+                config_data.get("contrast", 100),
+                config_data.get("auto_brightness", True),
+                config_data.get("orientation", "auto"),
+                config_data.get("slideshow_interval", 30),
+                config_data.get("slideshow_transition", "fade"),
+                config_data.get("shuffle_photos", True),
+                config_data.get("show_metadata", False),
+                json.dumps(sleep_schedule) if isinstance(sleep_schedule, dict) else sleep_schedule,
+                config_data.get("auto_sleep", True),
+                config_data.get("motion_detection", True),
+                auto_sync_albums if isinstance(auto_sync_albums, list) else [],
+                config_data.get("sync_frequency", "hourly"),
+                config_data.get("wifi_only_sync", True),
+                config_data.get("display_mode", "photo_slideshow"),
+                config_data.get("location"),
+                config_data.get("timezone", "UTC"),
+                now,
+                now
+            ]
+
+            async with self.db:
+                count = await self.db.execute(query, params=params)
+
+            return count is not None and count >= 0
 
         except Exception as e:
             logger.error(f"Error creating frame config: {e}")
@@ -434,8 +492,8 @@ class DeviceRepository:
             """
             params = [device_id]
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
             if result:
                 return FrameConfig(**result)
@@ -450,21 +508,31 @@ class DeviceRepository:
     async def create_device_command(self, command_data: Dict[str, Any]) -> bool:
         """Create a device command"""
         try:
-            data = {
-                "command_id": command_data["command_id"],
-                "device_id": command_data["device_id"],
-                "user_id": command_data["user_id"],
-                "command": command_data["command"],
-                "parameters": command_data.get("parameters", {}),
-                "timeout": command_data.get("timeout", 30),
-                "priority": command_data.get("priority", 1),
-                "require_ack": command_data.get("require_ack", True),
-                "status": "pending",
-                "created_at": datetime.now(timezone.utc)
-            }
+            now = datetime.now(timezone.utc)
+            parameters = command_data.get("parameters", {})
 
-            with self.db:
-                count = self.db.insert_into(self.commands_table, [data], schema=self.schema)
+            query = f"""
+                INSERT INTO {self.schema}.{self.commands_table} (
+                    command_id, device_id, user_id, command, parameters,
+                    timeout, priority, require_ack, status, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            """
+
+            params = [
+                command_data["command_id"],
+                command_data["device_id"],
+                command_data["user_id"],
+                command_data["command"],
+                json.dumps(parameters) if isinstance(parameters, dict) else parameters,
+                command_data.get("timeout", 30),
+                command_data.get("priority", 1),
+                command_data.get("require_ack", True),
+                "pending",
+                now
+            ]
+
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -493,7 +561,7 @@ class DeviceRepository:
                 update_data["completed_at"] = datetime.now(timezone.utc)
 
             if result:
-                update_data["result"] = result
+                update_data["result"] = json.dumps(result) if isinstance(result, dict) else result
 
             if error_message:
                 update_data["error_message"] = error_message
@@ -517,8 +585,8 @@ class DeviceRepository:
                 WHERE command_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -531,8 +599,8 @@ class DeviceRepository:
     async def check_connection(self) -> bool:
         """Check database connection"""
         try:
-            with self.db:
-                result = self.db.query_row("SELECT 1 as connected", [])
+            async with self.db:
+                result = await self.db.query_row("SELECT 1 as connected", params=[])
             return result is not None
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")

@@ -61,12 +61,13 @@ echo "======================================================================"
 echo ""
 
 REGISTER_PAYLOAD="{
-  \"device_id\": \"device_test_$(date +%s)\",
-  \"user_id\": \"${TEST_USER_ID}\",
   \"device_name\": \"Test Device for Events\",
-  \"device_type\": \"smartframe\",
+  \"device_type\": \"smart_frame\",
+  \"manufacturer\": \"TestCorp\",
   \"model\": \"SF-2024\",
-  \"os_version\": \"1.0.0\"
+  \"serial_number\": \"SN_EVENT_TEST_$(date +%s)\",
+  \"firmware_version\": \"1.0.0\",
+  \"connectivity_type\": \"wifi\"
 }"
 
 echo "Registering device to trigger device.registered event..."
@@ -101,10 +102,10 @@ if [ -n "$DEVICE_ID" ] && [ "$DEVICE_ID" != "null" ]; then
     }"
 
     echo "Updating device status to trigger device.status_changed event..."
-    echo "PUT ${API_BASE}/devices/${DEVICE_ID}/status"
+    echo "PUT ${API_BASE}/devices/${DEVICE_ID}"
     echo "$UPDATE_PAYLOAD" | jq '.'
 
-    RESPONSE=$(curl -s -X PUT "${API_BASE}/devices/${DEVICE_ID}/status" \
+    RESPONSE=$(curl -s -X PUT "${API_BASE}/devices/${DEVICE_ID}" \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $JWT_TOKEN" \
       -d "$UPDATE_PAYLOAD")
@@ -112,8 +113,8 @@ if [ -n "$DEVICE_ID" ] && [ "$DEVICE_ID" != "null" ]; then
     echo "Response:"
     echo "$RESPONSE" | jq '.'
 
-    SUCCESS=$(echo "$RESPONSE" | jq -r '.message' | grep -i "success\|updated")
-    if [ -n "$SUCCESS" ] || [ "$(echo "$RESPONSE" | jq -r '.status')" = "active" ]; then
+    # Check if update succeeded by verifying status is active in response
+    if [ "$(echo "$RESPONSE" | jq -r '.status')" = "active" ]; then
         print_result 0 "device.status_changed event should be published"
     else
         print_result 1 "Failed to update device status"

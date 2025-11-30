@@ -45,8 +45,8 @@ class ProceduralMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, domain]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -80,8 +80,8 @@ class ProceduralMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, skill_type]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -115,8 +115,8 @@ class ProceduralMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, difficulty_level]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -150,8 +150,8 @@ class ProceduralMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, min_success_rate]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 

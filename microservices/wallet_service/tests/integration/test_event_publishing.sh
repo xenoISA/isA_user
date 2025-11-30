@@ -18,17 +18,18 @@ echo -e "${CYAN}================================================================
 echo ""
 
 # Check if we're running in K8s
-if ! kubectl get pods -l app=wallet-service &> /dev/null; then
-    echo -e "${RED}✗ Cannot find wallet-service pods in Kubernetes${NC}"
+NAMESPACE="isa-cloud-staging"
+if ! kubectl get pods -n ${NAMESPACE} -l app=wallet &> /dev/null; then
+    echo -e "${RED}✗ Cannot find wallet pods in Kubernetes${NC}"
     echo "Please ensure the service is deployed to K8s"
     exit 1
 fi
 
-echo -e "${BLUE}✓ Found wallet-service pods in Kubernetes${NC}"
+echo -e "${BLUE}✓ Found wallet pods in Kubernetes${NC}"
 echo ""
 
-# Get the wallet-service pod name
-POD_NAME=$(kubectl get pods -l app=wallet-service -o jsonpath='{.items[0].metadata.name}')
+# Get the wallet pod name
+POD_NAME=$(kubectl get pods -n ${NAMESPACE} -l app=wallet -o jsonpath='{.items[0].metadata.name}')
 echo -e "${BLUE}Using pod: ${POD_NAME}${NC}"
 echo ""
 
@@ -44,7 +45,7 @@ echo ""
 
 # Clear recent logs
 echo -e "${BLUE}Step 1: Get baseline log position${NC}"
-BASELINE_LOGS=$(kubectl logs ${POD_NAME} --tail=5 | wc -l)
+BASELINE_LOGS=$(kubectl logs -n ${NAMESPACE} ${POD_NAME} --tail=5 | wc -l)
 echo "Baseline log lines: ${BASELINE_LOGS}"
 echo ""
 
@@ -71,7 +72,7 @@ else
 
     # Check logs for event publishing
     echo -e "${BLUE}Step 3: Check logs for event publishing confirmation${NC}"
-    EVENT_LOGS=$(kubectl logs ${POD_NAME} --tail=50 | grep "Published wallet.created" | grep "${TEST_USER_ID}" || echo "")
+    EVENT_LOGS=$(kubectl logs -n ${NAMESPACE} ${POD_NAME} --tail=50 | grep "Published wallet.created" | grep "${WALLET_ID}" || echo "")
 
     if [ -n "$EVENT_LOGS" ]; then
         echo -e "${GREEN}✓ SUCCESS: Event was published to NATS!${NC}"
@@ -80,7 +81,7 @@ else
     else
         echo -e "${RED}✗ FAILED: No event publishing log found${NC}"
         echo -e "${YELLOW}Recent logs:${NC}"
-        kubectl logs ${POD_NAME} --tail=20
+        kubectl logs -n ${NAMESPACE} ${POD_NAME} --tail=20
         PASSED_1=0
     fi
 fi
@@ -106,7 +107,7 @@ if [ -n "$WALLET_ID" ]; then
 
     # Check logs
     echo -e "${BLUE}Step 2: Check logs for wallet.deposited event${NC}"
-    EVENT_LOGS=$(kubectl logs ${POD_NAME} --tail=50 | grep "Published wallet.deposit.completed" | grep "${WALLET_ID}" || echo "")
+    EVENT_LOGS=$(kubectl logs -n ${NAMESPACE} ${POD_NAME} --tail=50 | grep "Published wallet.deposited" | grep "${WALLET_ID}" || echo "")
 
     if [ -n "$EVENT_LOGS" ]; then
         echo -e "${GREEN}✓ SUCCESS: wallet.deposited event was published!${NC}"
@@ -142,7 +143,7 @@ if [ -n "$WALLET_ID" ]; then
 
     # Check logs
     echo -e "${BLUE}Step 2: Check logs for wallet.consumed event${NC}"
-    EVENT_LOGS=$(kubectl logs ${POD_NAME} --tail=50 | grep -E "(Published wallet.consumed|Published wallet.tokens.deducted)" | grep "${WALLET_ID}" || echo "")
+    EVENT_LOGS=$(kubectl logs -n ${NAMESPACE} ${POD_NAME} --tail=50 | grep -E "(Published wallet.consumed|Published wallet.tokens.deducted)" | grep "${WALLET_ID}" || echo "")
 
     if [ -n "$EVENT_LOGS" ]; then
         echo -e "${GREEN}✓ SUCCESS: wallet.consumed/tokens.deducted event was published!${NC}"
@@ -178,7 +179,7 @@ if [ -n "$WALLET_ID" ]; then
 
     # Check logs
     echo -e "${BLUE}Step 2: Check logs for wallet.withdrawn event${NC}"
-    EVENT_LOGS=$(kubectl logs ${POD_NAME} --tail=50 | grep "Published wallet.withdrawn" | grep "${WALLET_ID}" || echo "")
+    EVENT_LOGS=$(kubectl logs -n ${NAMESPACE} ${POD_NAME} --tail=50 | grep "Published wallet.withdrawn" | grep "${WALLET_ID}" || echo "")
 
     if [ -n "$EVENT_LOGS" ]; then
         echo -e "${GREEN}✓ SUCCESS: wallet.withdrawn event was published!${NC}"
@@ -200,7 +201,7 @@ echo -e "${YELLOW}==============================================================
 echo ""
 
 echo -e "${BLUE}Checking if event handlers are registered on service startup${NC}"
-HANDLER_LOGS=$(kubectl logs ${POD_NAME} | grep "Subscribed to event" || echo "")
+HANDLER_LOGS=$(kubectl logs -n ${NAMESPACE} ${POD_NAME} | grep "Subscribed to event" || echo "")
 
 if [ -n "$HANDLER_LOGS" ]; then
     echo -e "${GREEN}✓ SUCCESS: Event handlers are registered!${NC}"
@@ -249,8 +250,8 @@ else
     echo -e "${RED}✗ SOME TESTS FAILED${NC}"
     echo ""
     echo -e "${YELLOW}Troubleshooting:${NC}"
-    echo "1. Check if NATS is running: kubectl get pods | grep nats"
-    echo "2. Check wallet-service logs: kubectl logs ${POD_NAME}"
-    echo "3. Check event_bus initialization: kubectl logs ${POD_NAME} | grep 'Event bus'"
+    echo "1. Check if NATS is running: kubectl get pods -n ${NAMESPACE} | grep nats"
+    echo "2. Check wallet logs: kubectl logs -n ${NAMESPACE} ${POD_NAME}"
+    echo "3. Check event_bus initialization: kubectl logs -n ${NAMESPACE} ${POD_NAME} | grep 'Event bus'"
     exit 1
 fi

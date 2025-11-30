@@ -66,7 +66,8 @@ sleep 2
 
 # Check logs for event publishing
 echo -e "${BLUE}Step 3: Check logs for event publishing confirmation${NC}"
-EVENT_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=50 | grep "Published album.created" | grep "${CREATED_ALBUM_ID}" || echo "")
+# Use --tail=200 and filter out noisy NATS consumer logs to find the Published logs
+EVENT_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=200 | grep -v "Pulled 0 messages" | grep "Published.*album.created" | grep "${CREATED_ALBUM_ID}" || echo "")
 
 if [ -n "$EVENT_LOGS" ]; then
     echo -e "${GREEN}✓ SUCCESS: Event was published to NATS!${NC}"
@@ -74,8 +75,8 @@ if [ -n "$EVENT_LOGS" ]; then
     PASSED_1=1
 else
     echo -e "${RED}✗ FAILED: No event publishing log found${NC}"
-    echo -e "${YELLOW}Recent logs:${NC}"
-    kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=20
+    echo -e "${YELLOW}Recent publish-related logs:${NC}"
+    kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=100 | grep -v "Pulled 0 messages" | grep -E "(Published|Failed to publish)" | tail -10
     PASSED_1=0
 fi
 echo ""
@@ -85,64 +86,127 @@ echo -e "${YELLOW}Test 2: Verify album.photo_added Event Publishing${NC}"
 echo -e "${YELLOW}=====================================================================${NC}"
 echo ""
 
-# Add photos to album (use real file IDs from storage_service test data)
-echo -e "${BLUE}Step 1: Add photos to album${NC}"
-PHOTO_ID1="test_file_003"  # Real file from storage test data (PDF, less likely to be in other albums)
-PHOTO_ID2="test_file_005"  # Real file from storage test data (PNG logo)
-ADD_PHOTOS_PAYLOAD="{\"photo_ids\":[\"${PHOTO_ID1}\",\"${PHOTO_ID2}\"]}"
-echo "POST ${BASE_URL}/${CREATED_ALBUM_ID}/photos?user_id=${TEST_USER_ID}"
-echo "Payload: ${ADD_PHOTOS_PAYLOAD}"
-curl -s -X POST "${BASE_URL}/${CREATED_ALBUM_ID}/photos?user_id=${TEST_USER_ID}" \
-  -H "Content-Type: application/json" \
-  -d "$ADD_PHOTOS_PAYLOAD" | python3 -m json.tool
-echo ""
+# Upload real test photos via storage service
+echo -e "${BLUE}Step 1: Upload test photos to storage service${NC}"
+STORAGE_URL="http://localhost/api/v1/storage"
 
-sleep 2
+# Create a small test image file
+TEST_IMAGE_1=$(mktemp /tmp/test_photo_1_XXXXXX.jpg)
+TEST_IMAGE_2=$(mktemp /tmp/test_photo_2_XXXXXX.jpg)
 
-# Check logs
-echo -e "${BLUE}Step 2: Check logs for album.photo_added event${NC}"
-EVENT_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=50 | grep "Published album.photo_added" | grep "${CREATED_ALBUM_ID}" || echo "")
+# Create minimal valid JPEG files (1x1 pixel red and blue)
+printf '\xff\xd8\xff\xe0\x00\x10\x4a\x46\x49\x46\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00\x43\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\x09\x09\x08\x0a\x0c\x14\x0d\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c\x20\x24\x2e\x27\x20\x22\x2c\x23\x1c\x1c\x28\x37\x29\x2c\x30\x31\x34\x34\x34\x1f\x27\x39\x3d\x38\x32\x3c\x2e\x33\x34\x32\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00\x37\xff\xd9' > "$TEST_IMAGE_1"
+printf '\xff\xd8\xff\xe0\x00\x10\x4a\x46\x49\x46\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00\x43\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\x09\x09\x08\x0a\x0c\x14\x0d\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c\x20\x24\x2e\x27\x20\x22\x2c\x23\x1c\x1c\x28\x37\x29\x2c\x30\x31\x34\x34\x34\x1f\x27\x39\x3d\x38\x32\x3c\x2e\x33\x34\x32\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00\x3f\xff\xd9' > "$TEST_IMAGE_2"
 
-if [ -n "$EVENT_LOGS" ]; then
-    echo -e "${GREEN}✓ SUCCESS: album.photo_added event was published!${NC}"
-    echo -e "${GREEN}Log entry: ${EVENT_LOGS}${NC}"
-    PASSED_2=1
-else
-    echo -e "${RED}✗ FAILED: No album.photo_added event log found${NC}"
+# Upload first photo
+UPLOAD_RESPONSE_1=$(curl -s -X POST "${STORAGE_URL}/files/upload" \
+  -F "file=@${TEST_IMAGE_1}" \
+  -F "user_id=${TEST_USER_ID}" \
+  -F "file_name=test_photo_1_${TEST_TS}.jpg" \
+  -F "content_type=image/jpeg")
+
+PHOTO_ID1=$(echo "$UPLOAD_RESPONSE_1" | python3 -c "import sys, json; print(json.load(sys.stdin).get('file_id', ''))" 2>/dev/null || echo "")
+
+if [ -z "$PHOTO_ID1" ]; then
+    echo -e "${RED}✗ Failed to upload first photo${NC}"
+    echo "Response: $UPLOAD_RESPONSE_1"
     PASSED_2=0
+else
+    echo -e "${GREEN}✓ Uploaded first photo: ${PHOTO_ID1}${NC}"
+
+    # Upload second photo
+    UPLOAD_RESPONSE_2=$(curl -s -X POST "${STORAGE_URL}/files/upload" \
+      -F "file=@${TEST_IMAGE_2}" \
+      -F "user_id=${TEST_USER_ID}" \
+      -F "file_name=test_photo_2_${TEST_TS}.jpg" \
+      -F "content_type=image/jpeg")
+
+    PHOTO_ID2=$(echo "$UPLOAD_RESPONSE_2" | python3 -c "import sys, json; print(json.load(sys.stdin).get('file_id', ''))" 2>/dev/null || echo "")
+
+    if [ -z "$PHOTO_ID2" ]; then
+        echo -e "${RED}✗ Failed to upload second photo${NC}"
+        PASSED_2=0
+    else
+        echo -e "${GREEN}✓ Uploaded second photo: ${PHOTO_ID2}${NC}"
+
+        # Add photos to album
+        echo ""
+        echo -e "${BLUE}Step 2: Add photos to album${NC}"
+        ADD_PHOTOS_PAYLOAD="{\"photo_ids\":[\"${PHOTO_ID1}\",\"${PHOTO_ID2}\"]}"
+        echo "POST ${BASE_URL}/${CREATED_ALBUM_ID}/photos?user_id=${TEST_USER_ID}"
+        echo "Payload: ${ADD_PHOTOS_PAYLOAD}"
+        curl -s -X POST "${BASE_URL}/${CREATED_ALBUM_ID}/photos?user_id=${TEST_USER_ID}" \
+          -H "Content-Type: application/json" \
+          -d "$ADD_PHOTOS_PAYLOAD" | python3 -m json.tool
+        echo ""
+    fi
 fi
-echo ""
+
+# Cleanup temp files
+rm -f "$TEST_IMAGE_1" "$TEST_IMAGE_2"
+
+if [ -z "$PHOTO_ID1" ] || [ -z "$PHOTO_ID2" ]; then
+    echo -e "${YELLOW}Skipping photo_added test due to upload failure${NC}"
+    PASSED_2=0
+    echo ""
+else
+    sleep 2
+
+    # Check logs
+    echo -e "${BLUE}Step 3: Check logs for album.photo_added event${NC}"
+    EVENT_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=200 | grep -v "Pulled 0 messages" | grep "Published.*album.photo.added" | grep "${CREATED_ALBUM_ID}" || echo "")
+
+    if [ -n "$EVENT_LOGS" ]; then
+        echo -e "${GREEN}✓ SUCCESS: album.photo_added event was published!${NC}"
+        echo -e "${GREEN}Log entry: ${EVENT_LOGS}${NC}"
+        PASSED_2=1
+    else
+        echo -e "${RED}✗ FAILED: No album.photo_added event log found${NC}"
+        echo -e "${YELLOW}Recent publish-related logs:${NC}"
+        kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=100 | grep -v "Pulled 0 messages" | grep -E "(Published|Failed to publish)" | tail -5
+        PASSED_2=0
+    fi
+    echo ""
+fi
 
 echo -e "${YELLOW}=====================================================================${NC}"
 echo -e "${YELLOW}Test 3: Verify album.photo_removed Event Publishing${NC}"
 echo -e "${YELLOW}=====================================================================${NC}"
 echo ""
 
-# Remove photo from album
-echo -e "${BLUE}Step 1: Remove photo from album${NC}"
-REMOVE_PHOTOS_PAYLOAD="{\"photo_ids\":[\"${PHOTO_ID1}\"]}"
-echo "DELETE ${BASE_URL}/${CREATED_ALBUM_ID}/photos?user_id=${TEST_USER_ID}"
-echo "Payload: ${REMOVE_PHOTOS_PAYLOAD}"
-curl -s -X DELETE "${BASE_URL}/${CREATED_ALBUM_ID}/photos?user_id=${TEST_USER_ID}" \
-  -H "Content-Type: application/json" \
-  -d "$REMOVE_PHOTOS_PAYLOAD" | python3 -m json.tool
-echo ""
-
-sleep 2
-
-# Check logs
-echo -e "${BLUE}Step 2: Check logs for album.photo_removed event${NC}"
-EVENT_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=50 | grep "Published album.photo_removed" | grep "${CREATED_ALBUM_ID}" || echo "")
-
-if [ -n "$EVENT_LOGS" ]; then
-    echo -e "${GREEN}✓ SUCCESS: album.photo_removed event was published!${NC}"
-    echo -e "${GREEN}Log entry: ${EVENT_LOGS}${NC}"
-    PASSED_3=1
-else
-    echo -e "${RED}✗ FAILED: No album.photo_removed event log found${NC}"
+if [ -z "$PHOTO_ID1" ]; then
+    echo -e "${YELLOW}Skipping photo_removed test (no photo uploaded)${NC}"
     PASSED_3=0
+    echo ""
+else
+    # Remove photo from album
+    echo -e "${BLUE}Step 1: Remove photo from album${NC}"
+    REMOVE_PHOTOS_PAYLOAD="{\"photo_ids\":[\"${PHOTO_ID1}\"]}"
+    echo "DELETE ${BASE_URL}/${CREATED_ALBUM_ID}/photos?user_id=${TEST_USER_ID}"
+    echo "Payload: ${REMOVE_PHOTOS_PAYLOAD}"
+    curl -s -X DELETE "${BASE_URL}/${CREATED_ALBUM_ID}/photos?user_id=${TEST_USER_ID}" \
+      -H "Content-Type: application/json" \
+      -d "$REMOVE_PHOTOS_PAYLOAD" | python3 -m json.tool
+    echo ""
+
+    sleep 2
+
+    # Check logs
+    echo -e "${BLUE}Step 2: Check logs for album.photo_removed event${NC}"
+    EVENT_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=200 | grep -v "Pulled 0 messages" | grep "Published.*album.photo.removed" | grep "${CREATED_ALBUM_ID}" || echo "")
+
+    if [ -n "$EVENT_LOGS" ]; then
+        echo -e "${GREEN}✓ SUCCESS: album.photo_removed event was published!${NC}"
+        echo -e "${GREEN}Log entry: ${EVENT_LOGS}${NC}"
+        PASSED_3=1
+    else
+        echo -e "${RED}✗ FAILED: No album.photo_removed event log found${NC}"
+        echo -e "${YELLOW}Recent publish-related logs:${NC}"
+        kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=100 | grep -v "Pulled 0 messages" | grep -E "(Published|Failed to publish)" | tail -5
+        PASSED_3=0
+    fi
+    echo ""
 fi
-echo ""
 
 echo -e "${YELLOW}=====================================================================${NC}"
 echo -e "${YELLOW}Test 4: Verify album.deleted Event Publishing${NC}"
@@ -159,7 +223,7 @@ sleep 2
 
 # Check logs
 echo -e "${BLUE}Step 2: Check logs for album.deleted event${NC}"
-EVENT_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=50 | grep "Published album.deleted" | grep "${CREATED_ALBUM_ID}" || echo "")
+EVENT_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=200 | grep -v "Pulled 0 messages" | grep "Published.*album.deleted" | grep "${CREATED_ALBUM_ID}" || echo "")
 
 if [ -n "$EVENT_LOGS" ]; then
     echo -e "${GREEN}✓ SUCCESS: album.deleted event was published!${NC}"
@@ -167,6 +231,8 @@ if [ -n "$EVENT_LOGS" ]; then
     PASSED_4=1
 else
     echo -e "${RED}✗ FAILED: No album.deleted event log found${NC}"
+    echo -e "${YELLOW}Recent publish-related logs:${NC}"
+    kubectl logs -n isa-cloud-staging ${POD_NAME} --tail=100 | grep -v "Pulled 0 messages" | grep -E "(Published|Failed to publish)" | tail -5
     PASSED_4=0
 fi
 echo ""
@@ -177,26 +243,42 @@ echo -e "${YELLOW}==============================================================
 echo ""
 
 echo -e "${BLUE}Checking if event handlers are registered on service startup${NC}"
-HANDLER_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} | grep "Subscribed to event" || echo "")
+# Check for JetStream consumer subscriptions (the actual pattern used by core.nats_client)
+HANDLER_LOGS=$(kubectl logs -n isa-cloud-staging ${POD_NAME} | grep -E "(Subscribed to events|JetStream consumer)" || echo "")
 
 if [ -n "$HANDLER_LOGS" ]; then
     echo -e "${GREEN}✓ SUCCESS: Event handlers are registered!${NC}"
     echo -e "${GREEN}${HANDLER_LOGS}${NC}"
 
-    # Check specific handlers
-    if echo "$HANDLER_LOGS" | grep -q "media.processed"; then
-        echo -e "${GREEN}  ✓ media.processed handler registered${NC}"
+    # Check specific handlers based on actual subscription patterns
+    if echo "$HANDLER_LOGS" | grep -q "file.uploaded"; then
+        echo -e "${GREEN}  ✓ file.uploaded handler registered${NC}"
     fi
-    if echo "$HANDLER_LOGS" | grep -q "storage.file_deleted"; then
-        echo -e "${GREEN}  ✓ storage.file_deleted handler registered${NC}"
+    if echo "$HANDLER_LOGS" | grep -q "file.deleted"; then
+        echo -e "${GREEN}  ✓ file.deleted handler registered${NC}"
     fi
-    if echo "$HANDLER_LOGS" | grep -q "user.deleted"; then
-        echo -e "${GREEN}  ✓ user.deleted handler registered${NC}"
+    if echo "$HANDLER_LOGS" | grep -q "device"; then
+        echo -e "${GREEN}  ✓ device event handler registered${NC}"
     fi
     PASSED_5=1
 else
     echo -e "${RED}✗ FAILED: No event handler registration logs found${NC}"
+    echo -e "${YELLOW}Checking for any subscription-related logs:${NC}"
+    kubectl logs -n isa-cloud-staging ${POD_NAME} | grep -i "subscri" | tail -10
     PASSED_5=0
+fi
+echo ""
+
+# Cleanup uploaded photos
+if [ -n "$PHOTO_ID1" ]; then
+    echo -e "${BLUE}Cleanup: Deleting uploaded test photos${NC}"
+    curl -s -X DELETE "${STORAGE_URL}/files/${PHOTO_ID1}?user_id=${TEST_USER_ID}" > /dev/null
+    echo -e "${GREEN}✓ Deleted photo 1: ${PHOTO_ID1}${NC}"
+fi
+
+if [ -n "$PHOTO_ID2" ]; then
+    curl -s -X DELETE "${STORAGE_URL}/files/${PHOTO_ID2}?user_id=${TEST_USER_ID}" > /dev/null
+    echo -e "${GREEN}✓ Deleted photo 2: ${PHOTO_ID2}${NC}"
 fi
 echo ""
 

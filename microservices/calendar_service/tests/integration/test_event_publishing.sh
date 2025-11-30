@@ -117,8 +117,9 @@ if [ -n "$EVENT_ID" ] && [ "$EVENT_ID" != "null" ]; then
     echo "Response:"
     echo "$RESPONSE" | jq '.'
 
-    SUCCESS=$(echo "$RESPONSE" | jq -r '.message' | grep -i "success\|updated")
-    if [ -n "$SUCCESS" ]; then
+    # Check if update succeeded by verifying event_id is present in response
+    UPDATED_EVENT_ID=$(echo "$RESPONSE" | jq -r '.event_id')
+    if [ -n "$UPDATED_EVENT_ID" ] && [ "$UPDATED_EVENT_ID" != "null" ]; then
         print_result 0 "calendar.event_updated event should be published"
     else
         print_result 1 "Failed to update calendar event"
@@ -151,16 +152,15 @@ if [ -n "$DELETE_EVENT_ID" ] && [ "$DELETE_EVENT_ID" != "null" ]; then
     echo "Deleting calendar event to trigger calendar.event_deleted event..."
     echo "DELETE ${API_BASE}/calendar/events/${DELETE_EVENT_ID}"
 
-    RESPONSE=$(curl -s -X DELETE "${API_BASE}/calendar/events/${DELETE_EVENT_ID}")
+    HTTP_CODE=$(curl -s -w "%{http_code}" -o /dev/null -X DELETE "${API_BASE}/calendar/events/${DELETE_EVENT_ID}")
 
-    echo "Response:"
-    echo "$RESPONSE" | jq '.'
+    echo "HTTP Status: $HTTP_CODE"
 
-    SUCCESS=$(echo "$RESPONSE" | jq -r '.message' | grep -i "success\|deleted")
-    if [ -n "$SUCCESS" ]; then
+    # Delete endpoint returns 204 No Content on success
+    if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
         print_result 0 "calendar.event_deleted event should be published"
     else
-        print_result 1 "Failed to delete calendar event"
+        print_result 1 "Failed to delete calendar event (HTTP $HTTP_CODE)"
     fi
 else
     print_result 1 "Cannot test delete (failed to create test event)"

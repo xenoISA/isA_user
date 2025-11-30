@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import os
 
 from isa_model.inference_client import AsyncISAModel
-from isa_common.qdrant_client import QdrantClient
+from isa_common import AsyncQdrantClient
 
 from .models import FactualMemory, MemoryOperationResult
 from .factual_repository import FactualMemoryRepository
@@ -35,13 +35,13 @@ class FactualMemoryService:
         # Get ISA Model URL via Consul service discovery or fallback
         self.model_url = self._get_model_url()
 
-        # Initialize Qdrant client for vector storage
-        self.qdrant = QdrantClient(
+        # Initialize Qdrant client (async) - lazy connection
+        self.qdrant = AsyncQdrantClient(
             host=os.getenv('QDRANT_HOST', 'isa-qdrant-grpc'),
             port=int(os.getenv('QDRANT_PORT', 50062)),
             user_id='memory_service'
         )
-        self._ensure_collection()
+        self._collection_initialized = False  # Track if collection is ready
 
         logger.info(f"Factual Memory Service initialized with ISA Model URL: {self.model_url}")
 
@@ -65,15 +65,28 @@ class FactualMemoryService:
         # Priority 3: Default fallback
         return "http://localhost:8082"
 
-    def _ensure_collection(self):
-        """Ensure Qdrant collection exists for factual memories"""
+    async def _ensure_collection(self):
+        """Ensure Qdrant collection exists (lazy async init)"""
+        if self._collection_initialized:
+            return
+
         collection_name = 'factual_memories'
         try:
-            if not self.qdrant.get_collection_info(collection_name):
-                self.qdrant.create_collection(collection_name, vector_size=1536, distance='Cosine')
-                logger.info(f"Created Qdrant collection: {collection_name}")
-                self.qdrant.create_field_index(collection_name, 'user_id', 'keyword')
-                logger.info(f"Created user_id index on {collection_name}")
+            async with self.qdrant:
+                info = await self.qdrant.get_collection_info(collection_name)
+                if not info:
+                    await self.qdrant.create_collection(
+                        collection_name=collection_name,
+                        vector_size=1536,
+                        distance='Cosine'
+                    )
+                    await self.qdrant.create_field_index(
+                        collection_name=collection_name,
+                        field_name='user_id',
+                        field_type='keyword'
+                    )
+                    logger.info(f"Created Qdrant collection: {collection_name}")
+            self._collection_initialized = True
         except Exception as e:
             logger.warning(f"Error ensuring Qdrant collection: {e}")
 
@@ -95,6 +108,9 @@ class FactualMemoryService:
             MemoryOperationResult with operation details
         """
         try:
+            # Ensure collection exists (lazy init)
+            await self._ensure_collection()
+
             # Extract facts using LLM
             extraction_result = await self._extract_facts(dialog_content)
 
@@ -164,18 +180,19 @@ class FactualMemoryService:
                     # Store to PostgreSQL
                     result = await self.repository.create(memory_data)
                     if result:
-                        # Store embedding to Qdrant
+                        # Store embedding to Qdrant - ASYNC
                         try:
-                            self.qdrant.upsert_points('factual_memories', [{
-                                'id': memory_id,
-                                'vector': embedding,
-                                'payload': {
-                                    'user_id': user_id,
-                                    'fact_type': fact.get('fact_type', 'general'),
-                                    'subject': str(fact.get('subject', '')),
-                                    'created_at': datetime.now(timezone.utc).isoformat()
-                                }
-                            }])
+                            async with self.qdrant:
+                                await self.qdrant.upsert_points('factual_memories', [{
+                                    'id': memory_id,
+                                    'vector': embedding,
+                                    'payload': {
+                                        'user_id': user_id,
+                                        'fact_type': fact.get('fact_type', 'general'),
+                                        'subject': str(fact.get('subject', '')),
+                                        'created_at': datetime.now(timezone.utc).isoformat()
+                                    }
+                                }])
                             logger.info(f"Stored embedding to Qdrant for factual memory {memory_id}")
                         except Exception as e:
                             logger.error(f"Failed to store embedding to Qdrant: {e}")

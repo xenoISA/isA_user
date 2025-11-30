@@ -1,16 +1,15 @@
 """
 MQTT Publisher for Album Service
 
-Publishes MQTT messages to notify smart frames about album updates
-Uses isa_common.mqtt_client for MQTT operations
+Publishes MQTT messages to notify smart frames about album updates.
+Uses centralized MQTTEventBus from core.mqtt_client for async operations.
 """
 
 import logging
-import json
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from isa_common.mqtt_client import MQTTClient
+from core.mqtt_client import MQTTEventBus, MQTTTopics, get_mqtt_bus
 
 logger = logging.getLogger(__name__)
 
@@ -28,54 +27,42 @@ class AlbumMQTTPublisher:
         """
         self.mqtt_host = mqtt_host
         self.mqtt_port = mqtt_port
-        self.mqtt_client = None
-        self.session_id = None
-        self.connected = False
+        self.mqtt_bus: Optional[MQTTEventBus] = None
+        self._initialized = False
 
         logger.info(f"AlbumMQTTPublisher initialized (host: {mqtt_host}, port: {mqtt_port})")
 
-    async def connect(self):
-        """Connect to MQTT broker via adapter"""
-        if self.connected:
-            logger.debug("Already connected to MQTT broker")
+    async def _ensure_connected(self):
+        """Ensure MQTT bus is connected (lazy initialization)"""
+        if self._initialized and self.mqtt_bus and self.mqtt_bus.connected:
             return
 
         try:
-            # Initialize MQTT client
-            self.mqtt_client = MQTTClient(
+            self.mqtt_bus = MQTTEventBus(
+                service_name="album_service",
                 host=self.mqtt_host,
                 port=self.mqtt_port,
-                user_id='album_service'
             )
-
-            # Connect to broker
-            with self.mqtt_client:
-                conn = self.mqtt_client.connect('album-service-connection')
-                self.session_id = conn['session_id']
-                self.connected = True
-
-            logger.info(f"Connected to MQTT broker (session: {self.session_id})")
+            await self.mqtt_bus.connect()
+            self._initialized = True
+            logger.info("AlbumMQTTPublisher connected to MQTT bus")
 
         except Exception as e:
-            logger.error(f"Failed to connect to MQTT broker: {e}")
-            self.connected = False
+            logger.error(f"Failed to connect to MQTT bus: {e}")
+            self._initialized = False
+            raise
+
+    async def connect(self):
+        """Connect to MQTT broker via adapter (backward compatibility)"""
+        await self._ensure_connected()
 
     async def disconnect(self):
         """Disconnect from MQTT broker"""
-        if not self.connected or not self.mqtt_client:
-            return
-
-        try:
-            with self.mqtt_client:
-                if self.session_id:
-                    self.mqtt_client.disconnect(self.session_id)
-
-            self.connected = False
-            self.session_id = None
-            logger.info("Disconnected from MQTT broker")
-
-        except Exception as e:
-            logger.error(f"Failed to disconnect from MQTT broker: {e}")
+        if self.mqtt_bus:
+            await self.mqtt_bus.close()
+            self._initialized = False
+            self.mqtt_bus = None
+            logger.info("AlbumMQTTPublisher disconnected")
 
     async def publish_photo_added(
         self,
@@ -83,7 +70,7 @@ class AlbumMQTTPublisher:
         file_id: str,
         photo_metadata: Dict[str, Any],
         media_service_url: Optional[str] = None,
-        download_url: Optional[str] = None
+        download_url: Optional[str] = None,
     ) -> bool:
         """
         Publish photo_added event to MQTT for smart frames
@@ -101,44 +88,35 @@ class AlbumMQTTPublisher:
         Returns:
             True if published successfully
         """
-        if not self.connected:
-            await self.connect()
-
-        if not self.connected:
-            logger.error("Not connected to MQTT broker, cannot publish")
-            return False
-
         try:
+            await self._ensure_connected()
+
             message = {
-                'event_type': 'photo_added',
-                'album_id': album_id,
-                'file_id': file_id,
-                'photo_metadata': {
-                    'file_name': photo_metadata.get('file_name'),
-                    'content_type': photo_metadata.get('content_type'),
-                    'file_size': photo_metadata.get('file_size'),
-                    'ai_labels': photo_metadata.get('ai_metadata', {}).get('labels', []),
-                    'created_at': photo_metadata.get('created_at')
+                "event_type": "photo_added",
+                "album_id": album_id,
+                "file_id": file_id,
+                "photo_metadata": {
+                    "file_name": photo_metadata.get("file_name"),
+                    "content_type": photo_metadata.get("content_type"),
+                    "file_size": photo_metadata.get("file_size"),
+                    "ai_labels": photo_metadata.get("ai_metadata", {}).get("labels", []),
+                    "created_at": photo_metadata.get("created_at"),
                 },
-                'media_service_url': media_service_url or f'http://media-service:8222/api/v1/photos/{file_id}',
-                'download_url': download_url,
-                'timestamp': datetime.utcnow().isoformat()
+                "media_service_url": media_service_url
+                or f"http://media-service:8222/api/v1/photos/{file_id}",
+                "download_url": download_url,
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
-            # Publish to album-specific topic
-            topic = f'albums/{album_id}/photo_added'
+            topic = f"albums/{album_id}/photo_added"
+            success = await self.mqtt_bus.publish_json(topic, message, qos=1, retained=False)
 
-            with self.mqtt_client:
-                self.mqtt_client.publish_json(
-                    self.session_id,
-                    topic,
-                    message,
-                    qos=1,  # At least once delivery
-                    retained=False
-                )
+            if success:
+                logger.info(f"Published MQTT photo_added event to {topic}")
+            else:
+                logger.error(f"Failed to publish photo_added to {topic}")
 
-            logger.info(f"Published MQTT photo_added event to {topic}")
-            return True
+            return success
 
         except Exception as e:
             logger.error(f"Failed to publish photo_added MQTT event: {e}")
@@ -147,7 +125,7 @@ class AlbumMQTTPublisher:
     async def publish_photo_removed(
         self,
         album_id: str,
-        file_id: str
+        file_id: str,
     ) -> bool:
         """
         Publish photo_removed event to MQTT
@@ -162,34 +140,23 @@ class AlbumMQTTPublisher:
         Returns:
             True if published successfully
         """
-        if not self.connected:
-            await self.connect()
-
-        if not self.connected:
-            logger.error("Not connected to MQTT broker, cannot publish")
-            return False
-
         try:
+            await self._ensure_connected()
+
             message = {
-                'event_type': 'photo_removed',
-                'album_id': album_id,
-                'file_id': file_id,
-                'timestamp': datetime.utcnow().isoformat()
+                "event_type": "photo_removed",
+                "album_id": album_id,
+                "file_id": file_id,
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
-            topic = f'albums/{album_id}/photo_removed'
+            topic = f"albums/{album_id}/photo_removed"
+            success = await self.mqtt_bus.publish_json(topic, message, qos=1, retained=False)
 
-            with self.mqtt_client:
-                self.mqtt_client.publish_json(
-                    self.session_id,
-                    topic,
-                    message,
-                    qos=1,
-                    retained=False
-                )
+            if success:
+                logger.info(f"Published MQTT photo_removed event to {topic}")
 
-            logger.info(f"Published MQTT photo_removed event to {topic}")
-            return True
+            return success
 
         except Exception as e:
             logger.error(f"Failed to publish photo_removed MQTT event: {e}")
@@ -199,7 +166,7 @@ class AlbumMQTTPublisher:
         self,
         album_id: str,
         frame_id: str,
-        photos: List[Dict[str, Any]]
+        photos: List[Dict[str, Any]],
     ) -> bool:
         """
         Publish full album sync to specific frame
@@ -216,36 +183,25 @@ class AlbumMQTTPublisher:
         Returns:
             True if published successfully
         """
-        if not self.connected:
-            await self.connect()
-
-        if not self.connected:
-            logger.error("Not connected to MQTT broker, cannot publish")
-            return False
-
         try:
+            await self._ensure_connected()
+
             message = {
-                'event_type': 'album_sync',
-                'album_id': album_id,
-                'frame_id': frame_id,
-                'photos': photos,
-                'total_photos': len(photos),
-                'timestamp': datetime.utcnow().isoformat()
+                "event_type": "album_sync",
+                "album_id": album_id,
+                "frame_id": frame_id,
+                "photos": photos,
+                "total_photos": len(photos),
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
-            topic = f'frames/{frame_id}/sync'
+            topic = f"frames/{frame_id}/sync"
+            success = await self.mqtt_bus.publish_json(topic, message, qos=2, retained=True)
 
-            with self.mqtt_client:
-                self.mqtt_client.publish_json(
-                    self.session_id,
-                    topic,
-                    message,
-                    qos=2,  # Exactly once
-                    retained=True  # Frame gets last sync on reconnect
-                )
+            if success:
+                logger.info(f"Published MQTT album_sync event to {topic} ({len(photos)} photos)")
 
-            logger.info(f"Published MQTT album_sync event to {topic} ({len(photos)} photos)")
-            return True
+            return success
 
         except Exception as e:
             logger.error(f"Failed to publish album_sync MQTT event: {e}")
@@ -255,7 +211,7 @@ class AlbumMQTTPublisher:
         self,
         frame_id: str,
         command: str,
-        parameters: Optional[Dict[str, Any]] = None
+        parameters: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Publish command to specific frame
@@ -271,35 +227,24 @@ class AlbumMQTTPublisher:
         Returns:
             True if published successfully
         """
-        if not self.connected:
-            await self.connect()
-
-        if not self.connected:
-            logger.error("Not connected to MQTT broker, cannot publish")
-            return False
-
         try:
+            await self._ensure_connected()
+
             message = {
-                'event_type': 'frame_command',
-                'frame_id': frame_id,
-                'command': command,
-                'parameters': parameters or {},
-                'timestamp': datetime.utcnow().isoformat()
+                "event_type": "frame_command",
+                "frame_id": frame_id,
+                "command": command,
+                "parameters": parameters or {},
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
-            topic = f'frames/{frame_id}/command'
+            topic = f"frames/{frame_id}/command"
+            success = await self.mqtt_bus.publish_json(topic, message, qos=2, retained=False)
 
-            with self.mqtt_client:
-                self.mqtt_client.publish_json(
-                    self.session_id,
-                    topic,
-                    message,
-                    qos=2,  # Exactly once
-                    retained=False
-                )
+            if success:
+                logger.info(f"Published MQTT frame_command '{command}' to {topic}")
 
-            logger.info(f"Published MQTT frame_command '{command}' to {topic}")
-            return True
+            return success
 
         except Exception as e:
             logger.error(f"Failed to publish frame_command MQTT event: {e}")
@@ -308,7 +253,7 @@ class AlbumMQTTPublisher:
     async def publish_album_config(
         self,
         album_id: str,
-        config: Dict[str, Any]
+        config: Dict[str, Any],
     ) -> bool:
         """
         Publish album configuration update
@@ -324,34 +269,23 @@ class AlbumMQTTPublisher:
         Returns:
             True if published successfully
         """
-        if not self.connected:
-            await self.connect()
-
-        if not self.connected:
-            logger.error("Not connected to MQTT broker, cannot publish")
-            return False
-
         try:
+            await self._ensure_connected()
+
             message = {
-                'event_type': 'album_config',
-                'album_id': album_id,
-                'config': config,
-                'timestamp': datetime.utcnow().isoformat()
+                "event_type": "album_config",
+                "album_id": album_id,
+                "config": config,
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
-            topic = f'albums/{album_id}/config'
+            topic = f"albums/{album_id}/config"
+            success = await self.mqtt_bus.publish_json(topic, message, qos=1, retained=True)
 
-            with self.mqtt_client:
-                self.mqtt_client.publish_json(
-                    self.session_id,
-                    topic,
-                    message,
-                    qos=1,
-                    retained=True  # Retained for new subscribers
-                )
+            if success:
+                logger.info(f"Published MQTT album_config to {topic}")
 
-            logger.info(f"Published MQTT album_config to {topic}")
-            return True
+            return success
 
         except Exception as e:
             logger.error(f"Failed to publish album_config MQTT event: {e}")
@@ -360,3 +294,41 @@ class AlbumMQTTPublisher:
     async def cleanup(self):
         """Cleanup resources"""
         await self.disconnect()
+
+
+# Singleton instance and factory
+_album_mqtt_publisher: Optional[AlbumMQTTPublisher] = None
+
+
+async def get_album_mqtt_publisher(
+    mqtt_host: str = "localhost",
+    mqtt_port: int = 50053,
+) -> AlbumMQTTPublisher:
+    """
+    Get or create global AlbumMQTTPublisher instance
+
+    Args:
+        mqtt_host: MQTT service host
+        mqtt_port: MQTT service port
+
+    Returns:
+        AlbumMQTTPublisher: Connected publisher instance
+    """
+    global _album_mqtt_publisher
+
+    if _album_mqtt_publisher is None:
+        _album_mqtt_publisher = AlbumMQTTPublisher(mqtt_host=mqtt_host, mqtt_port=mqtt_port)
+        await _album_mqtt_publisher.connect()
+        logger.info("Created global AlbumMQTTPublisher instance")
+
+    return _album_mqtt_publisher
+
+
+async def close_album_mqtt_publisher():
+    """Close and cleanup global AlbumMQTTPublisher instance"""
+    global _album_mqtt_publisher
+
+    if _album_mqtt_publisher is not None:
+        await _album_mqtt_publisher.cleanup()
+        _album_mqtt_publisher = None
+        logger.info("Closed global AlbumMQTTPublisher instance")

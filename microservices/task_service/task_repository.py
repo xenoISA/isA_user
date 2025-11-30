@@ -14,7 +14,7 @@ from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import ListValue, Struct
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 
 from .models import (
     TaskAnalyticsResponse,
@@ -68,7 +68,7 @@ class TaskRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=postgres_host, port=postgres_port, user_id="task_service"
         )
         self.schema = "task"
@@ -85,52 +85,59 @@ class TaskRepository:
             now = datetime.now(timezone.utc)
             task_id = str(uuid.uuid4())
 
-            # Helper function to serialize datetime to ISO string
+            # Helper function to serialize datetime
             def serialize_datetime(value):
                 if value is None:
                     return None
                 if isinstance(value, datetime):
-                    return value.isoformat()
-                if isinstance(value, str):
                     return value
+                if isinstance(value, str):
+                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
                 return value
 
-            task_record = {
-                "task_id": task_id,
-                "user_id": user_id,
-                "name": task_data.get("name"),
-                "description": task_data.get("description"),
-                "task_type": task_data.get("task_type"),
-                "status": task_data.get("status", TaskStatus.PENDING.value),
-                "priority": task_data.get("priority", TaskPriority.MEDIUM.value),
-                "config": task_data.get("config", {}),
-                "schedule": task_data.get("schedule"),
-                "credits_per_run": float(task_data.get("credits_per_run", 0)),
-                "tags": task_data.get("tags", []),
-                "metadata": task_data.get("metadata", {}),
-                "due_date": serialize_datetime(task_data.get("due_date")),
-                "reminder_time": serialize_datetime(task_data.get("reminder_time")),
-                "next_run_time": serialize_datetime(task_data.get("next_run_time")),
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat(),
-                "run_count": 0,
-                "success_count": 0,
-                "failure_count": 0,
-                "total_credits_consumed": 0.0,
-            }
+            query = f"""
+                INSERT INTO {self.schema}.{self.table_name} (
+                    task_id, user_id, name, description, task_type, status, priority,
+                    config, schedule, credits_per_run, tags, metadata, due_date,
+                    reminder_time, next_run_time, created_at, updated_at,
+                    run_count, success_count, failure_count, total_credits_consumed
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+            """
 
-            with self.db:
-                count = self.db.insert_into(
-                    self.table_name, [task_record], schema=self.schema
-                )
+            params = [
+                task_id,
+                user_id,
+                task_data.get("name"),
+                task_data.get("description"),
+                task_data.get("task_type"),
+                task_data.get("status", TaskStatus.PENDING.value),
+                task_data.get("priority", TaskPriority.MEDIUM.value),
+                task_data.get("config", {}),
+                task_data.get("schedule"),
+                float(task_data.get("credits_per_run", 0)),
+                task_data.get("tags", []),
+                task_data.get("metadata", {}),
+                serialize_datetime(task_data.get("due_date")),
+                serialize_datetime(task_data.get("reminder_time")),
+                serialize_datetime(task_data.get("next_run_time")),
+                now,
+                now,
+                0,
+                0,
+                0,
+                0.0,
+            ]
+
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             if count is not None and count > 0:
                 # Query back to get the created task
-                query = (
+                select_query = (
                     f"SELECT * FROM {self.schema}.{self.table_name} WHERE task_id = $1"
                 )
-                with self.db:
-                    results = self.db.query(query, [task_id], schema=self.schema)
+                async with self.db:
+                    results = await self.db.query(select_query, params=[task_id])
 
                 if results and len(results) > 0:
                     return self._parse_task(results[0])
@@ -158,8 +165,8 @@ class TaskRepository:
             where_clause = " AND ".join(conditions)
             query = f"SELECT * FROM {self.schema}.{self.table_name} WHERE {where_clause} LIMIT 1"
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return self._parse_task(results[0])
@@ -202,14 +209,15 @@ class TaskRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             tasks = []
-            for data in results:
-                task = self._parse_task(data)
-                if task:
-                    tasks.append(task)
+            if results:
+                for data in results:
+                    task = self._parse_task(data)
+                    if task:
+                        tasks.append(task)
 
             return tasks
 
@@ -247,11 +255,8 @@ class TaskRepository:
                     update_parts.append(f"{field} = ${param_count}")
 
                     value = updates[field]
-                    # Handle datetime serialization
-                    if isinstance(value, datetime):
-                        value = value.isoformat()
                     # Handle enum values
-                    elif hasattr(value, "value"):
+                    if hasattr(value, "value"):
                         value = value.value
 
                     params.append(value)
@@ -262,7 +267,7 @@ class TaskRepository:
             # Add updated_at
             param_count += 1
             update_parts.append(f"updated_at = ${param_count}")
-            params.append(datetime.now(timezone.utc).isoformat())
+            params.append(datetime.now(timezone.utc))
 
             # Build WHERE clause
             param_count += 1
@@ -283,8 +288,8 @@ class TaskRepository:
                 WHERE {where_clause}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -316,8 +321,8 @@ class TaskRepository:
                 WHERE {where_clause} AND deleted_at IS NULL
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -338,7 +343,7 @@ class TaskRepository:
     ) -> bool:
         """更新任务执行统计"""
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
 
             if success:
                 query = f"""
@@ -364,8 +369,8 @@ class TaskRepository:
                 """
                 params = [credits_consumed, now, task_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -376,7 +381,7 @@ class TaskRepository:
     async def get_pending_tasks(self, limit: int = 100) -> List[TaskResponse]:
         """获取待执行的任务"""
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
             query = f"""
                 SELECT * FROM {self.schema}.{self.table_name}
                 WHERE status = 'scheduled'
@@ -386,14 +391,15 @@ class TaskRepository:
                 LIMIT {limit}
             """
 
-            with self.db:
-                results = self.db.query(query, [now], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=[now])
 
             tasks = []
-            for data in results:
-                task = self._parse_task(data)
-                if task:
-                    tasks.append(task)
+            if results:
+                for data in results:
+                    task = self._parse_task(data)
+                    if task:
+                        tasks.append(task)
 
             return tasks
 
@@ -421,26 +427,31 @@ class TaskRepository:
             now = datetime.now(timezone.utc)
             execution_id = str(uuid.uuid4())
 
-            execution_record = {
-                "execution_id": execution_id,
-                "task_id": execution_data.get("task_id"),
-                "user_id": execution_data.get("user_id"),
-                "status": execution_data.get("status", "running"),
-                "trigger_type": execution_data.get("trigger_type", "manual"),
-                "trigger_data": execution_data.get("trigger_data"),
-                "started_at": now.isoformat(),
-                "created_at": now.isoformat(),
-            }
+            query = f"""
+                INSERT INTO {self.schema}.{self.execution_table} (
+                    execution_id, task_id, user_id, status, trigger_type,
+                    trigger_data, started_at, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """
 
-            with self.db:
-                count = self.db.insert_into(
-                    self.execution_table, [execution_record], schema=self.schema
-                )
+            params = [
+                execution_id,
+                execution_data.get("task_id"),
+                execution_data.get("user_id"),
+                execution_data.get("status", "running"),
+                execution_data.get("trigger_type", "manual"),
+                execution_data.get("trigger_data"),
+                now,
+                now,
+            ]
+
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             if count is not None and count > 0:
-                query = f"SELECT * FROM {self.schema}.{self.execution_table} WHERE execution_id = $1"
-                with self.db:
-                    results = self.db.query(query, [execution_id], schema=self.schema)
+                select_query = f"SELECT * FROM {self.schema}.{self.execution_table} WHERE execution_id = $1"
+                async with self.db:
+                    results = await self.db.query(select_query, params=[execution_id])
 
                 if results and len(results) > 0:
                     return self._parse_execution(results[0])
@@ -484,7 +495,7 @@ class TaskRepository:
             if updates.get("status") in ["completed", "failed", "cancelled"]:
                 param_count += 1
                 update_parts.append(f"completed_at = ${param_count}")
-                params.append(datetime.now(timezone.utc).isoformat())
+                params.append(datetime.now(timezone.utc))
 
             if not update_parts:
                 return True
@@ -499,8 +510,8 @@ class TaskRepository:
                 WHERE execution_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -520,14 +531,15 @@ class TaskRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                results = self.db.query(query, [task_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=[task_id])
 
             executions = []
-            for data in results:
-                execution = self._parse_execution(data)
-                if execution:
-                    executions.append(execution)
+            if results:
+                for data in results:
+                    execution = self._parse_execution(data)
+                    if execution:
+                        executions.append(execution)
 
             return executions
 
@@ -605,14 +617,15 @@ class TaskRepository:
                 ORDER BY category, name
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             templates = []
-            for data in results:
-                template = self._parse_template(data)
-                if template:
-                    templates.append(template)
+            if results:
+                for data in results:
+                    template = self._parse_template(data)
+                    if template:
+                        templates.append(template)
 
             return templates
 
@@ -654,14 +667,15 @@ class TaskRepository:
                 ORDER BY category, name
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             templates = []
-            for data in results:
-                template = self._parse_template(data)
-                if template:
-                    templates.append(template)
+            if results:
+                for data in results:
+                    template = self._parse_template(data)
+                    if template:
+                        templates.append(template)
 
             return templates
 
@@ -674,8 +688,8 @@ class TaskRepository:
         try:
             query = f"SELECT * FROM {self.schema}.{self.template_table} WHERE template_id = $1 LIMIT 1"
 
-            with self.db:
-                results = self.db.query(query, [template_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=[template_id])
 
             if results and len(results) > 0:
                 return self._parse_template(results[0])
@@ -695,10 +709,7 @@ class TaskRepository:
     ) -> Optional[TaskAnalyticsResponse]:
         """获取任务分析数据"""
         try:
-            from datetime import datetime, timedelta
-            from decimal import Decimal
-
-            time_threshold = datetime.utcnow() - timedelta(days=days)
+            time_threshold = datetime.now(timezone.utc) - timedelta(days=days)
 
             # Query 1: Task statistics
             task_stats_query = f"""
@@ -754,22 +765,22 @@ class TaskRepository:
                 LIMIT 5
             """
 
-            with self.db:
+            async with self.db:
                 # Execute all queries
-                task_stats = self.db.query(
-                    task_stats_query, [user_id], schema=self.schema
+                task_stats = await self.db.query(
+                    task_stats_query, params=[user_id]
                 )
-                exec_stats = self.db.query(
-                    exec_stats_query, [user_id, time_threshold], schema=self.schema
+                exec_stats = await self.db.query(
+                    exec_stats_query, params=[user_id, time_threshold]
                 )
-                type_dist = self.db.query(
-                    type_dist_query, [user_id], schema=self.schema
+                type_dist = await self.db.query(
+                    type_dist_query, params=[user_id]
                 )
-                busiest_hours = self.db.query(
-                    busiest_hours_query, [user_id, time_threshold], schema=self.schema
+                busiest_hours = await self.db.query(
+                    busiest_hours_query, params=[user_id, time_threshold]
                 )
-                busiest_days = self.db.query(
-                    busiest_days_query, [user_id, time_threshold], schema=self.schema
+                busiest_days = await self.db.query(
+                    busiest_days_query, params=[user_id, time_threshold]
                 )
 
             # Parse results
@@ -788,20 +799,25 @@ class TaskRepository:
 
             # Parse task type distribution
             task_types_distribution = {}
-            for row in type_dist:
-                task_types_distribution[row["task_type"]] = row["count"]
+            if type_dist:
+                for row in type_dist:
+                    task_types_distribution[row["task_type"]] = row["count"]
 
             # Parse busiest hours
-            busiest_hours_list = [
-                int(row["hour"]) for row in busiest_hours if row.get("hour") is not None
-            ]
+            busiest_hours_list = []
+            if busiest_hours:
+                busiest_hours_list = [
+                    int(row["hour"]) for row in busiest_hours if row.get("hour") is not None
+                ]
 
             # Parse busiest days
-            busiest_days_list = [
-                str(row["day_name"]).strip()
-                for row in busiest_days
-                if row.get("day_name")
-            ]
+            busiest_days_list = []
+            if busiest_days:
+                busiest_days_list = [
+                    str(row["day_name"]).strip()
+                    for row in busiest_days
+                    if row.get("day_name")
+                ]
 
             # Create analytics response
             analytics = TaskAnalyticsResponse(
@@ -1014,11 +1030,10 @@ class TaskRepository:
                 AND status IN ($3, $4)
             """
 
-            with self.db:
-                count = self.db.execute(
+            async with self.db:
+                count = await self.db.execute(
                     query,
-                    ["cancelled", user_id, "pending", "scheduled"],
-                    schema=self.schema,
+                    params=["cancelled", user_id, "pending", "scheduled"],
                 )
 
             logger.info(f"Cancelled {count} tasks for user {user_id}")

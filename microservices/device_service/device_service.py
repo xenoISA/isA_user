@@ -23,11 +23,14 @@ from core.nats_client import Event, EventType, ServiceSource
 
 logger = logging.getLogger("device_service")
 
-# Import MQTT client from core
+# Import async MQTT client from core
 try:
-    from core.mqtt_client import create_command_client
+    from core.mqtt_client import DeviceCommandClient, MQTTEventBus
+    MQTT_AVAILABLE = True
 except ImportError:
-    create_command_client = None
+    DeviceCommandClient = None
+    MQTTEventBus = None
+    MQTT_AVAILABLE = False
     logger.warning("MQTT client not available - commands will be simulated")
 
 
@@ -42,9 +45,9 @@ class DeviceService:
         # Initialize repository with config for service discovery
         self.device_repo = DeviceRepository(config=config)
 
-        # Initialize MQTT command client
-        self.mqtt_command_client = None
-        self._init_mqtt_command_client()
+        # Initialize MQTT command client (async, lazy init)
+        self.mqtt_command_client: Optional[DeviceCommandClient] = None
+        self._mqtt_initialized = False
 
     async def register_device(self, user_id: str, device_data: Dict[str, Any]) -> Optional[DeviceResponse]:
         """注册新设备"""
@@ -284,10 +287,13 @@ class DeviceService:
 
             await self.device_repo.create_device_command(command_data)
 
-            # 通过 MQTT 发送命令
+            # Ensure MQTT client is initialized
+            await self._ensure_mqtt_connected()
+
+            # 通过 MQTT 发送命令 (async)
             if self.mqtt_command_client and self.mqtt_command_client.is_connected():
-                # 使用 MQTT client 发送命令
-                mqtt_command_id = self.mqtt_command_client.send_device_command(
+                # 使用 async MQTT client 发送命令
+                mqtt_command_id = await self.mqtt_command_client.send_device_command(
                     device_id=device_id,
                     command=command["command"],
                     parameters=command.get("parameters", {}),
@@ -557,12 +563,20 @@ class DeviceService:
         }
         return jwt.encode(payload, self.secret_key, algorithm="HS256")
 
-    def _init_mqtt_command_client(self):
-        """初始化MQTT命令客户端"""
+    async def _ensure_mqtt_connected(self):
+        """Ensure MQTT command client is initialized and connected (lazy async init)"""
+        if self._mqtt_initialized and self.mqtt_command_client:
+            return
+
         try:
-            if create_command_client:
-                self.mqtt_command_client = create_command_client()
-                self.mqtt_command_client.connect_async()
+            if MQTT_AVAILABLE and DeviceCommandClient:
+                self.mqtt_command_client = DeviceCommandClient(
+                    host="localhost",
+                    port=50053,
+                    user_id="device_service"
+                )
+                await self.mqtt_command_client.connect()
+                self._mqtt_initialized = True
                 logger.info("MQTT command client initialized for device service")
             else:
                 logger.warning("MQTT client not available - commands will be simulated")
@@ -570,6 +584,15 @@ class DeviceService:
         except Exception as e:
             logger.error(f"Failed to initialize MQTT command client: {e}")
             self.mqtt_command_client = None
+            self._mqtt_initialized = False
+
+    async def close_mqtt_client(self):
+        """Close MQTT command client"""
+        if self.mqtt_command_client:
+            await self.mqtt_command_client.disconnect()
+            self.mqtt_command_client = None
+            self._mqtt_initialized = False
+            logger.info("MQTT command client closed")
 
     async def check_connection(self) -> bool:
         """检查数据库连接"""

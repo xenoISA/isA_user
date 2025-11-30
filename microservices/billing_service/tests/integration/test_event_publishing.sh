@@ -156,7 +156,8 @@ echo "Response:"
 echo "$RESPONSE" | jq '.'
 
 SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
-if [ "$SUCCESS" = "false" ]; then
+ERROR_DETAIL=$(echo "$RESPONSE" | jq -r '.detail')
+if [ "$SUCCESS" = "false" ] || [ -n "$ERROR_DETAIL" ] && [ "$ERROR_DETAIL" != "null" ]; then
     print_result 0 "billing.error event should be published (invalid product rejected)"
 else
     print_result 1 "Invalid product should trigger error event"

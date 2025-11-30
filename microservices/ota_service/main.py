@@ -27,7 +27,7 @@ from .models import (
 )
 from .ota_service import OTAService
 from .ota_repository import OTARepository
-from .events import OTAEventHandler
+from .events import get_event_handlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from datetime import datetime
 
@@ -124,13 +124,15 @@ async def lifespan(app: FastAPI):
     if event_bus:
         try:
             ota_repo = OTARepository(config=config_manager)
-            event_handler = OTAEventHandler(ota_repo)
+            handler_map = get_event_handlers(ota_repo)
 
-            await event_bus.subscribe(
-                subject="events.device.deleted",
-                callback=lambda msg: event_handler.handle_event(msg)
-            )
-            logger.info("✅ Subscribed to device.deleted events")
+            for event_pattern, handler_func in handler_map.items():
+                await event_bus.subscribe_to_events(
+                    pattern=event_pattern, handler=handler_func
+                )
+                logger.info(f"Subscribed to {event_pattern} events")
+
+            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 

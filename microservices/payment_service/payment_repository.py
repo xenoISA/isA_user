@@ -16,7 +16,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     SubscriptionPlan, Subscription, Payment, Invoice, Refund, PaymentMethodInfo,
@@ -47,7 +47,7 @@ class PaymentRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id="payment_service"
@@ -72,8 +72,8 @@ class PaymentRepository:
         """检查数据库连接"""
         try:
             query = f"SELECT 1 FROM {self.schema}.{self.subscriptions_table} LIMIT 1"
-            with self.db:
-                result = self.db.query(query, [], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [], schema=self.schema)
             return True
         except Exception as e:
             logger.error(f"数据库连接检查失败: {e}")
@@ -107,8 +107,8 @@ class PaymentRepository:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.plans_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.plans_table, [data], schema=self.schema)
 
             # Check return value for None
             if count is not None and count > 0:
@@ -129,8 +129,8 @@ class PaymentRepository:
                 WHERE plan_id = $1 AND is_active = true
             """
 
-            with self.db:
-                result = self.db.query_row(query, [plan_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [plan_id], schema=self.schema)
 
             if result:
                 return self._convert_to_subscription_plan(result)
@@ -163,8 +163,8 @@ class PaymentRepository:
                 ORDER BY price_usd ASC
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results:
                 return [self._convert_to_subscription_plan(plan) for plan in results]
@@ -206,8 +206,8 @@ class PaymentRepository:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.subscriptions_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.subscriptions_table, [data], schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_subscription(data["subscription_id"])
@@ -229,8 +229,8 @@ class PaymentRepository:
                 LIMIT 1
             """
 
-            with self.db:
-                result = self.db.query_row(query, [user_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [user_id], schema=self.schema)
 
             if result:
                 return self._convert_to_subscription(result)
@@ -282,8 +282,8 @@ class PaymentRepository:
                 WHERE subscription_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_subscription(subscription_id)
@@ -304,8 +304,8 @@ class PaymentRepository:
                 LIMIT 1
             """
 
-            with self.db:
-                result = self.db.query_row(
+            async with self.db:
+                result = await self.db.query_row(
                     query,
                     [user_id, SubscriptionStatus.ACTIVE.value, SubscriptionStatus.TRIALING.value],
                     schema=self.schema
@@ -328,8 +328,8 @@ class PaymentRepository:
                 LIMIT 1
             """
 
-            with self.db:
-                result = self.db.query_row(query, [user_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [user_id], schema=self.schema)
 
             if result:
                 return self._convert_to_payment_method(result)
@@ -347,8 +347,8 @@ class PaymentRepository:
                 WHERE subscription_id = $1
             """
 
-            with self.db:
-                result = self.db.query_row(query, [subscription_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [subscription_id], schema=self.schema)
 
             if result:
                 return self._convert_to_subscription(result)
@@ -397,8 +397,8 @@ class PaymentRepository:
                 WHERE subscription_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_subscription(subscription_id)
@@ -436,8 +436,8 @@ class PaymentRepository:
                 "failed_at": payment.failed_at.isoformat() if payment.failed_at else None
             }
 
-            with self.db:
-                count = self.db.insert_into(self.payments_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.payments_table, [data], schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_payment(data["payment_id"])
@@ -456,8 +456,8 @@ class PaymentRepository:
                 WHERE payment_id = $1
             """
 
-            with self.db:
-                result = self.db.query_row(query, [payment_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [payment_id], schema=self.schema)
 
             if result:
                 return self._convert_to_payment(result)
@@ -511,8 +511,8 @@ class PaymentRepository:
                 WHERE payment_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_payment(payment_id)
@@ -547,8 +547,8 @@ class PaymentRepository:
                 LIMIT {limit}
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results:
                 return [self._convert_to_payment(payment) for payment in results]
@@ -588,8 +588,8 @@ class PaymentRepository:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.invoices_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.invoices_table, [data], schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_invoice(data["invoice_id"])
@@ -608,8 +608,8 @@ class PaymentRepository:
                 WHERE invoice_id = $1
             """
 
-            with self.db:
-                result = self.db.query_row(query, [invoice_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [invoice_id], schema=self.schema)
 
             if result:
                 return self._convert_to_invoice(result)
@@ -653,8 +653,8 @@ class PaymentRepository:
                 WHERE invoice_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is not None and count > 0:
                 return await self.get_invoice(invoice_id)
@@ -689,13 +689,13 @@ class PaymentRepository:
                 "completed_at": refund.completed_at.isoformat() if refund.completed_at else None
             }
 
-            with self.db:
-                count = self.db.insert_into(self.refunds_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.refunds_table, [data], schema=self.schema)
 
             if count is not None and count > 0:
                 query = f"SELECT * FROM {self.schema}.{self.refunds_table} WHERE refund_id = $1"
-                with self.db:
-                    result = self.db.query_row(query, [data["refund_id"]], schema=self.schema)
+                async with self.db:
+                    result = await self.db.query_row(query, [data["refund_id"]], schema=self.schema)
                 if result:
                     return self._convert_to_refund(result)
 
@@ -738,8 +738,8 @@ class PaymentRepository:
                 WHERE refund_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -781,14 +781,14 @@ class PaymentRepository:
                 WHERE refund_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is not None and count > 0:
                 # Fetch the updated refund
                 fetch_query = f"SELECT * FROM {self.schema}.{self.refunds_table} WHERE refund_id = $1"
-                with self.db:
-                    result = self.db.query_row(fetch_query, [refund_id], schema=self.schema)
+                async with self.db:
+                    result = await self.db.query_row(fetch_query, [refund_id], schema=self.schema)
                 if result:
                     return self._convert_to_refund(result)
 
@@ -823,13 +823,13 @@ class PaymentRepository:
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.payment_methods_table, [data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.payment_methods_table, [data], schema=self.schema)
 
             if count is not None and count > 0:
                 query = f"SELECT * FROM {self.schema}.{self.payment_methods_table} WHERE method_id = $1"
-                with self.db:
-                    result = self.db.query_row(query, [data["method_id"]], schema=self.schema)
+                async with self.db:
+                    result = await self.db.query_row(query, [data["method_id"]], schema=self.schema)
                 if result:
                     return self._convert_to_payment_method(result)
 
@@ -848,8 +848,8 @@ class PaymentRepository:
                 ORDER BY is_default DESC, created_at DESC
             """
 
-            with self.db:
-                results = self.db.query(query, [user_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [user_id], schema=self.schema)
 
             if results:
                 return [self._convert_to_payment_method(method) for method in results]
@@ -874,8 +874,8 @@ class PaymentRepository:
                 WHERE status = $1 AND created_at >= $2
             """
 
-            with self.db:
-                results = self.db.query(
+            async with self.db:
+                results = await self.db.query(
                     query,
                     [PaymentStatus.SUCCEEDED.value, start_date.isoformat()],
                     schema=self.schema
@@ -923,8 +923,8 @@ class PaymentRepository:
                 WHERE status IN ('active', 'trialing')
             """
 
-            with self.db:
-                active_result = self.db.query_row(active_query, [], schema=self.schema)
+            async with self.db:
+                active_result = await self.db.query_row(active_query, [], schema=self.schema)
 
             active_count = int(active_result.get("count", 0)) if active_result else 0
 
@@ -935,8 +935,8 @@ class PaymentRepository:
                     SELECT COUNT(*) as count FROM {self.schema}.{self.subscriptions_table}
                     WHERE tier = $1 AND status IN ('active', 'trialing')
                 """
-                with self.db:
-                    tier_result = self.db.query_row(tier_query, [tier.value], schema=self.schema)
+                async with self.db:
+                    tier_result = await self.db.query_row(tier_query, [tier.value], schema=self.schema)
                 tier_stats[tier.value] = int(tier_result.get("count", 0)) if tier_result else 0
 
             # Churn rate
@@ -946,8 +946,8 @@ class PaymentRepository:
                 WHERE status = $1 AND canceled_at >= $2
             """
 
-            with self.db:
-                canceled_result = self.db.query_row(
+            async with self.db:
+                canceled_result = await self.db.query_row(
                     canceled_query,
                     [SubscriptionStatus.CANCELED.value, thirty_days_ago.isoformat()],
                     schema=self.schema

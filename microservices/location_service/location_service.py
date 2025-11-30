@@ -59,11 +59,9 @@ class LocationService:
         """Check database connection"""
         try:
             # Simple query to test connection
-            query = "SELECT 1"
-            with self.repository.db:
-                result = self.repository.db.query(
-                    query, [], schema=self.repository.schema
-                )
+            query = "SELECT 1 as connected"
+            async with self.repository.db:
+                result = await self.repository.db.query_row(query, params=[])
             return result is not None
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")

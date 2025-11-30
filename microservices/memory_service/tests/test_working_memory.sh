@@ -4,7 +4,7 @@
 # Tests working memory operations (short-term, temporary memory)
 
 BASE_URL="http://localhost"
-API_BASE="${BASE_URL}/memories"
+API_BASE="${BASE_URL}/api/v1/memories"
 
 # Colors for output
 GREEN='\033[0;32m'

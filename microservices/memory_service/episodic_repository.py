@@ -50,8 +50,8 @@ class EpisodicMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, start_date, end_date]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -85,8 +85,8 @@ class EpisodicMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, event_type]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             # Deserialize all rows
             return [self._deserialize_row(row) for row in (results or [])]
@@ -121,8 +121,8 @@ class EpisodicMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, f"%{location}%"]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -157,8 +157,8 @@ class EpisodicMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, participant]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -196,8 +196,8 @@ class EpisodicMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, min_valence, max_valence]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 

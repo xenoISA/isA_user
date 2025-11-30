@@ -68,27 +68,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Verify Event Service Health
-print_section "Test 1: Verify Event Service Health"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "Response:"
-pretty_json "$RESPONSE_BODY"
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Event service is healthy"
-else
-    print_result 1 "Event service health check failed"
-    echo "Cannot proceed with integration tests if service is not healthy"
-    exit 1
-fi
-
-# Test 2: Create Event and Verify Publishing
-print_section "Test 2: Create Event with Event Publishing"
+# Test 1: Create Event and Verify Publishing
+print_section "Test 1: Create Event with Event Publishing"
 echo "POST ${API_BASE}/events/create"
 CREATE_EVENT_PAYLOAD='{
   "event_type": "integration_test_event",

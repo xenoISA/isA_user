@@ -147,9 +147,20 @@ async def lifespan(app: FastAPI):
     # Register event handlers
     if event_bus:
         try:
-            from .events.handlers import register_event_handlers
-            await register_event_handlers(event_bus, order_microservice.order_service)
-            logger.info("✅ Event handlers registered successfully")
+            from .events.handlers import get_event_handlers
+
+            # Get event handlers (function-based, not class-based)
+            handler_map = get_event_handlers(order_microservice.order_service)
+
+            # Subscribe to events
+            for event_pattern, handler_func in handler_map.items():
+                # Subscribe to each event pattern (already includes service prefix)
+                await event_bus.subscribe_to_events(
+                    pattern=event_pattern, handler=handler_func
+                )
+                logger.info(f"Subscribed to {event_pattern} events")
+
+            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register event handlers: {e}")
 

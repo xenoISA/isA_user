@@ -30,9 +30,7 @@ spec:
           envFrom:
             - configMapRef:
                 name: user-config
-            - configMapRef:
-                name: data-config
-
+          
           env:
             - name: SERVICE_NAME
               value: "billing_service"

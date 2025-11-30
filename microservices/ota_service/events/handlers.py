@@ -17,83 +17,61 @@ from core.nats_client import Event, EventType
 logger = logging.getLogger(__name__)
 
 
-class OTAEventHandler:
+# ============================================================================
+# Event Handlers
+# ============================================================================
+
+
+async def handle_device_deleted(event_data: Dict[str, Any], ota_repository):
     """
-    Handles events subscribed by OTA Service
+    Handle device.deleted event from device_service
 
-    Subscribes to:
-    - device.deleted: Cancel all pending updates for deleted device
+    When a device is deleted, cancel all pending updates for that device
+
+    Event data:
+        - device_id: Device ID
+        - device_name: Device name (optional)
+        - reason: Deletion reason (optional)
+
+    Args:
+        event_data: Event data containing device_id
+        ota_repository: OTARepository instance for data access
     """
+    try:
+        device_id = event_data.get('device_id')
+        if not device_id:
+            logger.warning("device.deleted event missing device_id")
+            return
 
-    def __init__(self, ota_repository):
-        """
-        Initialize event handler
+        logger.info(f"Received device.deleted event for device {device_id}")
 
-        Args:
-            ota_repository: OTARepository instance for data access
-        """
-        self.ota_repo = ota_repository
+        # Cancel all pending/in-progress updates for this device
+        cancelled_count = await ota_repository.cancel_device_updates(device_id)
 
-    async def handle_device_deleted(self, event_data: Dict[str, Any]) -> bool:
-        """
-        Handle device.deleted event
+        logger.info(f"Cancelled {cancelled_count} OTA updates for deleted device {device_id}")
 
-        When a device is deleted, cancel all pending updates for that device
+    except Exception as e:
+        logger.error(f"Error handling device.deleted event: {e}", exc_info=True)
 
-        Args:
-            event_data: Event data containing device_id
 
-        Returns:
-            bool: True if handled successfully
-        """
-        try:
-            device_id = event_data.get('device_id')
-            if not device_id:
-                logger.warning("device.deleted event missing device_id")
-                return False
+# ============================================================================
+# Event Handler Registry
+# ============================================================================
 
-            logger.info(f"Handling device.deleted event for device {device_id}")
 
-            # Cancel all pending/in-progress updates for this device
-            cancelled_count = await self.ota_repo.cancel_device_updates(device_id)
+def get_event_handlers(ota_repository) -> Dict[str, callable]:
+    """
+    Return a mapping of event patterns to handler functions
 
-            logger.info(f"Cancelled {cancelled_count} updates for device {device_id}")
-            return True
+    Event patterns include the service prefix for proper event routing.
+    This will be used in main.py to register event subscriptions.
 
-        except Exception as e:
-            logger.error(f"Failed to handle device.deleted event: {e}", exc_info=True)
-            return False
+    Args:
+        ota_repository: OTARepository instance for data access
 
-    async def handle_event(self, event: Event) -> bool:
-        """
-        Route event to appropriate handler
-
-        Args:
-            event: The event to handle
-
-        Returns:
-            bool: True if handled successfully
-        """
-        try:
-            event_type = event.type
-
-            if event_type == "device.deleted":
-                return await self.handle_device_deleted(event.data)
-            else:
-                logger.warning(f"Unknown event type: {event_type}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Failed to handle event: {e}", exc_info=True)
-            return False
-
-    def get_subscriptions(self) -> list:
-        """
-        Get list of event types this handler subscribes to
-
-        Returns:
-            list: List of event type values to subscribe to
-        """
-        return [
-            "device.deleted",
-        ]
+    Returns:
+        Dict mapping event patterns to handler functions
+    """
+    return {
+        "device_service.device.deleted": lambda event: handle_device_deleted(event.data, ota_repository),
+    }

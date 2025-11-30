@@ -16,7 +16,13 @@ COMMENT ON SCHEMA storage IS 'Storage service schema for file storage, sharing, 
 -- ====================
 
 -- Create authenticated role for application access
-CREATE ROLE IF NOT EXISTS authenticated;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+        CREATE ROLE authenticated;
+    END IF;
+END
+$$;
 COMMENT ON ROLE authenticated IS 'Role for authenticated application access to database';
 
 -- ====================

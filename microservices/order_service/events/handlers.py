@@ -243,69 +243,39 @@ async def handle_user_deleted(event_data: Dict[str, Any], order_service) -> None
         logger.error(f"❌ Failed to handle user.deleted event: {e}")
 
 
-async def register_event_handlers(event_bus, order_service) -> None:
+def get_event_handlers(order_service):
     """
-    Register all event handlers for order service
+    Get all event handlers for order service.
+
+    Returns a dict mapping event patterns to handler functions.
+    This is used by main.py to register all event subscriptions.
 
     Args:
-        event_bus: NATS event bus instance
         order_service: OrderService instance
+
+    Returns:
+        Dict[str, callable]: Event pattern -> handler function mapping
     """
-    if not event_bus:
-        logger.warning("Event bus not available, skipping event handler registration")
-        return
-
-    try:
-        # Register handler for payment.completed (MIGRATED from main.py)
-        await event_bus.subscribe(
-            EventType.PAYMENT_COMPLETED,
-            lambda data: handle_payment_completed(data, order_service)
-        )
-        logger.info("✅ Registered handler for payment.completed event")
-
-        # Register handler for payment.failed (MIGRATED from main.py)
-        await event_bus.subscribe(
-            EventType.PAYMENT_FAILED,
-            lambda data: handle_payment_failed(data, order_service)
-        )
-        logger.info("✅ Registered handler for payment.failed event")
-
-        # Register handler for payment.refunded (NEW)
-        await event_bus.subscribe(
-            EventType.PAYMENT_REFUNDED,
-            lambda data: handle_payment_refunded(data, order_service)
-        )
-        logger.info("✅ Registered handler for payment.refunded event")
-
-        # Register handler for wallet.credits_added (NEW)
-        await event_bus.subscribe(
-            EventType.WALLET_CREDITS_ADDED,
-            lambda data: handle_wallet_credits_added(data, order_service)
-        )
-        logger.info("✅ Registered handler for wallet.credits_added event")
-
-        # Register handler for subscription.created (NEW)
-        await event_bus.subscribe(
-            EventType.SUBSCRIPTION_CREATED,
-            lambda data: handle_subscription_created(data, order_service)
-        )
-        logger.info("✅ Registered handler for subscription.created event")
-
-        # Register handler for subscription.canceled (NEW)
-        await event_bus.subscribe(
-            EventType.SUBSCRIPTION_CANCELED,
-            lambda data: handle_subscription_canceled(data, order_service)
-        )
-        logger.info("✅ Registered handler for subscription.canceled event")
-
-        # Register handler for user.deleted (NEW)
-        await event_bus.subscribe(
-            EventType.USER_DELETED,
-            lambda data: handle_user_deleted(data, order_service)
-        )
-        logger.info("✅ Registered handler for user.deleted event")
-
-        logger.info("✅ All order service event handlers registered successfully (2 migrated + 5 new)")
-
-    except Exception as e:
-        logger.error(f"❌ Error registering event handlers: {e}")
+    return {
+        "payment_service.payment.completed": lambda event: handle_payment_completed(
+            event.data, order_service, event.id
+        ),
+        "payment_service.payment.failed": lambda event: handle_payment_failed(
+            event.data, order_service, event.id
+        ),
+        "payment_service.payment.refunded": lambda event: handle_payment_refunded(
+            event.data, order_service
+        ),
+        "wallet_service.wallet.credits_added": lambda event: handle_wallet_credits_added(
+            event.data, order_service
+        ),
+        "billing_service.subscription.created": lambda event: handle_subscription_created(
+            event.data, order_service
+        ),
+        "billing_service.subscription.canceled": lambda event: handle_subscription_canceled(
+            event.data, order_service
+        ),
+        "account_service.user.deleted": lambda event: handle_user_deleted(
+            event.data, order_service
+        ),
+    }

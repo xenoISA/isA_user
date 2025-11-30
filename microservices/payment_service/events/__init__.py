@@ -29,7 +29,7 @@ from .publishers import (
     publish_invoice_paid
 )
 
-from .handlers import register_event_handlers
+from .handlers import get_event_handlers
 
 __all__ = [
     # Event Models
@@ -54,5 +54,5 @@ __all__ = [
     "publish_invoice_created",
     "publish_invoice_paid",
     # Handlers
-    "register_event_handlers"
+    "get_event_handlers"
 ]

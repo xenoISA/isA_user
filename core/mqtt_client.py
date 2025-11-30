@@ -1,415 +1,656 @@
 """
 MQTT Client for isA Cloud Platform
 
-MQTT客户端，用于IoT设备通信和命令分发
+Centralized MQTT event bus using AsyncMQTTClient from isa_common.
+Provides async-first IoT messaging with topic patterns for device commands,
+sensor readings, and system events.
 """
 
 import json
 import logging
-import threading
-import asyncio
+import secrets
 from datetime import datetime
-from typing import Dict, Any, Optional, Callable
-import paho.mqtt.client as mqtt
+from typing import Any, Callable, Dict, List, Optional
+
+from isa_common import AsyncMQTTClient
+
+from .config_manager import ConfigManager
 
 logger = logging.getLogger("mqtt_client")
 
 
-class MQTTClient:
-    """MQTT客户端，用于设备命令发送和接收"""
-    
-    def __init__(self, 
-                 client_id: str,
-                 host: str = "localhost", 
-                 port: int = 1883,
-                 username: Optional[str] = None,
-                 password: Optional[str] = None):
-        """
-        初始化MQTT客户端
-        
-        Args:
-            client_id: 客户端ID
-            host: MQTT broker地址
-            port: MQTT broker端口
-            username: 用户名（可选）
-            password: 密码（可选）
-        """
-        self.client_id = client_id
-        self.host = host
-        self.port = port
-        self.username = username
-        self.password = password
-        
-        # MQTT客户端实例
-        self.client = None
-        self.connected = False
-        self._lock = threading.Lock()
-        
-        # 回调函数
-        self.on_message_callback: Optional[Callable] = None
-        self.on_connect_callback: Optional[Callable] = None
-        self.on_disconnect_callback: Optional[Callable] = None
-        
-        self._initialize_client()
-    
-    def _initialize_client(self):
-        """初始化MQTT客户端"""
-        try:
-            self.client = mqtt.Client(client_id=self.client_id, protocol=mqtt.MQTTv311)
-            
-            # 设置认证
-            if self.username and self.password:
-                self.client.username_pw_set(self.username, self.password)
-            
-            # 设置回调函数
-            self.client.on_connect = self._on_connect
-            self.client.on_disconnect = self._on_disconnect
-            self.client.on_message = self._on_message
-            self.client.on_publish = self._on_publish
-            
-            logger.info(f"MQTT client '{self.client_id}' initialized")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize MQTT client: {e}")
-            raise
-    
-    def connect(self) -> bool:
-        """连接MQTT broker"""
-        try:
-            with self._lock:
-                if self.connected:
-                    logger.info("MQTT client already connected")
-                    return True
-                
-                logger.info(f"Connecting to MQTT broker at {self.host}:{self.port}")
-                self.client.connect(self.host, self.port, 60)
-                self.client.loop_start()
-                
-                return True
-                
-        except Exception as e:
-            logger.error(f"Failed to connect to MQTT broker: {e}")
-            return False
-    
-    def connect_async(self) -> bool:
-        """异步连接MQTT broker"""
-        try:
-            with self._lock:
-                if self.connected:
-                    logger.info("MQTT client already connected")
-                    return True
-                
-                logger.info(f"Connecting async to MQTT broker at {self.host}:{self.port}")
-                self.client.connect_async(self.host, self.port, 60)
-                self.client.loop_start()
-                
-                return True
-                
-        except Exception as e:
-            logger.error(f"Failed to connect async to MQTT broker: {e}")
-            return False
-    
-    def disconnect(self):
-        """断开MQTT连接"""
-        try:
-            with self._lock:
-                if self.client and self.connected:
-                    self.client.loop_stop()
-                    self.client.disconnect()
-                    self.connected = False
-                    logger.info("MQTT client disconnected")
-                
-        except Exception as e:
-            logger.error(f"Error disconnecting MQTT client: {e}")
-    
-    def publish(self, topic: str, payload: str, qos: int = 0, retain: bool = False) -> bool:
-        """
-        发布消息到MQTT主题
-        
-        Args:
-            topic: MQTT主题
-            payload: 消息内容
-            qos: 服务质量等级
-            retain: 是否保留消息
-            
-        Returns:
-            bool: 发布是否成功
-        """
-        try:
-            if not self.connected:
-                logger.warning("MQTT client not connected, cannot publish message")
-                return False
-            
-            result = self.client.publish(topic, payload, qos, retain)
-            
-            if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                logger.debug(f"Message published to topic '{topic}': {payload[:100]}...")
-                return True
-            else:
-                logger.error(f"Failed to publish message to topic '{topic}': {result.rc}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error publishing message: {e}")
-            return False
-    
-    def publish_json(self, topic: str, data: Dict[str, Any], qos: int = 0, retain: bool = False) -> bool:
-        """
-        发布JSON消息到MQTT主题
-        
-        Args:
-            topic: MQTT主题
-            data: 要发送的数据字典
-            qos: 服务质量等级
-            retain: 是否保留消息
-            
-        Returns:
-            bool: 发布是否成功
-        """
-        try:
-            payload = json.dumps(data, ensure_ascii=False)
-            return self.publish(topic, payload, qos, retain)
-            
-        except Exception as e:
-            logger.error(f"Error publishing JSON message: {e}")
-            return False
-    
-    def subscribe(self, topic: str, qos: int = 0) -> bool:
-        """
-        订阅MQTT主题
-        
-        Args:
-            topic: MQTT主题
-            qos: 服务质量等级
-            
-        Returns:
-            bool: 订阅是否成功
-        """
-        try:
-            if not self.connected:
-                logger.warning("MQTT client not connected, cannot subscribe")
-                return False
-            
-            result, mid = self.client.subscribe(topic, qos)
-            
-            if result == mqtt.MQTT_ERR_SUCCESS:
-                logger.info(f"Subscribed to topic '{topic}' with QoS {qos}")
-                return True
-            else:
-                logger.error(f"Failed to subscribe to topic '{topic}': {result}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error subscribing to topic: {e}")
-            return False
-    
-    def unsubscribe(self, topic: str) -> bool:
-        """
-        取消订阅MQTT主题
-        
-        Args:
-            topic: MQTT主题
-            
-        Returns:
-            bool: 取消订阅是否成功
-        """
-        try:
-            if not self.connected:
-                logger.warning("MQTT client not connected, cannot unsubscribe")
-                return False
-            
-            result, mid = self.client.unsubscribe(topic)
-            
-            if result == mqtt.MQTT_ERR_SUCCESS:
-                logger.info(f"Unsubscribed from topic '{topic}'")
-                return True
-            else:
-                logger.error(f"Failed to unsubscribe from topic '{topic}': {result}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error unsubscribing from topic: {e}")
-            return False
-    
-    def set_message_callback(self, callback: Callable):
-        """设置消息接收回调函数"""
-        self.on_message_callback = callback
-    
-    def set_connect_callback(self, callback: Callable):
-        """设置连接回调函数"""
-        self.on_connect_callback = callback
-    
-    def set_disconnect_callback(self, callback: Callable):
-        """设置断开连接回调函数"""
-        self.on_disconnect_callback = callback
-    
-    def is_connected(self) -> bool:
-        """检查是否已连接"""
-        return self.connected
-    
-    # MQTT回调函数
-    
-    def _on_connect(self, client, userdata, flags, rc):
-        """MQTT连接回调"""
-        if rc == 0:
-            self.connected = True
-            logger.info(f"MQTT client '{self.client_id}' connected to broker")
-            
-            if self.on_connect_callback:
-                try:
-                    self.on_connect_callback(client, userdata, flags, rc)
-                except Exception as e:
-                    logger.error(f"Error in connect callback: {e}")
-        else:
-            logger.error(f"MQTT client '{self.client_id}' failed to connect: {rc}")
-    
-    def _on_disconnect(self, client, userdata, rc):
-        """MQTT断开连接回调"""
-        self.connected = False
-        logger.warning(f"MQTT client '{self.client_id}' disconnected from broker (rc: {rc})")
-        
-        if self.on_disconnect_callback:
-            try:
-                self.on_disconnect_callback(client, userdata, rc)
-            except Exception as e:
-                logger.error(f"Error in disconnect callback: {e}")
-    
-    def _on_message(self, client, userdata, msg):
-        """MQTT消息接收回调"""
-        try:
-            topic = msg.topic
-            payload = msg.payload.decode('utf-8')
-            
-            logger.debug(f"Received message on topic '{topic}': {payload[:100]}...")
-            
-            if self.on_message_callback:
-                try:
-                    self.on_message_callback(topic, payload, msg)
-                except Exception as e:
-                    logger.error(f"Error in message callback: {e}")
-                    
-        except Exception as e:
-            logger.error(f"Error processing MQTT message: {e}")
-    
-    def _on_publish(self, client, userdata, mid):
-        """MQTT发布回调"""
-        logger.debug(f"Message published with message ID: {mid}")
+# Topic patterns for standardized messaging
+class MQTTTopics:
+    """Standardized MQTT topic patterns"""
+
+    # Device commands
+    DEVICE_COMMANDS = "devices/{device_id}/commands"
+    DEVICE_STATUS = "devices/{device_id}/status"
+    DEVICE_TELEMETRY = "devices/{device_id}/telemetry"
+
+    # Sensors
+    SENSOR_READINGS = "sensors/{sensor_id}/readings"
+    SENSOR_ALERTS = "sensors/{sensor_id}/alerts"
+
+    # System events
+    SYSTEM_EVENTS = "system/{service_name}/events"
+    SYSTEM_HEALTH = "system/{service_name}/health"
+
+    # Alerts
+    ALERTS = "alerts/{alert_type}"
+
+    # IoT commands (OTA, config, etc.)
+    OTA_COMMANDS = "ota/{device_id}/commands"
+    CONFIG_UPDATES = "config/{device_id}/updates"
+
+    @classmethod
+    def device_commands(cls, device_id: str) -> str:
+        return cls.DEVICE_COMMANDS.format(device_id=device_id)
+
+    @classmethod
+    def device_status(cls, device_id: str) -> str:
+        return cls.DEVICE_STATUS.format(device_id=device_id)
+
+    @classmethod
+    def device_telemetry(cls, device_id: str) -> str:
+        return cls.DEVICE_TELEMETRY.format(device_id=device_id)
+
+    @classmethod
+    def sensor_readings(cls, sensor_id: str) -> str:
+        return cls.SENSOR_READINGS.format(sensor_id=sensor_id)
+
+    @classmethod
+    def sensor_alerts(cls, sensor_id: str) -> str:
+        return cls.SENSOR_ALERTS.format(sensor_id=sensor_id)
+
+    @classmethod
+    def system_events(cls, service_name: str) -> str:
+        return cls.SYSTEM_EVENTS.format(service_name=service_name)
+
+    @classmethod
+    def alerts(cls, alert_type: str) -> str:
+        return cls.ALERTS.format(alert_type=alert_type)
 
 
-class DeviceCommandClient(MQTTClient):
-    """设备命令客户端，专用于发送设备命令"""
-    
-    def __init__(self, **kwargs):
-        super().__init__(client_id="device_command_client", **kwargs)
-    
-    def send_device_command(self, device_id: str, command: str, parameters: Dict[str, Any] = None, 
-                           timeout: int = 30, priority: int = 1, require_ack: bool = True) -> Optional[str]:
+class MQTTEventBus:
+    """
+    Centralized MQTT event bus for IoT messaging.
+
+    Uses AsyncMQTTClient from isa_common for true async operations.
+    Follows the same pattern as NATSEventBus for consistency.
+    """
+
+    def __init__(
+        self,
+        service_name: str,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+    ):
         """
-        发送设备命令
-        
+        Initialize MQTT event bus.
+
         Args:
-            device_id: 设备ID
-            command: 命令名称
-            parameters: 命令参数
-            timeout: 超时时间（秒）
-            priority: 优先级（1-10）
-            require_ack: 是否需要确认
-            
+            service_name: Name of the service using this bus
+            host: MQTT service host (defaults to config)
+            port: MQTT service port (defaults to config)
+            user_id: User ID for multi-tenant operations
+            organization_id: Organization ID for multi-tenant operations
+        """
+        self.service_name = service_name
+
+        # Load config
+        config_manager = ConfigManager(service_name)
+        config = config_manager.get_service_config()
+
+        # MQTT connection settings
+        self.host = host or getattr(config, "mqtt_host", "localhost")
+        self.port = port or getattr(config, "mqtt_port", 50053)
+        self.user_id = user_id or service_name
+        self.organization_id = organization_id or "default"
+
+        # Async client from isa_common
+        self.client = AsyncMQTTClient(
+            host=self.host,
+            port=self.port,
+            user_id=self.user_id,
+            organization_id=self.organization_id,
+        )
+
+        # Connection state
+        self.session_id: Optional[str] = None
+        self.connected = False
+
+        # Message handlers
+        self._handlers: Dict[str, List[Callable]] = {}
+
+        logger.info(f"MQTTEventBus initialized for service '{service_name}'")
+
+    async def connect(self, client_id: Optional[str] = None) -> bool:
+        """
+        Connect to MQTT broker.
+
+        Args:
+            client_id: Optional client ID (defaults to service_name)
+
         Returns:
-            str: 命令ID，发送失败返回None
+            bool: True if connected successfully
         """
         try:
-            import secrets
-            
-            command_id = secrets.token_hex(16)
-            
-            command_data = {
-                "device_id": device_id,
-                "command": command,
-                "parameters": parameters or {},
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "command_id": command_id,
-                "timeout": timeout,
-                "priority": priority,
-                "require_ack": require_ack
+            client_id = client_id or f"{self.service_name}-{secrets.token_hex(4)}"
+
+            async with self.client:
+                result = await self.client.mqtt_connect(client_id)
+                self.session_id = result.get("session_id")
+                self.connected = True
+
+            logger.info(f"MQTT connected with session: {self.session_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to connect to MQTT: {e}")
+            self.connected = False
+            return False
+
+    async def disconnect(self) -> bool:
+        """Disconnect from MQTT broker."""
+        try:
+            if self.session_id and self.connected:
+                async with self.client:
+                    await self.client.disconnect(self.session_id)
+                self.connected = False
+                self.session_id = None
+                logger.info("MQTT disconnected")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error disconnecting from MQTT: {e}")
+            return False
+
+    async def close(self):
+        """Clean shutdown of MQTT connection."""
+        await self.disconnect()
+
+    async def publish(
+        self,
+        topic: str,
+        payload: bytes,
+        qos: int = 1,
+        retained: bool = False,
+    ) -> bool:
+        """
+        Publish binary message to topic.
+
+        Args:
+            topic: MQTT topic
+            payload: Binary payload
+            qos: QoS level (0, 1, or 2)
+            retained: Whether to retain message
+
+        Returns:
+            bool: True if published successfully
+        """
+        try:
+            if not self.connected or not self.session_id:
+                logger.warning("MQTT not connected, attempting to connect...")
+                if not await self.connect():
+                    return False
+
+            async with self.client:
+                result = await self.client.publish(
+                    self.session_id, topic, payload, qos=qos, retained=retained
+                )
+
+            success = result.get("success", False)
+            if success:
+                logger.debug(f"Published to '{topic}' (QoS {qos})")
+            else:
+                logger.error(f"Failed to publish to '{topic}'")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error publishing to '{topic}': {e}")
+            return False
+
+    async def publish_json(
+        self,
+        topic: str,
+        data: Dict[str, Any],
+        qos: int = 1,
+        retained: bool = False,
+    ) -> bool:
+        """
+        Publish JSON message to topic.
+
+        Args:
+            topic: MQTT topic
+            data: Data dictionary to serialize as JSON
+            qos: QoS level (0, 1, or 2)
+            retained: Whether to retain message
+
+        Returns:
+            bool: True if published successfully
+        """
+        try:
+            if not self.connected or not self.session_id:
+                if not await self.connect():
+                    return False
+
+            async with self.client:
+                result = await self.client.publish_json(
+                    self.session_id, topic, data, qos=qos, retained=retained
+                )
+
+            return result.get("success", False)
+
+        except Exception as e:
+            logger.error(f"Error publishing JSON to '{topic}': {e}")
+            return False
+
+    async def publish_batch(
+        self,
+        messages: List[Dict[str, Any]],
+    ) -> Dict[str, int]:
+        """
+        Publish multiple messages efficiently.
+
+        Args:
+            messages: List of message dicts with 'topic', 'payload', 'qos', 'retained'
+
+        Returns:
+            Dict with 'published_count' and 'failed_count'
+        """
+        try:
+            if not self.connected or not self.session_id:
+                if not await self.connect():
+                    return {"published_count": 0, "failed_count": len(messages)}
+
+            async with self.client:
+                result = await self.client.publish_batch(self.session_id, messages)
+
+            return {
+                "published_count": result.get("published_count", 0),
+                "failed_count": result.get("failed_count", 0),
             }
-            
-            topic = f"devices/{device_id}/commands"
-            
-            if self.publish_json(topic, command_data):
-                logger.info(f"Device command sent to {device_id}: {command} (ID: {command_id})")
-                return command_id
-            else:
-                logger.error(f"Failed to send device command to {device_id}: {command}")
-                return None
-                
+
         except Exception as e:
-            logger.error(f"Error sending device command: {e}")
-            return None
-    
-    def send_ota_command(self, device_id: str, firmware_url: str, version: str, 
-                        checksum: str, force: bool = False) -> Optional[str]:
+            logger.error(f"Error in batch publish: {e}")
+            return {"published_count": 0, "failed_count": len(messages)}
+
+    # Device command convenience methods
+
+    async def send_device_command(
+        self,
+        device_id: str,
+        command: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        timeout: int = 30,
+        priority: int = 1,
+        require_ack: bool = True,
+    ) -> Optional[str]:
         """
-        发送OTA更新命令
-        
+        Send command to device.
+
         Args:
-            device_id: 设备ID
-            firmware_url: 固件下载URL
-            version: 固件版本
-            checksum: 固件校验和
-            force: 是否强制更新
-            
+            device_id: Target device ID
+            command: Command name
+            parameters: Command parameters
+            timeout: Command timeout in seconds
+            priority: Priority level (1-10)
+            require_ack: Whether acknowledgment is required
+
         Returns:
-            str: 命令ID，发送失败返回None
+            str: Command ID if sent, None on failure
+        """
+        command_id = secrets.token_hex(16)
+
+        command_data = {
+            "device_id": device_id,
+            "command": command,
+            "parameters": parameters or {},
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "command_id": command_id,
+            "timeout": timeout,
+            "priority": priority,
+            "require_ack": require_ack,
+        }
+
+        topic = MQTTTopics.device_commands(device_id)
+
+        if await self.publish_json(topic, command_data, qos=2):
+            logger.info(f"Device command sent: {command} -> {device_id} (ID: {command_id})")
+            return command_id
+        else:
+            logger.error(f"Failed to send device command: {command} -> {device_id}")
+            return None
+
+    async def send_ota_command(
+        self,
+        device_id: str,
+        firmware_url: str,
+        version: str,
+        checksum: str,
+        force: bool = False,
+    ) -> Optional[str]:
+        """
+        Send OTA update command to device.
+
+        Args:
+            device_id: Target device ID
+            firmware_url: URL to download firmware
+            version: Firmware version
+            checksum: Firmware checksum
+            force: Force update even if same version
+
+        Returns:
+            str: Command ID if sent, None on failure
         """
         parameters = {
             "firmware_url": firmware_url,
             "version": version,
             "checksum": checksum,
-            "force": force
+            "force": force,
         }
-        
-        return self.send_device_command(
+
+        return await self.send_device_command(
             device_id=device_id,
             command="ota_update",
             parameters=parameters,
-            timeout=300,  # OTA更新通常需要更长时间
-            priority=5    # 高优先级
+            timeout=300,  # OTA updates need longer timeout
+            priority=5,   # High priority
         )
 
+    async def publish_device_status(
+        self,
+        device_id: str,
+        status: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Publish device status update (retained message).
 
-# 工厂函数
+        Args:
+            device_id: Device ID
+            status: Status string (e.g., 'online', 'offline', 'error')
+            metadata: Additional metadata
 
-def create_command_client(host: str = "localhost", port: int = 1883, 
-                         username: Optional[str] = None, password: Optional[str] = None) -> DeviceCommandClient:
+        Returns:
+            bool: True if published successfully
+        """
+        status_data = {
+            "device_id": device_id,
+            "status": status,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            **(metadata or {}),
+        }
+
+        topic = MQTTTopics.device_status(device_id)
+        return await self.publish_json(topic, status_data, qos=1, retained=True)
+
+    async def publish_sensor_reading(
+        self,
+        sensor_id: str,
+        reading: Dict[str, Any],
+        qos: int = 0,
+    ) -> bool:
+        """
+        Publish sensor reading.
+
+        Args:
+            sensor_id: Sensor ID
+            reading: Reading data dict
+            qos: QoS level (default 0 for high-frequency data)
+
+        Returns:
+            bool: True if published successfully
+        """
+        reading_data = {
+            "sensor_id": sensor_id,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            **reading,
+        }
+
+        topic = MQTTTopics.sensor_readings(sensor_id)
+        return await self.publish_json(topic, reading_data, qos=qos)
+
+    async def publish_alert(
+        self,
+        alert_type: str,
+        message: str,
+        severity: str = "WARNING",
+        source: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Publish alert message (retained, QoS 2).
+
+        Args:
+            alert_type: Type of alert (e.g., 'temperature', 'security')
+            message: Alert message
+            severity: Severity level (INFO, WARNING, ERROR, CRITICAL)
+            source: Source of alert (device_id, sensor_id, etc.)
+            metadata: Additional metadata
+
+        Returns:
+            bool: True if published successfully
+        """
+        alert_data = {
+            "type": alert_type,
+            "message": message,
+            "severity": severity,
+            "source": source or self.service_name,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            **(metadata or {}),
+        }
+
+        topic = MQTTTopics.alerts(alert_type)
+        return await self.publish_json(topic, alert_data, qos=2, retained=True)
+
+    # Device management
+
+    async def register_device(
+        self,
+        device_id: str,
+        device_name: str,
+        device_type: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Register device with MQTT service.
+
+        Args:
+            device_id: Unique device ID
+            device_name: Human-readable device name
+            device_type: Device type (sensor, actuator, gateway, etc.)
+            metadata: Additional device metadata
+
+        Returns:
+            bool: True if registered successfully
+        """
+        try:
+            async with self.client:
+                result = await self.client.register_device(
+                    device_id, device_name, device_type, metadata or {}
+                )
+            return result.get("success", False)
+
+        except Exception as e:
+            logger.error(f"Error registering device {device_id}: {e}")
+            return False
+
+    async def update_device_status_registry(
+        self,
+        device_id: str,
+        status: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Update device status in MQTT service registry.
+
+        Args:
+            device_id: Device ID
+            status: Status code (0=UNKNOWN, 1=ONLINE, 2=OFFLINE, 3=ERROR)
+            metadata: Additional metadata
+
+        Returns:
+            bool: True if updated successfully
+        """
+        try:
+            async with self.client:
+                result = await self.client.update_device_status(
+                    device_id, status, metadata or {}
+                )
+            return result.get("success", False)
+
+        except Exception as e:
+            logger.error(f"Error updating device status {device_id}: {e}")
+            return False
+
+    async def get_statistics(self) -> Dict[str, Any]:
+        """Get MQTT service statistics."""
+        try:
+            async with self.client:
+                return await self.client.get_statistics()
+        except Exception as e:
+            logger.error(f"Error getting MQTT statistics: {e}")
+            return {}
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Check MQTT service health."""
+        try:
+            async with self.client:
+                return await self.client.health_check()
+        except Exception as e:
+            logger.error(f"MQTT health check failed: {e}")
+            return {"status": "unhealthy", "error": str(e)}
+
+
+# Global instance and factory function (similar to nats_client.py)
+_mqtt_bus_instance: Optional[MQTTEventBus] = None
+
+
+async def get_mqtt_bus(service_name: str) -> MQTTEventBus:
     """
-    创建设备命令客户端
-    
+    Get or create global MQTTEventBus instance.
+
     Args:
-        host: MQTT broker地址
-        port: MQTT broker端口
-        username: 用户名（可选）
-        password: 密码（可选）
-        
+        service_name: Name of the calling service
+
     Returns:
-        DeviceCommandClient: 设备命令客户端实例
+        MQTTEventBus: Initialized and connected event bus
     """
-    return DeviceCommandClient(host=host, port=port, username=username, password=password)
+    global _mqtt_bus_instance
+
+    if _mqtt_bus_instance is None:
+        _mqtt_bus_instance = MQTTEventBus(service_name)
+        await _mqtt_bus_instance.connect()
+        logger.info(f"Created global MQTTEventBus for '{service_name}'")
+
+    return _mqtt_bus_instance
 
 
-def create_mqtt_client(client_id: str, host: str = "localhost", port: int = 1883,
-                      username: Optional[str] = None, password: Optional[str] = None) -> MQTTClient:
+# Backward compatibility: DeviceCommandClient as async wrapper
+class DeviceCommandClient:
     """
-    创建通用MQTT客户端
-    
+    Async device command client.
+
+    Wrapper around MQTTEventBus for device command operations.
+    Maintained for backward compatibility.
+    """
+
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 50053,
+        user_id: str = "device_command_client",
+    ):
+        self.mqtt_bus = MQTTEventBus(
+            service_name="device_command_client",
+            host=host,
+            port=port,
+            user_id=user_id,
+        )
+
+    async def connect(self) -> bool:
+        """Connect to MQTT broker."""
+        return await self.mqtt_bus.connect()
+
+    async def disconnect(self):
+        """Disconnect from MQTT broker."""
+        await self.mqtt_bus.disconnect()
+
+    async def send_device_command(
+        self,
+        device_id: str,
+        command: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        timeout: int = 30,
+        priority: int = 1,
+        require_ack: bool = True,
+    ) -> Optional[str]:
+        """Send command to device."""
+        return await self.mqtt_bus.send_device_command(
+            device_id, command, parameters, timeout, priority, require_ack
+        )
+
+    async def send_ota_command(
+        self,
+        device_id: str,
+        firmware_url: str,
+        version: str,
+        checksum: str,
+        force: bool = False,
+    ) -> Optional[str]:
+        """Send OTA update command."""
+        return await self.mqtt_bus.send_ota_command(
+            device_id, firmware_url, version, checksum, force
+        )
+
+    def is_connected(self) -> bool:
+        """Check connection status."""
+        return self.mqtt_bus.connected
+
+
+# Factory functions (backward compatibility)
+
+async def create_command_client(
+    host: str = "localhost",
+    port: int = 50053,
+    user_id: str = "device_command_client",
+) -> DeviceCommandClient:
+    """
+    Create and connect device command client.
+
     Args:
-        client_id: 客户端ID
-        host: MQTT broker地址
-        port: MQTT broker端口
-        username: 用户名（可选）
-        password: 密码（可选）
-        
+        host: MQTT service host
+        port: MQTT service port
+        user_id: User ID for operations
+
     Returns:
-        MQTTClient: MQTT客户端实例
+        DeviceCommandClient: Connected client instance
     """
-    return MQTTClient(client_id=client_id, host=host, port=port, username=username, password=password)
+    client = DeviceCommandClient(host=host, port=port, user_id=user_id)
+    await client.connect()
+    return client
+
+
+async def create_mqtt_bus(
+    service_name: str,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+) -> MQTTEventBus:
+    """
+    Create and connect MQTT event bus.
+
+    Args:
+        service_name: Name of the service
+        host: Optional MQTT service host
+        port: Optional MQTT service port
+
+    Returns:
+        MQTTEventBus: Connected event bus instance
+    """
+    bus = MQTTEventBus(service_name, host=host, port=port)
+    await bus.connect()
+    return bus

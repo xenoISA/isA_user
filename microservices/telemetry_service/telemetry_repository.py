@@ -13,7 +13,7 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import ListValue, Struct
@@ -46,7 +46,7 @@ class TelemetryRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id="telemetry_service"
@@ -63,76 +63,13 @@ class TelemetryRepository:
         self._ensure_schema()
 
     def _ensure_schema(self):
-        """Ensure telemetry schema and tables exist"""
-        try:
-            # Create schema
-            with self.db:
-                self.db.execute("CREATE SCHEMA IF NOT EXISTS telemetry", schema='public')
-                logger.info("Telemetry schema ensured")
+        """Ensure telemetry schema and tables exist
 
-            # Create metric_definitions table
-            create_metric_definitions = '''
-                CREATE TABLE IF NOT EXISTS telemetry.metric_definitions (
-                    id SERIAL PRIMARY KEY,
-                    metric_id VARCHAR(64) NOT NULL UNIQUE,
-                    name VARCHAR(100) UNIQUE NOT NULL,
-                    description VARCHAR(500),
-                    data_type VARCHAR(20) NOT NULL,
-                    metric_type VARCHAR(20) NOT NULL DEFAULT 'gauge',
-                    unit VARCHAR(20),
-                    min_value DOUBLE PRECISION,
-                    max_value DOUBLE PRECISION,
-                    retention_days INTEGER DEFAULT 90,
-                    aggregation_interval INTEGER DEFAULT 60,
-                    tags TEXT[],
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    created_by VARCHAR(100) NOT NULL,
-                    CONSTRAINT check_data_type CHECK (data_type IN ('numeric', 'string', 'boolean', 'json', 'binary', 'geolocation', 'timestamp')),
-                    CONSTRAINT check_metric_type CHECK (metric_type IN ('gauge', 'counter', 'histogram', 'summary')),
-                    CONSTRAINT check_retention_days CHECK (retention_days BETWEEN 1 AND 3650)
-                )
-            '''
-
-            # Create alert_rules table
-            create_alert_rules = '''
-                CREATE TABLE IF NOT EXISTS telemetry.alert_rules (
-                    id SERIAL PRIMARY KEY,
-                    rule_id VARCHAR(64) NOT NULL UNIQUE,
-                    name VARCHAR(200) NOT NULL,
-                    description VARCHAR(1000),
-                    metric_name VARCHAR(100) NOT NULL,
-                    condition VARCHAR(500) NOT NULL,
-                    threshold_value TEXT NOT NULL,
-                    evaluation_window INTEGER DEFAULT 300,
-                    trigger_count INTEGER DEFAULT 1,
-                    level VARCHAR(20) NOT NULL DEFAULT 'warning',
-                    device_ids TEXT[],
-                    device_groups TEXT[],
-                    device_filters JSONB DEFAULT '{}',
-                    notification_channels TEXT[],
-                    cooldown_minutes INTEGER DEFAULT 15,
-                    auto_resolve BOOLEAN DEFAULT TRUE,
-                    auto_resolve_timeout INTEGER DEFAULT 3600,
-                    enabled BOOLEAN DEFAULT TRUE,
-                    tags TEXT[],
-                    total_triggers INTEGER DEFAULT 0,
-                    last_triggered TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    created_by VARCHAR(100) NOT NULL,
-                    CONSTRAINT check_alert_level CHECK (level IN ('info', 'warning', 'error', 'critical', 'emergency'))
-                )
-            '''
-
-            with self.db:
-                self.db.execute(create_metric_definitions, schema=self.schema)
-                self.db.execute(create_alert_rules, schema=self.schema)
-                logger.info("Telemetry tables ensured")
-
-        except Exception as e:
-            logger.warning(f"Could not ensure schema/tables (may already exist): {e}")
+        Note: Schema and tables should be created via migrations.
+        This method is kept for compatibility but does not execute
+        DDL statements with the async client.
+        """
+        logger.info("Telemetry schema initialization skipped - use migrations for DDL")
 
     def _convert_protobuf_to_native(self, value: Any) -> Any:
         """Convert Protobuf types to native Python types"""
@@ -217,8 +154,8 @@ class TelemetryRepository:
                 100  # Default quality
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count >= 0
 
@@ -273,8 +210,8 @@ class TelemetryRepository:
                 LIMIT {limit_param}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 data_points = []
@@ -353,8 +290,8 @@ class TelemetryRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 result = results[0]
@@ -381,8 +318,8 @@ class TelemetryRepository:
         try:
             query = f'SELECT * FROM {self.schema}.{self.metric_definitions_table} WHERE name = $1'
 
-            with self.db:
-                results = self.db.query(query, [name], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [name], schema=self.schema)
 
             if results and len(results) > 0:
                 result = results[0]
@@ -444,8 +381,8 @@ class TelemetryRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 result = results[0]
@@ -480,8 +417,8 @@ class TelemetryRepository:
                 ORDER BY created_at DESC
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results if results else []
 
@@ -529,8 +466,8 @@ class TelemetryRepository:
                 alert_data.get("metadata", {})
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 return results[0]
@@ -582,8 +519,8 @@ class TelemetryRepository:
                 LIMIT {limit_param}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results if results else []
 
@@ -619,10 +556,10 @@ class TelemetryRepository:
                 LIMIT 1
             '''
 
-            with self.db:
-                count_results = self.db.query(count_query, [device_id], schema=self.schema)
-                metrics_results = self.db.query(metrics_query, [device_id], schema=self.schema)
-                latest_results = self.db.query(latest_query, [device_id], schema=self.schema)
+            async with self.db:
+                count_results = await self.db.query(count_query, [device_id], schema=self.schema)
+                metrics_results = await self.db.query(metrics_query, [device_id], schema=self.schema)
+                latest_results = await self.db.query(latest_query, [device_id], schema=self.schema)
 
             total_points = count_results[0]['total_points'] if count_results else 0
             active_metrics = len(metrics_results) if metrics_results else 0
@@ -668,11 +605,11 @@ class TelemetryRepository:
                 WHERE status = $1
             '''
 
-            with self.db:
-                devices_results = self.db.query(devices_query, [], schema=self.schema)
-                points_results = self.db.query(points_query, [], schema=self.schema)
-                metrics_results = self.db.query(metrics_query, [], schema=self.schema)
-                alerts_results = self.db.query(alerts_query, ["active"], schema=self.schema)
+            async with self.db:
+                devices_results = await self.db.query(devices_query, [], schema=self.schema)
+                points_results = await self.db.query(points_query, [], schema=self.schema)
+                metrics_results = await self.db.query(metrics_query, [], schema=self.schema)
+                alerts_results = await self.db.query(alerts_query, ["active"], schema=self.schema)
 
             return {
                 "total_devices": devices_results[0]['total_devices'] if devices_results else 0,
@@ -725,8 +662,8 @@ class TelemetryRepository:
 
             params.extend([limit, offset])
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results if results else []
 
@@ -739,8 +676,8 @@ class TelemetryRepository:
         try:
             query = f'DELETE FROM {self.schema}.{self.metric_definitions_table} WHERE metric_id = $1'
 
-            with self.db:
-                count = self.db.execute(query, [metric_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [metric_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -777,8 +714,8 @@ class TelemetryRepository:
                 ORDER BY created_at DESC
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results:
                 # Ensure arrays and JSONB fields are never None for all results
@@ -816,8 +753,8 @@ class TelemetryRepository:
         try:
             query = f'SELECT * FROM {self.schema}.{self.alert_rules_table} WHERE rule_id = $1'
 
-            with self.db:
-                results = self.db.query(query, [rule_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [rule_id], schema=self.schema)
 
             if results and len(results) > 0:
                 result = results[0]
@@ -870,8 +807,8 @@ class TelemetryRepository:
                 WHERE rule_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -891,8 +828,8 @@ class TelemetryRepository:
                 WHERE rule_id = $3
             '''
 
-            with self.db:
-                count = self.db.execute(query, [now, now, rule_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [now, now, rule_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -947,8 +884,8 @@ class TelemetryRepository:
                 ORDER BY triggered_at DESC
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results if results else []
 
@@ -992,8 +929,8 @@ class TelemetryRepository:
                 WHERE alert_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -1019,8 +956,8 @@ class TelemetryRepository:
                 AND enabled = true
             '''
 
-            with self.db:
-                count = self.db.execute(
+            async with self.db:
+                count = await self.db.execute(
                     query,
                     [False, device_id],
                     schema=self.schema

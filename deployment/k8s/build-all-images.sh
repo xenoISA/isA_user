@@ -4,13 +4,6 @@ set -e
 
 cd /Users/xenodennis/Documents/Fun/isA_user
 
-# 同步 isa_common 到 isa_common_local
-echo "========================================="
-echo "Syncing isa_common..."
-echo "========================================="
-./scripts/sync_isa_common.sh
-echo ""
-
 # 微服务列表
 SERVICES=(
     "auth_service:8201"
@@ -39,12 +32,17 @@ SERVICES=(
     "location_service:8224"
     "telemetry_service:8225"
     "compliance_service:8226"
+    "document_service:8227"
+    "subscription_service:8228"
     "event_service:8230"
 )
 
 # Parse command line arguments
 SPECIFIC_SERVICE=""
 LOAD_TO_KIND=true
+NO_CACHE=false
+BUILD_BASE=true
+BASE_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -56,18 +54,35 @@ while [[ $# -gt 0 ]]; do
             LOAD_TO_KIND=false
             shift
             ;;
+        --no-cache)
+            NO_CACHE=true
+            shift
+            ;;
+        --no-base)
+            BUILD_BASE=false
+            shift
+            ;;
+        --base-only)
+            BASE_ONLY=true
+            shift
+            ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --service <name>   Build only specific service (e.g., billing, wallet)"
             echo "  --no-load          Skip loading images to Kind cluster"
+            echo "  --no-cache         Build without using Docker cache (forces fresh build)"
+            echo "  --no-base          Skip building base image (use existing)"
+            echo "  --base-only        Build only the base image"
             echo "  --help             Show this help message"
             echo ""
             echo "Examples:"
-            echo "  $0                          # Build all services"
-            echo "  $0 --service billing        # Build only billing service"
-            echo "  $0 --service wallet --no-load   # Build wallet without loading to Kind"
+            echo "  $0                          # Build base + all services"
+            echo "  $0 --base-only              # Build only base image (for isa-common upgrade)"
+            echo "  $0 --service billing        # Build base + billing service"
+            echo "  $0 --service wallet --no-base   # Build wallet using existing base"
+            echo "  $0 --no-cache               # Fresh build of everything"
             exit 0
             ;;
         *)
@@ -77,6 +92,44 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# =========================================
+# Build Base Image (contains isa-common and all shared deps)
+# =========================================
+if [ "$BUILD_BASE" = true ]; then
+    echo "========================================="
+    echo "Building isa-user-base:latest (shared dependencies)"
+    echo "========================================="
+
+    if [ "$NO_CACHE" = true ]; then
+        echo "Building with --no-cache..."
+        docker build --no-cache \
+            -f deployment/k8s/Dockerfile.base \
+            -t isa-user-base:latest \
+            .
+    else
+        docker build \
+            -f deployment/k8s/Dockerfile.base \
+            -t isa-user-base:latest \
+            .
+    fi
+
+    echo "✓ Built isa-user-base:latest"
+    echo ""
+
+    if [ "$LOAD_TO_KIND" = true ]; then
+        echo "Loading isa-user-base:latest to kind cluster..."
+        kind load docker-image isa-user-base:latest --name isa-cloud-local
+        echo "✓ Base image loaded to kind"
+        echo ""
+    fi
+fi
+
+# Exit if base-only mode
+if [ "$BASE_ONLY" = true ]; then
+    echo "✓ Base-only mode complete!"
+    exit 0
+fi
 
 # Filter services if specific service requested
 BUILD_LIST=("${SERVICES[@]}")
@@ -103,18 +156,19 @@ if [ -n "$SPECIFIC_SERVICE" ]; then
     fi
 fi
 
+echo "========================================="
 echo "Building microservice images..."
 echo "Services to build: ${#BUILD_LIST[@]}"
+echo "========================================="
 echo ""
 
 for svc in "${BUILD_LIST[@]}"; do
     IFS=':' read -r service_name port <<< "$svc"
     short_name="${service_name%_service}"
 
-    echo "========================================="
-    echo "Building isa-${short_name}:latest"
-    echo "========================================="
+    echo "Building isa-${short_name}:latest..."
 
+    # Microservice builds are always fast (just copies code on top of base)
     docker build \
         --build-arg SERVICE_NAME=${service_name} \
         --build-arg SERVICE_PORT=${port} \
@@ -123,9 +177,9 @@ for svc in "${BUILD_LIST[@]}"; do
         .
 
     echo "✓ Built isa-${short_name}:latest"
-    echo ""
 done
 
+echo ""
 echo "✓ All images built successfully!"
 echo ""
 

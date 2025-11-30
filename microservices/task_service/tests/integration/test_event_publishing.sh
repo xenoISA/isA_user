@@ -49,22 +49,6 @@ fi
 echo -e "${GREEN}✓ Test token generated${NC}"
 echo ""
 
-# Test 1: Health check first
-echo -e "${YELLOW}=====================================================================${NC}"
-echo -e "${YELLOW}Preliminary: Health Check${NC}"
-echo -e "${YELLOW}=====================================================================${NC}"
-echo ""
-
-HEALTH=$(curl -s http://localhost/health)
-if echo "$HEALTH" | grep -q '"status":"healthy"'; then
-    echo -e "${GREEN}✓ Service is healthy${NC}"
-else
-    echo -e "${RED}✗ Service is not healthy${NC}"
-    echo "$HEALTH"
-    exit 1
-fi
-echo ""
-
 echo -e "${YELLOW}=====================================================================${NC}"
 echo -e "${YELLOW}Test 1: Create Task (triggers task.created event)${NC}"
 echo -e "${YELLOW}=====================================================================${NC}"

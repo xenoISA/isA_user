@@ -7,8 +7,6 @@ Handlers for events from other services
 import logging
 from typing import Dict, Any
 
-from core.nats_client import EventType
-
 logger = logging.getLogger(__name__)
 
 
@@ -119,41 +117,21 @@ async def handle_user_deleted(event_data: Dict[str, Any], product_service) -> No
         logger.error(f"❌ Error handling user.deleted event: {e}")
 
 
-async def register_event_handlers(event_bus, product_service) -> None:
+def get_event_handlers(product_service) -> Dict[str, callable]:
     """
-    Register all event handlers for product service
+    Get event handlers mapping for product service
+
+    Returns a dictionary mapping event patterns to handler functions.
+    Uses the new event bus API with service-prefixed event patterns.
 
     Args:
-        event_bus: NATS event bus instance
         product_service: ProductService instance
+
+    Returns:
+        Dict mapping event patterns to handler functions
     """
-    if not event_bus:
-        logger.warning("Event bus not available, skipping event handler registration")
-        return
-
-    try:
-        # Register handler for payment.completed
-        await event_bus.subscribe(
-            EventType.PAYMENT_COMPLETED,
-            lambda data: handle_payment_completed(data, product_service)
-        )
-        logger.info("✅ Registered handler for payment.completed event")
-
-        # Register handler for wallet.insufficient_funds
-        await event_bus.subscribe(
-            EventType.WALLET_INSUFFICIENT_FUNDS,
-            lambda data: handle_wallet_insufficient_funds(data, product_service)
-        )
-        logger.info("✅ Registered handler for wallet.insufficient_funds event")
-
-        # Register handler for user.deleted
-        await event_bus.subscribe(
-            EventType.USER_DELETED,
-            lambda data: handle_user_deleted(data, product_service)
-        )
-        logger.info("✅ Registered handler for user.deleted event")
-
-        logger.info("✅ All event handlers registered successfully")
-
-    except Exception as e:
-        logger.error(f"❌ Error registering event handlers: {e}")
+    return {
+        "payment_service.payment.completed": lambda event: handle_payment_completed(event.data, product_service),
+        "wallet_service.wallet.insufficient_funds": lambda event: handle_wallet_insufficient_funds(event.data, product_service),
+        "account_service.user.deleted": lambda event: handle_user_deleted(event.data, product_service),
+    }

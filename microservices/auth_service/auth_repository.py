@@ -1,8 +1,8 @@
 """
-Authentication Repository - Data access layer for authentication operations
-Handles database operations for user authentication, sessions, and provider mappings
+Authentication Repository - Async Version
 
-Uses PostgresClient for direct PostgreSQL access with service discovery
+Data access layer for authentication operations using AsyncPostgresClient.
+Handles database operations for user authentication, sessions, and provider mappings.
 """
 
 import logging
@@ -10,22 +10,22 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
+
 class AuthRepository:
-    """Authentication repository - data access layer"""
+    """Authentication repository - async data access layer"""
 
     def __init__(self, config: Optional[ConfigManager] = None):
-        # Use config_manager for service discovery
         if config is None:
             config = ConfigManager("auth_service")
 
-        # Discover PostgreSQL service (priority: env var → Consul → localhost)
         host, port = config.discover_service(
             service_name='postgres_grpc_service',
             default_host='isa-postgres-grpc',
@@ -35,20 +35,18 @@ class AuthRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id='auth-service')
-        # Table names (auth schema)
+        self.db = AsyncPostgresClient(host=host, port=port, user_id='auth-service')
         self.schema = "auth"
         self.users_table = "users"
         self.sessions_table = "user_sessions"
-    
+
     async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get user information by user ID"""
         try:
-            with self.db:
-                result = self.db.query_row(
+            async with self.db:
+                result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.users_table} WHERE user_id = $1 AND is_active = TRUE",
-                    [user_id],
-                    schema=self.schema
+                    params=[user_id]
                 )
 
             if result:
@@ -70,11 +68,10 @@ class AuthRepository:
     async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """Get user information by email"""
         try:
-            with self.db:
-                result = self.db.query_row(
+            async with self.db:
+                result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.users_table} WHERE email = $1 AND is_active = TRUE",
-                    [email],
-                    schema=self.schema
+                    params=[email]
                 )
 
             if result:
@@ -97,15 +94,25 @@ class AuthRepository:
         """Create new user"""
         try:
             now = datetime.now(timezone.utc)
-            user_data["created_at"] = now
-            user_data["updated_at"] = now
-            user_data["is_active"] = True
 
-            with self.db:
-                count = self.db.insert_into(self.users_table, [user_data], schema=self.schema)
+            query = f"""
+                INSERT INTO {self.schema}.{self.users_table}
+                (user_id, email, name, is_active, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """
+            params = [
+                user_data["user_id"],
+                user_data["email"],
+                user_data.get("name"),
+                True,
+                now,
+                now
+            ]
 
-            if count > 0:
-                # Fetch the created user
+            async with self.db:
+                count = await self.db.execute(query, params=params)
+
+            if count and count > 0:
                 return await self.get_user_by_email(user_data["email"])
             return None
 
@@ -116,16 +123,15 @@ class AuthRepository:
     async def update_user(self, user_id: str, update_data: Dict[str, Any]) -> bool:
         """Update user information"""
         try:
-            update_data["updated_at"] = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
 
-            with self.db:
-                result = self.db.execute(
+            async with self.db:
+                result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET updated_at = $1 WHERE user_id = $2",
-                    [update_data["updated_at"], user_id],
-                    schema=self.schema
+                    params=[now, user_id]
                 )
 
-            return result > 0
+            return result is not None and result > 0
 
         except Exception as e:
             logger.error(f"Failed to update user: {e}")
@@ -134,13 +140,29 @@ class AuthRepository:
     async def create_session(self, session_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Create authentication session"""
         try:
-            session_data["created_at"] = datetime.now(timezone.utc)
-            session_data["is_active"] = True
+            now = datetime.now(timezone.utc)
 
-            with self.db:
-                count = self.db.insert_into(self.sessions_table, [session_data], schema=self.schema)
+            query = f"""
+                INSERT INTO {self.schema}.{self.sessions_table}
+                (session_id, user_id, access_token, refresh_token, expires_at, is_active, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """
+            params = [
+                session_data["session_id"],
+                session_data["user_id"],
+                session_data.get("access_token"),
+                session_data.get("refresh_token"),
+                session_data.get("expires_at"),
+                True,
+                now
+            ]
 
-            if count > 0:
+            async with self.db:
+                count = await self.db.execute(query, params=params)
+
+            if count and count > 0:
+                session_data["created_at"] = now
+                session_data["is_active"] = True
                 return session_data
             return None
 
@@ -151,17 +173,16 @@ class AuthRepository:
     async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session information"""
         try:
-            with self.db:
-                result = self.db.query_row(
+            async with self.db:
+                result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.sessions_table} WHERE session_id = $1 AND is_active = TRUE",
-                    [session_id],
-                    schema=self.schema
+                    params=[session_id]
                 )
 
             if result:
                 # Check if session is expired
-                if result.get("expires_at"):
-                    expires_at = result["expires_at"]
+                expires_at = result.get("expires_at")
+                if expires_at:
                     if isinstance(expires_at, str):
                         expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
                     if expires_at < datetime.now(timezone.utc):
@@ -178,14 +199,13 @@ class AuthRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            with self.db:
-                result = self.db.execute(
+            async with self.db:
+                result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.sessions_table} SET last_activity = $1 WHERE session_id = $2",
-                    [now, session_id],
-                    schema=self.schema
+                    params=[now, session_id]
                 )
 
-            return result > 0
+            return result is not None and result > 0
 
         except Exception as e:
             logger.error(f"Failed to update session activity: {e}")
@@ -196,14 +216,13 @@ class AuthRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            with self.db:
-                result = self.db.execute(
+            async with self.db:
+                result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.sessions_table} SET is_active = FALSE, invalidated_at = $1 WHERE session_id = $2",
-                    [now, session_id],
-                    schema=self.schema
+                    params=[now, session_id]
                 )
 
-            return result > 0
+            return result is not None and result > 0
 
         except Exception as e:
             logger.error(f"Failed to invalidate session: {e}")
@@ -212,9 +231,9 @@ class AuthRepository:
     async def check_connection(self) -> bool:
         """Check database connection"""
         try:
-            with self.db:
-                health = self.db.health_check()
-            return health and health.get('healthy', False)
+            async with self.db:
+                result = await self.db.query_row("SELECT 1 as connected", params=[])
+            return result is not None
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")
             return False

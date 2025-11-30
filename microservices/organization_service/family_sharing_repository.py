@@ -10,7 +10,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class FamilySharingRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id='organization_service')
+        self.db = AsyncPostgresClient(host=host, port=port, user_id='organization_service')
         self.schema = "organization"
         self.sharing_table = "family_sharing_resources"
         self.permissions_table = "family_sharing_member_permissions"
@@ -49,8 +49,8 @@ class FamilySharingRepository:
         try:
             logger.info(f"Creating sharing with data: {sharing_data}")
 
-            with self.db:
-                count = self.db.insert_into(
+            async with self.db:
+                count = await self.db.insert_into(
                     self.sharing_table,
                     [sharing_data],
                     schema=self.schema
@@ -85,8 +85,8 @@ class FamilySharingRepository:
                 WHERE sharing_id = $1
             """
 
-            with self.db:
-                result = self.db.query(query, [sharing_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [sharing_id], schema=self.schema)
 
             return result[0] if result and len(result) > 0 else None
 
@@ -121,8 +121,8 @@ class FamilySharingRepository:
                 WHERE sharing_id = ${param_count}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is None or count == 0:
                 return None
@@ -141,8 +141,8 @@ class FamilySharingRepository:
                 WHERE sharing_id = $1
             """
 
-            with self.db:
-                count = self.db.execute(query, [sharing_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [sharing_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -183,8 +183,8 @@ class FamilySharingRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                result = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, params, schema=self.schema)
 
             return result if result else []
 
@@ -197,8 +197,8 @@ class FamilySharingRepository:
     async def create_member_permission(self, permission_data: Dict[str, Any]) -> Dict[str, Any]:
         """创建成员权限"""
         try:
-            with self.db:
-                count = self.db.insert_into(
+            async with self.db:
+                count = await self.db.insert_into(
                     self.permissions_table,
                     [permission_data],
                     schema=self.schema
@@ -224,8 +224,8 @@ class FamilySharingRepository:
                 WHERE sharing_id = $1 AND user_id = $2
             """
 
-            with self.db:
-                result = self.db.query(query, [sharing_id, user_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [sharing_id, user_id], schema=self.schema)
 
             return result[0] if result and len(result) > 0 else None
 
@@ -267,8 +267,8 @@ class FamilySharingRepository:
                 WHERE sharing_id = ${sharing_id_param} AND user_id = ${user_id_param}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is None or count == 0:
                 return None
@@ -287,8 +287,8 @@ class FamilySharingRepository:
                 WHERE sharing_id = $1 AND user_id = $2
             """
 
-            with self.db:
-                count = self.db.execute(query, [sharing_id, user_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [sharing_id, user_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -304,8 +304,8 @@ class FamilySharingRepository:
                 WHERE sharing_id = $1
             """
 
-            with self.db:
-                count = self.db.execute(query, [sharing_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [sharing_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -325,8 +325,8 @@ class FamilySharingRepository:
                 WHERE sharing_id = $1
             """
 
-            with self.db:
-                result = self.db.query(query, [sharing_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [sharing_id], schema=self.schema)
 
             return result if result else []
 
@@ -384,8 +384,8 @@ class FamilySharingRepository:
                 WHERE organization_id = $1 AND status = $2
             """
 
-            with self.db:
-                result = self.db.query(query, [organization_id, "active"], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [organization_id, "active"], schema=self.schema)
 
             return result if result else []
 
@@ -401,8 +401,8 @@ class FamilySharingRepository:
                 WHERE organization_id = $1 AND user_id = $2 AND status = $3
             """
 
-            with self.db:
-                result = self.db.query(query, [organization_id, user_id, "active"], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [organization_id, user_id, "active"], schema=self.schema)
 
             return bool(result and len(result) > 0)
 
@@ -418,8 +418,8 @@ class FamilySharingRepository:
                 WHERE organization_id = $1 AND user_id = $2 AND status = $3
             """
 
-            with self.db:
-                result = self.db.query(query, [organization_id, user_id, "active"], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [organization_id, user_id, "active"], schema=self.schema)
 
             if not result or len(result) == 0:
                 return False

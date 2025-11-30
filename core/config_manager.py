@@ -71,6 +71,10 @@ class ServiceConfig:
     gateway_url: Optional[str] = None
     gateway_enabled: bool = False
 
+    # Digital Analytics Service (isA_Data - RAG & Multimodal Processing)
+    digital_analytics_url: Optional[str] = None
+    digital_analytics_enabled: bool = False
+
     # JWT/Auth Configuration
     local_jwt_secret: Optional[str] = None
     local_jwt_algorithm: str = "HS256"
@@ -472,6 +476,10 @@ class ConfigManager:
             gateway_url=self.get("GATEWAY_URL", self.get("gateway_url")),
             gateway_enabled=self._parse_bool(self.get("GATEWAY_ENABLED", self.get("gateway_enabled", False))),
 
+            # Digital Analytics Service
+            digital_analytics_url=self.get("DIGITAL_ANALYTICS_URL", self.get("digital_analytics_url")),
+            digital_analytics_enabled=self._parse_bool(self.get("DIGITAL_ANALYTICS_ENABLED", self.get("digital_analytics_enabled", False))),
+
             # JWT/Auth Configuration
             local_jwt_secret=self.get("LOCAL_JWT_SECRET", self.get("AUTH_SERVICE_JWT_SECRET", self.get("local_jwt_secret"))),
             local_jwt_algorithm=self.get("LOCAL_JWT_ALGORITHM", self.get("local_jwt_algorithm", "HS256")),
@@ -494,6 +502,7 @@ class ConfigManager:
             "minio_secure", "minio_bucket_name",
             "s3_enabled", "s3_bucket_name", "s3_region", "s3_access_key", "s3_secret_key",
             "gateway_url", "gateway_enabled",
+            "digital_analytics_url", "digital_analytics_enabled",
             "local_jwt_secret", "local_jwt_algorithm", "jwt_expiration", "auth0_domain", "auth0_audience",
             "auth_service_jwt_secret", "auth_service_jwt_expiration"
         }

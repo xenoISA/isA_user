@@ -35,7 +35,7 @@ ACCOUNT_SERVICE_ROUTES = [
         "path": "/api/v1/accounts/profile/{user_id}",
         "methods": ["GET", "PUT", "DELETE"],
         "auth_required": True,
-        "description": "Account profile CRUD operations"
+        "description": "Account profile CRUD operations (identity data only)"
     },
     {
         "path": "/api/v1/accounts/preferences/{user_id}",
@@ -177,13 +177,14 @@ def get_routes_by_category() -> Dict[str, List[Dict[str, Any]]]:
 # Service metadata for Consul registration
 SERVICE_METADATA = {
     "service_name": "account_service",
-    "version": "1.0.0",
-    "tags": ["v1", "user-microservice", "account"],
+    "version": "2.0.0",  # Version bump: removed subscription_status, added full-profile
+    "tags": ["v2", "user-microservice", "account", "identity-anchor"],
     "capabilities": [
         "account_management",
         "profile_management",
         "preferences_management",
         "account_search",
-        "status_management"
+        "status_management",
+        "subscription_aggregation"  # New: aggregates from subscription_service
     ]
 }

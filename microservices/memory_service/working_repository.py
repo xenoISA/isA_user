@@ -41,8 +41,8 @@ class WorkingMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, datetime.now(timezone.utc)]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -77,8 +77,8 @@ class WorkingMemoryRepository(BaseMemoryRepository):
                 """
                 params = [datetime.now(timezone.utc)]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             logger.info(f"Cleaned up {count} expired working memories")
             return count
@@ -120,8 +120,8 @@ class WorkingMemoryRepository(BaseMemoryRepository):
                 """
                 params = [user_id, task_id, datetime.now(timezone.utc)]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 
@@ -157,8 +157,8 @@ class WorkingMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, min_priority, datetime.now(timezone.utc)]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results or []
 

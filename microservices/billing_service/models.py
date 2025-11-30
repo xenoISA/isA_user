@@ -245,23 +245,28 @@ class BillingCalculationResponse(BaseModel):
     """计费计算响应"""
     success: bool
     message: str
-    
+
+    # 用户/组织标识
+    user_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    subscription_id: Optional[str] = None
+
     # 计算结果
     product_id: str
     usage_amount: Decimal
     unit_price: Decimal
     total_cost: Decimal
     currency: Currency
-    
+
     # 免费层和订阅包含
     is_free_tier: bool = False
     is_included_in_subscription: bool = False
     free_tier_remaining: Optional[Decimal] = None
-    
+
     # 建议的计费方式
     suggested_billing_method: BillingMethod
     available_billing_methods: List[BillingMethod]
-    
+
     # 用户余额信息
     wallet_balance: Optional[Decimal] = None
     credit_balance: Optional[Decimal] = None

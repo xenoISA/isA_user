@@ -254,11 +254,11 @@ class StorageEventPublisher:
 
             result = await self.event_bus.publish_event(event)
             if result:
-                logger.info(f"Published file.deleted event for file {file_id}")
+                logger.info(f"✅ Published FILE_DELETED event for file {file_id}")
             return result
 
         except Exception as e:
-            logger.error(f"Error publishing file_deleted event: {e}")
+            logger.error(f"Error publishing FILE_DELETED event: {e}")
             return False
 
     async def publish_file_shared(
@@ -292,9 +292,9 @@ class StorageEventPublisher:
 
             result = await self.event_bus.publish_event(event)
             if result:
-                logger.info(f"Published file.shared event for file {file_id}")
+                logger.info(f"✅ Published FILE_SHARED event for file {file_id}")
             return result
 
         except Exception as e:
-            logger.error(f"Error publishing file_shared event: {e}")
+            logger.error(f"Error publishing FILE_SHARED event: {e}")
             return False

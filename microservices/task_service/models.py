@@ -93,11 +93,11 @@ class TaskResponse(BaseModel):
     task_type: TaskType
     status: TaskStatus
     priority: TaskPriority
-    config: Dict[str, Any]
-    schedule: Optional[Dict[str, Any]]
-    credits_per_run: float
-    tags: List[str]
-    metadata: Dict[str, Any]
+    config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    schedule: Optional[Dict[str, Any]] = None
+    credits_per_run: float = 0.0
+    tags: Optional[List[str]] = Field(default_factory=list)
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     # 执行相关
     next_run_time: Optional[datetime]

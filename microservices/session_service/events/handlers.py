@@ -25,13 +25,15 @@ class SessionEventHandlers:
 
     def get_event_handler_map(self) -> Dict[str, Callable]:
         """
-        Get mapping of event types to handler functions
+        Get mapping of event patterns to handler functions
+
+        Uses the new event bus API with service-prefixed event patterns.
 
         Returns:
-            Dictionary mapping event types to handler functions
+            Dictionary mapping event patterns to handler functions
         """
         return {
-            "user.deleted": self.handle_user_deleted,
+            "account_service.user.deleted": lambda event: self.handle_user_deleted(event.data),
         }
 
     async def handle_user_deleted(self, event_data: dict):

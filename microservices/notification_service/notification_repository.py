@@ -11,7 +11,7 @@ import logging
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct, ListValue
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     Notification, NotificationTemplate, InAppNotification,
@@ -62,7 +62,7 @@ class NotificationRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=postgres_host,
             port=postgres_port,
             user_id="notification_service"
@@ -94,14 +94,14 @@ class NotificationRepository:
                 "updated_at": now.isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into("notification_templates", [template_data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into("notification_templates", [template_data], schema=self.schema)
 
             if count is not None and count > 0:
                 # Query back to get the generated id
                 query = f'SELECT * FROM {self.schema}.notification_templates WHERE template_id = $1'
-                with self.db:
-                    results = self.db.query(query, [template.template_id], schema=self.schema)
+                async with self.db:
+                    results = await self.db.query(query, [template.template_id], schema=self.schema)
 
                 if results and len(results) > 0:
                     created_template = results[0]
@@ -121,8 +121,8 @@ class NotificationRepository:
         try:
             query = f'SELECT * FROM {self.schema}.notification_templates WHERE template_id = $1 LIMIT 1'
 
-            with self.db:
-                results = self.db.query(query, [template_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [template_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return self._parse_template(results[0])
@@ -164,8 +164,8 @@ class NotificationRepository:
                 LIMIT {limit} OFFSET {offset}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             templates = []
             for data in results:
@@ -247,8 +247,8 @@ class NotificationRepository:
                 WHERE template_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -298,8 +298,8 @@ class NotificationRepository:
                 "updated_at": now.isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into("notifications", [notification_data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into("notifications", [notification_data], schema=self.schema)
 
             if count is not None and count > 0:
                 notification.created_at = now
@@ -316,8 +316,8 @@ class NotificationRepository:
         try:
             query = f'SELECT * FROM {self.schema}.notifications WHERE notification_id = $1 LIMIT 1'
 
-            with self.db:
-                results = self.db.query(query, [notification_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [notification_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return self._parse_notification(results[0])
@@ -371,8 +371,8 @@ class NotificationRepository:
                 LIMIT {limit} OFFSET {offset}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             notifications = []
             for data in results:
@@ -430,8 +430,8 @@ class NotificationRepository:
                 WHERE notification_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -452,8 +452,8 @@ class NotificationRepository:
                 LIMIT {limit}
             '''
 
-            with self.db:
-                results = self.db.query(query, [NotificationStatus.PENDING.value, now], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [NotificationStatus.PENDING.value, now], schema=self.schema)
 
             notifications = []
             for data in results:
@@ -495,8 +495,8 @@ class NotificationRepository:
                 "updated_at": now.isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into("in_app_notifications", [notification_data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into("in_app_notifications", [notification_data], schema=self.schema)
 
             if count is not None and count > 0:
                 notification.created_at = now
@@ -546,8 +546,8 @@ class NotificationRepository:
                 LIMIT {limit} OFFSET {offset}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             notifications = []
             for data in results:
@@ -572,8 +572,8 @@ class NotificationRepository:
                 WHERE notification_id = $2 AND user_id = $3
             '''
 
-            with self.db:
-                count = self.db.execute(query, [now, notification_id, user_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [now, notification_id, user_id], schema=self.schema)
 
             # 同时更新主通知表的已读时间
             if count is not None and count > 0:
@@ -582,8 +582,8 @@ class NotificationRepository:
                     SET read_at = $1
                     WHERE notification_id = $2
                 '''
-                with self.db:
-                    self.db.execute(update_query, [now, notification_id], schema=self.schema)
+                async with self.db:
+                    await self.db.execute(update_query, [now, notification_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -602,8 +602,8 @@ class NotificationRepository:
                 WHERE notification_id = $2 AND user_id = $3
             '''
 
-            with self.db:
-                count = self.db.execute(query, [now, notification_id, user_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [now, notification_id, user_id], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -620,8 +620,8 @@ class NotificationRepository:
                 WHERE user_id = $1 AND is_read = FALSE AND is_archived = FALSE
             '''
 
-            with self.db:
-                results = self.db.query(query, [user_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [user_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return results[0].get("count", 0)
@@ -657,8 +657,8 @@ class NotificationRepository:
                 "updated_at": now.isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into("notification_batches", [batch_data], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into("notification_batches", [batch_data], schema=self.schema)
 
             if count is not None and count > 0:
                 batch.created_at = now
@@ -721,8 +721,8 @@ class NotificationRepository:
                 WHERE batch_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -799,8 +799,8 @@ class NotificationRepository:
                 subscription_data["updated_at"]
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 created_subscription = results[0]
@@ -835,8 +835,8 @@ class NotificationRepository:
             where_clause = " AND ".join(conditions)
             query = f'SELECT * FROM {self.schema}.push_subscriptions WHERE {where_clause}'
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             subscriptions = []
             for data in results:
@@ -860,8 +860,8 @@ class NotificationRepository:
                 WHERE user_id = $2 AND device_token = $3
             '''
 
-            with self.db:
-                count = self.db.execute(query, [now, user_id, device_token], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [now, user_id, device_token], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -879,8 +879,8 @@ class NotificationRepository:
                 WHERE user_id = $2 AND device_token = $3
             '''
 
-            with self.db:
-                count = self.db.execute(query, [now, user_id, device_token], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [now, user_id, device_token], schema=self.schema)
 
             return count is not None and count > 0
 
@@ -922,8 +922,8 @@ class NotificationRepository:
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
             query = f'SELECT * FROM {self.schema}.notifications WHERE {where_clause}'
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             stats = {
                 "total_sent": 0,

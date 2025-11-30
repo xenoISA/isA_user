@@ -507,7 +507,7 @@ async def get_album_photos(
     try:
         photos = await service.get_album_photos(album_id, user_id, limit, offset)
         return JSONResponse(
-            content={"photos": [p.dict() for p in photos]}, status_code=200
+            content={"photos": [p.model_dump(mode='json') for p in photos]}, status_code=200
         )
     except AlbumNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

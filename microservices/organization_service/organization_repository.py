@@ -13,7 +13,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     OrganizationPlan, OrganizationStatus, OrganizationRole, MemberStatus,
@@ -42,7 +42,7 @@ class OrganizationRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id='organization_service')
+        self.db = AsyncPostgresClient(host=host, port=port, user_id='organization_service')
         self.schema = "organization"
         self.organizations_table = "organizations"
         self.org_members_table = "organization_members"
@@ -74,8 +74,8 @@ class OrganizationRepository:
             }
 
             # 创建组织
-            with self.db:
-                count = self.db.insert_into(
+            async with self.db:
+                count = await self.db.insert_into(
                     self.organizations_table,
                     [org_dict],
                     schema=self.schema
@@ -96,8 +96,8 @@ class OrganizationRepository:
             if not member_result:
                 # 如果添加成员失败，删除组织
                 query = f"DELETE FROM {self.schema}.{self.organizations_table} WHERE organization_id = $1"
-                with self.db:
-                    self.db.execute(query, [org_id], schema=self.schema)
+                async with self.db:
+                    await self.db.execute(query, [org_id], schema=self.schema)
                 logger.error(f"Failed to add owner, rolling back organization {org_id}")
                 return None
 
@@ -114,8 +114,8 @@ class OrganizationRepository:
         try:
             query = f"SELECT * FROM {self.schema}.{self.organizations_table} WHERE organization_id = $1"
 
-            with self.db:
-                result = self.db.query(query, [organization_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [organization_id], schema=self.schema)
 
             if not result or len(result) == 0:
                 return None
@@ -171,8 +171,8 @@ class OrganizationRepository:
                 WHERE organization_id = ${org_id_param}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             # ✅ Check count for None
             if count is None or count == 0:
@@ -199,8 +199,8 @@ class OrganizationRepository:
                 organization_id
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -218,8 +218,8 @@ class OrganizationRepository:
                 WHERE user_id = $1 AND status = $2
             """
 
-            with self.db:
-                member_result = self.db.query(
+            async with self.db:
+                member_result = await self.db.query(
                     member_query,
                     [user_id, MemberStatus.ACTIVE.value],
                     schema=self.schema
@@ -245,8 +245,8 @@ class OrganizationRepository:
 
             params = org_ids + [OrganizationStatus.DELETED.value]
 
-            with self.db:
-                org_result = self.db.query(org_query, params, schema=self.schema)
+            async with self.db:
+                org_result = await self.db.query(org_query, params, schema=self.schema)
 
             if not org_result:
                 return []
@@ -281,8 +281,8 @@ class OrganizationRepository:
                 WHERE organization_id = $1 AND user_id = $2
             """
 
-            with self.db:
-                existing = self.db.query(
+            async with self.db:
+                existing = await self.db.query(
                     check_query,
                     [organization_id, user_id],
                     schema=self.schema
@@ -305,8 +305,8 @@ class OrganizationRepository:
                         user_id
                     ]
 
-                    with self.db:
-                        count = self.db.execute(update_query, params, schema=self.schema)
+                    async with self.db:
+                        count = await self.db.execute(update_query, params, schema=self.schema)
 
                     if count is not None and count > 0:
                         return await self.get_organization_member(organization_id, user_id)
@@ -323,8 +323,8 @@ class OrganizationRepository:
                 'permissions': permissions or []
             }
 
-            with self.db:
-                count = self.db.insert_into(
+            async with self.db:
+                count = await self.db.insert_into(
                     self.org_members_table,
                     [member_dict],
                     schema=self.schema
@@ -382,8 +382,8 @@ class OrganizationRepository:
                 WHERE organization_id = ${org_id_param} AND user_id = ${user_id_param}
             """
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             if count is None or count == 0:
                 return None
@@ -414,8 +414,8 @@ class OrganizationRepository:
                 user_id
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -435,8 +435,8 @@ class OrganizationRepository:
                 WHERE organization_id = $1 AND user_id = $2
             """
 
-            with self.db:
-                result = self.db.query(query, [organization_id, user_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [organization_id, user_id], schema=self.schema)
 
             if not result or len(result) == 0:
                 return None
@@ -490,8 +490,8 @@ class OrganizationRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                result = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, params, schema=self.schema)
 
             if not result:
                 return []
@@ -521,8 +521,8 @@ class OrganizationRepository:
                 WHERE organization_id = $1 AND user_id = $2
             """
 
-            with self.db:
-                result = self.db.query(query, [organization_id, user_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, [organization_id, user_id], schema=self.schema)
 
             if not result or len(result) == 0:
                 return None
@@ -548,8 +548,8 @@ class OrganizationRepository:
                 WHERE organization_id = $1 AND status = $2
             """
 
-            with self.db:
-                result = self.db.query(
+            async with self.db:
+                result = await self.db.query(
                     query,
                     [organization_id, MemberStatus.ACTIVE.value],
                     schema=self.schema
@@ -640,8 +640,8 @@ class OrganizationRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                result = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query(query, params, schema=self.schema)
 
             if not result:
                 return []

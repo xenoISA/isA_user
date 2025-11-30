@@ -48,7 +48,7 @@ async def handle_file_indexing_request(
                 file_content = storage_service.minio_client.get_presigned_url(
                     bucket_name=bucket_name,
                     object_key=object_name,
-                    expiry_seconds=3600,  # 1小时
+                    expiry_seconds=86400,  # 24小时，用于AI处理
                 )
                 if not file_content:
                     raise Exception("Failed to generate presigned URL")
@@ -81,7 +81,12 @@ async def handle_file_indexing_request(
         # 通过 intelligence service 索引文件
         try:
             logger.info(f"Starting async indexing for file {file_id}")
-            await intelligence_service.index_file(
+            # Add bucket_name and object_name to metadata for AI extraction
+            if metadata is None:
+                metadata = {}
+            metadata.update({"bucket_name": bucket_name, "object_name": object_name})
+
+            indexed_doc = await intelligence_service.index_file(
                 file_id=file_id,
                 user_id=user_id,
                 organization_id=organization_id,
@@ -106,6 +111,61 @@ async def handle_file_indexing_request(
                     file_name=file_name,
                     file_size=file_size,
                 )
+
+                # 同时发布 file.uploaded.with_ai 事件给 Media Service（向后兼容）
+                # Media Service 期望接收带有 AI metadata 的事件
+                if file_type and file_type.startswith("image/") and indexed_doc:
+                    # 从索引结果的 metadata 中提取 AI metadata
+                    doc_metadata = indexed_doc.metadata or {}
+                    logger.info(
+                        f"🔍 DEBUG: indexed_doc.metadata keys: {list(doc_metadata.keys())}"
+                    )
+                    logger.info(f"🔍 DEBUG: indexed_doc.metadata: {doc_metadata}")
+
+                    ai_metadata_extracted = doc_metadata.get("ai_metadata")
+                    # 确保 ai_metadata 永远是 dict，never None
+                    # PostgreSQL gRPC may return protobuf Struct, convert to dict
+                    if ai_metadata_extracted is not None and not isinstance(
+                        ai_metadata_extracted, dict
+                    ):
+                        # Try to convert protobuf Struct to dict
+                        from google.protobuf.json_format import MessageToDict
+
+                        try:
+                            ai_metadata_extracted = MessageToDict(
+                                ai_metadata_extracted, preserving_proto_field_name=True
+                            )
+                        except:
+                            logger.warning(
+                                f"Failed to convert ai_metadata from protobuf, setting to empty dict"
+                            )
+                            ai_metadata_extracted = {}
+                    if not ai_metadata_extracted:
+                        ai_metadata_extracted = {}
+                    operation_id = doc_metadata.get("operation_id", "unknown")
+
+                    logger.info(
+                        f"📤 Preparing file.uploaded.with_ai event for {file_id}"
+                    )
+                    logger.info(f"  AI metadata extracted: {ai_metadata_extracted}")
+                    logger.info(f"  operation_id/chunk_id: {operation_id}")
+
+                    await publisher.publish_file_uploaded_with_ai(
+                        file_id=file_id,
+                        file_name=file_name,
+                        file_size=file_size,
+                        content_type=file_type,
+                        user_id=user_id,
+                        organization_id=organization_id,
+                        access_level="private",
+                        download_url=file_content
+                        if file_content.startswith("http")
+                        else "",
+                        bucket_name=bucket_name,
+                        object_name=object_name,
+                        chunk_id=operation_id,
+                        ai_metadata=ai_metadata_extracted,
+                    )
 
         except Exception as e:
             logger.error(f"Failed to index file {file_id}: {e}")

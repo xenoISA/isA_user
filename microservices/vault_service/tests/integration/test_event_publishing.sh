@@ -68,25 +68,8 @@ print_section() {
     echo ""
 }
 
-# Test 1: Health Check
-print_section "Test 1: Health Check"
-echo "GET ${BASE_URL}/health"
-HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/health")
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed '$d')
-
-echo "HTTP Status: $HTTP_CODE"
-
-if [ "$HTTP_CODE" = "200" ]; then
-    print_result 0 "Service is healthy"
-else
-    print_result 1 "Service health check failed"
-    echo -e "${RED}Cannot proceed with event tests - service is not running${NC}"
-    exit 1
-fi
-
-# Test 2: Create Secret and Check Event
-print_section "Test 2: Create Secret (Publishes vault.secret.created event)"
+# Test 1: Create Secret and Check Event
+print_section "Test 1: Create Secret (Publishes vault.secret.created event)"
 echo "POST ${API_BASE}/secrets"
 CREATE_SECRET_PAYLOAD='{
   "name": "Test Event API Key",

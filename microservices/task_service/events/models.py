@@ -1,7 +1,7 @@
 """
 Task Service Event Data Models
 
-task_service ^„‹öpnÓ„šI
+task_service ^ï¿½ï¿½ï¿½pnÓ„ï¿½I
 """
 
 from datetime import datetime
@@ -12,17 +12,17 @@ from pydantic import BaseModel, Field
 
 class UserDeletedEventData(BaseModel):
     """
-    (7 d‹öpn (task_service ÆÒ)
+    (7 dï¿½ï¿½pn (task_service ï¿½ï¿½)
 
-    task_service Ñ,d‹övÖˆ(7„@	û¡
+    task_service ï¿½,dï¿½ï¿½vÖˆ(7ï¿½@	ï¿½ï¿½
 
     NATS Subject: *.user.deleted
     Publisher: account_service
     """
 
-    user_id: str = Field(..., description="« d„(7ID")
-    timestamp: Optional[datetime] = Field(None, description=" döô")
-    reason: Optional[str] = Field(None, description=" dŸà")
+    user_id: str = Field(..., description="User ID")
+    timestamp: Optional[datetime] = Field(None, description=" dï¿½ï¿½")
+    reason: Optional[str] = Field(None, description=" dï¿½ï¿½")
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
@@ -30,20 +30,20 @@ class UserDeletedEventData(BaseModel):
 
 class TaskCreatedEventData(BaseModel):
     """
-    û¡úŸ‹öpn
+    ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½pn
 
-    task_service úû¡Ñd‹ö
+    task_service ï¿½ï¿½ï¿½ï¿½dï¿½ï¿½
 
     NATS Subject: task.created
     Subscribers: notification_service, calendar_service
     """
 
     user_id: str = Field(..., description="(7ID")
-    task_id: str = Field(..., description="û¡ID")
-    task_type: str = Field(..., description="û¡{‹")
-    name: str = Field(..., description="û¡ð")
-    schedule: Optional[str] = Field(None, description="¦h¾")
-    timestamp: Optional[datetime] = Field(None, description="úöô")
+    task_id: str = Field(..., description="Task ID")
+    task_type: str = Field(..., description="Task type")
+    name: str = Field(..., description="Task name")
+    schedule: Optional[str] = Field(None, description="ï¿½hï¿½")
+    timestamp: Optional[datetime] = Field(None, description="ï¿½ï¿½ï¿½")
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
@@ -51,22 +51,22 @@ class TaskCreatedEventData(BaseModel):
 
 class TaskCompletedEventData(BaseModel):
     """
-    û¡Œ‹öpn
+    ï¿½ï¿½ï¿½ï¿½ï¿½pn
 
-    task_service û¡gLŒÑd‹ö
+    task_service ï¿½ï¿½gLï¿½ï¿½dï¿½ï¿½
 
     NATS Subject: task.completed
     Subscribers: notification_service, analytics_service, billing_service
     """
 
     user_id: str = Field(..., description="(7ID")
-    task_id: str = Field(..., description="û¡ID")
+    task_id: str = Field(..., description="Task ID")
     execution_id: str = Field(..., description="gLID")
-    task_type: str = Field(..., description="û¡{‹")
-    status: str = Field(..., description="gL¶: success, failed")
-    credits_consumed: Optional[float] = Field(None, description="ˆ„ï")
-    duration_seconds: Optional[float] = Field(None, description="gLöÒ	")
-    timestamp: Optional[datetime] = Field(None, description="Œöô")
+    task_type: str = Field(..., description="Task type")
+    status: str = Field(..., description="gLï¿½: success, failed")
+    credits_consumed: Optional[float] = Field(None, description="ï¿½ï¿½ï¿½")
+    duration_seconds: Optional[float] = Field(None, description="gLï¿½ï¿½	")
+    timestamp: Optional[datetime] = Field(None, description="ï¿½ï¿½ï¿½")
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
@@ -74,21 +74,21 @@ class TaskCompletedEventData(BaseModel):
 
 class TaskFailedEventData(BaseModel):
     """
-    û¡1%‹öpn
+    ï¿½ï¿½1%ï¿½ï¿½pn
 
-    task_service û¡gL1%öÑd‹ö
+    task_service ï¿½ï¿½gL1%ï¿½ï¿½dï¿½ï¿½
 
     NATS Subject: task.failed
     Subscribers: notification_service, monitoring_service
     """
 
     user_id: str = Field(..., description="(7ID")
-    task_id: str = Field(..., description="û¡ID")
+    task_id: str = Field(..., description="Task ID")
     execution_id: str = Field(..., description="gLID")
-    task_type: str = Field(..., description="û¡{‹")
-    error_message: str = Field(..., description="ïáo")
-    retry_count: Optional[int] = Field(None, description="ÍÕ!p")
-    timestamp: Optional[datetime] = Field(None, description="1%öô")
+    task_type: str = Field(..., description="Task type")
+    error_message: str = Field(..., description="ï¿½ï¿½o")
+    retry_count: Optional[int] = Field(None, description="ï¿½ï¿½!p")
+    timestamp: Optional[datetime] = Field(None, description="1%ï¿½ï¿½")
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
@@ -96,7 +96,7 @@ class TaskFailedEventData(BaseModel):
 
 # Helper functions
 def parse_user_deleted_event(event_data: dict) -> UserDeletedEventData:
-    """ã user.deleted ‹öpn"""
+    """ï¿½ user.deleted ï¿½ï¿½pn"""
     return UserDeletedEventData(**event_data)
 
 
@@ -107,7 +107,7 @@ def create_task_created_event_data(
     name: str,
     schedule: Optional[str] = None,
 ) -> TaskCreatedEventData:
-    """ú task.created ‹öpn"""
+    """ï¿½ task.created ï¿½ï¿½pn"""
     return TaskCreatedEventData(
         user_id=user_id,
         task_id=task_id,
@@ -127,7 +127,7 @@ def create_task_completed_event_data(
     credits_consumed: Optional[float] = None,
     duration_seconds: Optional[float] = None,
 ) -> TaskCompletedEventData:
-    """ú task.completed ‹öpn"""
+    """ï¿½ task.completed ï¿½ï¿½pn"""
     return TaskCompletedEventData(
         user_id=user_id,
         task_id=task_id,
@@ -148,7 +148,7 @@ def create_task_failed_event_data(
     error_message: str,
     retry_count: Optional[int] = None,
 ) -> TaskFailedEventData:
-    """ú task.failed ‹öpn"""
+    """ï¿½ task.failed ï¿½ï¿½pn"""
     return TaskFailedEventData(
         user_id=user_id,
         task_id=task_id,

@@ -151,18 +151,20 @@ async def lifespan(app: FastAPI):
     # Subscribe to events for cleanup and synchronization
     if organization_microservice.event_bus:
         try:
-            from .events import OrganizationEventHandler
-            from .organization_repository import OrganizationRepository
+            from .events.handlers import get_event_handlers
 
-            repository = OrganizationRepository(config=config_manager)
-            event_handler = OrganizationEventHandler(repository)
+            # Get event handlers (function-based, not class-based)
+            handler_map = get_event_handlers()
 
-            # Subscribe to user.deleted events - clean up organization memberships
-            await organization_microservice.event_bus.subscribe(
-                subject="events.user.deleted",
-                callback=lambda msg: event_handler.handle_event(msg)
-            )
-            logger.info("✅ Subscribed to user.deleted events")
+            # Subscribe to events
+            for event_pattern, handler_func in handler_map.items():
+                # Subscribe to each event pattern (already includes service prefix)
+                await organization_microservice.event_bus.subscribe_to_events(
+                    pattern=event_pattern, handler=handler_func
+                )
+                logger.info(f"Subscribed to {event_pattern} events")
+
+            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
 
         except Exception as e:
             logger.error(f"Failed to subscribe to events: {e}")

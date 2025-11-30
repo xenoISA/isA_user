@@ -106,6 +106,8 @@ CREATE TABLE billing.billing_quotas (
     -- References
     user_id VARCHAR(100),
     organization_id VARCHAR(100),
+    subscription_id VARCHAR(100),
+    product_id VARCHAR(100),
     service_type VARCHAR(50) NOT NULL,
 
     -- Quota limits

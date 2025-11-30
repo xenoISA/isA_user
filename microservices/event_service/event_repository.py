@@ -13,7 +13,7 @@ import uuid
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     Event, EventStatus, EventSource, EventCategory,
@@ -44,7 +44,7 @@ class EventRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="event_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="event_service")
 
         self.schema = "event"
         self.events_table = "events"
@@ -89,8 +89,8 @@ class EventRepository:
                 'schema_version': event.schema_version
             }
 
-            with self.db:
-                count = self.db.insert_into(self.events_table, [event_dict], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.events_table, [event_dict], schema=self.schema)
 
             if count is not None and count > 0:
                 logger.info(f"Event {event.event_id} saved successfully")
@@ -112,8 +112,8 @@ class EventRepository:
         try:
             query = f'SELECT * FROM {self.schema}.{self.events_table} WHERE event_id = $1'
 
-            with self.db:
-                result = self.db.query_row(query, [event_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [event_id], schema=self.schema)
 
             if result:
                 return self._row_to_event(result)
@@ -184,8 +184,8 @@ class EventRepository:
 
             # Get total count
             count_query = f'SELECT COUNT(*) as count FROM {self.schema}.{self.events_table} WHERE {where_clause}'
-            with self.db:
-                count_result = self.db.query_row(count_query, params, schema=self.schema)
+            async with self.db:
+                count_result = await self.db.query_row(count_query, params, schema=self.schema)
             total_count = int(count_result.get("count", 0)) if count_result else 0
 
             # Get events
@@ -196,8 +196,8 @@ class EventRepository:
                 LIMIT {limit} OFFSET {offset}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             events = [self._row_to_event(row) for row in results] if results else []
 
@@ -244,8 +244,8 @@ class EventRepository:
                 WHERE event_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -288,8 +288,8 @@ class EventRepository:
                 WHERE event_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -307,8 +307,8 @@ class EventRepository:
                 LIMIT {limit}
             '''
 
-            with self.db:
-                results = self.db.query(query, [EventStatus.PENDING.value], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [EventStatus.PENDING.value], schema=self.schema)
 
             return [self._row_to_event(row) for row in results] if results else []
 
@@ -342,8 +342,8 @@ class EventRepository:
                 WHERE {where_clause}
             '''
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params, schema=self.schema)
 
             if result:
                 return EventStatistics(
@@ -400,8 +400,8 @@ class EventRepository:
                 'duration_ms': result.duration_ms
             }
 
-            with self.db:
-                count = self.db.insert_into(self.processing_results_table, [result_dict], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.processing_results_table, [result_dict], schema=self.schema)
 
             if count is not None and count > 0:
                 logger.info(f"Processing result for event {result.event_id} saved")
@@ -424,8 +424,8 @@ class EventRepository:
             else:
                 return None
 
-            with self.db:
-                result = self.db.query_row(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params, schema=self.schema)
 
             return result
 
@@ -448,8 +448,8 @@ class EventRepository:
                 'updated_at': projection.updated_at.isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.event_projections_table, [projection_dict], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.event_projections_table, [projection_dict], schema=self.schema)
 
             if count is not None and count > 0:
                 logger.info(f"Projection {projection.projection_id} saved")
@@ -467,8 +467,8 @@ class EventRepository:
                 WHERE entity_type = $1 AND entity_id = $2 AND projection_name = $3
             '''
 
-            with self.db:
-                result = self.db.query_row(query, [entity_type, entity_id, projection_name], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, [entity_type, entity_id, projection_name], schema=self.schema)
 
             if result:
                 return EventProjection(
@@ -507,8 +507,8 @@ class EventRepository:
                 'updated_at': processor.updated_at.isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.event_processors_table, [processor_dict], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.event_processors_table, [processor_dict], schema=self.schema)
 
             if count is not None and count > 0:
                 logger.info(f"Processor {processor.processor_id} saved")
@@ -526,8 +526,8 @@ class EventRepository:
                 ORDER BY priority DESC
             '''
 
-            with self.db:
-                results = self.db.query(query, [], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [], schema=self.schema)
 
             processors = []
             if results:
@@ -571,8 +571,8 @@ class EventRepository:
                 'updated_at': subscription.updated_at.isoformat()
             }
 
-            with self.db:
-                count = self.db.insert_into(self.event_subscriptions_table, [subscription_dict], schema=self.schema)
+            async with self.db:
+                count = await self.db.insert_into(self.event_subscriptions_table, [subscription_dict], schema=self.schema)
 
             if count is not None and count > 0:
                 logger.info(f"Subscription {subscription.subscription_id} saved")
@@ -593,8 +593,8 @@ class EventRepository:
                 ORDER BY created_at DESC
             '''
 
-            with self.db:
-                results = self.db.query(query, [], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [], schema=self.schema)
 
             subscriptions = []
             if results:

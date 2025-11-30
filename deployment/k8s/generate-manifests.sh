@@ -28,6 +28,7 @@ SERVICES=(
     "location_service:8224"
     "telemetry_service:8225"
     "compliance_service:8226"
+    "document_service:8227"
     "event_service:8230"
 )
 

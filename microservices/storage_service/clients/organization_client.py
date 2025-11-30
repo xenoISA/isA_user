@@ -8,7 +8,7 @@ Storage Service - Organization Service Client
 import logging
 from typing import Any, Dict, List, Optional
 
-from microservices.organization_service.clients import OrganizationServiceClient
+from microservices.organization_service.client import OrganizationServiceClient
 
 logger = logging.getLogger(__name__)
 

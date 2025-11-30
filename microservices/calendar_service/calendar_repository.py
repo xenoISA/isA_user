@@ -1,7 +1,7 @@
 """
 Calendar Repository
 
-日历事件数据访问层 - PostgreSQL + gRPC
+日历事件数据访问层 - PostgreSQL + gRPC (Async)
 """
 
 import logging
@@ -17,7 +17,7 @@ sys.path.append(
 
 from core.config_manager import ConfigManager
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 
 from .models import CalendarEvent, EventCategory, EventResponse, RecurrenceType
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class CalendarRepository:
-    """日历事件数据访问层 - PostgreSQL"""
+    """日历事件数据访问层 - PostgreSQL (Async)"""
 
     def __init__(self, config: Optional[ConfigManager] = None):
         # 使用 config_manager 进行服务发现
@@ -43,7 +43,7 @@ class CalendarRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="calendar_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="calendar_service")
 
         self.schema = "calendar"
         self.table_name = "calendar_events"
@@ -107,8 +107,8 @@ class CalendarRepository:
                 now,
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return EventResponse(**results[0])
@@ -137,11 +137,11 @@ class CalendarRepository:
                 f"SELECT * FROM {self.schema}.{self.table_name} WHERE {where_clause}"
             )
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
-            if results and len(results) > 0:
-                return EventResponse(**results[0])
+            if result:
+                return EventResponse(**result)
             return None
 
         except Exception as e:
@@ -189,8 +189,8 @@ class CalendarRepository:
 
             params.extend([limit, offset])
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results:
                 return [EventResponse(**event) for event in results]
@@ -271,8 +271,8 @@ class CalendarRepository:
                 RETURNING *
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return EventResponse(**results[0])
@@ -297,8 +297,8 @@ class CalendarRepository:
             where_clause = " AND ".join(conditions)
             query = f"DELETE FROM {self.schema}.{self.table_name} WHERE {where_clause}"
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count > 0
 
@@ -342,8 +342,8 @@ class CalendarRepository:
                 now,
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params=params)
 
             return count is not None and count >= 0
 
@@ -370,12 +370,13 @@ class CalendarRepository:
                 f"SELECT * FROM {self.schema}.{self.sync_table} WHERE {where_clause}"
             )
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
-
-            if results:
-                return results[0] if provider else results
-            return None
+            async with self.db:
+                if provider:
+                    result = await self.db.query_row(query, params=params)
+                    return result
+                else:
+                    results = await self.db.query(query, params=params)
+                    return results if results else None
 
         except Exception as e:
             logger.error(f"Failed to get sync status: {e}")
@@ -393,18 +394,16 @@ class CalendarRepository:
                 f"DELETE FROM {self.schema}.{self.table_name} WHERE user_id = $1"
             )
 
-            with self.db:
-                events_count = self.db.execute(
-                    events_query, [user_id], schema=self.schema
-                )
+            async with self.db:
+                events_count = await self.db.execute(events_query, params=[user_id])
 
             # Delete sync status
             sync_query = (
                 f"DELETE FROM {self.schema}.{self.sync_table} WHERE user_id = $1"
             )
 
-            with self.db:
-                sync_count = self.db.execute(sync_query, [user_id], schema=self.schema)
+            async with self.db:
+                sync_count = await self.db.execute(sync_query, params=[user_id])
 
             total_deleted = (events_count if events_count is not None else 0) + (
                 sync_count if sync_count is not None else 0

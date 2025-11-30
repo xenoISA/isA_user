@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     ComplianceCheck, CompliancePolicy, ComplianceStatus,
@@ -41,7 +41,7 @@ class ComplianceRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id="compliance_service"
@@ -107,8 +107,8 @@ class ComplianceRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 logger.info(f"Created compliance check: {check.check_id}")
@@ -127,8 +127,8 @@ class ComplianceRepository:
                 WHERE check_id = $1
             '''
 
-            with self.db:
-                results = self.db.query(query, [check_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [check_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return ComplianceCheck(**results[0])
@@ -185,8 +185,8 @@ class ComplianceRepository:
 
             params.extend([limit, offset])
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return [ComplianceCheck(**item) for item in results] if results else []
 
@@ -210,8 +210,8 @@ class ComplianceRepository:
                 LIMIT $2 OFFSET $3
             '''
 
-            with self.db:
-                results = self.db.query(query, [organization_id, limit, offset], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [organization_id, limit, offset], schema=self.schema)
 
             return [ComplianceCheck(**item) for item in results] if results else []
 
@@ -231,8 +231,8 @@ class ComplianceRepository:
                 LIMIT $2
             '''
 
-            with self.db:
-                results = self.db.query(query, [ComplianceStatus.PENDING.value, limit], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [ComplianceStatus.PENDING.value, limit], schema=self.schema)
 
             return [ComplianceCheck(**item) for item in results] if results else []
 
@@ -262,8 +262,8 @@ class ComplianceRepository:
             now = datetime.now(timezone.utc)
             params = [status.value, reviewed_by, now, review_notes, now, check_id]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -314,8 +314,8 @@ class ComplianceRepository:
                 {where_clause}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 stats = results[0]
@@ -380,8 +380,8 @@ class ComplianceRepository:
                 ORDER BY count DESC
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results if results else []
 
@@ -428,8 +428,8 @@ class ComplianceRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 return CompliancePolicy(**results[0])
@@ -447,8 +447,8 @@ class ComplianceRepository:
                 WHERE policy_id = $1
             '''
 
-            with self.db:
-                results = self.db.query(query, [policy_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [policy_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return CompliancePolicy(**results[0])
@@ -470,8 +470,8 @@ class ComplianceRepository:
                 ORDER BY created_at DESC
             '''
 
-            with self.db:
-                results = self.db.query(query, [organization_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [organization_id], schema=self.schema)
 
             return [CompliancePolicy(**item) for item in results] if results else []
 
@@ -491,8 +491,8 @@ class ComplianceRepository:
                 WHERE user_id = $1
             '''
 
-            with self.db:
-                count = self.db.execute(query, [user_id], schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, [user_id], schema=self.schema)
 
             logger.info(f"Deleted {count} compliance records for user {user_id}")
             return count if count is not None else 0

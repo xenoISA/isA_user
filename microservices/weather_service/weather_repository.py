@@ -17,7 +17,7 @@ sys.path.append(
 
 from core.config_manager import ConfigManager
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 
 from .models import FavoriteLocation
 
@@ -43,7 +43,7 @@ class WeatherRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="weather_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="weather_service")
         self.schema = "weather"
         self.locations_table = "weather_locations"
         self.cache_table = "weather_cache"
@@ -80,8 +80,8 @@ class WeatherRepository:
                 WHERE cache_key = $1 AND expires_at >= $2
             """
 
-            with self.db:
-                results = self.db.query(
+            async with self.db:
+                results = await self.db.query(
                     query, [cache_key, datetime.now(timezone.utc)], schema=self.schema
                 )
 
@@ -133,8 +133,8 @@ class WeatherRepository:
                 now,
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             logger.debug(f"Cached in DB: {cache_key}")
             return count is not None and count >= 0
@@ -158,8 +158,8 @@ class WeatherRepository:
                 WHERE cache_key LIKE $1
             """
 
-            with self.db:
-                self.db.execute(query, [f"%{location}%"], schema=self.schema)
+            async with self.db:
+                await self.db.execute(query, [f"%{location}%"], schema=self.schema)
 
             logger.info(f"Cleared cache for location: {location}")
 
@@ -182,8 +182,8 @@ class WeatherRepository:
                     SET is_default = FALSE, updated_at = $1
                     WHERE user_id = $2
                 """
-                with self.db:
-                    self.db.execute(
+                async with self.db:
+                    await self.db.execute(
                         update_query,
                         [datetime.now(timezone.utc), location_data["user_id"]],
                         schema=self.schema,
@@ -209,8 +209,8 @@ class WeatherRepository:
                 now,
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 return FavoriteLocation(**results[0])
@@ -229,8 +229,8 @@ class WeatherRepository:
                 ORDER BY is_default DESC, created_at DESC
             """
 
-            with self.db:
-                results = self.db.query(query, [user_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [user_id], schema=self.schema)
 
             if results:
                 return [FavoriteLocation(**loc) for loc in results]
@@ -249,8 +249,8 @@ class WeatherRepository:
                 LIMIT 1
             """
 
-            with self.db:
-                results = self.db.query(query, [user_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [user_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return FavoriteLocation(**results[0])
@@ -268,8 +268,8 @@ class WeatherRepository:
                 WHERE id = $1 AND user_id = $2
             """
 
-            with self.db:
-                count = self.db.execute(
+            async with self.db:
+                count = await self.db.execute(
                     query, [location_id, user_id], schema=self.schema
                 )
 
@@ -316,8 +316,8 @@ class WeatherRepository:
                 now,
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -336,8 +336,8 @@ class WeatherRepository:
                 ORDER BY severity DESC
             """
 
-            with self.db:
-                results = self.db.query(query, [location, now], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [location, now], schema=self.schema)
 
             if results:
                 return results

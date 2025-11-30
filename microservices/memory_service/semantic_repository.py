@@ -45,8 +45,8 @@ class SemanticMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, category]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             # Deserialize each row to clean protobuf objects
             if results:
@@ -83,8 +83,8 @@ class SemanticMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, concept_type]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             # Deserialize each row to clean protobuf objects
             if results:
@@ -121,8 +121,8 @@ class SemanticMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, abstraction_level]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             # Deserialize each row to clean protobuf objects
             if results:
@@ -159,8 +159,8 @@ class SemanticMemoryRepository(BaseMemoryRepository):
             """
             params = [user_id, f"%{keyword}%"]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             # Deserialize each row to clean protobuf objects
             if results:

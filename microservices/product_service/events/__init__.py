@@ -19,7 +19,7 @@ from .publishers import (
     publish_product_usage_recorded
 )
 
-from .handlers import register_event_handlers
+from .handlers import get_event_handlers
 
 __all__ = [
     # Event Models
@@ -34,5 +34,5 @@ __all__ = [
     "publish_subscription_status_changed",
     "publish_product_usage_recorded",
     # Handlers
-    "register_event_handlers"
+    "get_event_handlers"
 ]

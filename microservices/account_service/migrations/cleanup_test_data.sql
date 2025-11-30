@@ -1,15 +1,13 @@
 -- Account Service: Cleanup Test Data
 -- This script removes test users created by seed_test_data.sql
 
--- Delete test users
+-- Delete test users (matches seed_test_data.sql pattern: test_user_XXX)
 DELETE FROM account.users
 WHERE user_id IN (
-    'test-user-1',
-    'test-user-2',
-    'test-user-3',
-    'test-user-4',
-    'test-user-5',
-    'inactive-user-1'
+    'test_user_001',
+    'test_user_002',
+    'test_user_003',
+    'test_user_004'
 );
 
 -- Print summary

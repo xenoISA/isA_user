@@ -4,7 +4,7 @@
 # Tests session memory operations (conversation context)
 
 BASE_URL="http://localhost"
-API_BASE="${BASE_URL}/memories"
+API_BASE="${BASE_URL}/api/v1/memories"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -225,19 +225,30 @@ else
     print_result 1 "Failed to get session memories"
 fi
 
-# Test 5: Get Session Memory by ID (via generic endpoint)
-if [ -n "$MEMORY_ID_1" ] && [ "$MEMORY_ID_1" != "null" ]; then
-    print_section "Test 5: Get Session Memory by ID"
-    # Note: Session memories are typically accessed via session_id, not individual memory_id
-    # Skipping this test as it conflicts with session-specific routes
-    echo -e "${YELLOW}Skipping: Session memories are accessed by session_id, not individual memory_id${NC}"
-    print_result 0 "Test skipped (by design)"
+# Test 5: Get Session Context (with AI-enhanced summaries)
+print_section "Test 5: Get Session Context"
+echo "GET ${API_BASE}/session/${SESSION_ID}/context?user_id=test_user_session&include_summaries=true&max_recent_messages=5"
+
+CONTEXT_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/session/${SESSION_ID}/context?user_id=test_user_session&include_summaries=true&max_recent_messages=5")
+HTTP_CODE=$(echo "$CONTEXT_RESPONSE" | tail -n1)
+RESPONSE_BODY=$(echo "$CONTEXT_RESPONSE" | sed '$d')
+
+echo "Response:"
+pretty_json "$RESPONSE_BODY"
+echo "HTTP Status: $HTTP_CODE"
+
+if [ "$HTTP_CODE" = "200" ]; then
+    TOTAL_MESSAGES=$(json_value "$RESPONSE_BODY" "total_messages")
+    if [ "$TOTAL_MESSAGES" -ge 1 ]; then
+        print_result 0 "Session context retrieved successfully (total_messages: $TOTAL_MESSAGES)"
+    else
+        print_result 1 "Session context returned but no messages found"
+    fi
 else
-    echo -e "${YELLOW}Skipping Test 5: No memory ID available${NC}"
-    print_result 0 "Test skipped"
+    print_result 1 "Failed to get session context"
 fi
 
-# Test 6: List All Session Memories
+# Test 6: List All Session Memories for User
 print_section "Test 6: List All Session Memories for User"
 echo "GET ${API_BASE}?user_id=test_user_session&memory_type=session&limit=50"
 

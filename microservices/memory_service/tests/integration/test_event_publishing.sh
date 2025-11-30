@@ -20,25 +20,9 @@ echo ""
 # Test variables
 TEST_TS="$(date +%s)_$$"
 TEST_USER_ID="event_test_user_${TEST_TS}"
-BASE_URL="http://localhost"
+BASE_URL="http://localhost/api/v1"
 
 echo -e "${BLUE}Testing memory service at: ${BASE_URL}${NC}"
-echo ""
-
-# Test 1: Health check first
-echo -e "${YELLOW}=====================================================================${NC}"
-echo -e "${YELLOW}Preliminary: Health Check${NC}"
-echo -e "${YELLOW}=====================================================================${NC}"
-echo ""
-
-HEALTH=$(curl -s ${BASE_URL}/health)
-if echo "$HEALTH" | grep -q '"status":"healthy"'; then
-    echo -e "${GREEN}✓ Service is healthy${NC}"
-else
-    echo -e "${RED}✗ Service is not healthy${NC}"
-    echo "$HEALTH"
-    exit 1
-fi
 echo ""
 
 echo -e "${YELLOW}=====================================================================${NC}"

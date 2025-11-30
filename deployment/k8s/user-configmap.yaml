@@ -27,8 +27,12 @@ data:
   NATS_GRPC_HOST: "nats-grpc.isa-cloud-staging.svc.cluster.local"
   NATS_GRPC_PORT: "50056"
 
+  # NATS Direct Connection (for event bus)
+  NATS_URL: "nats://nats.isa-cloud-staging.svc.cluster.local:4222"
+
   MINIO_GRPC_HOST: "minio-grpc.isa-cloud-staging.svc.cluster.local"
   MINIO_GRPC_PORT: "50051"
+  MINIO_BUCKET_NAME: "isa-storage"
 
   MQTT_GRPC_HOST: "mqtt-grpc.isa-cloud-staging.svc.cluster.local"
   MQTT_GRPC_PORT: "50053"
@@ -45,17 +49,21 @@ data:
   LOKI_GRPC_HOST: "loki-grpc.isa-cloud-staging.svc.cluster.local"
   LOKI_GRPC_PORT: "50054"
 
-  # MCP Service (Intelligence/Analytics)
+  # MCP Service (Intelligence/Analytics) - Legacy
   MCP_ENDPOINT: "http://mcp.isa-cloud-staging.svc.cluster.local:8081"
 
   # ISA Model Service (AI extraction + embeddings)
   ISA_MODEL_URL: "http://model.isa-cloud-staging.svc.cluster.local:8082"
+
+  # Digital Analytics Service (isA_Data - RAG & Multimodal Processing)
+  DIGITAL_ANALYTICS_URL: "http://data.isa-cloud-staging.svc.cluster.local:8084/api/v1/digital"
+  DIGITAL_ANALYTICS_ENABLED: "true"
 
   # JWT Authentication
   JWT_SECRET: "your-secure-jwt-secret-min-32-chars-replace-in-production"
   JWT_ALGORITHM: "HS256"
   JWT_EXPIRATION: "3600"
 
-  # Stripe (Staging test keys - replace with actual keys in production)
-  STRIPE_SECRET_KEY: "sk_test_YOUR_STRIPE_SECRET_KEY_HERE"
-  STRIPE_WEBHOOK_SECRET: "whsec_YOUR_STRIPE_WEBHOOK_SECRET_HERE"
+  # Stripe (replace with actual keys in production - use secrets instead)
+  STRIPE_SECRET_KEY: "sk_test_your_stripe_key_here"
+  STRIPE_WEBHOOK_SECRET: "whsec_your_webhook_secret_here"

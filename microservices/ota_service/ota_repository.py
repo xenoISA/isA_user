@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct, ListValue
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     FirmwareResponse, UpdateCampaignResponse, DeviceUpdateResponse,
@@ -59,7 +59,7 @@ class OTARepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="ota_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="ota_service")
         self.schema = "ota"
         self.firmware_table = "firmware"
         self.campaigns_table = "update_campaigns"
@@ -125,8 +125,8 @@ class OTARepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 logger.info(f"Created firmware: {firmware_data['firmware_id']}")
@@ -142,8 +142,8 @@ class OTARepository:
         try:
             query = f'SELECT * FROM {self.schema}.{self.firmware_table} WHERE firmware_id = $1 LIMIT 1'
 
-            with self.db:
-                results = self.db.query(query, [firmware_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [firmware_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return results[0]
@@ -162,8 +162,8 @@ class OTARepository:
                 LIMIT 1
             '''
 
-            with self.db:
-                results = self.db.query(query, [device_model, version], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [device_model, version], schema=self.schema)
 
             if results and len(results) > 0:
                 return results[0]
@@ -217,8 +217,8 @@ class OTARepository:
                 LIMIT {limit} OFFSET {offset}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results if results else []
 
@@ -264,8 +264,8 @@ class OTARepository:
                 WHERE firmware_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -341,8 +341,8 @@ class OTARepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 logger.info(f"Created campaign: {campaign_data['campaign_id']}")
@@ -358,8 +358,8 @@ class OTARepository:
         try:
             query = f'SELECT * FROM {self.schema}.{self.campaigns_table} WHERE campaign_id = $1 LIMIT 1'
 
-            with self.db:
-                results = self.db.query(query, [campaign_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [campaign_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return results[0]
@@ -401,8 +401,8 @@ class OTARepository:
                 LIMIT {limit} OFFSET {offset}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results if results else []
 
@@ -448,8 +448,8 @@ class OTARepository:
                 WHERE campaign_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -495,8 +495,8 @@ class OTARepository:
                 campaign_id
             ]
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -544,8 +544,8 @@ class OTARepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 logger.info(f"Created device update: {update_data['update_id']}")
@@ -561,8 +561,8 @@ class OTARepository:
         try:
             query = f'SELECT * FROM {self.schema}.{self.device_updates_table} WHERE update_id = $1 LIMIT 1'
 
-            with self.db:
-                results = self.db.query(query, [update_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, [update_id], schema=self.schema)
 
             if results and len(results) > 0:
                 return results[0]
@@ -609,8 +609,8 @@ class OTARepository:
                 LIMIT {limit}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             return results if results else []
 
@@ -668,8 +668,8 @@ class OTARepository:
                 WHERE update_id = ${param_count}
             '''
 
-            with self.db:
-                count = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
 
             return count is not None and count > 0
 
@@ -708,8 +708,8 @@ class OTARepository:
                 rollback_data.get("completed_at")
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
 
             if results and len(results) > 0:
                 logger.info(f"Created rollback log: {rollback_data.get('rollback_id')}")
@@ -746,9 +746,9 @@ class OTARepository:
                 FROM {self.schema}.{self.device_updates_table}
             '''
 
-            with self.db:
-                campaign_results = self.db.query(campaign_query, [], schema=self.schema)
-                update_results = self.db.query(update_query, [], schema=self.schema)
+            async with self.db:
+                campaign_results = await self.db.query(campaign_query, [], schema=self.schema)
+                update_results = await self.db.query(update_query, [], schema=self.schema)
 
             if not campaign_results or not update_results:
                 return None
@@ -791,8 +791,8 @@ class OTARepository:
         try:
             query = f'SELECT 1 FROM {self.schema}.{self.firmware_table} LIMIT 1'
 
-            with self.db:
-                self.db.query(query, [], schema=self.schema)
+            async with self.db:
+                await self.db.query(query, [], schema=self.schema)
 
             return True
 
@@ -809,8 +809,8 @@ class OTARepository:
                 WHERE device_id = $2
                 AND status IN ($3, $4, $5)
             '''
-            with self.db:
-                count = self.db.execute(
+            async with self.db:
+                count = await self.db.execute(
                     query,
                     ['cancelled', device_id, 'created', 'scheduled', 'in_progress'],
                     schema=self.schema

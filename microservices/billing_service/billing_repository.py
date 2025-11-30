@@ -1,7 +1,7 @@
 """
 Billing Service Data Repository
 
-数据访问层 - PostgreSQL + gRPC
+数据访问层 - PostgreSQL + gRPC (Async)
 """
 
 import logging
@@ -15,7 +15,7 @@ import uuid
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     BillingRecord, BillingEvent, UsageAggregation, BillingQuota,
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class BillingRepository:
-    """计费服务数据仓库 - PostgreSQL"""
+    """计费服务数据仓库 - PostgreSQL (Async)"""
 
     def __init__(self, config: Optional[ConfigManager] = None):
         # Use config_manager for service discovery
@@ -44,7 +44,7 @@ class BillingRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(
+        self.db = AsyncPostgresClient(
             host=host,
             port=port,
             user_id="billing_service"
@@ -110,8 +110,8 @@ class BillingRepository:
                 now
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return self._row_to_billing_record(results[0])
@@ -130,11 +130,11 @@ class BillingRepository:
                 WHERE billing_id = $1
             '''
 
-            with self.db:
-                results = self.db.query(query, [billing_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=[billing_id])
 
-            if results and len(results) > 0:
-                return self._row_to_billing_record(results[0])
+            if result:
+                return self._row_to_billing_record(result)
             return None
 
         except Exception as e:
@@ -171,8 +171,8 @@ class BillingRepository:
                 billing_id
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return self._row_to_billing_record(results[0])
@@ -229,8 +229,8 @@ class BillingRepository:
 
             params.extend([limit, offset])
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return [self._row_to_billing_record(row) for row in results] if results else []
 
@@ -268,8 +268,8 @@ class BillingRepository:
                 datetime.now(timezone.utc)
             ]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
                 return self._row_to_billing_event(results[0])
@@ -347,24 +347,25 @@ class BillingRepository:
 
             params.append(limit)
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             # Convert to UsageAggregation objects
             aggregations = []
-            for row in results:
-                aggregations.append(UsageAggregation(
-                    aggregation_id=row.get("aggregation_id"),
-                    user_id=row.get("user_id"),
-                    organization_id=row.get("organization_id"),
-                    service_type=ServiceType(row.get("service_type")),
-                    period_start=row.get("period_start"),
-                    period_end=row.get("period_end"),
-                    total_usage=Decimal(str(row.get("total_usage", 0))),
-                    total_cost=Decimal(str(row.get("total_cost", 0))),
-                    currency=Currency(row.get("currency", "USD")),
-                    usage_breakdown=row.get("usage_breakdown", {})
-                ))
+            if results:
+                for row in results:
+                    aggregations.append(UsageAggregation(
+                        aggregation_id=row.get("aggregation_id"),
+                        user_id=row.get("user_id"),
+                        organization_id=row.get("organization_id"),
+                        service_type=ServiceType(row.get("service_type")),
+                        period_start=row.get("period_start"),
+                        period_end=row.get("period_end"),
+                        total_usage=Decimal(str(row.get("total_usage", 0))),
+                        total_cost=Decimal(str(row.get("total_cost", 0))),
+                        currency=Currency(row.get("currency", "USD")),
+                        usage_breakdown=row.get("usage_breakdown", {})
+                    ))
 
             return aggregations
 
@@ -433,11 +434,11 @@ class BillingRepository:
                 LIMIT 1
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
-            if results and len(results) > 0:
-                return self._row_to_billing_quota(results[0])
+            if result:
+                return self._row_to_billing_quota(result)
             return None
 
         except Exception as e:
@@ -505,17 +506,16 @@ class BillingRepository:
                 {where_clause}
             '''
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
 
-            if results and len(results) > 0:
-                row = results[0]
+            if result:
                 return {
-                    "total_billing_records": row.get("total_records", 0),
-                    "completed_billing_records": row.get("completed_count", 0),
-                    "failed_billing_records": row.get("failed_count", 0),
-                    "pending_billing_records": row.get("pending_count", 0),
-                    "total_revenue": float(row.get("completed_amount", 0)),
+                    "total_billing_records": result.get("total_records", 0),
+                    "completed_billing_records": result.get("completed_count", 0),
+                    "failed_billing_records": result.get("failed_count", 0),
+                    "pending_billing_records": result.get("pending_count", 0),
+                    "total_revenue": float(result.get("completed_amount", 0)),
                     "revenue_by_service": {},
                     "revenue_by_method": {},
                     "active_users": 0,

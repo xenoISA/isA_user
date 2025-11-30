@@ -41,6 +41,7 @@ from .account_service import (
 from .clients import (
     BillingServiceClient,
     OrganizationServiceClient,
+    SubscriptionServiceClient,
     WalletServiceClient,
 )
 from .events import get_event_handlers
@@ -124,12 +125,16 @@ class AccountMicroservice:
                 self.organization_client = OrganizationServiceClient()
                 self.billing_client = BillingServiceClient()
                 self.wallet_client = WalletServiceClient()
+                self.subscription_client = SubscriptionServiceClient()
                 logger.info("Service clients initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize service clients: {e}")
+                self.subscription_client = None
 
             self.account_service = AccountService(
-                event_bus=event_bus, config=config_manager
+                event_bus=event_bus,
+                config=config_manager,
+                subscription_client=self.subscription_client
             )
             logger.info("Account microservice initialized successfully")
         except Exception as e:
@@ -154,6 +159,8 @@ class AccountMicroservice:
                 await self.billing_client.close()
             if self.wallet_client:
                 await self.wallet_client.close()
+            if self.subscription_client:
+                await self.subscription_client.close()
             logger.info("Service clients closed")
 
             if self.event_bus:
@@ -209,8 +216,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI application
 app = FastAPI(
     title="Account Service",
-    description="User account management microservice",
-    version="1.0.0",
+    description="User account management microservice - Identity anchor. Subscription data managed by subscription_service.",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -286,7 +293,11 @@ async def ensure_account(
 async def get_account_profile(
     user_id: str, account_service: AccountService = Depends(get_account_service)
 ):
-    """Get detailed account profile"""
+    """
+    Get detailed account profile (identity data only).
+
+    Note: For subscription information, query subscription_service directly.
+    """
     try:
         return await account_service.get_account_profile(user_id)
     except AccountNotFoundError as e:
@@ -368,19 +379,20 @@ async def list_accounts(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    subscription_status: Optional[str] = Query(
-        None, description="Filter by subscription"
-    ),
     search: Optional[str] = Query(None, description="Search in name/email"),
     account_service: AccountService = Depends(get_account_service),
 ):
-    """List accounts with filtering and pagination"""
+    """
+    List accounts with filtering and pagination.
+
+    Note: Subscription filtering is not available here. Use subscription_service
+    for subscription-based queries.
+    """
     try:
         params = AccountListParams(
             page=page,
             page_size=page_size,
             is_active=is_active,
-            subscription_status=subscription_status,
             search=search,
         )
         return await account_service.list_accounts(params)

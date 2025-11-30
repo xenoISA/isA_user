@@ -1,6 +1,6 @@
 """
 Location Repository
-Data access layer for location operations with PostGIS support
+Data access layer for location operations with PostGIS support (Async)
 """
 
 import json
@@ -17,16 +17,16 @@ sys.path.append(
 
 from core.config_manager import ConfigManager
 
-from isa_common.postgres_client import PostgresClient
+from isa_common import AsyncPostgresClient
 
 logger = logging.getLogger(__name__)
 
 
 class LocationRepository:
-    """Repository for location operations with PostGIS spatial queries"""
+    """Repository for location operations with PostGIS spatial queries (Async)"""
 
     def __init__(self, config: Optional[ConfigManager] = None):
-        """Initialize location repository with PostgresClient"""
+        """Initialize location repository with AsyncPostgresClient"""
         # 使用 config_manager 进行服务发现
         if config is None:
             config = ConfigManager("location_service")
@@ -42,7 +42,7 @@ class LocationRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = PostgresClient(host=host, port=port, user_id="location_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="location_service")
 
         self.schema = "location"
 
@@ -87,11 +87,11 @@ class LocationRepository:
                 data["created_at"],
             ]
 
-            with self.db:
-                result = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.execute(query, params=params)
                 logger.debug(f"Location insert result: {result}")
 
-            if result:
+            if result is not None:
                 return await self.get_location_by_id(data["location_id"])
 
             logger.warning(
@@ -117,11 +117,11 @@ class LocationRepository:
                 WHERE location_id::text = $1
             """
 
-            with self.db:
-                results = self.db.query(query, [location_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=[location_id])
 
-            if results and len(results) > 0:
-                return self._deserialize_location(results[0])
+            if result:
+                return self._deserialize_location(result)
             return None
 
         except Exception as e:
@@ -146,11 +146,11 @@ class LocationRepository:
                 LIMIT 1
             """
 
-            with self.db:
-                results = self.db.query(query, [device_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=[device_id])
 
-            if results and len(results) > 0:
-                return self._deserialize_location(results[0])
+            if result:
+                return self._deserialize_location(result)
             return None
 
         except Exception as e:
@@ -194,8 +194,8 @@ class LocationRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return [self._deserialize_location(r) for r in results] if results else []
 
@@ -256,8 +256,8 @@ class LocationRepository:
 
             params = [user_id, time_threshold, longitude, latitude, radius_meters]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return [dict(r) for r in results] if results else []
 
@@ -315,8 +315,8 @@ class LocationRepository:
 
             params.extend([center_lon, center_lat, radius_meters])
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return [self._deserialize_location(r) for r in results] if results else []
 
@@ -355,10 +355,10 @@ class LocationRepository:
 
             params = self._build_geofence_params(data)
 
-            with self.db:
-                result = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.execute(query, params=params)
 
-            if result:
+            if result is not None:
                 return await self.get_geofence_by_id(data["geofence_id"])
             return None
 
@@ -385,11 +385,11 @@ class LocationRepository:
                 WHERE geofence_id = $1
             """
 
-            with self.db:
-                results = self.db.query(query, [geofence_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=[geofence_id])
 
-            if results and len(results) > 0:
-                return self._deserialize_geofence(results[0])
+            if result:
+                return self._deserialize_geofence(result)
             return None
 
         except Exception as e:
@@ -425,8 +425,8 @@ class LocationRepository:
                 LIMIT {limit} OFFSET {offset}
             """
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return [self._deserialize_geofence(r) for r in results] if results else []
 
@@ -466,8 +466,8 @@ class LocationRepository:
                 WHERE geofence_id = ${param_idx}
             """
 
-            with self.db:
-                self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                await self.db.execute(query, params=params)
 
             return True
 
@@ -480,8 +480,8 @@ class LocationRepository:
         try:
             query = f"DELETE FROM {self.schema}.geofences WHERE geofence_id = $1"
 
-            with self.db:
-                self.db.execute(query, [geofence_id], schema=self.schema)
+            async with self.db:
+                await self.db.execute(query, params=[geofence_id])
 
             return True
 
@@ -515,8 +515,8 @@ class LocationRepository:
 
             params = [user_id, device_id, longitude, latitude]
 
-            with self.db:
-                results = self.db.query(query, params, schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=params)
 
             return [dict(r) for r in results] if results else []
 
@@ -554,10 +554,10 @@ class LocationRepository:
                 data["updated_at"],
             ]
 
-            with self.db:
-                result = self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                result = await self.db.execute(query, params=params)
 
-            if result:
+            if result is not None:
                 return await self.get_place_by_id(data["place_id"])
             return None
 
@@ -577,11 +577,11 @@ class LocationRepository:
                 WHERE place_id::text = $1
             """
 
-            with self.db:
-                results = self.db.query(query, [place_id], schema=self.schema)
+            async with self.db:
+                result = await self.db.query_row(query, params=[place_id])
 
-            if results and len(results) > 0:
-                return self._deserialize_place(results[0])
+            if result:
+                return self._deserialize_place(result)
             return None
 
         except Exception as e:
@@ -601,8 +601,8 @@ class LocationRepository:
                 ORDER BY created_at DESC
             """
 
-            with self.db:
-                results = self.db.query(query, [user_id], schema=self.schema)
+            async with self.db:
+                results = await self.db.query(query, params=[user_id])
 
             return [self._deserialize_place(r) for r in results] if results else []
 
@@ -655,8 +655,8 @@ class LocationRepository:
                 WHERE place_id = ${param_idx}
             """
 
-            with self.db:
-                self.db.execute(query, params, schema=self.schema)
+            async with self.db:
+                await self.db.execute(query, params=params)
 
             return True
 
@@ -669,8 +669,8 @@ class LocationRepository:
         try:
             query = f"DELETE FROM {self.schema}.places WHERE place_id = $1"
 
-            with self.db:
-                self.db.execute(query, [place_id], schema=self.schema)
+            async with self.db:
+                await self.db.execute(query, params=[place_id])
 
             return True
 
