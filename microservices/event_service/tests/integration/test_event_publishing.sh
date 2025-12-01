@@ -3,8 +3,8 @@
 # Event Service - Event Publishing Integration Tests
 # Tests NATS event publishing and event service integration
 
-# Use environment variable for base URL, default to localhost:8230
-BASE_URL="${EVENT_SERVICE_URL:-http://localhost:8230}"
+# Use environment variable for base URL, default to localhost
+BASE_URL="${EVENT_SERVICE_URL:-http://localhost}"
 API_BASE="${BASE_URL}/api/v1"
 
 # Colors for output

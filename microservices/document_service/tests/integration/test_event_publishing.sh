@@ -20,7 +20,7 @@ echo ""
 # Test variables
 TEST_TS="$(date +%s)_$$"
 TEST_USER_ID="event_test_user_${TEST_TS}"
-BASE_URL="http://localhost:8227/api/v1"
+BASE_URL="http://localhost/api/v1"
 
 echo -e "${BLUE}Testing document service at: ${BASE_URL}${NC}"
 echo ""

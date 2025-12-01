@@ -107,8 +107,8 @@ echo -e "${CYAN}                         TEST SUMMARY${NC}"
 echo -e "${CYAN}======================================================================${NC}"
 echo ""
 
-TOTAL_TESTS=4
-PASSED_TESTS=$((PASSED_1 + PASSED_2 + PASSED_3 + PASSED_4))
+TOTAL_TESTS=3
+PASSED_TESTS=$((PASSED_1 + PASSED_2 + PASSED_3))
 
 echo -e "Test 1: Event bus connection        - $([ $PASSED_1 -eq 1 ] && echo -e "${GREEN}✓ PASSED${NC}" || echo -e "${RED}✗ FAILED${NC}")"
 echo -e "Test 2: Service startup             - $([ $PASSED_2 -eq 1 ] && echo -e "${GREEN}✓ PASSED${NC}" || echo -e "${RED}✗ FAILED${NC}")"

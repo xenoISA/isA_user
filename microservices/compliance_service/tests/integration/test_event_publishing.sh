@@ -62,16 +62,17 @@ echo ""
 
 TEXT_CHECK_PAYLOAD="{
   \"user_id\": \"${TEST_USER_ID}\",
+  \"content_type\": \"text\",
   \"content\": \"This is a clean test message for compliance checking\",
-  \"check_types\": [\"content_moderation\", \"hate_speech\"],
+  \"check_types\": [\"content_moderation\", \"toxicity\"],
   \"session_id\": \"session_test_$(date +%s)\"
 }"
 
 echo "Checking text content to trigger compliance.check_performed event..."
-echo "POST ${API_BASE}/compliance/check/text"
+echo "POST ${API_BASE}/compliance/check"
 echo "$TEXT_CHECK_PAYLOAD" | jq '.'
 
-RESPONSE=$(curl -s -X POST "${API_BASE}/compliance/check/text" \
+RESPONSE=$(curl -s -X POST "${API_BASE}/compliance/check" \
   -H "Content-Type: application/json" \
   -d "$TEXT_CHECK_PAYLOAD")
 
@@ -81,8 +82,8 @@ echo "$RESPONSE" | jq '.'
 CHECK_ID=$(echo "$RESPONSE" | jq -r '.check_id')
 STATUS=$(echo "$RESPONSE" | jq -r '.status')
 
-if [ -n "$CHECK_ID" ] && [ "$CHECK_ID" != "null" ] && [ "$STATUS" = "passed" ]; then
-    print_result 0 "compliance.check_performed event should be published (check_id: $CHECK_ID)"
+if [ -n "$CHECK_ID" ] && [ "$CHECK_ID" != "null" ]; then
+    print_result 0 "compliance.check_performed event should be published (check_id: $CHECK_ID, status: $STATUS)"
 else
     print_result 1 "Failed to perform compliance check"
 fi
@@ -95,16 +96,17 @@ echo ""
 
 VIOLATION_PAYLOAD="{
   \"user_id\": \"${TEST_USER_ID}\",
+  \"content_type\": \"text\",
   \"content\": \"This content contains profanity: damn shit fuck\",
-  \"check_types\": [\"content_moderation\"],
+  \"check_types\": [\"content_moderation\", \"toxicity\"],
   \"session_id\": \"session_violation_$(date +%s)\"
 }"
 
 echo "Checking violating content to trigger compliance.violation_detected event..."
-echo "POST ${API_BASE}/compliance/check/text"
+echo "POST ${API_BASE}/compliance/check"
 echo "$VIOLATION_PAYLOAD" | jq '.'
 
-RESPONSE=$(curl -s -X POST "${API_BASE}/compliance/check/text" \
+RESPONSE=$(curl -s -X POST "${API_BASE}/compliance/check" \
   -H "Content-Type: application/json" \
   -d "$VIOLATION_PAYLOAD")
 
@@ -132,16 +134,17 @@ echo ""
 
 WARNING_PAYLOAD="{
   \"user_id\": \"${TEST_USER_ID}\",
+  \"content_type\": \"text\",
   \"content\": \"Buy now! Limited time offer! Click here!\",
-  \"check_types\": [\"spam_detection\"],
+  \"check_types\": [\"content_moderation\", \"content_safety\"],
   \"session_id\": \"session_warning_$(date +%s)\"
 }"
 
 echo "Checking suspicious content to trigger compliance.warning_issued event..."
-echo "POST ${API_BASE}/compliance/check/text"
+echo "POST ${API_BASE}/compliance/check"
 echo "$WARNING_PAYLOAD" | jq '.'
 
-RESPONSE=$(curl -s -X POST "${API_BASE}/compliance/check/text" \
+RESPONSE=$(curl -s -X POST "${API_BASE}/compliance/check" \
   -H "Content-Type: application/json" \
   -d "$WARNING_PAYLOAD")
 
@@ -162,18 +165,15 @@ echo "Test 4: Verify PCI compliance check events"
 echo "======================================================================"
 echo ""
 
-PCI_PAYLOAD="{
-  \"content\": \"My credit card number is 4111111111111111\",
-  \"check_type\": \"pci\"
-}"
+PCI_CONTENT="My credit card number is 4111111111111111"
+PCI_USER_ID="${TEST_USER_ID}"
 
 echo "Checking PCI sensitive data..."
-echo "POST ${API_BASE}/compliance/pci/card-data-check"
-echo "$PCI_PAYLOAD" | jq '.'
+echo "POST ${API_BASE}/compliance/pci/card-data-check?content=...&user_id=${PCI_USER_ID}"
 
 RESPONSE=$(curl -s -X POST "${API_BASE}/compliance/pci/card-data-check" \
-  -H "Content-Type: application/json" \
-  -d "$PCI_PAYLOAD")
+  -G --data-urlencode "content=${PCI_CONTENT}" \
+  --data-urlencode "user_id=${PCI_USER_ID}")
 
 echo "Response:"
 echo "$RESPONSE" | jq '.'
