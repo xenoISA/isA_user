@@ -5,11 +5,11 @@ Wallet Event Handlers
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     BillingCalculatedEventData,
@@ -239,6 +239,240 @@ async def handle_payment_completed(event: Event, wallet_service):
         logger.error(f"Failed to handle payment.completed event {event.id}: {e}")
 
 
+async def handle_payment_refunded(event: Event, wallet_service):
+    """
+    Handle payment.refunded event
+    Deposit refund amount back into user's wallet
+
+    Args:
+        event: NATS event object
+        wallet_service: WalletService instance
+
+    Event Data:
+        - user_id: User ID
+        - amount: Refund amount
+        - currency: Currency code (default: USD)
+        - payment_id: Original payment transaction ID
+        - refund_id: Refund transaction ID
+        - reason: Refund reason
+
+    Workflow:
+        1. Validate event data
+        2. Get user's primary wallet
+        3. Deposit refund to wallet
+        4. Publish refund.completed event
+    """
+    try:
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        user_id = event.data.get("user_id")
+        amount = event.data.get("amount")
+        currency = event.data.get("currency", "USD")
+        payment_id = event.data.get("payment_id")
+        refund_id = event.data.get("refund_id")
+        reason = event.data.get("reason", "Payment refund")
+
+        if not user_id or not amount:
+            logger.warning(
+                f"payment.refunded event missing required fields: {event.id}"
+            )
+            return
+
+        # Get user's primary wallet
+        wallet = await wallet_service.repository.get_primary_wallet(user_id)
+        if not wallet:
+            logger.warning(f"No wallet found for user {user_id}, cannot process refund")
+            _mark_event_processed(event.id)
+            return
+
+        # Import here to avoid circular imports
+        from ..models import DepositRequest
+
+        # Deposit refund into wallet
+        deposit_request = DepositRequest(
+            amount=Decimal(str(amount)),
+            description=f"Refund: {reason} (payment_id: {payment_id})",
+            reference_id=refund_id or payment_id,
+            metadata={
+                "event_id": event.id,
+                "event_type": event.type,
+                "payment_id": payment_id,
+                "refund_id": refund_id,
+                "reason": reason,
+                "timestamp": event.timestamp,
+                "currency": currency,
+                "is_refund": True,
+            },
+        )
+
+        result = await wallet_service.deposit(wallet.wallet_id, deposit_request)
+
+        _mark_event_processed(event.id)
+        logger.info(
+            f"✅ Refunded {amount} {currency} to wallet for user {user_id} "
+            f"(refund: {refund_id}, event: {event.id})"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to handle payment.refunded event {event.id}: {e}")
+
+
+async def handle_subscription_created(event: Event, wallet_service):
+    """
+    Handle subscription.created event
+    Allocate monthly credits to user's wallet based on subscription tier
+
+    Args:
+        event: NATS event object
+        wallet_service: WalletService instance
+
+    Event Data:
+        - user_id: User ID
+        - subscription_id: Subscription ID
+        - plan_id: Plan/tier ID
+        - monthly_credits: Credits included in subscription (optional)
+
+    Workflow:
+        1. Validate event data
+        2. Get user's primary wallet
+        3. Allocate subscription credits
+    """
+    try:
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        user_id = event.data.get("user_id")
+        subscription_id = event.data.get("subscription_id")
+        plan_id = event.data.get("plan_id")
+        monthly_credits = event.data.get("monthly_credits", 0)
+
+        if not user_id or not subscription_id:
+            logger.warning(
+                f"subscription.created event missing required fields: {event.id}"
+            )
+            return
+
+        # Get user's primary wallet
+        wallet = await wallet_service.repository.get_primary_wallet(user_id)
+        if not wallet:
+            logger.warning(f"No wallet found for user {user_id}, skipping credit allocation")
+            _mark_event_processed(event.id)
+            return
+
+        # Allocate monthly credits if included in subscription
+        if monthly_credits and float(monthly_credits) > 0:
+            from ..models import DepositRequest
+
+            deposit_request = DepositRequest(
+                amount=Decimal(str(monthly_credits)),
+                description=f"Subscription credits ({plan_id})",
+                reference_id=subscription_id,
+                metadata={
+                    "event_id": event.id,
+                    "event_type": event.type,
+                    "subscription_id": subscription_id,
+                    "plan_id": plan_id,
+                    "timestamp": event.timestamp,
+                    "is_subscription_credit": True,
+                },
+            )
+
+            await wallet_service.deposit(wallet.wallet_id, deposit_request)
+            logger.info(
+                f"✅ Allocated {monthly_credits} subscription credits to wallet for user {user_id} "
+                f"(subscription: {subscription_id})"
+            )
+        else:
+            logger.info(
+                f"Subscription {subscription_id} created for user {user_id} (no credits to allocate)"
+            )
+
+        _mark_event_processed(event.id)
+
+    except Exception as e:
+        logger.error(f"Failed to handle subscription.created event {event.id}: {e}")
+
+
+async def handle_user_deleted(event: Event, wallet_service):
+    """
+    Handle user.deleted event
+    Clean up user's wallet data for GDPR compliance
+
+    Args:
+        event: NATS event object
+        wallet_service: WalletService instance
+
+    Event Data:
+        - user_id: Deleted user ID
+
+    Workflow:
+        1. Validate event data
+        2. Get user's wallets
+        3. Mark wallets as deleted/frozen
+        4. Anonymize transaction history (keep for accounting)
+    """
+    try:
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        user_id = event.data.get("user_id")
+
+        if not user_id:
+            logger.warning(f"user.deleted event missing user_id: {event.id}")
+            return
+
+        logger.info(f"Processing user.deleted for wallet cleanup: {user_id}")
+
+        # Get all wallets for this user
+        wallets = await wallet_service.repository.get_user_wallets(user_id)
+
+        if not wallets:
+            logger.info(f"No wallets found for deleted user {user_id}")
+            _mark_event_processed(event.id)
+            return
+
+        frozen_count = 0
+        for wallet in wallets:
+            try:
+                # Freeze/deactivate wallet
+                await wallet_service.repository.deactivate_wallet(wallet.wallet_id)
+
+                # Anonymize wallet metadata
+                await wallet_service.repository.update_wallet_metadata(
+                    wallet.wallet_id,
+                    {
+                        "user_deleted": True,
+                        "user_deleted_at": datetime.now(timezone.utc).isoformat(),
+                        "original_user_id": user_id,  # Keep for audit
+                    }
+                )
+
+                frozen_count += 1
+                logger.debug(f"Frozen wallet {wallet.wallet_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to freeze wallet {wallet.wallet_id}: {e}")
+
+        # Anonymize transaction history (keep amounts for accounting)
+        try:
+            anonymized = await wallet_service.repository.anonymize_user_transactions(user_id)
+            logger.info(f"Anonymized {anonymized} transactions for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to anonymize transactions: {e}")
+
+        _mark_event_processed(event.id)
+        logger.info(
+            f"✅ User {user_id} wallet cleanup completed: {frozen_count} wallets frozen"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to handle user.deleted event {event.id}: {e}")
+
+
 async def handle_user_created(event: Event, wallet_service):
     """
     Handle user.created event
@@ -319,7 +553,16 @@ def get_event_handlers(wallet_service, event_bus):
         "payment_service.payment.completed": lambda event: handle_payment_completed(
             event, wallet_service
         ),
+        "payment_service.payment.refunded": lambda event: handle_payment_refunded(
+            event, wallet_service
+        ),
+        "subscription_service.subscription.created": lambda event: handle_subscription_created(
+            event, wallet_service
+        ),
         "account_service.user.created": lambda event: handle_user_created(
+            event, wallet_service
+        ),
+        "account_service.user.deleted": lambda event: handle_user_deleted(
             event, wallet_service
         ),
         "billing_service.billing.calculated": lambda event: handle_billing_calculated(
@@ -331,6 +574,9 @@ def get_event_handlers(wallet_service, event_bus):
 __all__ = [
     "handle_billing_calculated",
     "handle_payment_completed",
+    "handle_payment_refunded",
+    "handle_subscription_created",
     "handle_user_created",
+    "handle_user_deleted",
     "get_event_handlers",
 ]

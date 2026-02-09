@@ -30,8 +30,8 @@ class ProceduralMemoryService:
 
         # Initialize Qdrant client (async) - lazy connection
         self.qdrant = AsyncQdrantClient(
-            host=os.getenv('QDRANT_HOST', 'isa-qdrant-grpc'),
-            port=int(os.getenv('QDRANT_PORT', 50062)),
+            host=os.getenv('QDRANT_HOST', 'localhost'),
+            port=int(os.getenv('QDRANT_PORT', 6333)),
             user_id='memory_service'
         )
         self._collection_initialized = False  # Track if collection is ready
@@ -265,3 +265,78 @@ Return ONLY valid JSON with a "procedures" array."""
     ) -> List[Dict[str, Any]]:
         """Search procedures by skill type"""
         return await self.repository.search_by_skill_type(user_id, skill_type, limit)
+
+    async def vector_search(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+        score_threshold: float = 0.15
+    ) -> List[Dict[str, Any]]:
+        """
+        Search procedural memories using vector similarity (Qdrant)
+
+        Args:
+            user_id: User identifier
+            query: Search query text
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score (0.0-1.0)
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        try:
+            # Ensure collection exists
+            await self._ensure_collection()
+
+            # Generate embedding for query
+            query_embedding = await self._generate_embedding(query)
+            if not query_embedding:
+                logger.warning("Failed to generate query embedding, falling back to text search")
+                return await self.search_procedures_by_skill_type(user_id, query, limit)
+
+            logger.info(f"Generated query embedding with {len(query_embedding)} dimensions for procedural search: {query[:50]}...")
+
+            # Search Qdrant for similar vectors with user_id filter
+            filter_conditions = {
+                "must": [
+                    {"field": "user_id", "match": {"keyword": user_id}}
+                ]
+            }
+
+            async with self.qdrant:
+                search_results = await self.qdrant.search_with_filter(
+                    collection_name='procedural_memories',
+                    vector=query_embedding,
+                    filter_conditions=filter_conditions,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    with_payload=True
+                )
+
+            if not search_results:
+                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
+                return []
+
+            # Get memory IDs and scores from results
+            memory_ids = [str(result['id']) for result in search_results]
+            scores = {str(result['id']): result.get('score', 0.0) for result in search_results}
+
+            logger.info(f"Vector search found {len(memory_ids)} procedural matches for user {user_id}")
+
+            # Fetch full memory data from PostgreSQL
+            memories = await self.repository.get_by_ids(memory_ids)
+
+            # Add similarity scores to results
+            for memory in memories:
+                memory_id = memory.get('id')
+                memory['similarity_score'] = scores.get(memory_id, 0.0)
+
+            # Sort by score descending
+            memories.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+
+            return memories
+
+        except Exception as e:
+            logger.error(f"Procedural vector search failed: {e}")
+            return await self.search_procedures_by_skill_type(user_id, query, limit)

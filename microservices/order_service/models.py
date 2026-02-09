@@ -38,6 +38,49 @@ class PaymentStatus(str, Enum):
     REFUNDED = "refunded"
 
 
+class FulfillmentStatus(str, Enum):
+    """Fulfillment status enumeration"""
+    PENDING = "pending"
+    ALLOCATED = "allocated"
+    SHIPPED = "shipped"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+
+
+class FulfillmentType(str, Enum):
+    """Fulfillment type"""
+    DIGITAL = "digital"
+    SHIP = "ship"
+
+
+class Address(BaseModel):
+    """Shipping or billing address"""
+    name: Optional[str] = None
+    line1: str
+    line2: Optional[str] = None
+    city: str
+    state: Optional[str] = None
+    postal_code: str
+    country: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+
+class OrderLineItem(BaseModel):
+    """Order line item"""
+    product_id: str
+    sku_id: Optional[str] = None
+    title: Optional[str] = None
+    quantity: int = Field(..., gt=0)
+    unit_price: Decimal = Field(..., ge=0)
+    subtotal: Decimal = Field(default=Decimal("0"), ge=0)
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    total_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    fulfillment_type: FulfillmentType = FulfillmentType.DIGITAL
+    metadata: Optional[Dict[str, Any]] = None
+
+
 # Core Order Models
 
 class Order(BaseModel):
@@ -52,7 +95,16 @@ class Order(BaseModel):
     payment_intent_id: Optional[str] = None
     subscription_id: Optional[str] = None
     wallet_id: Optional[str] = None
-    items: List[Dict[str, Any]] = []
+    items: List[OrderLineItem] = []
+    subtotal_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    shipping_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    final_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    fulfillment_status: FulfillmentStatus = FulfillmentStatus.PENDING
+    tracking_number: Optional[str] = None
+    shipping_address: Optional[Address] = None
+    billing_address: Optional[Address] = None
     metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
@@ -71,7 +123,14 @@ class OrderCreateRequest(BaseModel):
     payment_intent_id: Optional[str] = Field(None, description="Associated payment intent")
     subscription_id: Optional[str] = Field(None, description="Associated subscription")
     wallet_id: Optional[str] = Field(None, description="Target wallet for credits")
-    items: List[Dict[str, Any]] = Field(default=[], description="Order items")
+    items: List[OrderLineItem] = Field(default=[], description="Order items")
+    subtotal_amount: Optional[Decimal] = Field(default=None, ge=0)
+    tax_amount: Optional[Decimal] = Field(default=None, ge=0)
+    shipping_amount: Optional[Decimal] = Field(default=None, ge=0)
+    discount_amount: Optional[Decimal] = Field(default=None, ge=0)
+    final_amount: Optional[Decimal] = Field(default=None, ge=0)
+    shipping_address: Optional[Address] = None
+    billing_address: Optional[Address] = None
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
     expires_in_minutes: Optional[int] = Field(default=30, description="Order expiration time")
 
@@ -87,6 +146,10 @@ class OrderUpdateRequest(BaseModel):
     status: Optional[OrderStatus] = None
     payment_status: Optional[PaymentStatus] = None
     payment_intent_id: Optional[str] = None
+    fulfillment_status: Optional[FulfillmentStatus] = None
+    tracking_number: Optional[str] = None
+    shipping_address: Optional[Address] = None
+    billing_address: Optional[Address] = None
     metadata: Optional[Dict[str, Any]] = None
 
 

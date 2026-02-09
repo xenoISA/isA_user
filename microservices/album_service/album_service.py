@@ -3,9 +3,13 @@ Album Service Business Logic
 
 Album management business logic layer for the microservice.
 Handles validation, business rules, and error handling.
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
 """
 
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from datetime import datetime, timezone
 import logging
 import uuid
@@ -15,38 +19,27 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from .album_repository import AlbumRepository
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import (
+    AlbumRepositoryProtocol,
+    AlbumNotFoundError,
+    AlbumValidationError,
+    AlbumPermissionError,
+    AlbumServiceError,
+)
 from .models import (
     AlbumCreateRequest, AlbumUpdateRequest, AlbumAddPhotosRequest,
     AlbumRemovePhotosRequest, AlbumSyncRequest, AlbumResponse,
     AlbumSummaryResponse, AlbumPhotoResponse, AlbumSyncStatusResponse,
     AlbumListResponse, Album, AlbumPhoto, SyncStatus
 )
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
-
-
-# ==================== Custom Exceptions ====================
-
-class AlbumServiceError(Exception):
-    """Base exception for album service errors"""
-    pass
-
-
-class AlbumValidationError(AlbumServiceError):
-    """Album validation error"""
-    pass
-
-
-class AlbumNotFoundError(AlbumServiceError):
-    """Album not found error"""
-    pass
-
-
-class AlbumPermissionError(AlbumServiceError):
-    """Album permission denied error"""
-    pass
 
 
 # ==================== Album Service ====================
@@ -56,11 +49,25 @@ class AlbumService:
     Album management business logic service
 
     Handles all album-related business operations while delegating
-    data access to the AlbumRepository layer.
+    data access to the repository layer.
+
+    Uses dependency injection for testability - repository is injected,
+    not created internally.
     """
 
-    def __init__(self, event_bus=None):
-        self.album_repo = AlbumRepository()
+    def __init__(
+        self,
+        repository: Optional[AlbumRepositoryProtocol] = None,
+        event_bus=None,
+    ):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+        """
+        self.repo = repository  # Will be set by factory if None
         self.event_bus = event_bus
 
     # ==================== Album Lifecycle Operations ====================
@@ -106,7 +113,7 @@ class AlbumService:
             )
 
             # Save to database
-            created_album = await self.album_repo.create_album(album)
+            created_album = await self.repo.create_album(album)
 
             if not created_album:
                 raise AlbumServiceError("Failed to create album")
@@ -115,8 +122,8 @@ class AlbumService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.ALBUM_CREATED,
-                        source=ServiceSource.ALBUM_SERVICE,
+                        event_type="album.created",
+                        source="album_service",
                         data={
                             "album_id": created_album.album_id,
                             "user_id": created_album.user_id,
@@ -160,7 +167,7 @@ class AlbumService:
             AlbumPermissionError: If user doesn't have access
         """
         try:
-            album = await self.album_repo.get_album_by_id(album_id, user_id)
+            album = await self.repo.get_album_by_id(album_id, user_id)
 
             if not album:
                 raise AlbumNotFoundError(f"Album not found: {album_id}")
@@ -199,7 +206,7 @@ class AlbumService:
             offset = (page - 1) * page_size
 
             # Get albums from repository
-            albums = await self.album_repo.list_user_albums(
+            albums = await self.repo.list_user_albums(
                 user_id=user_id,
                 organization_id=organization_id,
                 is_family_shared=is_family_shared,
@@ -261,7 +268,7 @@ class AlbumService:
         """
         try:
             # Verify album exists and user owns it
-            album = await self.album_repo.get_album_by_id(album_id, user_id)
+            album = await self.repo.get_album_by_id(album_id, user_id)
             if not album:
                 raise AlbumNotFoundError(f"Album not found: {album_id}")
 
@@ -283,20 +290,20 @@ class AlbumService:
                 update_data["tags"] = request.tags
 
             # Update album
-            success = await self.album_repo.update_album(album_id, user_id, update_data)
+            success = await self.repo.update_album(album_id, user_id, update_data)
 
             if not success:
                 raise AlbumServiceError("Failed to update album")
 
             # Get updated album
-            updated_album = await self.album_repo.get_album_by_id(album_id, user_id)
+            updated_album = await self.repo.get_album_by_id(album_id, user_id)
 
             # Publish album.updated event
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.ALBUM_UPDATED,
-                        source=ServiceSource.ALBUM_SERVICE,
+                        event_type="album.updated",
+                        source="album_service",
                         data={
                             "album_id": album_id,
                             "user_id": user_id,
@@ -339,20 +346,20 @@ class AlbumService:
         """
         try:
             # Verify album exists and user owns it
-            album = await self.album_repo.get_album_by_id(album_id, user_id)
+            album = await self.repo.get_album_by_id(album_id, user_id)
             if not album:
                 raise AlbumNotFoundError(f"Album not found: {album_id}")
 
             # Delete album (this will cascade delete photos due to repository logic)
-            success = await self.album_repo.delete_album(album_id, user_id)
+            success = await self.repo.delete_album(album_id, user_id)
 
             if success:
                 # Publish album.deleted event
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.ALBUM_DELETED,
-                            source=ServiceSource.ALBUM_SERVICE,
+                            event_type="album.deleted",
+                            source="album_service",
                             data={
                                 "album_id": album_id,
                                 "user_id": user_id,
@@ -399,7 +406,7 @@ class AlbumService:
         """
         try:
             # Verify album exists and user owns it
-            album = await self.album_repo.get_album_by_id(album_id, user_id)
+            album = await self.repo.get_album_by_id(album_id, user_id)
             if not album:
                 raise AlbumNotFoundError(f"Album not found: {album_id}")
 
@@ -407,7 +414,7 @@ class AlbumService:
             # For now, we trust the photo_ids provided
 
             # Add photos
-            added_count = await self.album_repo.add_photos_to_album(
+            added_count = await self.repo.add_photos_to_album(
                 album_id=album_id,
                 photo_ids=request.photo_ids,
                 added_by=user_id
@@ -417,8 +424,8 @@ class AlbumService:
             if self.event_bus and added_count > 0:
                 try:
                     event = Event(
-                        event_type=EventType.ALBUM_PHOTO_ADDED,
-                        source=ServiceSource.ALBUM_SERVICE,
+                        event_type="album.photo.added",
+                        source="album_service",
                         data={
                             "album_id": album_id,
                             "user_id": user_id,
@@ -469,12 +476,12 @@ class AlbumService:
         """
         try:
             # Verify album exists and user owns it
-            album = await self.album_repo.get_album_by_id(album_id, user_id)
+            album = await self.repo.get_album_by_id(album_id, user_id)
             if not album:
                 raise AlbumNotFoundError(f"Album not found: {album_id}")
 
             # Remove photos
-            removed_count = await self.album_repo.remove_photos_from_album(
+            removed_count = await self.repo.remove_photos_from_album(
                 album_id=album_id,
                 photo_ids=request.photo_ids
             )
@@ -483,8 +490,8 @@ class AlbumService:
             if self.event_bus and removed_count > 0:
                 try:
                     event = Event(
-                        event_type=EventType.ALBUM_PHOTO_REMOVED,
-                        source=ServiceSource.ALBUM_SERVICE,
+                        event_type="album.photo.removed",
+                        source="album_service",
                         data={
                             "album_id": album_id,
                             "user_id": user_id,
@@ -536,12 +543,12 @@ class AlbumService:
         """
         try:
             # Verify album exists
-            album = await self.album_repo.get_album_by_id(album_id, user_id)
+            album = await self.repo.get_album_by_id(album_id, user_id)
             if not album:
                 raise AlbumNotFoundError(f"Album not found: {album_id}")
 
             # Get photos
-            photos = await self.album_repo.get_album_photos(
+            photos = await self.repo.get_album_photos(
                 album_id=album_id,
                 limit=limit,
                 offset=offset
@@ -579,7 +586,7 @@ class AlbumService:
         """
         try:
             # Verify album exists
-            album = await self.album_repo.get_album_by_id(album_id, user_id)
+            album = await self.repo.get_album_by_id(album_id, user_id)
             if not album:
                 raise AlbumNotFoundError(f"Album not found: {album_id}")
 
@@ -597,7 +604,7 @@ class AlbumService:
                 "error_message": None
             }
 
-            await self.album_repo.update_album_sync_status(
+            await self.repo.update_album_sync_status(
                 album_id=album_id,
                 frame_id=request.frame_id,
                 user_id=user_id,
@@ -605,7 +612,7 @@ class AlbumService:
             )
 
             # Get updated sync status
-            sync_status = await self.album_repo.get_album_sync_status(
+            sync_status = await self.repo.get_album_sync_status(
                 album_id=album_id,
                 frame_id=request.frame_id
             )
@@ -628,8 +635,8 @@ class AlbumService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.ALBUM_SYNCED,
-                        source=ServiceSource.ALBUM_SERVICE,
+                        event_type="album.synced",
+                        source="album_service",
                         data={
                             "album_id": album_id,
                             "user_id": user_id,
@@ -673,12 +680,12 @@ class AlbumService:
         """
         try:
             # Verify album exists
-            album = await self.album_repo.get_album_by_id(album_id, user_id)
+            album = await self.repo.get_album_by_id(album_id, user_id)
             if not album:
                 raise AlbumNotFoundError(f"Album not found: {album_id}")
 
             # Get sync status
-            sync_status = await self.album_repo.get_album_sync_status(
+            sync_status = await self.repo.get_album_sync_status(
                 album_id=album_id,
                 frame_id=frame_id
             )
@@ -723,7 +730,7 @@ class AlbumService:
     async def check_connection(self) -> bool:
         """Check database connection"""
         try:
-            return await self.album_repo.check_connection()
+            return await self.repo.check_connection()
         except Exception as e:
             logger.error(f"Connection check failed: {e}")
             return False

@@ -2,9 +2,7 @@
 Device Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # Define all routes
 SERVICE_ROUTES = [
     # Health Check
@@ -14,13 +12,18 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Basic health check"
     },
+        {
+            "path": "/api/v1/devices/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
         "description": "Detailed health check"
     },
-
     # Device Management
     {
         "path": "/api/v1/devices",
@@ -52,7 +55,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Delete device"
     },
-
     # Device Authentication & Commands
     {
         "path": "/api/v1/devices/auth",
@@ -66,13 +68,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Send command to device"
     },
-    {
-        "path": "/api/v1/devices/{device_id}/health",
-        "methods": ["GET"],
-        "auth_required": True,
-        "description": "Get device health status"
-    },
-
     # Device Groups
     {
         "path": "/api/v1/groups",
@@ -92,7 +87,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Add device to group"
     },
-
     # Bulk Operations
     {
         "path": "/api/v1/devices/bulk/register",
@@ -106,7 +100,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Bulk device commands"
     },
-
     # Frame Management (Digital Photo Frame)
     {
         "path": "/api/v1/devices/frames",
@@ -132,7 +125,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Update frame configuration"
     },
-
     # Statistics & Debug
     {
         "path": "/api/v1/devices/stats",
@@ -153,8 +145,6 @@ SERVICE_ROUTES = [
         "description": "Debug Consul registration"
     }
 ]
-
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -167,12 +157,10 @@ def get_routes_for_consul() -> Dict[str, Any]:
     bulk_routes = []
     frame_routes = []
     stats_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
         # Use compact representation
         compact_path = path.replace("/api/v1/devices/", "").replace("/api/v1/", "")
-
         if path.startswith("/health"):
             health_routes.append(compact_path)
         elif "bulk" in path:
@@ -185,7 +173,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             stats_routes.append(compact_path)
         elif path.startswith("/api/v1/devices"):
             device_routes.append(compact_path)
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "base_path": "/api/v1/devices",
@@ -199,8 +186,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
-
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "device_service",

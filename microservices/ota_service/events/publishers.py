@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     FirmwareUploadedEvent,
     CampaignCreatedEvent,
@@ -59,8 +59,8 @@ async def publish_firmware_uploaded(
         )
 
         event = Event(
-            event_type=EventType.FIRMWARE_UPLOADED,
-            source=ServiceSource.OTA_SERVICE,
+            event_type="firmware.uploaded",
+            source="ota_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -115,8 +115,8 @@ async def publish_campaign_created(
         )
 
         event = Event(
-            event_type=EventType.CAMPAIGN_CREATED,
-            source=ServiceSource.OTA_SERVICE,
+            event_type="campaign.created",
+            source="ota_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -162,8 +162,8 @@ async def publish_campaign_started(
         )
 
         event = Event(
-            event_type=EventType.CAMPAIGN_STARTED,
-            source=ServiceSource.OTA_SERVICE,
+            event_type="campaign.started",
+            source="ota_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -209,8 +209,8 @@ async def publish_update_cancelled(
         )
 
         event = Event(
-            event_type=EventType.UPDATE_CANCELLED,
-            source=ServiceSource.OTA_SERVICE,
+            event_type="update.cancelled",
+            source="ota_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -256,8 +256,8 @@ async def publish_rollback_initiated(
         )
 
         event = Event(
-            event_type=EventType.ROLLBACK_INITIATED,
-            source=ServiceSource.OTA_SERVICE,
+            event_type="rollback.initiated",
+            source="ota_service",
             data=event_data.model_dump(mode='json')
         )
 

@@ -8,7 +8,7 @@ Following the standard event-driven architecture pattern.
 import logging
 from typing import List, Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_bulk_permissions_granted_event_data,
@@ -60,8 +60,8 @@ async def publish_permission_granted(
         )
 
         event = Event(
-            event_type=EventType.PERMISSION_GRANTED,
-            source=ServiceSource.AUTHORIZATION_SERVICE,
+            event_type="authorization.permission.granted",
+            source="authorization_service",
             data=event_data.model_dump(),
         )
 
@@ -104,8 +104,8 @@ async def publish_permission_revoked(
         )
 
         event = Event(
-            event_type=EventType.PERMISSION_REVOKED,
-            source=ServiceSource.AUTHORIZATION_SERVICE,
+            event_type="authorization.permission.revoked",
+            source="authorization_service",
             data=event_data.model_dump(),
         )
 
@@ -144,8 +144,8 @@ async def publish_bulk_permissions_granted(
         )
 
         event = Event(
-            event_type=EventType.BULK_PERMISSIONS_GRANTED,
-            source=ServiceSource.AUTHORIZATION_SERVICE,
+            event_type="authorization.bulk.granted",
+            source="authorization_service",
             data=event_data.model_dump(),
         )
 
@@ -184,8 +184,8 @@ async def publish_bulk_permissions_revoked(
         )
 
         event = Event(
-            event_type=EventType.BULK_PERMISSIONS_REVOKED,
-            source=ServiceSource.AUTHORIZATION_SERVICE,
+            event_type="authorization.bulk.revoked",
+            source="authorization_service",
             data=event_data.model_dump(),
         )
 

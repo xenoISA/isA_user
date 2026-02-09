@@ -1,0 +1,269 @@
+# =============================================================================
+# Pull Request Checks
+# =============================================================================
+# Validates pull requests before merging.
+#
+# Checks:
+#   - CDD layer completeness
+#   - Test coverage requirements
+#   - Code quality standards
+#   - Contract validation
+# =============================================================================
+
+name: PR Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ===========================================================================
+  # Changed Files Analysis
+  # ===========================================================================
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.changes.outputs.services }}
+      has_services: ${{ steps.changes.outputs.has_services }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changed Services
+        id: changes
+        run: |
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+
+          # Extract affected services
+          SERVICES=""
+          for file in $CHANGED_FILES; do
+            if [[ $file == microservices/*_service/* ]]; then
+              service=$(echo $file | cut -d'/' -f2)
+              if [[ ! "$SERVICES" =~ "$service" ]]; then
+                SERVICES="$SERVICES,$service"
+              fi
+            fi
+          done
+
+          SERVICES=${SERVICES#,}
+          echo "services=$SERVICES" >> $GITHUB_OUTPUT
+
+          if [[ -n "$SERVICES" ]]; then
+            echo "has_services=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_services=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ===========================================================================
+  # CDD Layer Validation
+  # ===========================================================================
+  cdd-check:
+    name: CDD Completeness
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.has_services == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check CDD Layers
+        id: cdd
+        run: |
+          INCOMPLETE=""
+          IFS=',' read -ra SERVICES <<< "${{ needs.changes.outputs.services }}"
+
+          for service in "${SERVICES[@]}"; do
+            name=${service%_service}
+            echo "Checking CDD for $name..."
+
+            MISSING=""
+            [ ! -f "docs/domain/${service}.md" ] && MISSING="$MISSING L1"
+            [ ! -f "docs/prd/${service}.md" ] && MISSING="$MISSING L2"
+            [ ! -f "docs/design/${service}.md" ] && MISSING="$MISSING L3"
+            [ ! -f "tests/contracts/${service}/data_contract.py" ] && MISSING="$MISSING L4"
+            [ ! -f "tests/contracts/${service}/logic_contract.md" ] && MISSING="$MISSING L5"
+            [ ! -f "tests/contracts/${service}/system_contract.md" ] && MISSING="$MISSING L6"
+
+            if [[ -n "$MISSING" ]]; then
+              INCOMPLETE="$INCOMPLETE\n- $service: Missing$MISSING"
+            fi
+          done
+
+          if [[ -n "$INCOMPLETE" ]]; then
+            echo "has_incomplete=true" >> $GITHUB_OUTPUT
+            echo -e "incomplete=$INCOMPLETE" >> $GITHUB_OUTPUT
+          else
+            echo "has_incomplete=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: CDD Status Comment
+        if: steps.cdd.outputs.has_incomplete == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## CDD Layer Check
+
+            ⚠️ **Incomplete CDD documentation detected:**
+            ${{ steps.cdd.outputs.incomplete }}
+
+            Please ensure all 6 CDD layers are complete before merging:
+            - L1: Domain Context (\`docs/domain/\`)
+            - L2: PRD (\`docs/prd/\`)
+            - L3: Design (\`docs/design/\`)
+            - L4: Data Contract (\`tests/contracts/{service}/data_contract.py\`)
+            - L5: Logic Contract (\`tests/contracts/{service}/logic_contract.md\`)
+            - L6: System Contract (\`tests/contracts/{service}/system_contract.md\`)
+
+            Run \`/check-cdd-status {service}\` in Claude Code for details.`
+            })
+
+  # ===========================================================================
+  # Test Coverage Check
+  # ===========================================================================
+  test-coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.has_services == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          uv pip install -r deployment/requirements/dev.txt
+
+      - name: Run Tests with Coverage
+        run: |
+          source .venv/bin/activate
+          pytest tests/unit tests/component -v \
+            --cov=microservices \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=70
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ===========================================================================
+  # Test Pyramid Check
+  # ===========================================================================
+  test-pyramid:
+    name: Test Pyramid Completeness
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.has_services == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Test Coverage
+        run: |
+          echo "## Test Pyramid Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Unit | Component | Integration | API | Smoke |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|------|-----------|-------------|-----|-------|" >> $GITHUB_STEP_SUMMARY
+
+          IFS=',' read -ra SERVICES <<< "${{ needs.changes.outputs.services }}"
+          for service in "${SERVICES[@]}"; do
+            unit="❌"
+            comp="❌"
+            integ="❌"
+            api="❌"
+            smoke="❌"
+
+            [ -d "tests/unit/golden/${service}" ] || [ -d "tests/unit/tdd/${service}" ] && unit="✅"
+            [ -d "tests/component/golden/${service}" ] || [ -d "tests/component/tdd/${service}" ] && comp="✅"
+            [ -d "tests/integration/golden/${service}" ] || [ -d "tests/integration/tdd/${service}" ] && integ="✅"
+            [ -d "tests/api/golden/${service}" ] || [ -d "tests/api/tdd/${service}" ] && api="✅"
+            [ -d "tests/smoke/${service}" ] && smoke="✅"
+
+            echo "| $service | $unit | $comp | $integ | $api | $smoke |" >> $GITHUB_STEP_SUMMARY
+          done
+
+  # ===========================================================================
+  # Protocol & Factory Check
+  # ===========================================================================
+  di-pattern:
+    name: DI Pattern Check
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.has_services == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check DI Files
+        run: |
+          echo "## Dependency Injection Pattern" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | protocols.py | factory.py |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------------|------------|" >> $GITHUB_STEP_SUMMARY
+
+          IFS=',' read -ra SERVICES <<< "${{ needs.changes.outputs.services }}"
+          for service in "${SERVICES[@]}"; do
+            proto="❌"
+            factory="❌"
+
+            [ -f "microservices/${service}/protocols.py" ] && proto="✅"
+            [ -f "microservices/${service}/factory.py" ] && factory="✅"
+
+            echo "| $service | $proto | $factory |" >> $GITHUB_STEP_SUMMARY
+          done
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: PR Summary
+    runs-on: ubuntu-latest
+    needs: [changes, cdd-check, test-coverage, test-pyramid, di-pattern]
+    if: always()
+
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "# PR Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Changed Services:** ${{ needs.changes.outputs.services }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| CDD Completeness | ${{ needs.cdd-check.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Coverage | ${{ needs.test-coverage.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Pyramid | ${{ needs.test-pyramid.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DI Pattern | ${{ needs.di-pattern.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY

@@ -5,9 +5,43 @@ Event data models for authorization and permission management events.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class AuthorizationEventType(str, Enum):
+    """
+    Events published by authorization_service.
+
+    Stream: authorization-stream
+    Subjects: authorization.>
+    """
+    PERMISSION_GRANTED = "authorization.permission.granted"
+    PERMISSION_REVOKED = "authorization.permission.revoked"
+    ACCESS_CHECKED = "authorization.access.checked"
+    ACCESS_DENIED = "authorization.access.denied"
+    BULK_PERMISSIONS_UPDATED = "authorization.bulk.updated"
+
+
+class AuthorizationSubscribedEventType(str, Enum):
+    """Events that authorization_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+    ORG_MEMBER_ADDED = "organization.member_added"
+    ORG_MEMBER_REMOVED = "organization.member_removed"
+
+
+class AuthorizationStreamConfig:
+    """Stream configuration for authorization_service"""
+    STREAM_NAME = "authorization-stream"
+    SUBJECTS = ["authorization.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "authorization"
+
 
 # ============================================================================
 # Permission Event Models

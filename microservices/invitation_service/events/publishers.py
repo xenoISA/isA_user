@@ -7,7 +7,7 @@ Invitation Service Event Publishers
 import logging
 from datetime import datetime
 from typing import Optional
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,8 @@ async def publish_invitation_sent(
 
     try:
         event = Event(
-            event_type=EventType.INVITATION_SENT,
-            source=ServiceSource.INVITATION_SERVICE,
+            event_type="invitation.sent",
+            source="invitation_service",
             data={
                 "invitation_id": invitation_id,
                 "organization_id": organization_id,
@@ -86,8 +86,8 @@ async def publish_invitation_expired(
 
     try:
         event = Event(
-            event_type=EventType.INVITATION_EXPIRED,
-            source=ServiceSource.INVITATION_SERVICE,
+            event_type="invitation.expired",
+            source="invitation_service",
             data={
                 "invitation_id": invitation_id,
                 "organization_id": organization_id,
@@ -133,8 +133,8 @@ async def publish_invitation_accepted(
 
     try:
         event = Event(
-            event_type=EventType.INVITATION_ACCEPTED,
-            source=ServiceSource.INVITATION_SERVICE,
+            event_type="invitation.accepted",
+            source="invitation_service",
             data={
                 "invitation_id": invitation_id,
                 "organization_id": organization_id,
@@ -178,8 +178,8 @@ async def publish_invitation_cancelled(
 
     try:
         event = Event(
-            event_type=EventType.INVITATION_CANCELLED,
-            source=ServiceSource.INVITATION_SERVICE,
+            event_type="invitation.cancelled",
+            source="invitation_service",
             data={
                 "invitation_id": invitation_id,
                 "organization_id": organization_id,

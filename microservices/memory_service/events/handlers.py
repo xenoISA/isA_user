@@ -167,9 +167,69 @@ class MemoryEventHandlers:
         except Exception as e:
             logger.error(f"Failed to extract memories from buffer: {e}", exc_info=True)
 
+    async def handle_user_deleted(self, event: Event):
+        """
+        Handle user.deleted event
+
+        When a user is deleted, clean up all their memories
+
+        Args:
+            event: Event containing user_id
+        """
+        try:
+            # Check idempotency
+            if self.is_event_processed(event.id):
+                logger.debug(f"Event {event.id} already processed, skipping")
+                return
+
+            user_id = event.data.get("user_id")
+
+            if not user_id:
+                logger.warning(f"Missing user_id in user.deleted event: {event.id}")
+                return
+
+            logger.info(f"Handling user.deleted event for user {user_id}")
+
+            # Delete all memories for this user
+            try:
+                # Delete factual memories
+                await self.memory_service.delete_all_user_memories(user_id, memory_type="factual")
+                logger.info(f"Deleted factual memories for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to delete factual memories for user {user_id}: {e}")
+
+            try:
+                # Delete episodic memories
+                await self.memory_service.delete_all_user_memories(user_id, memory_type="episodic")
+                logger.info(f"Deleted episodic memories for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to delete episodic memories for user {user_id}: {e}")
+
+            try:
+                # Delete procedural memories
+                await self.memory_service.delete_all_user_memories(user_id, memory_type="procedural")
+                logger.info(f"Deleted procedural memories for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to delete procedural memories for user {user_id}: {e}")
+
+            # Clear any buffered messages for this user's sessions
+            sessions_to_remove = [
+                session_id for session_id in self.session_message_buffer.keys()
+                if session_id.startswith(user_id)
+            ]
+            for session_id in sessions_to_remove:
+                del self.session_message_buffer[session_id]
+
+            self.mark_event_processed(event.id)
+            logger.info(f"Successfully handled user.deleted event for user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to handle user.deleted event: {e}", exc_info=True)
+
     def get_event_handler_map(self):
         """Return mapping of event patterns to handler functions"""
         return {
             "*.session.message_sent": self.handle_session_message_sent,
             "*.session.ended": self.handle_session_ended,
+            "*.user.deleted": self.handle_user_deleted,
         }

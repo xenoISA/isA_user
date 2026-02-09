@@ -29,8 +29,8 @@ class SessionMemoryService:
 
         # Initialize Qdrant client (async) - lazy connection
         self.qdrant = AsyncQdrantClient(
-            host=os.getenv('QDRANT_HOST', 'isa-qdrant-grpc'),
-            port=int(os.getenv('QDRANT_PORT', 50062)),
+            host=os.getenv('QDRANT_HOST', 'localhost'),
+            port=int(os.getenv('QDRANT_PORT', 6333)),
             user_id='memory_service'
         )
         self._collection_initialized = False  # Track if collection is ready
@@ -242,3 +242,86 @@ class SessionMemoryService:
     ) -> List[str]:
         """Get list of active session IDs"""
         return await self.repository.get_active_sessions(user_id)
+
+    async def vector_search(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+        score_threshold: float = 0.15,
+        session_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search session memories using vector similarity (Qdrant)
+
+        Args:
+            user_id: User identifier
+            query: Search query text
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score (0.0-1.0)
+            session_id: Optional session ID to filter by
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        try:
+            # Ensure collection exists
+            await self._ensure_collection()
+
+            # Generate embedding for query
+            query_embedding = await self._generate_embedding(query)
+            if not query_embedding:
+                logger.warning("Failed to generate query embedding for session memory")
+                return []
+
+            logger.info(f"Generated query embedding with {len(query_embedding)} dimensions for session search: {query[:50]}...")
+
+            # Build filter conditions
+            filter_conditions = {
+                "must": [
+                    {"field": "user_id", "match": {"keyword": user_id}}
+                ]
+            }
+
+            # Add session_id filter if provided
+            if session_id:
+                filter_conditions["must"].append(
+                    {"field": "session_id", "match": {"keyword": session_id}}
+                )
+
+            async with self.qdrant:
+                search_results = await self.qdrant.search_with_filter(
+                    collection_name='session_memories',
+                    vector=query_embedding,
+                    filter_conditions=filter_conditions,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    with_payload=True
+                )
+
+            if not search_results:
+                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
+                return []
+
+            # Get memory IDs and scores from results
+            memory_ids = [str(result['id']) for result in search_results]
+            scores = {str(result['id']): result.get('score', 0.0) for result in search_results}
+
+            logger.info(f"Vector search found {len(memory_ids)} session memory matches for user {user_id}")
+
+            # Fetch full memory data from PostgreSQL
+            memories = await self.repository.get_by_ids(memory_ids)
+
+            # Add similarity scores to results
+            for memory in memories:
+                memory_id = memory.get('id')
+                memory['similarity_score'] = scores.get(memory_id, 0.0)
+
+            # Sort by score descending
+            memories.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+
+            return memories
+
+        except Exception as e:
+            logger.error(f"Session memory vector search failed: {e}")
+            return []

@@ -33,7 +33,7 @@ class SubscriptionEventPublisher:
     ) -> bool:
         """Publish subscription created event"""
         return await self._publish_event(
-            event_type=SubscriptionEventType.SUBSCRIPTION_CREATED,
+            event_type="subscription.created",
             subscription_id=subscription_id,
             user_id=user_id,
             organization_id=organization_id,
@@ -57,7 +57,7 @@ class SubscriptionEventPublisher:
     ) -> bool:
         """Publish subscription canceled event"""
         return await self._publish_event(
-            event_type=SubscriptionEventType.SUBSCRIPTION_CANCELED,
+            event_type="subscription.canceled",
             subscription_id=subscription_id,
             user_id=user_id,
             organization_id=organization_id,
@@ -127,6 +127,192 @@ class SubscriptionEventPublisher:
             user_id=user_id,
             organization_id=organization_id,
             data={}
+        )
+
+    async def publish_subscription_renewed(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        new_period_start: datetime,
+        new_period_end: datetime,
+        credits_allocated: int,
+        amount_charged: Optional[float] = None
+    ) -> bool:
+        """Publish subscription renewed event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.SUBSCRIPTION_RENEWED,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "new_period_start": new_period_start.isoformat(),
+                "new_period_end": new_period_end.isoformat(),
+                "credits_allocated": credits_allocated,
+                "amount_charged": amount_charged
+            }
+        )
+
+    async def publish_subscription_paused(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        paused_at: datetime,
+        reason: Optional[str] = None
+    ) -> bool:
+        """Publish subscription paused event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.SUBSCRIPTION_PAUSED,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "paused_at": paused_at.isoformat(),
+                "reason": reason
+            }
+        )
+
+    async def publish_subscription_resumed(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        resumed_at: datetime
+    ) -> bool:
+        """Publish subscription resumed event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.SUBSCRIPTION_RESUMED,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "resumed_at": resumed_at.isoformat()
+            }
+        )
+
+    async def publish_subscription_expired(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        expired_at: datetime,
+        reason: str = "period_ended"
+    ) -> bool:
+        """Publish subscription expired event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.SUBSCRIPTION_EXPIRED,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "expired_at": expired_at.isoformat(),
+                "reason": reason
+            }
+        )
+
+    async def publish_subscription_upgraded(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        old_tier: str,
+        new_tier: str,
+        prorated_amount: Optional[float] = None
+    ) -> bool:
+        """Publish subscription upgraded event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.SUBSCRIPTION_UPGRADED,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "old_tier": old_tier,
+                "new_tier": new_tier,
+                "prorated_amount": prorated_amount
+            }
+        )
+
+    async def publish_subscription_downgraded(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        old_tier: str,
+        new_tier: str,
+        effective_date: datetime
+    ) -> bool:
+        """Publish subscription downgraded event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.SUBSCRIPTION_DOWNGRADED,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "old_tier": old_tier,
+                "new_tier": new_tier,
+                "effective_date": effective_date.isoformat()
+            }
+        )
+
+    async def publish_trial_started(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        trial_end_date: datetime,
+        trial_tier: str
+    ) -> bool:
+        """Publish trial started event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.TRIAL_STARTED,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "trial_end_date": trial_end_date.isoformat(),
+                "trial_tier": trial_tier
+            }
+        )
+
+    async def publish_trial_ending_soon(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        trial_end_date: datetime,
+        days_remaining: int
+    ) -> bool:
+        """Publish trial ending soon warning event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.TRIAL_ENDING_SOON,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "trial_end_date": trial_end_date.isoformat(),
+                "days_remaining": days_remaining
+            }
+        )
+
+    async def publish_trial_ended(
+        self,
+        subscription_id: str,
+        user_id: str,
+        organization_id: Optional[str],
+        converted_to_paid: bool,
+        new_tier: Optional[str] = None
+    ) -> bool:
+        """Publish trial ended event"""
+        return await self._publish_event(
+            event_type=SubscriptionEventType.TRIAL_ENDED,
+            subscription_id=subscription_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            data={
+                "converted_to_paid": converted_to_paid,
+                "new_tier": new_tier
+            }
         )
 
     async def _publish_event(

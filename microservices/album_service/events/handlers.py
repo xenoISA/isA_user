@@ -12,7 +12,7 @@ from typing import Dict, Any
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
-from core.nats_client import Event, EventType
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +193,40 @@ class AlbumEventHandler:
             logger.error(f"Failed to handle device.deleted event: {e}", exc_info=True)
             return False
 
+    async def handle_user_deleted(self, event_data: Dict[str, Any]) -> bool:
+        """
+        Handle user.deleted event
+
+        When a user is deleted, clean up all their albums and photos
+
+        Args:
+            event_data: Event data containing user_id
+
+        Returns:
+            bool: True if handled successfully
+        """
+        try:
+            user_id = event_data.get('user_id')
+            if not user_id:
+                logger.warning("user.deleted event missing user_id")
+                return False
+
+            logger.info(f"Handling user.deleted event for user {user_id}")
+
+            # Delete all albums owned by this user
+            deleted_albums = await self.album_repo.delete_all_user_albums(user_id)
+            logger.info(f"Deleted {deleted_albums} albums for user {user_id}")
+
+            # Delete all album sync status for this user
+            deleted_sync = await self.album_repo.delete_all_user_sync_status(user_id)
+            logger.info(f"Deleted {deleted_sync} sync status records for user {user_id}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to handle user.deleted event: {e}", exc_info=True)
+            return False
+
     async def handle_event(self, event: Event) -> bool:
         """
         Route event to appropriate handler
@@ -206,14 +240,14 @@ class AlbumEventHandler:
         try:
             event_type = event.type
 
-            if event_type == EventType.FILE_UPLOADED_WITH_AI.value:
+            if event_type == "file.uploaded.with_ai":
                 return await self.handle_file_uploaded_with_ai(event.data)
-            elif event_type == EventType.FILE_DELETED.value:
+            elif event_type == "file.deleted":
                 return await self.handle_file_deleted(event.data)
-            elif event_type == EventType.DEVICE_OFFLINE.value:
-                # We're treating device.deleted similarly to device.offline
-                # You may need to add DEVICE_DELETED to EventType enum
+            elif event_type == "device.offline" or event_type == "device.deleted":
                 return await self.handle_device_deleted(event.data)
+            elif event_type == "user.deleted" or event_type == "USER_DELETED":
+                return await self.handle_user_deleted(event.data)
             else:
                 logger.warning(f"Unknown event type: {event_type}")
                 return False
@@ -230,7 +264,7 @@ class AlbumEventHandler:
             list: List of event type values to subscribe to
         """
         return [
-            EventType.FILE_DELETED.value,
-            # Note: You may want to add DEVICE_DELETED to EventType enum
-            # For now we're using DEVICE_OFFLINE as a proxy
+            "file.deleted".value,
+            "device.deleted",
+            "user.deleted",
         ]

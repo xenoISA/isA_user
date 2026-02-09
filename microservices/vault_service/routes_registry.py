@@ -2,9 +2,7 @@
 Vault Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # 定义所有路由
 SERVICE_ROUTES = [
     {
@@ -13,6 +11,12 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Basic health check"
     },
+        {
+            "path": "/api/v1/vault/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
@@ -77,7 +81,6 @@ SERVICE_ROUTES = [
         "description": "Get vault statistics"
     }
 ]
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -88,12 +91,10 @@ def get_routes_for_consul() -> Dict[str, Any]:
     secret_routes = []
     share_routes = []
     audit_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
         # 使用紧凑表示：只保留路径的关键部分
         compact_path = path.replace("/api/v1/vault/", "").replace("{", ":").replace("}", "")
-
         if "/health" in path or "/info" in path:
             health_routes.append(compact_path)
         elif "/shared" in path or "/share" in path:
@@ -102,7 +103,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             audit_routes.append(compact_path)
         elif "/secrets" in path:
             secret_routes.append(compact_path)
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "base_path": "/api/v1/vault",
@@ -113,7 +113,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "vault_service",

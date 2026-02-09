@@ -5,9 +5,43 @@ Storage Service - Event Data Models
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class StorageEventType(str, Enum):
+    """
+    Events published by storage_service.
+
+    Stream: storage-stream
+    Subjects: storage.>
+    """
+    FILE_UPLOADED = "file.uploaded"
+    FILE_UPLOADED_WITH_AI = "file.uploaded.with_ai"
+    FILE_SHARED = "file.shared"
+    FILE_DELETED = "file.deleted"
+    FILE_INDEXING_REQUESTED = "file.indexing.requested"
+    FILE_INDEXED = "file.indexed"
+    FILE_INDEXING_FAILED = "file.indexing.failed"
+
+
+class StorageSubscribedEventType(str, Enum):
+    """Events that storage_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+
+
+class StorageStreamConfig:
+    """Stream configuration for storage_service"""
+    STREAM_NAME = "storage-stream"
+    SUBJECTS = ["storage.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "storage"
+
 
 
 # ==================== File Upload Events ====================

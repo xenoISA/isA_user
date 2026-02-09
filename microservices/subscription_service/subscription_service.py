@@ -2,16 +2,31 @@
 Subscription Service
 
 Business logic for subscription management and credit allocation.
+
+Uses dependency injection for testability.
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
 """
+
+from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional, Dict, Any, List
+from typing import TYPE_CHECKING, Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
-from core.nats_client import Event, EventType, ServiceSource
-from .subscription_repository import SubscriptionRepository
+from core.nats_client import Event
+
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import (
+    SubscriptionRepositoryProtocol,
+    SubscriptionServiceError,
+    SubscriptionNotFoundError,
+    SubscriptionValidationError,
+    InsufficientCreditsError,
+    TierNotFoundError,
+)
 from .models import (
     UserSubscription, SubscriptionHistory,
     SubscriptionStatus, BillingCycle, SubscriptionAction, InitiatedBy,
@@ -22,36 +37,12 @@ from .models import (
     SubscriptionStatsResponse
 )
 
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
+    
+
 logger = logging.getLogger(__name__)
-
-
-# ====================
-# Exceptions
-# ====================
-
-class SubscriptionServiceError(Exception):
-    """Base exception for subscription service errors"""
-    pass
-
-
-class SubscriptionNotFoundError(SubscriptionServiceError):
-    """Subscription not found"""
-    pass
-
-
-class SubscriptionValidationError(SubscriptionServiceError):
-    """Validation error"""
-    pass
-
-
-class InsufficientCreditsError(SubscriptionServiceError):
-    """Not enough credits"""
-    pass
-
-
-class TierNotFoundError(SubscriptionServiceError):
-    """Subscription tier not found"""
-    pass
 
 
 # ====================
@@ -59,14 +50,30 @@ class TierNotFoundError(SubscriptionServiceError):
 # ====================
 
 class SubscriptionService:
-    """Subscription management service"""
+    """
+    Subscription management service
 
-    def __init__(self, event_bus=None, config=None):
-        """Initialize subscription service"""
-        self.repository = SubscriptionRepository(config=config)
+    Handles all subscription operations while delegating
+    data access to the repository layer.
+    """
+
+    def __init__(
+        self,
+        repository: Optional[SubscriptionRepositoryProtocol] = None,
+        event_bus=None,
+    ):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+        """
+        self.repository = repository  # Will be set by factory if None
         self.event_bus = event_bus
         self._tier_cache: Dict[str, Dict[str, Any]] = {}
-        logger.info("Subscription service initialized")
+        self._event_publishers_loaded = False
+        logger.info("Subscription service initialized with dependency injection")
 
     async def initialize(self):
         """Initialize the service"""
@@ -249,7 +256,7 @@ class SubscriptionService:
 
             # Publish event
             if self.event_bus:
-                await self._publish_event(EventType.SUBSCRIPTION_CREATED, {
+                await self._publish_event("subscription.created", {
                     "subscription_id": created.subscription_id,
                     "user_id": request.user_id,
                     "organization_id": request.organization_id,
@@ -389,7 +396,7 @@ class SubscriptionService:
 
             # Publish event
             if self.event_bus:
-                await self._publish_event(EventType.SUBSCRIPTION_CANCELED, {
+                await self._publish_event("subscription.canceled", {
                     "subscription_id": subscription_id,
                     "user_id": user_id,
                     "immediate": request.immediate,
@@ -480,7 +487,7 @@ class SubscriptionService:
 
             # Publish event
             if self.event_bus:
-                await self._publish_event(EventType.CREDITS_CONSUMED, {
+                await self._publish_event("subscription.credits.consumed", {
                     "subscription_id": subscription.subscription_id,
                     "user_id": request.user_id,
                     "credits_consumed": request.credits_to_consume,
@@ -596,13 +603,13 @@ class SubscriptionService:
     # Event Publishing
     # ====================
 
-    async def _publish_event(self, event_type: EventType, data: Dict[str, Any], subject: Optional[str] = None):
+    async def _publish_event(self, event_type: str, data: Dict[str, Any], subject: Optional[str] = None):
         """Publish an event using the NATS event bus"""
         if self.event_bus:
             try:
                 event = Event(
                     event_type=event_type,
-                    source=ServiceSource.SUBSCRIPTION_SERVICE,
+                    source="subscription_service",
                     data=data,
                     subject=subject
                 )

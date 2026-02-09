@@ -5,9 +5,42 @@ vault_service ^���pnӄ�I
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class VaultEventType(str, Enum):
+    """
+    Events published by vault_service.
+
+    Stream: vault-stream
+    Subjects: vault.>
+    """
+    SECRET_CREATED = "vault.secret.created"
+    SECRET_ACCESSED = "vault.secret.accessed"
+    SECRET_UPDATED = "vault.secret.updated"
+    SECRET_DELETED = "vault.secret.deleted"
+    SECRET_SHARED = "vault.secret.shared"
+    SECRET_ROTATED = "vault.secret.rotated"
+
+
+class VaultSubscribedEventType(str, Enum):
+    """Events that vault_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+
+
+class VaultStreamConfig:
+    """Stream configuration for vault_service"""
+    STREAM_NAME = "vault-stream"
+    SUBJECTS = ["vault.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "vault"
+
 
 
 class UserDeletedEventData(BaseModel):

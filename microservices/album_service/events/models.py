@@ -5,6 +5,40 @@ Defines Pydantic models for events published and consumed by album_service
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class AlbumEventType(str, Enum):
+    """
+    Events published by album_service.
+
+    Stream: album-stream
+    Subjects: album.>
+    """
+    ALBUM_CREATED = "album.created"
+    ALBUM_UPDATED = "album.updated"
+    ALBUM_DELETED = "album.deleted"
+    ALBUM_PHOTO_ADDED = "album.photo.added"
+    ALBUM_PHOTO_REMOVED = "album.photo.removed"
+    ALBUM_SYNCED = "album.synced"
+
+
+class AlbumSubscribedEventType(str, Enum):
+    """Events that album_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+    PHOTO_VERSION_CREATED = "media.photo_version.created"
+
+
+class AlbumStreamConfig:
+    """Stream configuration for album_service"""
+    STREAM_NAME = "album-stream"
+    SUBJECTS = ["album.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "album"
+
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 

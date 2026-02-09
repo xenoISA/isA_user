@@ -2,9 +2,7 @@
 OTA Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # 定义所有路由
 SERVICE_ROUTES = [
     {
@@ -13,6 +11,12 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Basic health check"
     },
+        {
+            "path": "/api/v1/ota/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
@@ -145,7 +149,6 @@ SERVICE_ROUTES = [
         "description": "Get service statistics"
     }
 ]
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -158,12 +161,10 @@ def get_routes_for_consul() -> Dict[str, Any]:
     device_routes = []
     update_routes = []
     stats_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
         # 使用紧凑表示：只保留路径的关键部分
         compact_path = path.replace("/api/v1/", "").replace("{", ":").replace("}", "")
-
         if path.startswith("/health"):
             health_routes.append(compact_path)
         elif "/firmware" in path:
@@ -176,7 +177,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             update_routes.append(compact_path)
         elif "/stats" in path:
             stats_routes.append(compact_path)
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "base_path": "/api/v1/ota",
@@ -189,7 +189,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "ota_service",

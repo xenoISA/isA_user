@@ -40,6 +40,7 @@ from .models import (
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .task_repository import TaskRepository
 from .task_service import TaskService
+from .factory import create_task_service
 
 # 初始化配置
 config_manager = ConfigManager("task_service")
@@ -59,7 +60,7 @@ class TaskMicroservice:
 
     async def initialize(self, event_bus=None, config_manager=None):
         self.repository = TaskRepository(config=config_manager)
-        self.service = TaskService(event_bus=event_bus, config_manager=config_manager)
+        self.service = create_task_service(config=config_manager, event_bus=event_bus)
         logger.info("Task service initialized")
 
     async def shutdown(self):
@@ -138,9 +139,11 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl"  # Use TTL for reliable health checks,
             )
             microservice.consul_registry.register()
+            microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info(
                 f"Service registered with Consul: {route_meta.get('route_count', 0)} routes"
             )
@@ -188,6 +191,7 @@ app = FastAPI(
 # ======================
 
 
+@app.get("/api/v1/tasks/health")
 @app.get("/health")
 async def health_check():
     """基础健康检查"""
@@ -230,9 +234,22 @@ async def detailed_health_check():
 async def get_user_context(
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="x-api-key"),
+    x_internal_call: Optional[str] = Header(None, alias="x-internal-call"),
+    x_user_id: Optional[str] = Header(None, alias="x-user-id"),
 ) -> Dict[str, Any]:
     """获取用户上下文信息"""
-    logger.debug(f"Auth headers: authorization={authorization}, x_api_key={x_api_key}")
+    logger.debug(f"Auth headers: authorization={authorization}, x_api_key={x_api_key}, x_internal_call={x_internal_call}")
+
+    # Allow internal service-to-service calls (e.g., from MCP server)
+    # In production, this should be secured with mTLS or service mesh
+    if x_internal_call == "true":
+        user_id = x_user_id or "mcp_internal"
+        logger.debug(f"Internal call from MCP, user_id={user_id}")
+        return {
+            "user_id": user_id,
+            "subscription_level": "pro",  # Internal calls get pro access
+            "internal_call": True
+        }
 
     if not authorization and not x_api_key:
         raise HTTPException(status_code=401, detail="Authentication required")

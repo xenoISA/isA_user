@@ -2,15 +2,23 @@
 Organization Service
 
 组织业务逻辑层
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from datetime import datetime, timezone
 
-from .organization_repository import OrganizationRepository
-# Note: AccountServiceClient was removed as it was unused
-# If user validation is needed, implement via microservice communication
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import (
+    OrganizationRepositoryProtocol,
+    OrganizationNotFoundError as ProtocolNotFoundError,
+    OrganizationAccessDeniedError as ProtocolAccessDeniedError,
+    OrganizationValidationError as ProtocolValidationError,
+)
 from .models import (
     OrganizationCreateRequest, OrganizationUpdateRequest,
     OrganizationMemberAddRequest, OrganizationMemberUpdateRequest,
@@ -20,8 +28,11 @@ from .models import (
     OrganizationUsageResponse, OrganizationRole, MemberStatus
 )
 # Import event bus components
-from core.nats_client import Event, EventType, ServiceSource
-from core.config_manager import ConfigManager
+from core.nats_client import Event
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +58,30 @@ class OrganizationValidationError(OrganizationServiceError):
 
 
 class OrganizationService:
-    """组织服务"""
+    """
+    组织服务
 
-    def __init__(self, event_bus=None, config: Optional[ConfigManager] = None):
-        self.repository = OrganizationRepository(config=config)
+    Handles all organization business operations while delegating
+    data access to the repository layer via dependency injection.
+    """
+
+    def __init__(
+        self,
+        repository: Optional[OrganizationRepositoryProtocol] = None,
+        event_bus=None,
+        account_client=None,
+    ):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            account_client: Account service client for user validation
+        """
+        self.repository = repository  # Will be set by factory if None
         self.event_bus = event_bus
+        self.account_client = account_client
     
     # ============ Organization Management ============
     
@@ -81,8 +111,8 @@ class OrganizationService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.ORG_CREATED,
-                        source=ServiceSource.ORG_SERVICE,
+                        event_type="organization.created",
+                        source="organization_service",
                         data={
                             "organization_id": organization.organization_id,
                             "organization_name": organization.name,
@@ -157,8 +187,8 @@ class OrganizationService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.ORG_UPDATED,
-                        source=ServiceSource.ORG_SERVICE,
+                        event_type="organization.updated",
+                        source="organization_service",
                         data={
                             "organization_id": organization_id,
                             "organization_name": organization.name,
@@ -206,8 +236,8 @@ class OrganizationService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.ORG_DELETED,
-                            source=ServiceSource.ORG_SERVICE,
+                            event_type="organization.deleted",
+                            source="organization_service",
                             data={
                                 "organization_id": organization_id,
                                 "organization_name": organization.name,
@@ -296,8 +326,8 @@ class OrganizationService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.ORG_MEMBER_ADDED,
-                        source=ServiceSource.ORG_SERVICE,
+                        event_type="organization.member_added",
+                        source="organization_service",
                         data={
                             "organization_id": organization_id,
                             "user_id": request.user_id,
@@ -408,8 +438,8 @@ class OrganizationService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.ORG_MEMBER_REMOVED,
-                            source=ServiceSource.ORG_SERVICE,
+                            event_type="organization.member_removed",
+                            source="organization_service",
                             data={
                                 "organization_id": organization_id,
                                 "user_id": member_user_id,

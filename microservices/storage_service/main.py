@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.nats_client import Event, EventType, get_event_bus
+from core.nats_client import Event, get_event_bus
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
         event_publisher = StorageEventPublisher(event_bus)
         logger.info("Event publisher initialized")
 
-    # 初始化服务
+    # 初始化服务 (need it before subscribing to events)
     storage_service = StorageService(
         service_config,
         event_bus=event_bus,
@@ -94,6 +94,29 @@ async def lifespan(app: FastAPI):
     if not await storage_service.repository.check_connection():
         logger.error("Failed to connect to database")
         raise RuntimeError("Database connection failed")
+
+    # Subscribe to events
+    if event_bus:
+        try:
+            from .events.handlers import get_event_handlers
+
+            # Get intelligence service if available
+            intelligence_service = getattr(storage_service, 'intelligence_service', None)
+
+            handler_map = get_event_handlers(storage_service, intelligence_service, event_bus)
+
+            for pattern, handler_func in handler_map.items():
+                await event_bus.subscribe_to_events(
+                    pattern=pattern,
+                    handler=handler_func,
+                    durable=f"storage-{pattern.replace('.', '-')}-consumer"
+                )
+                logger.info(f"✅ Subscribed to {pattern}")
+
+            logger.info(f"✅ Storage event subscriber started ({len(handler_map)} event patterns)")
+
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 
     # Consul 服务注册
     if service_config.consul_enabled:
@@ -112,9 +135,11 @@ async def lifespan(app: FastAPI):
                 consul_port=service_config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl"  # Use TTL for reliable health checks,
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info(
                 f"Service registered with Consul: {route_meta.get('route_count', 0)} routes"
             )
@@ -167,6 +192,7 @@ async def general_exception_handler(request, exc):
 # ==================== 健康检查路由 ====================
 
 
+@app.get("/api/v1/storage/health")
 @app.get("/health")
 async def health_check():
     """健康检查端点"""

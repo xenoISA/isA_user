@@ -100,13 +100,20 @@ class MQTTEventBus:
         """
         self.service_name = service_name
 
-        # Load config
+        # Load config with service discovery
         config_manager = ConfigManager(service_name)
-        config = config_manager.get_service_config()
 
-        # MQTT connection settings
-        self.host = host or getattr(config, "mqtt_host", "localhost")
-        self.port = port or getattr(config, "mqtt_port", 50053)
+        # MQTT connection settings - use service discovery like other clients
+        discovered_host, discovered_port = config_manager.discover_service(
+            service_name="mqtt_service",
+            default_host="mosquitto",
+            default_port=1883,
+            env_host_key="MQTT_HOST",
+            env_port_key="MQTT_PORT",
+        )
+
+        self.host = host or discovered_host
+        self.port = port or discovered_port
         self.user_id = user_id or service_name
         self.organization_id = organization_id or "default"
 

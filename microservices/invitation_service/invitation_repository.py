@@ -35,11 +35,11 @@ class InvitationRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
-            env_host_key='POSTGRES_GRPC_HOST',
-            env_port_key='POSTGRES_GRPC_PORT'
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")

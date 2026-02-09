@@ -23,8 +23,7 @@ from core.nats_client import get_event_bus
 
 from isa_common.consul_client import ConsulRegistry
 
-from .calendar_repository import CalendarRepository
-from .calendar_service import CalendarService
+from .factory import create_calendar_service
 from .models import (
     EventCategory,
     EventCreateRequest,
@@ -50,7 +49,6 @@ logger = app_logger
 class CalendarMicroservice:
     def __init__(self):
         self.service = None
-        self.repository = None
         self.event_bus = None
 
     async def initialize(self):
@@ -64,8 +62,11 @@ class CalendarMicroservice:
             )
             self.event_bus = None
 
-        self.repository = CalendarRepository()
-        self.service = CalendarService(event_bus=self.event_bus)
+        # Create service with real dependencies using factory
+        self.service = create_calendar_service(
+            config=config_manager,
+            event_bus=self.event_bus
+        )
         logger.info("Calendar service initialized")
 
         # Subscribe to events
@@ -130,9 +131,11 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl"  # Use TTL for reliable health checks,
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info(
                 f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
             )
@@ -168,6 +171,7 @@ app = FastAPI(
 # =============================================================================
 
 
+@app.get("/api/v1/calendar/health")
 @app.get("/health")
 async def health_check():
     """健康检查"""
@@ -419,6 +423,6 @@ async def get_sync_status(
 if __name__ == "__main__":
     import uvicorn
 
-    port = config.service_port if hasattr(config, "service_port") else 8240
+    port = config.service_port if hasattr(config, "service_port") else 8217
 
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

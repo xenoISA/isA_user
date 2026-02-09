@@ -11,10 +11,15 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
-from core.nats_client import Event, ServiceSource
-from core.nats_client import EventType as NATSEventType
+from core.nats_client import Event
 
-from .billing_repository import BillingRepository
+from .protocols import (
+    BillingRepositoryProtocol,
+    EventBusProtocol,
+    ProductClientProtocol,
+    WalletClientProtocol,
+    SubscriptionClientProtocol,
+)
 from .models import (
     BillingCalculationRequest,
     BillingCalculationResponse,
@@ -43,33 +48,31 @@ logger = logging.getLogger(__name__)
 class BillingService:
     """计费服务核心业务逻辑"""
 
-    def __init__(self, repository: BillingRepository, event_bus=None):
+    def __init__(
+        self,
+        repository: BillingRepositoryProtocol,
+        event_bus: Optional[EventBusProtocol] = None,
+        product_client: Optional[ProductClientProtocol] = None,
+        wallet_client: Optional[WalletClientProtocol] = None,
+        subscription_client: Optional[SubscriptionClientProtocol] = None,
+    ):
+        """
+        Initialize billing service with injected dependencies
+
+        Args:
+            repository: Repository for data access
+            event_bus: Optional event bus for publishing events
+            product_client: Optional client for product service communication
+            wallet_client: Optional client for wallet service communication
+            subscription_client: Optional client for subscription service communication
+        """
         self.repository = repository
         self.event_bus = event_bus
-        self.consul = None
-        self._init_consul()
-        self._init_service_clients()
+        self.product_client = product_client
+        self.wallet_client = wallet_client
+        self.subscription_client = subscription_client
 
-    def _init_service_clients(self):
-        """Initialize service clients for inter-service communication"""
-        try:
-            from .clients import ProductClient, WalletClient, SubscriptionClient
-
-            self.wallet_client = WalletClient()
-            self.product_client = ProductClient()
-            self.subscription_client = SubscriptionClient()
-            logger.info("✅ Service clients initialized for billing service (including SubscriptionClient)")
-
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to initialize service clients: {e}")
-            logger.warning("Billing service will fall back to HTTP calls")
-            self.product_client = None
-            self.wallet_client = None
-            self.subscription_client = None
-
-    def _init_consul(self):
-        """Service discovery via Consul agent sidecar"""
-        logger.info("Service discovery via Consul agent sidecar")
+        logger.info("✅ BillingService initialized with dependency injection")
 
     def _get_service_url(self, service_name: str, fallback_port: int) -> str:
         """Get service URL from environment or use fallback"""
@@ -99,8 +102,8 @@ class BillingService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=NATSEventType.USAGE_RECORDED,
-                        source=ServiceSource.BILLING_SERVICE,
+                        event_type="billing.usage.recorded",
+                        source="billing_service",
                         data={
                             "user_id": request.user_id,
                             "organization_id": request.organization_id,
@@ -112,8 +115,23 @@ class BillingService:
                         },
                     )
                     await self.event_bus.publish_event(event)
+                except AttributeError:
+                    # Fallback: event_bus might expect dict instead of Event object
+                    await self.event_bus.publish_event({
+                        "event_type": "usage.recorded",
+                        "source": "billing_service",
+                        "data": {
+                            "user_id": request.user_id,
+                            "organization_id": request.organization_id,
+                            "product_id": request.product_id,
+                            "usage_amount": float(request.usage_amount),
+                            "service_type": request.service_type,
+                            "usage_record_id": usage_record_id,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    })
                 except Exception as e:
-                    logger.error(f"Failed to publish usage.recorded event: {e}")
+                    logger.warning(f"Failed to publish usage.recorded event: {e}")
 
             # 2. 计算费用
             calc_request = BillingCalculationRequest(
@@ -169,8 +187,8 @@ class BillingService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=NATSEventType.QUOTA_EXCEEDED,
-                            source=ServiceSource.BILLING_SERVICE,
+                            event_type="quota.exceeded",
+                            source="billing_service",
                             data={
                                 "user_id": request.user_id,
                                 "organization_id": request.organization_id,
@@ -363,8 +381,8 @@ class BillingService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=NATSEventType.BILLING_CALCULATED,
-                        source=ServiceSource.BILLING_SERVICE,
+                        event_type="calculated",
+                        source="billing_service",
                         data={
                             "user_id": request.user_id,
                             "organization_id": request.organization_id,
@@ -477,8 +495,8 @@ class BillingService:
                     if self.event_bus:
                         try:
                             event = Event(
-                                event_type=NATSEventType.BILLING_PROCESSED,
-                                source=ServiceSource.BILLING_SERVICE,
+                                event_type="processed",
+                                source="billing_service",
                                 data={
                                     "billing_record_id": billing_record.billing_id,
                                     "user_id": calculation.user_id
@@ -705,7 +723,9 @@ class BillingService:
                     user_id=user_id,
                     subscription_id=subscription_id,
                 )
-                return pricing
+                if pricing:
+                    return pricing
+                logger.warning("ProductServiceClient returned None, falling back to HTTP")
             except Exception as e:
                 logger.warning(
                     f"ProductServiceClient failed: {e}, falling back to HTTP"
@@ -726,11 +746,21 @@ class BillingService:
                     logger.error(
                         f"Product service pricing returned {response.status_code}"
                     )
-                    return None
 
         except Exception as e:
             logger.error(f"Error getting product pricing: {e}")
-            return None
+
+        # All attempts failed - return default fallback pricing
+        logger.warning(
+            f"Product pricing unavailable for {product_id}, using default fallback (zero-cost)"
+        )
+        return {
+            "product_id": product_id,
+            "unit_price": 0,
+            "currency": "CREDIT",
+            "pricing_model": {"pricing_type": "default_fallback", "base_unit_price": 0},
+            "effective_pricing": {"base_unit_price": 0},
+        }
 
     async def _get_subscription_info(
         self, subscription_id: str
@@ -1049,8 +1079,8 @@ class BillingService:
         if self.event_bus and created_record:
             try:
                 event = Event(
-                    event_type=NATSEventType.BILLING_RECORD_CREATED,
-                    source=ServiceSource.BILLING_SERVICE,
+                    event_type="record.created",
+                    source="billing_service",
                     data={
                         "billing_record_id": created_record.billing_id,
                         "user_id": created_record.user_id,

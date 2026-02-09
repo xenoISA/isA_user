@@ -2,30 +2,48 @@
 Audit Service Business Logic
 
 审计服务业务逻辑层，处理审计事件记录、查询、分析、告警和合规报告
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
 """
 
 import logging
 import asyncio
 import uuid
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
+
 from datetime import datetime, timedelta
 
-from .audit_repository import AuditRepository
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import AuditRepositoryProtocol
 from .models import (
     AuditEvent, UserActivity, SecurityEvent, ComplianceReport,
     AuditEventCreateRequest, AuditEventResponse, AuditQueryRequest, AuditQueryResponse,
-    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest,
-    EventType, EventSeverity, EventStatus, AuditCategory
+    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest,  EventSeverity, EventStatus, AuditCategory
 )
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
 
 class AuditService:
-    """审计服务核心业务逻辑"""
+    """审计服务核心业务逻辑
 
-    def __init__(self, config=None):
-        self.repository = AuditRepository(config=config)
+    Uses dependency injection for testability - repository is injected,
+    not created internally.
+    """
+
+    def __init__(self, repository: Optional[AuditRepositoryProtocol] = None):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+        """
+        self.repository = repository  # Will be set by factory if None
 
         # 风险评分配置
         self.risk_thresholds = {
@@ -40,17 +58,17 @@ class AuditService:
             "GDPR": {
                 "retention_days": 2555,  # 7 years
                 "required_fields": ["user_id", "action", "timestamp", "ip_address"],
-                "sensitive_events": [EventType.USER_DELETE, EventType.PERMISSION_GRANT]
+                "sensitive_events": ["user.deleted", "authorization.permission.granted"]
             },
             "SOX": {
                 "retention_days": 2555,  # 7 years
                 "required_fields": ["user_id", "action", "timestamp"],
-                "sensitive_events": [EventType.RESOURCE_UPDATE, EventType.PERMISSION_UPDATE]
+                "sensitive_events": ["audit.resource.update", "authorization.permission.updated"]
             },
             "HIPAA": {
                 "retention_days": 2190,  # 6 years
                 "required_fields": ["user_id", "action", "timestamp", "resource_type"],
-                "sensitive_events": [EventType.RESOURCE_ACCESS, EventType.USER_UPDATE]
+                "sensitive_events": ["audit.resource.access", "user.updated"]
             }
         }
     
@@ -253,7 +271,7 @@ class AuditService:
             
             security_event = SecurityEvent(
                 id=str(uuid.uuid4()),
-                event_type=EventType.SECURITY_ALERT,
+                event_type="audit.security.alert",
                 severity=alert.severity,
                 threat_level=self._calculate_threat_level(alert.severity),
 
@@ -421,11 +439,11 @@ class AuditService:
             compliance_flags = []
             
             # GDPR相关事件
-            if event.user_id and event.event_type in [EventType.USER_DELETE, EventType.USER_UPDATE]:
+            if event.user_id and event.event_type in ["user.deleted", "user.updated"]:
                 compliance_flags.append("GDPR")
             
             # SOX相关事件
-            if event.resource_type and event.event_type in [EventType.RESOURCE_UPDATE, EventType.PERMISSION_UPDATE]:
+            if event.resource_type and event.event_type in ["audit.resource.update", "authorization.permission.updated"]:
                 compliance_flags.append("SOX")
             
             # HIPAA相关事件
@@ -449,7 +467,7 @@ class AuditService:
                 logger.warning(f"认证失败事件: 用户={event.user_id}, IP={event.ip_address}")
             
             # 检查权限变更
-            if event.event_type in [EventType.PERMISSION_GRANT, EventType.PERMISSION_REVOKE]:
+            if event.event_type in ["authorization.permission.granted", "authorization.permission.revoked"]:
                 logger.info(f"权限变更事件: {event.action}")
             
         except Exception as e:

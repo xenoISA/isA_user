@@ -2,9 +2,7 @@
 Memory Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # 定义所有路由
 SERVICE_ROUTES = [
     {
@@ -19,6 +17,12 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Service health check"
     },
+        {
+            "path": "/api/v1/memories/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     # Memory Extraction
     {
         "path": "/memories/factual/extract",
@@ -134,7 +138,6 @@ SERVICE_ROUTES = [
         "description": "Get memory statistics"
     },
 ]
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -147,10 +150,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
     working_routes = []
     search_routes = []
     storage_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
-
         # 使用紧凑表示：只保留路径的关键部分
         if path in ["/", "/health"]:
             health_routes.append(path)
@@ -168,10 +169,10 @@ def get_routes_for_consul() -> Dict[str, Any]:
             search_routes.append(compact_path)
         elif path == "/memories" or "/{memory_type}/{memory_id}" in path:
             storage_routes.append("crud")
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "api_path": "/api/v1/memories",
+        "base_path": "/api/v1/memories",
         "health": ",".join(health_routes),
         "extraction": ",".join(extraction_routes),
         "session": "|".join(session_routes[:5]),  # 限制长度
@@ -182,7 +183,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "memory_service",

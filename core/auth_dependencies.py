@@ -8,6 +8,7 @@ from fastapi import Header, HTTPException, status, Request
 from typing import Optional
 import logging
 import os
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,31 @@ INTERNAL_SERVICE_SECRET = os.getenv(
     "dev-internal-secret-change-in-production"
 )
 
+# Auth service URL for JWT verification
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:8201")
+
+
+async def _extract_user_id_from_bearer(authorization: str) -> Optional[str]:
+    """Extract user_id from a Bearer JWT token by calling auth service verify-token."""
+    if not authorization.startswith("Bearer "):
+        return None
+    token = authorization[7:]
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{AUTH_SERVICE_URL}/api/v1/auth/verify-token",
+                json={"token": token},
+                timeout=5.0,
+            )
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("valid"):
+                    return result.get("user_id")
+            return None
+    except Exception as e:
+        logger.warning(f"Failed to verify Bearer token via auth service: {e}")
+        return None
+
 
 async def require_auth_or_internal_service(
     request: Request,
@@ -24,6 +50,7 @@ async def require_auth_or_internal_service(
     x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
     x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
+    authorization: Optional[str] = Header(None),
 ) -> str:
     """
     认证依赖：允许用户认证或内部服务认证
@@ -65,12 +92,18 @@ async def require_auth_or_internal_service(
         else:
             logger.warning(f"Invalid internal service secret from {request.client.host}")
 
-    # 2. 检查用户ID认证
+    # 2. 检查 Authorization: Bearer <jwt> 认证
+    if authorization:
+        bearer_user_id = await _extract_user_id_from_bearer(authorization)
+        if bearer_user_id:
+            return bearer_user_id
+
+    # 3. 检查用户ID认证
     user_id_value = user_id or x_user_id
     if user_id_value:
         return user_id_value
 
-    # 3. 认证失败
+    # 4. 认证失败
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="User authentication required"
@@ -82,6 +115,7 @@ async def optional_auth_or_internal_service(
     user_id: Optional[str] = Header(None, alias="user-id"),
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
     x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
+    authorization: Optional[str] = Header(None),
 ) -> Optional[str]:
     """
     可选认证依赖：允许匿名、用户或内部服务访问
@@ -107,6 +141,12 @@ async def optional_auth_or_internal_service(
     # 检查内部服务认证
     if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
         return "internal-service"
+
+    # 检查 Authorization: Bearer <jwt> 认证
+    if authorization:
+        bearer_user_id = await _extract_user_id_from_bearer(authorization)
+        if bearer_user_id:
+            return bearer_user_id
 
     # 返回用户ID（可能为None）
     return user_id or x_user_id

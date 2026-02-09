@@ -2,9 +2,7 @@
 Authorization Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # Define all routes
 SERVICE_ROUTES = [
     # Health and Service Info
@@ -14,6 +12,12 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Basic health check"
     },
+        {
+            "path": "/api/v1/authorization/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
@@ -32,7 +36,6 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Service statistics and metrics"
     },
-
     # Core Authorization
     {
         "path": "/api/v1/authorization/check-access",
@@ -52,7 +55,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Revoke resource permission"
     },
-
     # Permission Management
     {
         "path": "/api/v1/authorization/user-permissions/{user_id}",
@@ -66,7 +68,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "List user accessible resources"
     },
-
     # Bulk Operations
     {
         "path": "/api/v1/authorization/bulk-grant",
@@ -80,7 +81,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Bulk revoke permissions"
     },
-
     # Administrative
     {
         "path": "/api/v1/authorization/cleanup-expired",
@@ -89,8 +89,6 @@ SERVICE_ROUTES = [
         "description": "Cleanup expired permissions"
     }
 ]
-
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -102,12 +100,10 @@ def get_routes_for_consul() -> Dict[str, Any]:
     management_routes = []
     bulk_routes = []
     admin_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
         # Use compact representation
         compact_path = path.replace("/api/v1/authorization/", "")
-
         if path.startswith("/health"):
             health_routes.append(compact_path)
         elif "bulk" in path:
@@ -118,7 +114,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             management_routes.append(compact_path)
         elif path.startswith("/api/v1/authorization"):
             core_routes.append(compact_path)
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "base_path": "/api/v1/authorization",
@@ -131,8 +126,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
-
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "authorization_service",

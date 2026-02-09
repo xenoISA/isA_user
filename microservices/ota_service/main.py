@@ -156,9 +156,10 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA['tags'],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type='ttl'  # Use TTL for reliable health checks
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
             logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -221,6 +222,7 @@ app = FastAPI(
 # Health Check Endpoints
 # ======================
 
+@app.get("/api/v1/ota/health")
 @app.get("/health")
 async def health_check():
     """基础健康检查"""

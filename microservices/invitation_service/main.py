@@ -21,6 +21,7 @@ from isa_common.consul_client import ConsulRegistry
 from .invitation_service import InvitationService
 from .invitation_repository import InvitationRepository
 from .events import InvitationEventHandler
+from .factory import create_invitation_service
 from .models import (
     HealthResponse, ServiceInfo,
     InvitationCreateRequest, AcceptInvitationRequest,
@@ -74,8 +75,8 @@ async def lifespan(app: FastAPI):
             logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
             event_bus = None
 
-        # 初始化服务
-        invitation_service = InvitationService(event_bus=event_bus)
+        # 初始化服务 (使用工厂模式)
+        invitation_service = create_invitation_service(config=config_manager, event_bus=event_bus)
         logger.info("Invitation microservice initialized successfully")
 
         # Set up event subscriptions if event bus is available
@@ -86,15 +87,15 @@ async def lifespan(app: FastAPI):
 
                 # Subscribe to organization.deleted events
                 await event_bus.subscribe(
-                    subject="events.organization.deleted",
-                    callback=lambda msg: event_handler.handle_event(msg)
+                    pattern="events.organization.deleted",
+                    handler=lambda msg: event_handler.handle_event(msg)
                 )
                 logger.info("✅ Subscribed to organization.deleted events")
 
                 # Subscribe to user.deleted events
                 await event_bus.subscribe(
-                    subject="events.user.deleted",
-                    callback=lambda msg: event_handler.handle_event(msg)
+                    pattern="events.user.deleted",
+                    handler=lambda msg: event_handler.handle_event(msg)
                 )
                 logger.info("✅ Subscribed to user.deleted events")
 
@@ -121,9 +122,10 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA['tags'],
                     meta=consul_meta,
-                    health_check_type='http'
+                    health_check_type='ttl'  # Use TTL for reliable health checks
                 )
                 consul_registry.register()
+                consul_registry.start_maintenance()  # Start TTL heartbeat
                 logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -169,6 +171,7 @@ app = FastAPI(
 
 # ============ Health & Info Endpoints ============
 
+@app.get("/api/v1/invitations/health")
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """健康检查"""

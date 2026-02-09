@@ -165,3 +165,35 @@ class WorkingMemoryRepository(BaseMemoryRepository):
         except Exception as e:
             logger.error(f"Error searching working memories by priority: {e}")
             return []
+
+    async def get_by_ids(
+        self,
+        memory_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Get working memories by their IDs
+
+        Args:
+            memory_ids: List of memory IDs to retrieve
+
+        Returns:
+            List of matching working memories
+        """
+        if not memory_ids:
+            return []
+
+        try:
+            placeholders = ', '.join([f'${i+1}' for i in range(len(memory_ids))])
+            query = f"""
+                SELECT * FROM {self.schema}.{self.table_name}
+                WHERE id IN ({placeholders})
+            """
+
+            async with self.db:
+                results = await self.db.query(query, memory_ids, schema=self.schema)
+
+            return results or []
+
+        except Exception as e:
+            logger.error(f"Error getting working memories by IDs: {e}")
+            return []

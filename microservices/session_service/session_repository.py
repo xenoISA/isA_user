@@ -37,12 +37,12 @@ class SessionRepository:
         if config is None:
             config = ConfigManager("session_service")
 
-        # Discover PostgreSQL service
+        # Discover PostgreSQL service (native connection)
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
@@ -51,6 +51,9 @@ class SessionRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
+            database=os.getenv("POSTGRES_DB", "isa_platform"),
+            username=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
             user_id='session_service'
         )
         self.schema = "session"
@@ -59,6 +62,8 @@ class SessionRepository:
     async def create_session(self, session_data: Dict[str, Any]) -> Optional[Session]:
         """创建会话"""
         try:
+            now = datetime.now(timezone.utc)
+
             data = {
                 "session_id": session_data.get("session_id"),
                 "user_id": session_data.get("user_id"),
@@ -70,9 +75,9 @@ class SessionRepository:
                 "total_tokens": 0,
                 "total_cost": 0.0,
                 "session_summary": "",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "last_activity": datetime.now(timezone.utc).isoformat()
+                "created_at": now,
+                "updated_at": now,
+                "last_activity": now
             }
 
             async with self.db:
@@ -92,7 +97,7 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error creating session: {e}", exc_info=True)
             raise
-    
+
     async def get_by_session_id(self, session_id: str) -> Optional[Session]:
         """根据session_id获取会话"""
         try:
@@ -278,12 +283,12 @@ class SessionMessageRepository:
         if config is None:
             config = ConfigManager("session_service")
 
-        # Discover PostgreSQL service
+        # Discover PostgreSQL service (native connection)
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
@@ -292,6 +297,9 @@ class SessionMessageRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
+            database=os.getenv("POSTGRES_DB", "isa_platform"),
+            username=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
             user_id='session_service'
         )
         self.schema = "session"
@@ -303,6 +311,9 @@ class SessionMessageRepository:
             # Generate UUID for message
             message_id = str(uuid.uuid4())
 
+            # Serialize JSONB fields to JSON strings for AsyncPostgresClient
+            metadata = message_data.get("metadata") or {}
+
             data = {
                 "id": message_id,  # UUID id
                 "session_id": message_data.get("session_id"),
@@ -310,10 +321,10 @@ class SessionMessageRepository:
                 "role": message_data.get("role"),
                 "content": message_data.get("content"),
                 "message_type": message_data.get("message_type", "chat"),
-                "message_metadata": message_data.get("metadata") or {},  # Actual column name
+                "message_metadata": message_data.get("metadata") or {},
                 "tokens_used": message_data.get("tokens_used", 0),
                 "cost_usd": message_data.get("cost_usd", 0.0),
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc)
             }
 
             async with self.db:
@@ -338,7 +349,7 @@ class SessionMessageRepository:
                         "role": result.get("role"),
                         "content": result.get("content"),
                         "message_type": result.get("message_type"),
-                        "metadata": result.get("message_metadata") or {},  # Actual column name
+                        "metadata": result.get("message_metadata") or {},
                         "tokens_used": result.get("tokens_used", 0),
                         "cost_usd": result.get("cost_usd", 0.0),
                         "created_at": result.get("created_at")
@@ -381,7 +392,7 @@ class SessionMessageRepository:
                         "role": msg.get("role"),
                         "content": msg.get("content"),
                         "message_type": msg.get("message_type"),
-                        "metadata": msg.get("message_metadata") or {},  # Actual column name
+                        "metadata": msg.get("message_metadata") or {},
                         "tokens_used": msg.get("tokens_used", 0),
                         "cost_usd": msg.get("cost_usd", 0.0),
                         "created_at": msg.get("created_at")

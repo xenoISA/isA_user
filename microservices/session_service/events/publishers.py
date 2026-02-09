@@ -8,7 +8,7 @@ Following the standard event-driven architecture pattern.
 import logging
 from typing import Any, Dict, Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_session_ended_event_data,
@@ -51,8 +51,8 @@ async def publish_session_started(
         )
 
         event = Event(
-            event_type=EventType.SESSION_STARTED,
-            source=ServiceSource.SESSION_SERVICE,
+            event_type="session.started",
+            source="session_service",
             data=event_data.model_dump(),
         )
 
@@ -96,8 +96,8 @@ async def publish_session_ended(
         )
 
         event = Event(
-            event_type=EventType.SESSION_ENDED,
-            source=ServiceSource.SESSION_SERVICE,
+            event_type="session.ended",
+            source="session_service",
             data=event_data.model_dump(),
         )
 
@@ -146,8 +146,8 @@ async def publish_session_message_sent(
         )
 
         event = Event(
-            event_type=EventType.SESSION_MESSAGE_SENT,
-            source=ServiceSource.SESSION_SERVICE,
+            event_type="session.message_sent",
+            source="session_service",
             data=event_data.model_dump(),
         )
 
@@ -189,8 +189,8 @@ async def publish_session_tokens_used(
         )
 
         event = Event(
-            event_type=EventType.SESSION_TOKENS_USED,
-            source=ServiceSource.SESSION_SERVICE,
+            event_type="session.tokens_used",
+            source="session_service",
             data=event_data.model_dump(),
         )
 

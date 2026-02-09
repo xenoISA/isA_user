@@ -5,9 +5,42 @@ task_service ^���pnӄ�I
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class TaskEventType(str, Enum):
+    """
+    Events published by task_service.
+
+    Stream: task-stream
+    Subjects: task.>
+    """
+    TASK_CREATED = "task.created"
+    TASK_UPDATED = "task.updated"
+    TASK_STARTED = "task.started"
+    TASK_COMPLETED = "task.completed"
+    TASK_FAILED = "task.failed"
+    TASK_CANCELLED = "task.cancelled"
+
+
+class TaskSubscribedEventType(str, Enum):
+    """Events that task_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+
+
+class TaskStreamConfig:
+    """Stream configuration for task_service"""
+    STREAM_NAME = "task-stream"
+    SUBJECTS = ["task.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "task"
+
 
 
 class UserDeletedEventData(BaseModel):

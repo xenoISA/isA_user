@@ -5,9 +5,42 @@ Event data models for organization lifecycle and member management events.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class OrganizationEventType(str, Enum):
+    """
+    Events published by organization_service.
+
+    Stream: organization-stream
+    Subjects: organization.>
+    """
+    ORG_CREATED = "organization.created"
+    ORG_UPDATED = "organization.updated"
+    ORG_DELETED = "organization.deleted"
+    ORG_MEMBER_ADDED = "organization.member_added"
+    ORG_MEMBER_REMOVED = "organization.member_removed"
+    FAMILY_RESOURCE_SHARED = "family.resource_shared"
+
+
+class OrganizationSubscribedEventType(str, Enum):
+    """Events that organization_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+
+
+class OrganizationStreamConfig:
+    """Stream configuration for organization_service"""
+    STREAM_NAME = "organization-stream"
+    SUBJECTS = ["organization.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "organization"
+
 
 # ============================================================================
 # Organization Event Models

@@ -12,6 +12,7 @@ from typing import List, Dict, Any
 NOTIFICATION_SERVICE_ROUTES = [
     # Health & Info
     {"path": "/health", "methods": ["GET"], "auth_required": False, "description": "Health check"},
+    {"path": "/api/v1/notifications/health", "methods": ["GET"], "auth_required": False, "description": "Service health check (API v1)"},
     {"path": "/info", "methods": ["GET"], "auth_required": False, "description": "Service info"},
 
     # Template Management

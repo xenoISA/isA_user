@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     FileDeletedEventData,
@@ -60,8 +60,8 @@ class StorageEventPublisher:
             )
 
             event = Event(
-                event_type=EventType.FILE_UPLOADED,
-                source=ServiceSource.STORAGE_SERVICE,
+                event_type="file.uploaded",
+                source="storage_service",
                 data=event_data.dict(),
             )
 
@@ -110,8 +110,8 @@ class StorageEventPublisher:
             )
 
             event = Event(
-                event_type=EventType.FILE_UPLOADED_WITH_AI,
-                source=ServiceSource.STORAGE_SERVICE,
+                event_type="file.uploaded.with_ai",
+                source="storage_service",
                 data=event_data.dict(),
             )
 
@@ -157,8 +157,8 @@ class StorageEventPublisher:
             )
 
             event = Event(
-                event_type=EventType.FILE_INDEXING_REQUESTED,
-                source=ServiceSource.STORAGE_SERVICE,
+                event_type="file.indexing.requested",
+                source="storage_service",
                 data=event_data.dict(),
             )
 
@@ -187,8 +187,8 @@ class StorageEventPublisher:
             )
 
             event = Event(
-                event_type=EventType.FILE_INDEXED,
-                source=ServiceSource.STORAGE_SERVICE,
+                event_type="file.indexed",
+                source="storage_service",
                 data=event_data.dict(),
             )
 
@@ -211,8 +211,8 @@ class StorageEventPublisher:
             )
 
             event = Event(
-                event_type=EventType.FILE_INDEXING_FAILED,
-                source=ServiceSource.STORAGE_SERVICE,
+                event_type="file.indexing.failed",
+                source="storage_service",
                 data=event_data.dict(),
             )
 
@@ -247,8 +247,8 @@ class StorageEventPublisher:
             )
 
             event = Event(
-                event_type=EventType.FILE_DELETED,
-                source=ServiceSource.STORAGE_SERVICE,
+                event_type="file.deleted",
+                source="storage_service",
                 data=event_data.dict(),
             )
 
@@ -285,8 +285,8 @@ class StorageEventPublisher:
             )
 
             event = Event(
-                event_type=EventType.FILE_SHARED,
-                source=ServiceSource.STORAGE_SERVICE,
+                event_type="file.shared",
+                source="storage_service",
                 data=event_data.dict(),
             )
 

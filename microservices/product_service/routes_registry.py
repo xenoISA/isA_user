@@ -12,6 +12,7 @@ from typing import List, Dict, Any
 PRODUCT_SERVICE_ROUTES = [
     # Health & Info
     {"path": "/health", "methods": ["GET"], "auth_required": False, "description": "Health check"},
+    {"path": "/api/v1/product/health", "methods": ["GET"], "auth_required": False, "description": "Service health check (API v1)"},
     {"path": "/api/v1/product/info", "methods": ["GET"], "auth_required": False, "description": "Service info"},
 
     # Product Catalog

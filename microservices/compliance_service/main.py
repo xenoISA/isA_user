@@ -68,7 +68,7 @@ consul_registry = None
 # 服务配置
 # ====================
 SERVICE_NAME = "compliance_service"
-SERVICE_PORT = int(config.service_port) if config and config.service_port else int(os.getenv("COMPLIANCE_SERVICE_PORT", "8250"))
+SERVICE_PORT = int(config.service_port) if config and config.service_port else int(os.getenv("COMPLIANCE_SERVICE_PORT", "8226"))
 SERVICE_VERSION = "1.0.0"
 SERVICE_HOST = config.service_host if config and config.service_host else os.getenv("COMPLIANCE_SERVICE_HOST", "0.0.0.0")
 
@@ -92,10 +92,26 @@ async def lifespan(app: FastAPI):
             logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
             event_bus = None
 
-        # 初始化合规服务
+        # 初始化合规服务 (need to do this first so handlers can reference it)
         compliance_service = ComplianceService(event_bus=event_bus, config=config_manager)
         compliance_repository = compliance_service.repository
         await compliance_repository.initialize()
+
+        # Register event handlers
+        if event_bus:
+            try:
+                from .events.handlers import get_event_handlers
+                handler_map = get_event_handlers(compliance_service, event_bus)
+
+                for event_pattern, handler_func in handler_map.items():
+                    await event_bus.subscribe_to_events(
+                        pattern=event_pattern, handler=handler_func
+                    )
+                    logger.info(f"Subscribed to {event_pattern} events")
+
+                logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register event handlers: {e}")
 
         # Consul service registration
         if config.consul_enabled:
@@ -117,9 +133,10 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA['tags'],
                     meta=consul_meta,
-                    health_check_type='http'
+                    health_check_type='ttl'  # Use TTL for reliable health checks
                 )
                 consul_registry.register()
+                consul_registry.start_maintenance()  # Start TTL heartbeat
                 logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -192,6 +209,7 @@ def get_compliance_repository() -> ComplianceRepository:
 # 健康检查端点
 # ====================
 
+@app.get("/api/v1/compliance/health")
 @app.get("/health")
 async def health_check():
     """健康检查"""

@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: ota_service
+# Regenerate with: python -m agents.tools.generate_config --deployment ota_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ota
+  namespace: isa-cloud-staging
+  labels:
+    app: ota
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ota
+  template:
+    metadata:
+      labels:
+        app: ota
+    spec:
+      containers:
+      - name: ota
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8221
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "ota_service"
+        - name: SERVICE_PORT
+          value: "8221"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.ota_service.main:app", "--host", "0.0.0.0", "--port", "8221"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8221
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8221
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ota
+  namespace: isa-cloud-staging
+  labels:
+    app: ota
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8221
+    targetPort: 8221
+    protocol: TCP
+    name: http
+  selector:
+    app: ota

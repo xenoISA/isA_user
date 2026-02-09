@@ -6,8 +6,42 @@ Following wallet_service pattern.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class DeviceEventType(str, Enum):
+    """
+    Events published by device_service.
+
+    Stream: device-stream
+    Subjects: device.>
+    """
+    DEVICE_REGISTERED = "device.registered"
+    DEVICE_DELETED = "device.deleted"
+    DEVICE_ONLINE = "device.online"
+    DEVICE_OFFLINE = "device.offline"
+    DEVICE_COMMAND_SENT = "device.command_sent"
+    DEVICE_PAIRED = "device.paired"
+    DEVICE_STATUS_CHANGED = "device.status.changed"
+
+
+class DeviceSubscribedEventType(str, Enum):
+    """Events that device_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+
+
+class DeviceStreamConfig:
+    """Stream configuration for device_service"""
+    STREAM_NAME = "device-stream"
+    SUBJECTS = ["device.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "device"
+
 
 
 # ============================================================================
@@ -93,7 +127,7 @@ class DeviceFirmwareUpdatedEventData(BaseModel):
     new_version: str = Field(..., description="New firmware version")
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     update_id: Optional[str] = Field(None, description="OTA update ID")
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -102,6 +136,86 @@ class DeviceFirmwareUpdatedEventData(BaseModel):
                 "new_version": "1.1.0",
                 "updated_at": "2025-11-11T12:10:00Z",
                 "update_id": "update_abc123"
+            }
+        }
+
+
+class DeviceDeletedEventData(BaseModel):
+    """
+    Event: device.deleted
+    Triggered when a device is deleted/deregistered
+
+    Subscribers:
+        - location_service: Clean up device location data
+        - album_service: Clean up device sync status
+        - media_service: Clean up device playlists/cache
+        - telemetry_service: Clean up device metrics and alert rules
+        - ota_service: Cancel pending firmware updates
+    """
+    device_id: str = Field(..., description="Device ID")
+    user_id: Optional[str] = Field(None, description="Owner user ID")
+    device_type: Optional[str] = Field(None, description="Device type")
+    deleted_at: datetime = Field(default_factory=datetime.utcnow)
+    reason: Optional[str] = Field(None, description="Reason for deletion")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "device_id": "frame_12345",
+                "user_id": "user_67890",
+                "device_type": "frame",
+                "deleted_at": "2025-11-11T12:15:00Z",
+                "reason": "User requested removal"
+            }
+        }
+
+
+class DeviceOfflineEventData(BaseModel):
+    """
+    Event: device.offline
+    Triggered when a device goes offline
+
+    Subscribers:
+        - notification_service: Send offline notification to user
+        - telemetry_service: Update device status metrics
+    """
+    device_id: str = Field(..., description="Device ID")
+    user_id: Optional[str] = Field(None, description="Owner user ID")
+    last_seen_at: datetime = Field(default_factory=datetime.utcnow)
+    offline_duration_seconds: Optional[int] = Field(None, description="Seconds since last heartbeat")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "device_id": "frame_12345",
+                "user_id": "user_67890",
+                "last_seen_at": "2025-11-11T12:00:00Z",
+                "offline_duration_seconds": 300
+            }
+        }
+
+
+class DeviceOnlineEventData(BaseModel):
+    """
+    Event: device.online
+    Triggered when a device comes back online
+
+    Subscribers:
+        - notification_service: Optionally notify user
+        - telemetry_service: Update device status metrics
+    """
+    device_id: str = Field(..., description="Device ID")
+    user_id: Optional[str] = Field(None, description="Owner user ID")
+    online_at: datetime = Field(default_factory=datetime.utcnow)
+    offline_duration_seconds: Optional[int] = Field(None, description="How long device was offline")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "device_id": "frame_12345",
+                "user_id": "user_67890",
+                "online_at": "2025-11-11T12:05:00Z",
+                "offline_duration_seconds": 300
             }
         }
 
@@ -167,4 +281,45 @@ def create_device_firmware_updated_event_data(
         old_version=old_version,
         new_version=new_version,
         update_id=update_id
+    )
+
+
+def create_device_deleted_event_data(
+    device_id: str,
+    user_id: Optional[str] = None,
+    device_type: Optional[str] = None,
+    reason: Optional[str] = None
+) -> DeviceDeletedEventData:
+    """Create device deleted event data"""
+    return DeviceDeletedEventData(
+        device_id=device_id,
+        user_id=user_id,
+        device_type=device_type,
+        reason=reason
+    )
+
+
+def create_device_offline_event_data(
+    device_id: str,
+    user_id: Optional[str] = None,
+    offline_duration_seconds: Optional[int] = None
+) -> DeviceOfflineEventData:
+    """Create device offline event data"""
+    return DeviceOfflineEventData(
+        device_id=device_id,
+        user_id=user_id,
+        offline_duration_seconds=offline_duration_seconds
+    )
+
+
+def create_device_online_event_data(
+    device_id: str,
+    user_id: Optional[str] = None,
+    offline_duration_seconds: Optional[int] = None
+) -> DeviceOnlineEventData:
+    """Create device online event data"""
+    return DeviceOnlineEventData(
+        device_id=device_id,
+        user_id=user_id,
+        offline_duration_seconds=offline_duration_seconds
     )

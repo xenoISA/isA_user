@@ -2,19 +2,23 @@
 Notification Service Business Logic Layer
 
 业务逻辑层，处理通知发送、模板管理、邮件发送等
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
+- Service clients are injected
 """
 
 import json
 import httpx
 import os
-from typing import List, Optional, Dict, Any
+from typing import TYPE_CHECKING, List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import logging
 import re
 import asyncio
 
-from core.config_manager import ConfigManager
-from .notification_repository import NotificationRepository
+# Import only models (no I/O dependencies)
 from .models import (
     Notification, NotificationTemplate, InAppNotification,
     NotificationBatch, SendNotificationRequest, SendBatchRequest,
@@ -25,8 +29,13 @@ from .models import (
     RecipientType, PushSubscription, PushPlatform,
     RegisterPushSubscriptionRequest
 )
-from .events.publishers import NotificationEventPublishers
-from .clients import AccountServiceClient, OrganizationServiceClient
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
+    from .notification_repository import NotificationRepository
+    from .events.publishers import NotificationEventPublishers
+    from .clients import AccountServiceClient, OrganizationServiceClient
 
 
 logger = logging.getLogger(__name__)
@@ -35,32 +44,63 @@ logger = logging.getLogger(__name__)
 class NotificationService:
     """通知服务业务逻辑层"""
 
-    def __init__(self, event_bus=None, config_manager: Optional[ConfigManager] = None):
+    def __init__(
+        self,
+        event_bus=None,
+        config_manager=None,
+        repository=None,
+        account_client=None,
+        organization_client=None,
+        email_client=None,
+    ):
         """
         Initialize notification service.
 
         Args:
             event_bus: Event bus for publishing events
             config_manager: ConfigManager instance for service discovery
+            repository: Optional NotificationRepository (for DI/testing)
+            account_client: Optional AccountServiceClient (for DI/testing)
+            organization_client: Optional OrganizationServiceClient (for DI/testing)
+            email_client: Optional email client (for DI/testing)
         """
-        self.repository = NotificationRepository(config=config_manager)
         self.event_bus = event_bus
         self.config_manager = config_manager
+        self._event_publishers_loaded = False
 
-        # Initialize event publishers
-        self.event_publishers = NotificationEventPublishers(event_bus) if event_bus else None
+        # Support dependency injection - lazy import real dependencies only if not provided
+        if repository is not None:
+            self.repository = repository
+        else:
+            from .notification_repository import NotificationRepository
+            self.repository = NotificationRepository(config=config_manager)
 
-        # Initialize service clients
-        self.account_client = AccountServiceClient(config_manager)
-        self.organization_client = OrganizationServiceClient(config_manager)
+        # Lazy load event publishers
+        self.event_publishers = None
+        self._lazy_load_event_publishers()
+
+        # Initialize service clients with lazy imports
+        if account_client is not None:
+            self.account_client = account_client
+        else:
+            from .clients import AccountServiceClient
+            self.account_client = AccountServiceClient(config_manager)
+
+        if organization_client is not None:
+            self.organization_client = organization_client
+        else:
+            from .clients import OrganizationServiceClient
+            self.organization_client = OrganizationServiceClient(config_manager)
 
         # Resend API配置
         self.resend_api_key = os.environ.get("RESEND_API_KEY")
         self.resend_base_url = "https://api.resend.com"
         self.default_from_email = "noreply@iapro.ai"
 
-        # HTTP客户端（用于发送邮件）
-        if self.resend_api_key:
+        # HTTP客户端（用于发送邮件）- support DI
+        if email_client is not None:
+            self.email_client = email_client
+        elif self.resend_api_key:
             self.email_client = httpx.AsyncClient(
                 base_url=self.resend_base_url,
                 headers={
@@ -72,7 +112,19 @@ class NotificationService:
         else:
             self.email_client = None
             logger.warning("Resend API key not configured. Email sending disabled.")
-    
+
+    def _lazy_load_event_publishers(self):
+        """Lazy load event publishers to avoid import-time I/O"""
+        if not self._event_publishers_loaded:
+            if self.event_bus:
+                try:
+                    from .events.publishers import NotificationEventPublishers
+                    self.event_publishers = NotificationEventPublishers(self.event_bus)
+                except ImportError:
+                    logger.warning("Event publishers not available")
+                    self.event_publishers = None
+            self._event_publishers_loaded = True
+
     # ====================
     # 通知模板管理
     # ====================

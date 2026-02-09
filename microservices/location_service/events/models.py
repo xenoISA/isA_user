@@ -5,9 +5,42 @@ Event models for location service event-driven architecture
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class LocationEventType(str, Enum):
+    """
+    Events published by location_service.
+
+    Stream: location-stream
+    Subjects: location.>
+    """
+    LOCATION_UPDATED = "location.updated"
+    LOCATION_BATCH_UPDATED = "location.batch.updated"
+    GEOFENCE_CREATED = "location.geofence.created"
+    GEOFENCE_ENTERED = "location.geofence.entered"
+    GEOFENCE_EXITED = "location.geofence.exited"
+
+
+class LocationSubscribedEventType(str, Enum):
+    """Events that location_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+    DEVICE_REGISTERED = "device.registered"
+
+
+class LocationStreamConfig:
+    """Stream configuration for location_service"""
+    STREAM_NAME = "location-stream"
+    SUBJECTS = ["location.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "location"
+
 
 
 class DeviceDeletedEventData(BaseModel):

@@ -39,9 +39,9 @@ class PaymentRepository:
         # Discover PostgreSQL service
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
@@ -107,8 +107,18 @@ class PaymentRepository:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
 
-            async with self.db:
-                count = await self.db.insert_into(self.plans_table, [data], schema=self.schema)
+            logger.info(f"Inserting subscription plan into {self.schema}.{self.plans_table} | plan_id={data['plan_id']}")
+
+            try:
+                async with self.db:
+                    count = await self.db.insert_into(self.plans_table, [data], schema=self.schema)
+            except Exception as insert_err:
+                logger.error(
+                    f"INSERT failed for {self.schema}.{self.plans_table} | "
+                    f"plan_id={data['plan_id']} | error={insert_err}",
+                    exc_info=True
+                )
+                raise
 
             # Check return value for None
             if count is not None and count > 0:
@@ -118,7 +128,7 @@ class PaymentRepository:
             return await self.get_subscription_plan(data["plan_id"])
 
         except Exception as e:
-            logger.error(f"创建订阅计划失败: {e}")
+            logger.error(f"创建订阅计划失败: {e}", exc_info=True)
             return None
 
     async def get_subscription_plan(self, plan_id: str) -> Optional[SubscriptionPlan]:
@@ -419,8 +429,13 @@ class PaymentRepository:
                 "payment_id": payment.payment_id or f"pay_{uuid.uuid4().hex[:8]}",
                 "user_id": payment.user_id,
                 "organization_id": payment.organization_id,
+                "order_id": payment.order_id,
                 "amount": float(payment.amount),
                 "currency": payment.currency.value,
+                "subtotal_amount": float(payment.subtotal_amount),
+                "tax_amount": float(payment.tax_amount),
+                "shipping_amount": float(payment.shipping_amount),
+                "discount_amount": float(payment.discount_amount),
                 "description": payment.description,
                 "status": payment.status.value,
                 "payment_method": payment.payment_method.value,
@@ -667,6 +682,25 @@ class PaymentRepository:
     # ====================
     # 退款管理
     # ====================
+
+    async def get_refund(self, refund_id: str) -> Optional[Refund]:
+        """获取退款记录"""
+        try:
+            query = f"""
+                SELECT * FROM {self.schema}.{self.refunds_table}
+                WHERE refund_id = $1
+            """
+
+            async with self.db:
+                result = await self.db.query_row(query, [refund_id], schema=self.schema)
+
+            if result:
+                return self._convert_to_refund(result)
+            return None
+
+        except Exception as e:
+            logger.error(f"获取退款记录失败: {e}")
+            return None
 
     async def create_refund(self, refund: Refund) -> Optional[Refund]:
         """创建退款"""
@@ -1054,8 +1088,13 @@ class PaymentRepository:
             payment_id=data["payment_id"],
             user_id=data["user_id"],
             organization_id=data.get("organization_id"),
+            order_id=data.get("order_id"),
             amount=Decimal(str(data["amount"])),
             currency=Currency(data["currency"]),
+            subtotal_amount=Decimal(str(data.get("subtotal_amount", 0) or 0)),
+            tax_amount=Decimal(str(data.get("tax_amount", 0) or 0)),
+            shipping_amount=Decimal(str(data.get("shipping_amount", 0) or 0)),
+            discount_amount=Decimal(str(data.get("discount_amount", 0) or 0)),
             description=data.get("description"),
             status=PaymentStatus(data["status"]),
             payment_method=PaymentMethod(data["payment_method"]),

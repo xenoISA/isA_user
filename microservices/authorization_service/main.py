@@ -30,7 +30,7 @@ from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
 
 # Import internal modules
-from .authorization_service import AuthorizationService
+from .factory import create_authorization_service
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     HealthResponse, ServiceInfo, ServiceStats,
@@ -65,8 +65,8 @@ async def lifespan(app: FastAPI):
             event_bus = await get_event_bus("authorization_service")
             logger.info("✅ Event bus initialized successfully")
 
-            # Initialize authorization service with event bus
-            authorization_service = AuthorizationService(event_bus=event_bus, config=config_manager)
+            # Initialize authorization service using factory pattern
+            authorization_service = create_authorization_service(config=config_manager, event_bus=event_bus)
 
             # Subscribe to events
             from .events import AuthorizationEventHandlers
@@ -87,8 +87,8 @@ async def lifespan(app: FastAPI):
             logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
             event_bus = None
 
-            # Initialize authorization service without event bus
-            authorization_service = AuthorizationService(event_bus=None, config=config_manager)
+            # Initialize authorization service using factory pattern (without event bus)
+            authorization_service = create_authorization_service(config=config_manager, event_bus=None)
 
         # Initialize default permissions
         await authorization_service.initialize_default_permissions()
@@ -113,9 +113,10 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA['tags'],
                     meta=consul_meta,
-                    health_check_type='http'
+                    health_check_type='ttl'  # Use TTL for reliable health checks
                 )
                 consul_registry.register()
+                consul_registry.start_maintenance()  # Start TTL heartbeat
                 logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -173,6 +174,7 @@ async def global_exception_handler(request, exc):
 # Health Check & Service Information
 # ==========================================
 
+@app.get("/api/v1/authorization/health")
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Basic health check"""

@@ -5,6 +5,37 @@ Compliance Service Event Models
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class ComplianceEventType(str, Enum):
+    """
+    Events published by compliance_service.
+
+    Stream: compliance-stream
+    Subjects: compliance.>
+    """
+    CHECK_PERFORMED = "compliance.check.performed"
+    VIOLATION_DETECTED = "compliance.violation.detected"
+    WARNING_ISSUED = "compliance.warning.issued"
+
+
+class ComplianceSubscribedEventType(str, Enum):
+    """Events that compliance_service subscribes to from other services."""
+    USER_CREATED = "user.created"
+    ORDER_COMPLETED = "order.completed"
+
+
+class ComplianceStreamConfig:
+    """Stream configuration for compliance_service"""
+    STREAM_NAME = "compliance-stream"
+    SUBJECTS = ["compliance.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "compliance"
+
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 

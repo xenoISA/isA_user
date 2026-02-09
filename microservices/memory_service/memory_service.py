@@ -1,36 +1,34 @@
 """
 Memory Service - Business Logic Orchestration Layer
 
-Orchestrates memory operations across different memory types with AI-powered extraction
+Orchestrates memory operations across different memory types with AI-powered extraction.
+
+Uses dependency injection for testability:
+- Sub-services are injected, not created at import time
+- Event publishers are lazily loaded
 """
 
 import logging
 import uuid
-from typing import Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from datetime import datetime, timedelta, timezone
 
+# Import only models (no I/O dependencies)
 from .models import (
     MemoryType, MemoryModel, MemoryOperationResult,
     FactualMemory, ProceduralMemory, EpisodicMemory,
     SemanticMemory, WorkingMemory, SessionMemory,
     MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams
 )
-from .factual_service import FactualMemoryService
-from .procedural_service import ProceduralMemoryService
-from .episodic_service import EpisodicMemoryService
-from .semantic_service import SemanticMemoryService
-from .working_service import WorkingMemoryService
-from .session_service import SessionMemoryService
-from .events.publishers import (
-    publish_memory_created,
-    publish_memory_updated,
-    publish_memory_deleted,
-    publish_factual_memory_stored,
-    publish_episodic_memory_stored,
-    publish_procedural_memory_stored,
-    publish_semantic_memory_stored,
-    publish_session_memory_deactivated
-)
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from .factual_service import FactualMemoryService
+    from .procedural_service import ProceduralMemoryService
+    from .episodic_service import EpisodicMemoryService
+    from .semantic_service import SemanticMemoryService
+    from .working_service import WorkingMemoryService
+    from .session_service import SessionMemoryService
 
 logger = logging.getLogger(__name__)
 
@@ -42,24 +40,106 @@ class MemoryService:
     Coordinates memory operations across different memory type services with AI capabilities
     """
 
-    def __init__(self, consul_registry=None, event_bus=None):
+    def __init__(
+        self,
+        consul_registry=None,
+        event_bus=None,
+        factual_service=None,
+        procedural_service=None,
+        episodic_service=None,
+        semantic_service=None,
+        working_service=None,
+        session_service=None,
+    ):
         """
         Initialize memory service with all service instances
 
         Args:
             consul_registry: Optional ConsulRegistry for service discovery (deprecated - not used)
             event_bus: Optional NATS event bus for publishing events
+            factual_service: Optional FactualMemoryService (for DI/testing)
+            procedural_service: Optional ProceduralMemoryService (for DI/testing)
+            episodic_service: Optional EpisodicMemoryService (for DI/testing)
+            semantic_service: Optional SemanticMemoryService (for DI/testing)
+            working_service: Optional WorkingMemoryService (for DI/testing)
+            session_service: Optional SessionMemoryService (for DI/testing)
         """
         self.consul_registry = consul_registry
         self.event_bus = event_bus
-        self.factual_service = FactualMemoryService()
-        self.procedural_service = ProceduralMemoryService()
-        self.episodic_service = EpisodicMemoryService()
-        self.semantic_service = SemanticMemoryService()
-        self.working_service = WorkingMemoryService()
-        self.session_service = SessionMemoryService()
+        self._event_publishers_loaded = False
+
+        # Support dependency injection - lazy import real services only if not provided
+        if factual_service is not None:
+            self.factual_service = factual_service
+        else:
+            from .factual_service import FactualMemoryService
+            self.factual_service = FactualMemoryService()
+
+        if procedural_service is not None:
+            self.procedural_service = procedural_service
+        else:
+            from .procedural_service import ProceduralMemoryService
+            self.procedural_service = ProceduralMemoryService()
+
+        if episodic_service is not None:
+            self.episodic_service = episodic_service
+        else:
+            from .episodic_service import EpisodicMemoryService
+            self.episodic_service = EpisodicMemoryService()
+
+        if semantic_service is not None:
+            self.semantic_service = semantic_service
+        else:
+            from .semantic_service import SemanticMemoryService
+            self.semantic_service = SemanticMemoryService()
+
+        if working_service is not None:
+            self.working_service = working_service
+        else:
+            from .working_service import WorkingMemoryService
+            self.working_service = WorkingMemoryService()
+
+        if session_service is not None:
+            self.session_service = session_service
+        else:
+            from .session_service import SessionMemoryService
+            self.session_service = SessionMemoryService()
 
         logger.info("Memory service initialized with AI capabilities")
+
+    def _lazy_load_event_publishers(self):
+        """Lazy load event publishers to avoid import-time I/O"""
+        if not self._event_publishers_loaded:
+            try:
+                from .events.publishers import (
+                    publish_memory_created,
+                    publish_memory_updated,
+                    publish_memory_deleted,
+                    publish_factual_memory_stored,
+                    publish_episodic_memory_stored,
+                    publish_procedural_memory_stored,
+                    publish_semantic_memory_stored,
+                    publish_session_memory_deactivated
+                )
+                self._publish_memory_created = publish_memory_created
+                self._publish_memory_updated = publish_memory_updated
+                self._publish_memory_deleted = publish_memory_deleted
+                self._publish_factual_memory_stored = publish_factual_memory_stored
+                self._publish_episodic_memory_stored = publish_episodic_memory_stored
+                self._publish_procedural_memory_stored = publish_procedural_memory_stored
+                self._publish_semantic_memory_stored = publish_semantic_memory_stored
+                self._publish_session_memory_deactivated = publish_session_memory_deactivated
+            except ImportError:
+                logger.warning("Event publishers not available")
+                self._publish_memory_created = None
+                self._publish_memory_updated = None
+                self._publish_memory_deleted = None
+                self._publish_factual_memory_stored = None
+                self._publish_episodic_memory_stored = None
+                self._publish_procedural_memory_stored = None
+                self._publish_semantic_memory_stored = None
+                self._publish_session_memory_deactivated = None
+            self._event_publishers_loaded = True
 
     def _get_service(self, memory_type: MemoryType):
         """Get service for specified memory type"""
@@ -177,16 +257,18 @@ class MemoryService:
                 # Publish memory.created event
                 if self.event_bus:
                     try:
-                        await publish_memory_created(
-                            event_bus=self.event_bus,
-                            memory_id=result['id'],
-                            memory_type=request.memory_type.value,
-                            user_id=request.user_id,
-                            content=memory_data.get('content', ''),
-                            importance_score=request.importance_score,
-                            tags=memory_data.get('tags'),
-                            metadata=memory_data.get('metadata')
-                        )
+                        self._lazy_load_event_publishers()
+                        if self._publish_memory_created:
+                            await self._publish_memory_created(
+                                event_bus=self.event_bus,
+                                memory_id=result['id'],
+                                memory_type=request.memory_type.value,
+                                user_id=request.user_id,
+                                content=memory_data.get('content', ''),
+                                importance_score=request.importance_score,
+                                tags=memory_data.get('tags'),
+                                metadata=memory_data.get('metadata')
+                            )
                     except Exception as e:
                         logger.error(f"Failed to publish memory.created event: {e}")
 
@@ -357,13 +439,15 @@ class MemoryService:
                 # Publish memory.updated event
                 if self.event_bus:
                     try:
-                        await publish_memory_updated(
-                            event_bus=self.event_bus,
-                            memory_id=memory_id,
-                            memory_type=memory_type.value,
-                            user_id=user_id,
-                            updated_fields=list(updates.keys())
-                        )
+                        self._lazy_load_event_publishers()
+                        if self._publish_memory_updated:
+                            await self._publish_memory_updated(
+                                event_bus=self.event_bus,
+                                memory_id=memory_id,
+                                memory_type=memory_type.value,
+                                user_id=user_id,
+                                updated_fields=list(updates.keys())
+                            )
                     except Exception as e:
                         logger.error(f"Failed to publish memory.updated event: {e}")
 
@@ -423,12 +507,14 @@ class MemoryService:
                 # Publish memory.deleted event
                 if self.event_bus:
                     try:
-                        await publish_memory_deleted(
-                            event_bus=self.event_bus,
-                            memory_id=memory_id,
-                            memory_type=memory_type.value,
-                            user_id=user_id
-                        )
+                        self._lazy_load_event_publishers()
+                        if self._publish_memory_deleted:
+                            await self._publish_memory_deleted(
+                                event_bus=self.event_bus,
+                                memory_id=memory_id,
+                                memory_type=memory_type.value,
+                                user_id=user_id
+                            )
                     except Exception as e:
                         logger.error(f"Failed to publish memory.deleted event: {e}")
 
@@ -471,13 +557,15 @@ class MemoryService:
         # Publish memory.factual.stored event
         if result.success and self.event_bus:
             try:
-                await publish_factual_memory_stored(
-                    event_bus=self.event_bus,
-                    user_id=user_id,
-                    count=result.count,
-                    importance_score=importance_score,
-                    source="dialog"
-                )
+                self._lazy_load_event_publishers()
+                if self._publish_factual_memory_stored:
+                    await self._publish_factual_memory_stored(
+                        event_bus=self.event_bus,
+                        user_id=user_id,
+                        count=result.count,
+                        importance_score=importance_score,
+                        source="dialog"
+                    )
             except Exception as e:
                 logger.error(f"Failed to publish memory.factual.stored event: {e}")
 
@@ -497,13 +585,15 @@ class MemoryService:
         # Publish memory.episodic.stored event
         if result.success and self.event_bus:
             try:
-                await publish_episodic_memory_stored(
-                    event_bus=self.event_bus,
-                    user_id=user_id,
-                    count=result.count,
-                    importance_score=importance_score,
-                    source="dialog"
-                )
+                self._lazy_load_event_publishers()
+                if self._publish_episodic_memory_stored:
+                    await self._publish_episodic_memory_stored(
+                        event_bus=self.event_bus,
+                        user_id=user_id,
+                        count=result.count,
+                        importance_score=importance_score,
+                        source="dialog"
+                    )
             except Exception as e:
                 logger.error(f"Failed to publish memory.episodic.stored event: {e}")
 
@@ -523,13 +613,15 @@ class MemoryService:
         # Publish memory.procedural.stored event
         if result.success and self.event_bus:
             try:
-                await publish_procedural_memory_stored(
-                    event_bus=self.event_bus,
-                    user_id=user_id,
-                    count=result.count,
-                    importance_score=importance_score,
-                    source="dialog"
-                )
+                self._lazy_load_event_publishers()
+                if self._publish_procedural_memory_stored:
+                    await self._publish_procedural_memory_stored(
+                        event_bus=self.event_bus,
+                        user_id=user_id,
+                        count=result.count,
+                        importance_score=importance_score,
+                        source="dialog"
+                    )
             except Exception as e:
                 logger.error(f"Failed to publish memory.procedural.stored event: {e}")
 
@@ -549,13 +641,15 @@ class MemoryService:
         # Publish memory.semantic.stored event
         if result.success and self.event_bus:
             try:
-                await publish_semantic_memory_stored(
-                    event_bus=self.event_bus,
-                    user_id=user_id,
-                    count=result.count,
-                    importance_score=importance_score,
-                    source="dialog"
-                )
+                self._lazy_load_event_publishers()
+                if self._publish_semantic_memory_stored:
+                    await self._publish_semantic_memory_stored(
+                        event_bus=self.event_bus,
+                        user_id=user_id,
+                        count=result.count,
+                        importance_score=importance_score,
+                        source="dialog"
+                    )
             except Exception as e:
                 logger.error(f"Failed to publish memory.semantic.stored event: {e}")
 
@@ -580,6 +674,136 @@ class MemoryService:
     ) -> List[Dict[str, Any]]:
         """Search factual memories by type"""
         return await self.factual_service.repository.search_by_fact_type(user_id, fact_type, limit)
+
+    async def vector_search_factual(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+        score_threshold: float = 0.4
+    ) -> List[Dict[str, Any]]:
+        """
+        Vector similarity search for factual memories using Qdrant
+
+        Args:
+            user_id: User identifier
+            query: Search query text
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        return await self.factual_service.vector_search(user_id, query, limit, score_threshold)
+
+    async def vector_search_episodic(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+        score_threshold: float = 0.15
+    ) -> List[Dict[str, Any]]:
+        """
+        Vector similarity search for episodic memories using Qdrant
+
+        Args:
+            user_id: User identifier
+            query: Search query text
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        return await self.episodic_service.vector_search(user_id, query, limit, score_threshold)
+
+    async def vector_search_procedural(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+        score_threshold: float = 0.15
+    ) -> List[Dict[str, Any]]:
+        """
+        Vector similarity search for procedural memories using Qdrant
+
+        Args:
+            user_id: User identifier
+            query: Search query text
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        return await self.procedural_service.vector_search(user_id, query, limit, score_threshold)
+
+    async def vector_search_semantic(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+        score_threshold: float = 0.15
+    ) -> List[Dict[str, Any]]:
+        """
+        Vector similarity search for semantic memories using Qdrant
+
+        Args:
+            user_id: User identifier
+            query: Search query text
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        return await self.semantic_service.vector_search(user_id, query, limit, score_threshold)
+
+    async def vector_search_working(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+        score_threshold: float = 0.15,
+        include_expired: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Vector similarity search for working memories using Qdrant
+
+        Args:
+            user_id: User identifier
+            query: Search query text
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+            include_expired: Whether to include expired memories
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        return await self.working_service.vector_search(user_id, query, limit, score_threshold, include_expired)
+
+    async def vector_search_session(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+        score_threshold: float = 0.15,
+        session_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Vector similarity search for session memories using Qdrant
+
+        Args:
+            user_id: User identifier
+            query: Search query text
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+            session_id: Optional session ID to filter by
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        return await self.session_service.vector_search(user_id, query, limit, score_threshold, session_id)
 
     # ==================== Procedural Memory Operations ====================
 
@@ -704,11 +928,13 @@ class MemoryService:
                 # Publish memory.session.deactivated event
                 if self.event_bus:
                     try:
-                        await publish_session_memory_deactivated(
-                            event_bus=self.event_bus,
-                            user_id=user_id,
-                            session_id=session_id
-                        )
+                        self._lazy_load_event_publishers()
+                        if self._publish_session_memory_deactivated:
+                            await self._publish_session_memory_deactivated(
+                                event_bus=self.event_bus,
+                                user_id=user_id,
+                                session_id=session_id
+                            )
                     except Exception as e:
                         logger.error(f"Failed to publish memory.session.deactivated event: {e}")
 

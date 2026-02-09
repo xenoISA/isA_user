@@ -8,11 +8,22 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
-from .document_repository import DocumentRepository
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import (
+    DocumentRepositoryProtocol,
+    EventBusProtocol,
+    StorageClientProtocol,
+    AuthorizationClientProtocol,
+    DigitalAnalyticsClientProtocol,
+    DocumentNotFoundError,
+    DocumentValidationError,
+    DocumentPermissionError,
+    DocumentServiceError,
+)
 from .models import (
     AccessLevel,
     ChunkingStrategy,
@@ -35,30 +46,11 @@ from .models import (
     UpdateStrategy,
 )
 
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
+
 logger = logging.getLogger(__name__)
-
-
-# ==================== Custom Exceptions ====================
-
-
-class DocumentServiceError(Exception):
-    """Base exception for document service errors"""
-    pass
-
-
-class DocumentNotFoundError(DocumentServiceError):
-    """Document not found"""
-    pass
-
-
-class DocumentValidationError(DocumentServiceError):
-    """Document validation error"""
-    pass
-
-
-class DocumentPermissionError(DocumentServiceError):
-    """Document permission error"""
-    pass
 
 
 # ==================== Document Service ====================
@@ -67,18 +59,38 @@ class DocumentPermissionError(DocumentServiceError):
 class DocumentService:
     """Document service - business logic layer for knowledge documents"""
 
-    def __init__(self, event_bus=None, config_manager=None):
-        """Initialize document service"""
-        self.repository = DocumentRepository(config=config_manager)
+    def __init__(
+        self,
+        repository: Optional[DocumentRepositoryProtocol] = None,
+        event_bus: Optional[EventBusProtocol] = None,
+        config_manager: Optional["ConfigManager"] = None,
+        storage_client: Optional[StorageClientProtocol] = None,
+        auth_client: Optional[AuthorizationClientProtocol] = None,
+        digital_client: Optional[DigitalAnalyticsClientProtocol] = None,
+    ):
+        """
+        Initialize document service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            config_manager: Configuration manager
+            storage_client: Storage service client
+            auth_client: Authorization service client
+            digital_client: Digital analytics client
+        """
+        self.repo = repository  # Will be set by factory if None
         self.event_bus = event_bus
         self.config_manager = config_manager
 
-        # Import service clients (lazy load to avoid circular dependencies)
-        self.storage_client = None
-        self.auth_client = None
-        self.digital_client = None
+        # Service clients (injected or initialized)
+        self.storage_client = storage_client
+        self.auth_client = auth_client
+        self.digital_client = digital_client
 
-        self._init_clients()
+        # Lazy init clients if not provided
+        if not any([storage_client, auth_client, digital_client]):
+            self._init_clients()
 
     def _init_clients(self):
         """Initialize service clients"""
@@ -159,7 +171,7 @@ class DocumentService:
             )
 
             # Save to database
-            created = await self.repository.create_document(document)
+            created = await self.repo.create_document(document)
 
             if not created:
                 raise DocumentServiceError("Failed to create document")
@@ -170,7 +182,7 @@ class DocumentService:
                     await self._index_document_async(created, user_id)
                 except Exception as e:
                     logger.error(f"Failed to index document: {e}")
-                    await self.repository.update_document_status(
+                    await self.repo.update_document_status(
                         doc_id, DocumentStatus.FAILED
                     )
 
@@ -178,8 +190,8 @@ class DocumentService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.DOCUMENT_CREATED,
-                        source=ServiceSource.DOCUMENT_SERVICE,
+                        event_type="document.created",
+                        source="document_service",
                         data={
                             "doc_id": created.doc_id,
                             "user_id": user_id,
@@ -204,7 +216,7 @@ class DocumentService:
         """
         Get document by ID (with permission check)
         """
-        document = await self.repository.get_document_by_id(doc_id)
+        document = await self.repo.get_document_by_id(doc_id)
 
         if not document:
             raise DocumentNotFoundError(f"Document {doc_id} not found")
@@ -228,7 +240,7 @@ class DocumentService:
         offset: int = 0,
     ) -> List[DocumentResponse]:
         """List user's documents"""
-        documents = await self.repository.list_user_documents(
+        documents = await self.repo.list_user_documents(
             user_id, organization_id, status, doc_type, limit, offset
         )
         return [self._document_to_response(doc) for doc in documents]
@@ -249,7 +261,7 @@ class DocumentService:
         """
         try:
             # Get document
-            document = await self.repository.get_document_by_id(doc_id)
+            document = await self.repo.get_document_by_id(doc_id)
             if not document:
                 raise DocumentNotFoundError(f"Document {doc_id} not found")
 
@@ -264,7 +276,7 @@ class DocumentService:
             # We don't need to explicitly delete points - they are managed by collection
 
             # Delete from database
-            result = await self.repository.delete_document(
+            result = await self.repo.delete_document(
                 doc_id, user_id, soft=not permanent
             )
 
@@ -272,8 +284,8 @@ class DocumentService:
             if result and self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.DOCUMENT_DELETED,
-                        source=ServiceSource.DOCUMENT_SERVICE,
+                        event_type="document.deleted",
+                        source="document_service",
                         data={
                             "doc_id": doc_id,
                             "user_id": user_id,
@@ -306,7 +318,7 @@ class DocumentService:
         """
         try:
             # Get current document
-            current_doc = await self.repository.get_document_by_id(doc_id)
+            current_doc = await self.repo.get_document_by_id(doc_id)
             if not current_doc:
                 raise DocumentNotFoundError(f"Document {doc_id} not found")
 
@@ -318,7 +330,7 @@ class DocumentService:
                 raise DocumentPermissionError("No permission to update document")
 
             # Update status to UPDATING
-            await self.repository.update_document_status(doc_id, DocumentStatus.UPDATING)
+            await self.repo.update_document_status(doc_id, DocumentStatus.UPDATING)
 
             # Download new file content
             new_content = await self._download_file_content(request.new_file_id, user_id)
@@ -330,7 +342,7 @@ class DocumentService:
 
             # Create new version
             new_version = current_doc.version + 1
-            new_doc = await self.repository.create_document_version(
+            new_doc = await self.repo.create_document_version(
                 base_doc_id=doc_id,
                 new_file_id=request.new_file_id,
                 new_version=new_version,
@@ -340,7 +352,7 @@ class DocumentService:
             )
 
             # Mark old version as not latest
-            await self.repository.mark_version_as_old(doc_id)
+            await self.repo.mark_version_as_old(doc_id)
 
             # Update title/description if provided
             if request.title or request.description or request.tags:
@@ -351,14 +363,14 @@ class DocumentService:
                     update_data["description"] = request.description
                 if request.tags:
                     update_data["tags"] = request.tags
-                await self.repository.update_document(new_doc.doc_id, update_data)
+                await self.repo.update_document(new_doc.doc_id, update_data)
 
             # Publish document.updated event
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.DOCUMENT_UPDATED,
-                        source=ServiceSource.DOCUMENT_SERVICE,
+                        event_type="document.updated",
+                        source="document_service",
                         data={
                             "doc_id": new_doc.doc_id,
                             "old_doc_id": doc_id,
@@ -378,7 +390,7 @@ class DocumentService:
         except Exception as e:
             logger.error(f"Error updating document: {e}")
             # Restore status to INDEXED or FAILED
-            await self.repository.update_document_status(doc_id, DocumentStatus.FAILED)
+            await self.repo.update_document_status(doc_id, DocumentStatus.FAILED)
             raise DocumentServiceError(f"Failed to update document: {str(e)}")
 
     async def _reindex_document(
@@ -443,7 +455,7 @@ class DocumentService:
         """
         try:
             # Get document
-            document = await self.repository.get_document_by_id(doc_id)
+            document = await self.repo.get_document_by_id(doc_id)
             if not document:
                 raise DocumentNotFoundError(f"Document {doc_id} not found")
 
@@ -486,7 +498,7 @@ class DocumentService:
             new_allowed_groups = list(set(new_allowed_groups))
 
             # Update database
-            await self.repository.update_document_permissions(
+            await self.repo.update_document_permissions(
                 doc_id=doc_id,
                 access_level=new_access_level,
                 allowed_users=new_allowed_users,
@@ -507,14 +519,14 @@ class DocumentService:
                 groups_removed=request.remove_groups or [],
                 changed_at=datetime.utcnow(),
             )
-            await self.repository.record_permission_change(history)
+            await self.repo.record_permission_change(history)
 
             # Publish permission.updated event
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.DOCUMENT_PERMISSION_UPDATED,
-                        source=ServiceSource.DOCUMENT_SERVICE,
+                        event_type="document.permission.updated",
+                        source="document_service",
                         data={
                             "doc_id": doc_id,
                             "user_id": user_id,
@@ -546,7 +558,7 @@ class DocumentService:
         self, doc_id: str, user_id: str
     ) -> DocumentPermissionResponse:
         """Get document permissions"""
-        document = await self.repository.get_document_by_id(doc_id)
+        document = await self.repo.get_document_by_id(doc_id)
         if not document:
             raise DocumentNotFoundError(f"Document {doc_id} not found")
 
@@ -665,7 +677,7 @@ class DocumentService:
 
                 doc_id = item.get("metadata", {}).get("doc_id", "")
                 if doc_id:
-                    document = await self.repository.get_document_by_id(doc_id)
+                    document = await self.repo.get_document_by_id(doc_id)
                     if document:
                         # Check permission
                         has_access = await self._check_document_permission(
@@ -705,7 +717,7 @@ class DocumentService:
     ) -> DocumentStatsResponse:
         """Get user's document statistics"""
         try:
-            stats = await self.repository.get_user_stats(user_id, organization_id)
+            stats = await self.repo.get_user_stats(user_id, organization_id)
 
             return DocumentStatsResponse(
                 user_id=user_id,
@@ -729,7 +741,7 @@ class DocumentService:
         """Index document via Digital Analytics (async background task)"""
         try:
             # Update status
-            await self.repository.update_document_status(
+            await self.repo.update_document_status(
                 document.doc_id, DocumentStatus.INDEXING
             )
 
@@ -759,29 +771,29 @@ class DocumentService:
                     point_ids = result.get("point_ids", [])
 
                     # Update document
-                    await self.repository.update_document(
+                    await self.repo.update_document(
                         document.doc_id, {"point_ids": point_ids}
                     )
-                    await self.repository.update_document_status(
+                    await self.repo.update_document_status(
                         document.doc_id, DocumentStatus.INDEXED, chunk_count=chunk_count
                     )
                     logger.info(f"✅ Document indexed: {document.doc_id}, {chunk_count} chunks")
                 else:
                     # Digital Analytics returned no result
-                    await self.repository.update_document_status(
+                    await self.repo.update_document_status(
                         document.doc_id, DocumentStatus.INDEXED, chunk_count=0
                     )
                     logger.warning(f"⚠️ Document indexed without chunks: {document.doc_id}")
             else:
                 # Digital Analytics not available - mark as indexed anyway for testing
-                await self.repository.update_document_status(
+                await self.repo.update_document_status(
                     document.doc_id, DocumentStatus.INDEXED, chunk_count=0
                 )
                 logger.warning(f"⚠️ Digital Analytics not available, skipping indexing: {document.doc_id}")
 
         except Exception as e:
             logger.error(f"Document indexing failed: {e}")
-            await self.repository.update_document_status(
+            await self.repo.update_document_status(
                 document.doc_id, DocumentStatus.FAILED
             )
 
@@ -900,7 +912,7 @@ class DocumentService:
     async def check_health(self) -> Dict[str, Any]:
         """Check service health"""
         try:
-            db_connected = await self.repository.check_connection()
+            db_connected = await self.repo.check_connection()
             return {
                 "service": "document_service",
                 "status": "healthy" if db_connected else "unhealthy",

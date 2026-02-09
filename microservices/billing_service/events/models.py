@@ -3,6 +3,11 @@ Billing Event Data Models
 
 billing_service 专属的事件数据结构定义
 这些模型用于解析和构造事件数据
+
+Event Architecture:
+- BillingEventType: Events published by billing_service
+- BillingSubscribedEventType: Events billing_service subscribes to
+- Stream: billing-stream (subjects: billing.>)
 """
 
 from datetime import datetime
@@ -11,6 +16,58 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
+
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class BillingEventType(str, Enum):
+    """
+    Events published by billing_service.
+
+    These are the authoritative event types for this service.
+    Other services should reference these when subscribing.
+    """
+    # Billing calculation events
+    USAGE_RECORDED = "billing.usage.recorded"
+    CALCULATED = "billing.calculated"
+    PROCESSED = "billing.processed"
+
+    # Invoice events
+    INVOICE_CREATED = "billing.invoice.created"
+
+    # Quota events
+    QUOTA_EXCEEDED = "billing.quota.exceeded"
+
+    # Error events
+    ERROR = "billing.error"
+
+    # Record events
+    RECORD_CREATED = "billing.record.created"
+
+
+class BillingSubscribedEventType(str, Enum):
+    """
+    Events that billing_service subscribes to from other services.
+    """
+    # Session events (from session_service)
+    SESSION_TOKENS_USED = "session.tokens_used"
+    SESSION_ENDED = "session.ended"
+
+    # Order events (from order_service)
+    ORDER_COMPLETED = "order.completed"
+
+    # User lifecycle events (from account_service)
+    USER_DELETED = "user.deleted"
+
+
+class BillingStreamConfig:
+    """Stream configuration for billing_service"""
+    STREAM_NAME = "billing-stream"
+    SUBJECTS = ["billing.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "billing"
 
 
 class UnitType(str, Enum):

@@ -1,0 +1,155 @@
+"""
+Account Service Client
+
+Client for media_service to interact with account_service.
+Used for validating user existence for media operations.
+"""
+
+import os
+import sys
+from typing import Optional
+
+# Add parent directories to path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from microservices.account_service.client import AccountServiceClient
+
+
+class AccountClient:
+    """
+    Wrapper client for Account Service calls from Media Service.
+
+    This wrapper provides media-specific convenience methods
+    while delegating to the actual AccountServiceClient.
+    """
+
+    def __init__(self, base_url: str = None, config=None):
+        """
+        Initialize Account Service client
+
+        Args:
+            base_url: Account service base URL (optional, uses service discovery)
+            config: ConfigManager instance for service discovery
+        """
+        self._client = AccountServiceClient(base_url=base_url, config=config)
+
+    async def close(self):
+        """Close HTTP client"""
+        await self._client.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    # =============================================================================
+    # Media-specific convenience methods
+    # =============================================================================
+
+    async def validate_user_exists(self, user_id: str) -> bool:
+        """
+        Validate that a user exists in the system.
+
+        Used before media processing operations.
+
+        Args:
+            user_id: User ID to validate
+
+        Returns:
+            True if user exists, False otherwise
+        """
+        try:
+            profile = await self._client.get_account_profile(user_id)
+            return profile is not None
+        except Exception:
+            return False
+
+    async def get_user_info(self, user_id: str) -> Optional[dict]:
+        """
+        Get user information for media context.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            User account profile or None
+        """
+        try:
+            return await self._client.get_account_profile(user_id)
+        except Exception:
+            return None
+
+    async def check_user_active(self, user_id: str) -> bool:
+        """
+        Check if user account is active.
+
+        Prevents media operations for suspended/deleted accounts.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            True if user is active, False otherwise
+        """
+        try:
+            user_info = await self.get_user_info(user_id)
+            if not user_info:
+                return False
+
+            status = user_info.get("status", "").lower()
+            return status == "active"
+        except Exception:
+            return False
+
+    async def get_user_media_preferences(self, user_id: str) -> dict:
+        """
+        Get user media processing preferences.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            Dict with media preferences
+        """
+        try:
+            profile = await self._client.get_account_profile(user_id)
+            if profile:
+                preferences = profile.get("preferences", {})
+                return {
+                    "auto_enhance": preferences.get("auto_enhance_photos", True),
+                    "generate_thumbnails": preferences.get("generate_thumbnails", True),
+                    "video_quality": preferences.get("video_quality", "auto"),
+                    "photo_quality": preferences.get("photo_quality", "high")
+                }
+            return {
+                "auto_enhance": True,
+                "generate_thumbnails": True,
+                "video_quality": "auto",
+                "photo_quality": "high"
+            }
+        except Exception:
+            return {
+                "auto_enhance": True,
+                "generate_thumbnails": True,
+                "video_quality": "auto",
+                "photo_quality": "high"
+            }
+
+    # =============================================================================
+    # Direct delegation to AccountServiceClient
+    # =============================================================================
+
+    async def get_account_profile(self, user_id: str):
+        """Get full account profile (delegates to AccountServiceClient)"""
+        return await self._client.get_account_profile(user_id)
+
+    async def health_check(self) -> bool:
+        """Check Account Service health"""
+        return await self._client.health_check()
+
+
+__all__ = ["AccountClient"]

@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,8 @@ class DocumentEventPublisher:
         """Publish document.created event"""
         try:
             event = Event(
-                event_type=EventType.DOCUMENT_CREATED,
-                source=ServiceSource.DOCUMENT_SERVICE,
+                event_type="document.created",
+                source="document_service",
                 data={
                     "doc_id": doc_id,
                     "user_id": user_id,
@@ -67,8 +67,8 @@ class DocumentEventPublisher:
         """Publish document.indexed event"""
         try:
             event = Event(
-                event_type=EventType.DOCUMENT_INDEXED,
-                source=ServiceSource.DOCUMENT_SERVICE,
+                event_type="document.indexed",
+                source="document_service",
                 data={
                     "doc_id": doc_id,
                     "user_id": user_id,
@@ -99,8 +99,8 @@ class DocumentEventPublisher:
         """Publish document.updated event"""
         try:
             event = Event(
-                event_type=EventType.DOCUMENT_UPDATED,
-                source=ServiceSource.DOCUMENT_SERVICE,
+                event_type="document.updated",
+                source="document_service",
                 data={
                     "doc_id": doc_id,
                     "old_doc_id": old_doc_id,
@@ -127,8 +127,8 @@ class DocumentEventPublisher:
         """Publish document.deleted event"""
         try:
             event = Event(
-                event_type=EventType.DOCUMENT_DELETED,
-                source=ServiceSource.DOCUMENT_SERVICE,
+                event_type="document.deleted",
+                source="document_service",
                 data={
                     "doc_id": doc_id,
                     "user_id": user_id,
@@ -154,8 +154,8 @@ class DocumentEventPublisher:
         """Publish document.permission.updated event"""
         try:
             event = Event(
-                event_type=EventType.DOCUMENT_PERMISSION_UPDATED,
-                source=ServiceSource.DOCUMENT_SERVICE,
+                event_type="document.permission.updated",
+                source="document_service",
                 data={
                     "doc_id": doc_id,
                     "user_id": user_id,

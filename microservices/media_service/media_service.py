@@ -10,9 +10,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
-from .media_repository import MediaRepository
+from .protocols import MediaRepositoryProtocol
 from .models import (
     CacheStatus,
     PhotoCache,
@@ -84,14 +84,42 @@ class MediaPermissionError(MediaServiceError):
 class MediaService:
     """Media service - business logic layer for media operations"""
 
-    def __init__(self, event_bus=None):
-        """Initialize media service"""
-        self.repository = MediaRepository()
+    def __init__(
+        self,
+        repository: Optional[MediaRepositoryProtocol] = None,
+        event_bus=None,
+        storage_client=None,
+        device_client=None,
+    ):
+        """
+        Initialize MediaService with injected dependencies.
+
+        Args:
+            repository: Media repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            storage_client: Storage service client (inject mock for testing)
+            device_client: Device service client (inject mock for testing)
+        """
+        # Use injected repository or create default
+        if repository is not None:
+            self.repository = repository
+        else:
+            # Import here to avoid import-time I/O
+            from .media_repository import MediaRepository
+            self.repository = MediaRepository()
+
         self.event_bus = event_bus
 
-        # Initialize service clients for cross-service validation
-        self.storage_client = StorageServiceClient() if StorageServiceClient else None
-        self.device_client = DeviceServiceClient() if DeviceServiceClient else None
+        # Use injected clients or create defaults
+        if storage_client is not None:
+            self.storage_client = storage_client
+        else:
+            self.storage_client = StorageServiceClient() if StorageServiceClient else None
+
+        if device_client is not None:
+            self.device_client = device_client
+        else:
+            self.device_client = DeviceServiceClient() if DeviceServiceClient else None
 
         if self.storage_client:
             logger.info("StorageServiceClient initialized for file validation")
@@ -160,8 +188,8 @@ class MediaService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.PHOTO_VERSION_CREATED,
-                        source=ServiceSource.MEDIA_SERVICE,
+                        event_type="media.photo_version.created",
+                        source="media_service",
                         data={
                             "version_id": created_version.version_id,
                             "photo_id": created_version.photo_id,
@@ -290,8 +318,8 @@ class MediaService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.PHOTO_METADATA_UPDATED,
-                        source=ServiceSource.MEDIA_SERVICE,
+                        event_type="media.photo_metadata.updated",
+                        source="media_service",
                         data={
                             "file_id": file_id,
                             "user_id": user_id,
@@ -385,8 +413,8 @@ class MediaService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.MEDIA_PLAYLIST_CREATED,
-                        source=ServiceSource.MEDIA_SERVICE,
+                        event_type="media.playlist.created",
+                        source="media_service",
                         data={
                             "playlist_id": created.playlist_id,
                             "name": created.name,
@@ -498,8 +526,8 @@ class MediaService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.MEDIA_PLAYLIST_UPDATED,
-                        source=ServiceSource.MEDIA_SERVICE,
+                        event_type="media.playlist.updated",
+                        source="media_service",
                         data={
                             "playlist_id": playlist_id,
                             "user_id": user_id,
@@ -545,8 +573,8 @@ class MediaService:
             if result and self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.MEDIA_PLAYLIST_DELETED,
-                        source=ServiceSource.MEDIA_SERVICE,
+                        event_type="media.playlist.deleted",
+                        source="media_service",
                         data={
                             "playlist_id": playlist_id,
                             "user_id": user_id,
@@ -612,8 +640,8 @@ class MediaService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.ROTATION_SCHEDULE_CREATED,
-                        source=ServiceSource.MEDIA_SERVICE,
+                        event_type="media.rotation_schedule.created",
+                        source="media_service",
                         data={
                             "schedule_id": created.schedule_id,
                             "frame_id": created.frame_id,
@@ -684,8 +712,8 @@ class MediaService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.ROTATION_SCHEDULE_UPDATED,
-                        source=ServiceSource.MEDIA_SERVICE,
+                        event_type="media.rotation_schedule.updated",
+                        source="media_service",
                         data={
                             "schedule_id": schedule_id,
                             "user_id": user_id,
@@ -783,8 +811,8 @@ class MediaService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.PHOTO_CACHED,
-                        source=ServiceSource.MEDIA_SERVICE,
+                        event_type="media.photo.cached",
+                        source="media_service",
                         data={
                             "cache_id": created.cache_id,
                             "frame_id": frame_id,

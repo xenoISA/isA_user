@@ -3,13 +3,19 @@ Family Sharing Service
 
 家庭共享业务逻辑层
 处理订阅、设备、存储、钱包等资源的共享管理
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from datetime import datetime, timezone
 import uuid
 
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import FamilySharingRepositoryProtocol
 from .family_sharing_models import (
     CreateSharingRequest, UpdateSharingRequest,
     UpdateMemberSharingPermissionRequest, GetMemberSharedResourcesRequest,
@@ -19,7 +25,7 @@ from .family_sharing_models import (
     SharingResourceType, SharingPermissionLevel, SharingStatus
 )
 # Import event bus components
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +51,26 @@ class SharingQuotaExceededError(FamilySharingServiceError):
 
 
 class FamilySharingService:
-    """家庭共享服务"""
+    """
+    家庭共享服务
 
-    def __init__(self, repository=None, event_bus=None):
+    Handles all family sharing operations while delegating
+    data access to the repository layer via dependency injection.
+    """
+
+    def __init__(
+        self,
+        repository: Optional[FamilySharingRepositoryProtocol] = None,
+        event_bus=None,
+    ):
         """
-        初始化共享服务
+        Initialize service with injected dependencies.
 
         Args:
-            repository: 数据访问层（暂时传入 organization_repository，后续可能需要专门的 sharing_repository）
-            event_bus: NATS event bus for publishing events
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
         """
-        self.repository = repository
+        self.repository = repository  # Will be set by factory if None
         self.event_bus = event_bus
 
     # ============ 共享资源管理 ============
@@ -143,8 +158,8 @@ class FamilySharingService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.FAMILY_RESOURCE_SHARED,
-                        source=ServiceSource.ORG_SERVICE,
+                        event_type="family.resource_shared",
+                        source="organization_service",
                         data={
                             "sharing_id": sharing_id,
                             "organization_id": organization_id,

@@ -34,6 +34,31 @@ class ProductType(str, Enum):
     OTHER = "other"                      # 其他
 
 
+class ProductKind(str, Enum):
+    """Product kind"""
+    DIGITAL = "digital"
+    PHYSICAL = "physical"
+
+
+class FulfillmentType(str, Enum):
+    """Fulfillment type"""
+    DIGITAL = "digital"
+    SHIP = "ship"
+
+
+class InventoryPolicy(str, Enum):
+    """Inventory policy"""
+    INFINITE = "infinite"
+    FINITE = "finite"
+
+
+class TaxCategory(str, Enum):
+    """Tax category"""
+    DIGITAL_GOODS = "digital_goods"
+    PHYSICAL_GOODS = "physical_goods"
+    SERVICES = "services"
+
+
 class PricingType(str, Enum):
     """定价类型"""
     USAGE_BASED = "usage_based"          # 按用量计费
@@ -121,6 +146,25 @@ class Product(BaseModel):
     # 产品分类
     product_type: ProductType
     provider: Optional[str] = None  # openai, anthropic, minio, internal等
+
+    # Commerce properties
+    product_kind: ProductKind = ProductKind.DIGITAL
+    fulfillment_type: FulfillmentType = FulfillmentType.DIGITAL
+    inventory_policy: InventoryPolicy = InventoryPolicy.INFINITE
+    requires_shipping: bool = False
+    tax_category: TaxCategory = TaxCategory.DIGITAL_GOODS
+    default_sku_id: Optional[str] = None
+
+    # Catalog fields (legacy table compatibility)
+    product_code: Optional[str] = None
+    base_price: Decimal = Field(default=Decimal("0"), ge=0)
+    currency: Currency = Currency.USD
+    billing_interval: Optional[str] = None
+    features: List[str] = Field(default_factory=list)
+    quota_limits: Dict[str, Any] = Field(default_factory=dict)
+    is_featured: bool = False
+    display_order: int = 0
+    tags: Optional[List[str]] = None
     
     # 产品规格
     specifications: Dict[str, Any] = Field(default_factory=dict)
@@ -141,6 +185,34 @@ class Product(BaseModel):
     service_endpoint: Optional[str] = None
     service_type: Optional[str] = None
     
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class ProductVariant(BaseModel):
+    """Product variant / SKU"""
+    id: Optional[int] = None
+    sku_id: str = Field(..., description="SKU ID")
+    product_id: str = Field(..., description="产品ID")
+    sku_code: str = Field(..., description="SKU code")
+    title: Optional[str] = None
+
+    # Variant options (size/color/etc.)
+    options: Dict[str, Any] = Field(default_factory=dict)
+
+    # Pricing and inventory
+    price: Decimal = Field(default=Decimal("0"), ge=0)
+    currency: Currency = Currency.USD
+    inventory_policy: InventoryPolicy = InventoryPolicy.FINITE
+
+    # Physical attributes (hardware)
+    weight_grams: Optional[int] = None
+    dimensions_cm: Optional[Dict[str, Any]] = None  # {length, width, height}
+    hs_code: Optional[str] = None
+    origin_country: Optional[str] = None
+
+    is_active: bool = True
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

@@ -45,11 +45,11 @@ class OrderRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
-            env_host_key='POSTGRES_GRPC_HOST',
-            env_port_key='POSTGRES_GRPC_PORT'
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -71,12 +71,26 @@ class OrderRepository:
         wallet_id: Optional[str] = None,
         items: Optional[List[Dict[str, Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        subtotal_amount: Optional[Decimal] = None,
+        tax_amount: Optional[Decimal] = None,
+        shipping_amount: Optional[Decimal] = None,
+        discount_amount: Optional[Decimal] = None,
+        final_amount: Optional[Decimal] = None,
+        fulfillment_status: Optional[str] = None,
+        tracking_number: Optional[str] = None,
+        shipping_address: Optional[Dict[str, Any]] = None,
+        billing_address: Optional[Dict[str, Any]] = None,
         expires_at: Optional[datetime] = None
     ) -> Order:
         """Create a new order"""
         try:
             order_id = f"order_{uuid.uuid4().hex[:12]}"
             now = datetime.now(timezone.utc)
+            subtotal_value = float(subtotal_amount) if subtotal_amount is not None else float(total_amount)
+            tax_value = float(tax_amount) if tax_amount is not None else 0.0
+            shipping_value = float(shipping_amount) if shipping_amount is not None else 0.0
+            discount_value = float(discount_amount) if discount_amount is not None else 0.0
+            final_value = float(final_amount) if final_amount is not None else subtotal_value + tax_value + shipping_value - discount_value
 
             order_data = {
                 "order_id": order_id,
@@ -86,9 +100,11 @@ class OrderRepository:
                 "status": OrderStatus.PENDING.value,
                 "total_amount": float(total_amount),
                 "currency": currency,
-                "discount_amount": 0.0,
-                "tax_amount": 0.0,
-                "final_amount": float(total_amount),
+                "discount_amount": discount_value,
+                "tax_amount": tax_value,
+                "shipping_amount": shipping_value,
+                "subtotal_amount": subtotal_value,
+                "final_amount": final_value,
                 "payment_status": PaymentStatus.PENDING.value,
                 "payment_intent_id": payment_intent_id,
                 "payment_method": None,
@@ -97,9 +113,10 @@ class OrderRepository:
                 "invoice_id": None,
                 "items": items or [],  # Direct list
                 "metadata": metadata or {},  # Direct dict
-                "fulfillment_status": "pending",
-                "tracking_number": None,
-                "shipping_address": None,
+                "fulfillment_status": fulfillment_status or "pending",
+                "tracking_number": tracking_number,
+                "shipping_address": shipping_address,
+                "billing_address": billing_address,
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat(),
                 "completed_at": None,
@@ -149,7 +166,11 @@ class OrderRepository:
         payment_status: Optional[PaymentStatus] = None,
         payment_intent_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        completed_at: Optional[datetime] = None
+        completed_at: Optional[datetime] = None,
+        fulfillment_status: Optional[str] = None,
+        tracking_number: Optional[str] = None,
+        shipping_address: Optional[Dict[str, Any]] = None,
+        billing_address: Optional[Dict[str, Any]] = None
     ) -> Optional[Order]:
         """Update order"""
         try:
@@ -167,6 +188,14 @@ class OrderRepository:
                 update_data["metadata"] = metadata  # Direct dict
             if completed_at:
                 update_data["completed_at"] = completed_at.isoformat()
+            if fulfillment_status:
+                update_data["fulfillment_status"] = fulfillment_status
+            if tracking_number:
+                update_data["tracking_number"] = tracking_number
+            if shipping_address:
+                update_data["shipping_address"] = shipping_address
+            if billing_address:
+                update_data["billing_address"] = billing_address
 
             # Build SET clause
             set_clauses = []
@@ -198,6 +227,26 @@ class OrderRepository:
         except Exception as e:
             logger.error(f"Failed to update order {order_id}: {e}")
             raise
+
+    async def update_order_status(
+        self,
+        order_id: str,
+        status: OrderStatus,
+        payment_status: Optional[PaymentStatus] = None
+    ) -> Optional[Order]:
+        """Update order and payment status"""
+        return await self.update_order(
+            order_id=order_id,
+            status=status,
+            payment_status=payment_status
+        )
+
+    async def update_order_metadata(self, order_id: str, metadata: Dict[str, Any]) -> Optional[Order]:
+        """Update order metadata"""
+        return await self.update_order(
+            order_id=order_id,
+            metadata=metadata
+        )
 
     async def list_orders(
         self,
@@ -469,6 +518,17 @@ class OrderRepository:
         elif not isinstance(metadata, dict):
             metadata = {}
 
+        # Handle addresses
+        shipping_address = data.get("shipping_address")
+        if isinstance(shipping_address, str):
+            import json
+            shipping_address = json.loads(shipping_address)
+
+        billing_address = data.get("billing_address")
+        if isinstance(billing_address, str):
+            import json
+            billing_address = json.loads(billing_address)
+
         return Order(
             order_id=data["order_id"],
             user_id=data["user_id"],
@@ -481,6 +541,15 @@ class OrderRepository:
             subscription_id=data.get("subscription_id"),
             wallet_id=data.get("wallet_id"),
             items=items,
+            subtotal_amount=Decimal(str(data.get("subtotal_amount", 0) or 0)),
+            tax_amount=Decimal(str(data.get("tax_amount", 0) or 0)),
+            shipping_amount=Decimal(str(data.get("shipping_amount", 0) or 0)),
+            discount_amount=Decimal(str(data.get("discount_amount", 0) or 0)),
+            final_amount=Decimal(str(data.get("final_amount", 0) or 0)),
+            fulfillment_status=data.get("fulfillment_status", "pending"),
+            tracking_number=data.get("tracking_number"),
+            shipping_address=shipping_address,
+            billing_address=billing_address,
             metadata=metadata,
             created_at=datetime.fromisoformat(data["created_at"].replace('Z', '+00:00')),
             updated_at=datetime.fromisoformat(data["updated_at"].replace('Z', '+00:00')),

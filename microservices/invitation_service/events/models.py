@@ -5,6 +5,38 @@ Invitation Service Event Models
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class InvitationEventType(str, Enum):
+    """
+    Events published by invitation_service.
+
+    Stream: invitation-stream
+    Subjects: invitation.>
+    """
+    INVITATION_SENT = "invitation.sent"
+    INVITATION_ACCEPTED = "invitation.accepted"
+    INVITATION_DECLINED = "invitation.declined"
+    INVITATION_EXPIRED = "invitation.expired"
+    INVITATION_CANCELLED = "invitation.cancelled"
+
+
+class InvitationSubscribedEventType(str, Enum):
+    """Events that invitation_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+
+
+class InvitationStreamConfig:
+    """Stream configuration for invitation_service"""
+    STREAM_NAME = "invitation-stream"
+    SUBJECTS = ["invitation.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "invitation"
+
 from typing import Optional, Dict, Any
 from datetime import datetime
 

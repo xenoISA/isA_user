@@ -50,6 +50,7 @@ from .vault_service import (
     VaultService,
     VaultServiceError,
 )
+from .factory import create_vault_service
 
 # Initialize configuration
 config_manager = ConfigManager("vault_service")
@@ -120,8 +121,8 @@ async def lifespan(app: FastAPI):
             event_bus = await get_event_bus("vault_service")
             logger.info("✅ Event bus initialized successfully")
 
-            # Initialize vault service with event bus
-            vault_service = VaultService(blockchain_client=blockchain_client, event_bus=event_bus, config=config_manager)
+            # Initialize vault service with event bus (using factory pattern)
+            vault_service = create_vault_service(config=config_manager, event_bus=event_bus, blockchain_client=blockchain_client)
 
         except Exception as e:
             logger.warning(
@@ -129,8 +130,8 @@ async def lifespan(app: FastAPI):
             )
             event_bus = None
 
-            # Initialize vault service without event bus
-            vault_service = VaultService(blockchain_client=blockchain_client, event_bus=None, config=config_manager)
+            # Initialize vault service without event bus (using factory pattern)
+            vault_service = create_vault_service(config=config_manager, event_bus=None, blockchain_client=blockchain_client)
 
         # =============================================================================
         # Subscribe to events using standardized event handlers
@@ -180,9 +181,11 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type="http",
+                    health_check_type="ttl"  # Use TTL for reliable health checks,
                 )
                 consul_registry.register()
+                consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
                 logger.info(
                     f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
                 )
@@ -228,6 +231,7 @@ app = FastAPI(
 # ============ Health & Info Endpoints ============
 
 
+@app.get("/api/v1/vault/health")
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check"""

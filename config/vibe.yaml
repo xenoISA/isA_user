@@ -1,0 +1,168 @@
+# =============================================================================
+# Vibe Configuration - Project Metadata for AI-SDLC
+# =============================================================================
+# This file is the entry point for isA_Vibe to understand project structure.
+# All isA projects should have this file at config/vibe.yaml
+# =============================================================================
+
+project:
+  name: isA_user
+  type: python_microservices    # python_microservices | python_app | python_package | data_product | typescript_monorepo | nextjs_app | react_native
+  version: "0.1.0"
+  description: "isA Platform Business Microservices"
+
+# =============================================================================
+# Source Code Configuration
+# =============================================================================
+source:
+  root: microservices           # Main source folder
+  unit: module                  # Each directory under source root is a unit
+
+  # Modules to track for CDD/TDD (full service directory names)
+  modules:
+    # Identity & Access (8201-8210)
+    - name: auth_service
+      path: auth_service/
+      description: Authentication service
+    - name: account_service
+      path: account_service/
+      description: Account management service
+    - name: session_service
+      path: session_service/
+      description: Session management service
+    - name: authorization_service
+      path: authorization_service/
+      description: Authorization service
+    - name: audit_service
+      path: audit_service/
+      description: Audit logging service
+    - name: notification_service
+      path: notification_service/
+      description: Notification service
+    - name: payment_service
+      path: payment_service/
+      description: Payment processing service
+    - name: wallet_service
+      path: wallet_service/
+      description: Wallet management service
+    - name: storage_service
+      path: storage_service/
+      description: File storage service
+    - name: order_service
+      path: order_service/
+      description: Order management service
+    # Business Domain (8211-8230)
+    - name: task_service
+      path: task_service/
+      description: Task management service
+    - name: organization_service
+      path: organization_service/
+      description: Organization management service
+    - name: invitation_service
+      path: invitation_service/
+      description: Invitation management service
+    - name: vault_service
+      path: vault_service/
+      description: Secrets vault service
+    - name: product_service
+      path: product_service/
+      description: Product catalog service
+    - name: billing_service
+      path: billing_service/
+      description: Billing service
+    - name: calendar_service
+      path: calendar_service/
+      description: Calendar service
+    - name: weather_service
+      path: weather_service/
+      description: Weather service
+    - name: album_service
+      path: album_service/
+      description: Album management service
+    - name: device_service
+      path: device_service/
+      description: Device management service
+    - name: ota_service
+      path: ota_service/
+      description: OTA update service
+    - name: media_service
+      path: media_service/
+      description: Media management service
+    - name: memory_service
+      path: memory_service/
+      description: Memory management service
+    - name: location_service
+      path: location_service/
+      description: Location service
+    - name: telemetry_service
+      path: telemetry_service/
+      description: Telemetry service
+    - name: compliance_service
+      path: compliance_service/
+      description: Compliance service
+    - name: document_service
+      path: document_service/
+      description: Document management service
+    - name: subscription_service
+      path: subscription_service/
+      description: Subscription management service
+    - name: credit_service
+      path: credit_service/
+      description: Credit management service
+    - name: event_service
+      path: event_service/
+      description: Event management service
+    # Extended Services (8250+)
+    - name: membership_service
+      path: membership_service/
+      description: Membership/loyalty service
+
+# =============================================================================
+# Config Files Used
+# =============================================================================
+config:
+  ports: true           # Uses config/ports.yaml for port assignments
+  dependencies: true    # Uses config/dependencies.yaml for Python deps
+  init: true            # Uses config/init.yaml for infrastructure init
+
+# =============================================================================
+# CDD (Contract-Driven Development) Paths
+# =============================================================================
+cdd:
+  docs_path: docs
+  domain_path: docs/domain          # Layer 1: Domain context
+  prd_path: docs/prd                # Layer 2: PRD specification
+  design_path: docs/design          # Layer 3: Design document
+  contracts_path: tests/contracts   # Layer 4-6: Data/Logic/System contracts
+  contract_pattern: "{module}"      # Pattern for contract folder names
+
+# =============================================================================
+# TDD (Test-Driven Development) Paths
+# =============================================================================
+tdd:
+  tests_path: tests
+  test_layers:
+    unit: tests/unit                # Layer 1: Unit tests
+    component: tests/component      # Layer 2: Component tests
+    integration: tests/integration  # Layer 3: Integration tests
+    api: tests/api                  # Layer 4: API tests
+    smoke: tests/smoke              # Layer 5: Smoke tests
+  test_pattern: "{module}"          # Pattern for test folder names
+
+# =============================================================================
+# Infrastructure Dependencies
+# =============================================================================
+infrastructure:
+  databases:
+    - postgres
+    - redis
+    - neo4j
+    - qdrant
+  messaging:
+    - nats
+    - mosquitto
+  storage:
+    - minio
+  observability:
+    - loki
+    - grafana

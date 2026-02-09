@@ -24,6 +24,7 @@ from isa_common.consul_client import ConsulRegistry
 
 from .billing_repository import BillingRepository
 from .billing_service import BillingService
+from .factory import create_billing_service
 from .models import (
     BillingCalculationRequest,
     BillingCalculationResponse,
@@ -66,11 +67,6 @@ async def lifespan(app: FastAPI):
     global billing_service, repository, consul_registry, event_bus, event_handlers
 
     try:
-        # 初始化数据库连接
-        repository = BillingRepository(config=config_manager)
-        await repository.initialize()
-
-        # 初始化并启动事件订阅器 (CRITICAL for event-driven billing)
         # Initialize NATS JetStream event bus
         try:
             from .events import get_event_handlers
@@ -78,33 +74,44 @@ async def lifespan(app: FastAPI):
             event_bus = await get_event_bus("billing_service")
             logger.info("✅ Event bus initialized successfully")
 
-            # 初始化业务服务 with event bus
-            billing_service = BillingService(repository, event_bus=event_bus)
-
-            # Get event handlers
-            handler_map = get_event_handlers(billing_service, event_bus)
-
-            # Subscribe to events
-            for pattern, handler_func in handler_map.items():
-                await event_bus.subscribe_to_events(
-                    pattern=pattern,
-                    handler=handler_func,
-                    durable=f"billing-{pattern.replace('.', '-').replace('*', 'all')}-consumer",
-                )
-                logger.info(f"✅ Subscribed to {pattern}")
-
-            logger.info(
-                f"✅ Billing event subscriber started ({len(handler_map)} event patterns)"
-            )
-
         except Exception as e:
             logger.warning(
                 f"⚠️  Failed to initialize event bus: {e}. Continuing without event subscriptions."
             )
             event_bus = None
 
-            # 初始化业务服务 without event bus
-            billing_service = BillingService(repository, event_bus=None)
+        # Create billing service using factory (with or without event bus)
+        billing_service = create_billing_service(
+            config=config_manager, event_bus=event_bus
+        )
+
+        # Initialize repository connection
+        repository = billing_service.repository
+        await repository.initialize()
+
+        # Subscribe to events if event bus is available
+        if event_bus:
+            try:
+                from .events import get_event_handlers
+
+                # Get event handlers
+                handler_map = get_event_handlers(billing_service, event_bus)
+
+                # Subscribe to events
+                for pattern, handler_func in handler_map.items():
+                    await event_bus.subscribe_to_events(
+                        pattern=pattern,
+                        handler=handler_func,
+                        durable=f"billing-{pattern.replace('.', '-').replace('*', 'all')}-consumer",
+                    )
+                    logger.info(f"✅ Subscribed to {pattern}")
+
+                logger.info(
+                    f"✅ Billing event subscriber started ({len(handler_map)} event patterns)"
+                )
+
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to subscribe to events: {e}")
 
         # Consul service registration
         if config.consul_enabled:
@@ -126,9 +133,11 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type="http",
+                    health_check_type="ttl"  # Use TTL for reliable health checks,
                 )
                 consul_registry.register()
+                consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
                 logger.info(
                     f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
                 )
@@ -190,6 +199,7 @@ async def get_billing_service() -> BillingService:
 # ====================
 
 
+@app.get("/api/v1/billing/health")
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """健康检查"""

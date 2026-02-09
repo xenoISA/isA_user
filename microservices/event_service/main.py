@@ -114,9 +114,10 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA['tags'],
                     meta=consul_meta,
-                    health_check_type='http'
+                    health_check_type='ttl'  # Use TTL for reliable health checks
                 )
                 consul_registry.register()
+                consul_registry.start_maintenance()  # Start TTL heartbeat
                 logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -189,6 +190,7 @@ async def get_nats() -> NATS:
 
 # ==================== API端点 ====================
 
+@app.get("/api/v1/events/health")
 @app.get("/health")
 async def health_check():
     """健康检查"""
@@ -322,31 +324,157 @@ async def delete_subscription(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/events/{event_id}", response_model=EventResponse)
-async def get_event(
-    event_id: str,
-    service: EventService = Depends(get_event_service)
+# ==================== 前端事件采集端点 ====================
+# NOTE: These routes MUST be defined BEFORE /api/v1/events/{event_id} to avoid path matching conflicts
+
+from pydantic import BaseModel as FrontendBaseModel
+
+class FrontendEvent(FrontendBaseModel):
+    """前端事件模型"""
+    event_type: str  # 'page_view', 'button_click', 'form_submit', etc.
+    category: str = "user_interaction"  # 'user_interaction', 'business_action', 'system_event'
+    page_url: Optional[str] = None
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+    data: Dict[str, Any] = {}
+    metadata: Dict[str, str] = {}
+
+class FrontendEventBatch(FrontendBaseModel):
+    """批量前端事件"""
+    events: List["FrontendEvent"]
+    client_info: Optional[Dict[str, Any]] = {}
+
+async def frontend_health():
+    """前端事件采集健康检查"""
+    return {
+        "status": "healthy",
+        "service": "frontend-event-collection",
+        "nats_connected": nats_client is not None,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+@app.post("/api/v1/events/frontend", response_model=Dict[str, Any])
+async def collect_frontend_event(
+    event: FrontendEvent,
+    request: Request
 ):
-    """获取单个事件"""
+    """采集单个前端事件"""
     try:
-        event = await service.get_event(event_id)
-        if not event:
-            raise HTTPException(status_code=404, detail="Event not found")
-        
-        return EventResponse(
-            event_id=event.event_id,
-            event_type=event.event_type,
-            event_source=event.event_source,
-            event_category=event.event_category,
-            user_id=event.user_id,
-            data=event.data,
-            status=event.status,
-            timestamp=event.timestamp,
-            created_at=event.created_at
-        )
+        # 添加客户端信息
+        client_info = {
+            "ip": request.client.host,
+            "user_agent": request.headers.get("user-agent", ""),
+            "referer": request.headers.get("referer", ""),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        # 构建NATS事件
+        if nats_client and js:
+            # 构建主题：events.frontend.{category}.{event_type}
+            subject = f"events.frontend.{event.category}.{event.event_type}"
+
+            event_data = {
+                "event_id": str(uuid.uuid4()),
+                "event_type": event.event_type,
+                "event_source": "frontend",
+                "event_category": event.category,
+                "user_id": event.user_id,
+                "session_id": event.session_id,
+                "page_url": event.page_url,
+                "data": event.data,
+                "metadata": {**event.metadata, **client_info},
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+            # 发布到NATS
+            await js.publish(
+                subject,
+                json.dumps(event_data).encode(),
+                headers={
+                    "event_type": event.event_type,
+                    "source": "frontend",
+                    "user_id": event.user_id or "",
+                }
+            )
+
+            return {
+                "status": "accepted",
+                "event_id": event_data["event_id"],
+                "message": "Event published to stream"
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Event stream not available"
+            }
+
+    except Exception as e:
+        logger.error(f"Error collecting frontend event: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/events/frontend/batch", response_model=Dict[str, Any])
+async def collect_frontend_events_batch(
+    batch: FrontendEventBatch,
+    request: Request
+):
+    """批量采集前端事件 - 高性能处理"""
+    try:
+        if not nats_client or not js:
+            raise HTTPException(status_code=503, detail="Event stream not available")
+
+        # 添加客户端信息
+        client_info = {
+            "ip": request.client.host,
+            "user_agent": request.headers.get("user-agent", ""),
+            "referer": request.headers.get("referer", ""),
+            "batch_timestamp": datetime.utcnow().isoformat()
+        }
+
+        processed_events = []
+
+        # 批量处理事件
+        for evt in batch.events:
+            event_data = {
+                "event_id": str(uuid.uuid4()),
+                "event_type": evt.event_type,
+                "event_source": "frontend",
+                "event_category": evt.category,
+                "user_id": evt.user_id,
+                "session_id": evt.session_id,
+                "page_url": evt.page_url,
+                "data": evt.data,
+                "metadata": {**evt.metadata, **client_info, **batch.client_info},
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+            # 构建主题
+            subject = f"events.frontend.{evt.category}.{evt.event_type}"
+
+            # 异步发布（提高性能）
+            await js.publish(
+                subject,
+                json.dumps(event_data).encode(),
+                headers={
+                    "event_type": evt.event_type,
+                    "source": "frontend",
+                    "user_id": evt.user_id or "",
+                    "batch": "true"
+                }
+            )
+
+            processed_events.append(event_data["event_id"])
+
+        return {
+            "status": "accepted",
+            "processed_count": len(processed_events),
+            "event_ids": processed_events,
+            "message": f"Batch of {len(processed_events)} events published to stream"
+        }
+
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error collecting frontend event batch: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -434,9 +562,10 @@ async def rudderstack_webhook(
     """RudderStack webhook端点"""
     try:
         # 验证webhook密钥（如果配置了）
-        if config.RUDDERSTACK_WEBHOOK_SECRET:
+        rudderstack_secret = config.get("RUDDERSTACK_WEBHOOK_SECRET", None)
+        if rudderstack_secret:
             signature = request.headers.get("X-Signature")
-            if not signature or signature != config.RUDDERSTACK_WEBHOOK_SECRET:
+            if not signature or signature != rudderstack_secret:
                 raise HTTPException(status_code=401, detail="Invalid signature")
         
         # 解析事件数据
@@ -505,6 +634,36 @@ async def toggle_processor(
             "processor_id": processor_id,
             "enabled": enabled
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 单个事件获取 (放在最后避免路由冲突) ====================
+
+@app.get("/api/v1/events/{event_id}", response_model=EventResponse)
+async def get_event(
+    event_id: str,
+    service: EventService = Depends(get_event_service)
+):
+    """获取单个事件 - 注意: 此路由必须放在所有/api/v1/events/xxx静态路由之后"""
+    try:
+        event = await service.get_event(event_id)
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        return EventResponse(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            event_source=event.event_source,
+            event_category=event.event_category,
+            user_id=event.user_id,
+            data=event.data,
+            status=event.status,
+            timestamp=event.timestamp,
+            created_at=event.created_at
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -596,159 +755,6 @@ async def process_pending_events(batch_size: int = 100):
         except Exception as e:
             print(f"Error in event processing loop: {e}")
             await asyncio.sleep(processing_interval)
-
-
-# ==================== 前端事件采集端点 ====================
-
-from pydantic import BaseModel
-from typing import Optional, List
-
-class FrontendEvent(BaseModel):
-    """前端事件模型"""
-    event_type: str  # 'page_view', 'button_click', 'form_submit', etc.
-    category: str = "user_interaction"  # 'user_interaction', 'business_action', 'system_event'
-    page_url: Optional[str] = None
-    user_id: Optional[str] = None
-    session_id: Optional[str] = None
-    data: Dict[str, Any] = {}
-    metadata: Dict[str, str] = {}
-
-class FrontendEventBatch(BaseModel):
-    """批量前端事件"""
-    events: List[FrontendEvent]
-    client_info: Optional[Dict[str, Any]] = {}
-
-@app.post("/api/v1/frontend/events", response_model=Dict[str, Any])
-async def collect_frontend_event(
-    event: FrontendEvent,
-    request: Request
-):
-    """采集单个前端事件"""
-    try:
-        # 添加客户端信息
-        client_info = {
-            "ip": request.client.host,
-            "user_agent": request.headers.get("user-agent", ""),
-            "referer": request.headers.get("referer", ""),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        # 构建NATS事件
-        if nats_client and js:
-            # 构建主题：events.frontend.{category}.{event_type}
-            subject = f"events.frontend.{event.category}.{event.event_type}"
-            
-            event_data = {
-                "event_id": str(uuid.uuid4()),
-                "event_type": event.event_type,
-                "event_source": "frontend",
-                "event_category": event.category,
-                "user_id": event.user_id,
-                "session_id": event.session_id,
-                "page_url": event.page_url,
-                "data": event.data,
-                "metadata": {**event.metadata, **client_info},
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            
-            # 发布到NATS
-            await js.publish(
-                subject,
-                json.dumps(event_data).encode(),
-                headers={
-                    "event_type": event.event_type,
-                    "source": "frontend",
-                    "user_id": event.user_id or "",
-                }
-            )
-            
-            return {
-                "status": "accepted",
-                "event_id": event_data["event_id"],
-                "message": "Event published to stream"
-            }
-        else:
-            return {
-                "status": "error", 
-                "message": "Event stream not available"
-            }
-            
-    except Exception as e:
-        logger.error(f"Error collecting frontend event: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/v1/frontend/events/batch", response_model=Dict[str, Any])
-async def collect_frontend_events_batch(
-    batch: FrontendEventBatch,
-    request: Request
-):
-    """批量采集前端事件 - 高性能处理"""
-    try:
-        if not nats_client or not js:
-            raise HTTPException(status_code=503, detail="Event stream not available")
-        
-        # 添加客户端信息
-        client_info = {
-            "ip": request.client.host,
-            "user_agent": request.headers.get("user-agent", ""),
-            "referer": request.headers.get("referer", ""),
-            "batch_timestamp": datetime.utcnow().isoformat()
-        }
-        
-        processed_events = []
-        
-        # 批量处理事件
-        for event in batch.events:
-            event_data = {
-                "event_id": str(uuid.uuid4()),
-                "event_type": event.event_type,
-                "event_source": "frontend",
-                "event_category": event.category,
-                "user_id": event.user_id,
-                "session_id": event.session_id,
-                "page_url": event.page_url,
-                "data": event.data,
-                "metadata": {**event.metadata, **client_info, **batch.client_info},
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            
-            # 构建主题
-            subject = f"events.frontend.{event.category}.{event.event_type}"
-            
-            # 异步发布（提高性能）
-            await js.publish(
-                subject,
-                json.dumps(event_data).encode(),
-                headers={
-                    "event_type": event.event_type,
-                    "source": "frontend",
-                    "user_id": event.user_id or "",
-                    "batch": "true"
-                }
-            )
-            
-            processed_events.append(event_data["event_id"])
-        
-        return {
-            "status": "accepted",
-            "processed_count": len(processed_events),
-            "event_ids": processed_events,
-            "message": f"Batch of {len(processed_events)} events published to stream"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error collecting frontend event batch: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/v1/frontend/health")
-async def frontend_health():
-    """前端事件采集健康检查"""
-    return {
-        "status": "healthy",
-        "service": "frontend-event-collection",
-        "nats_connected": nats_client is not None,
-        "timestamp": datetime.utcnow().isoformat()
-    }
 
 
 # ==================== 主入口 ====================

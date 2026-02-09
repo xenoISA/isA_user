@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     PaymentCompletedEvent,
     PaymentFailedEvent,
@@ -51,8 +51,8 @@ async def publish_payment_completed(
         )
 
         event = Event(
-            event_type=EventType.PAYMENT_COMPLETED,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="payment.completed",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -92,8 +92,8 @@ async def publish_payment_failed(
         )
 
         event = Event(
-            event_type=EventType.PAYMENT_FAILED,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="payment.failed",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -133,8 +133,8 @@ async def publish_payment_refunded(
         )
 
         event = Event(
-            event_type=EventType.PAYMENT_REFUNDED,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="payment.refunded",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -172,8 +172,8 @@ async def publish_payment_intent_created(
         )
 
         event = Event(
-            event_type=EventType.PAYMENT_INITIATED,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="payment.initiated",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -215,8 +215,8 @@ async def publish_subscription_created(
         )
 
         event = Event(
-            event_type=EventType.SUBSCRIPTION_CREATED,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="subscription.created",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -254,8 +254,8 @@ async def publish_subscription_canceled(
         )
 
         event = Event(
-            event_type=EventType.SUBSCRIPTION_CANCELED,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="subscription.canceled",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -295,8 +295,8 @@ async def publish_subscription_updated(
         )
 
         event = Event(
-            event_type=EventType.SUBSCRIPTION_UPDATED,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="subscription.updated",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -336,8 +336,8 @@ async def publish_invoice_created(
         )
 
         event = Event(
-            event_type=EventType.INVOICE_CREATED,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="billing.invoice.created",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -375,8 +375,8 @@ async def publish_invoice_paid(
         )
 
         event = Event(
-            event_type=EventType.INVOICE_PAID,
-            source=ServiceSource.PAYMENT_SERVICE,
+            event_type="payment.invoice.paid",
+            source="payment_service",
             data=event_data.model_dump(mode='json')
         )
 

@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: media_service
+# Regenerate with: python -m agents.tools.generate_config --deployment media_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: media
+  namespace: isa-cloud-staging
+  labels:
+    app: media
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: media
+  template:
+    metadata:
+      labels:
+        app: media
+    spec:
+      containers:
+      - name: media
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8222
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "media_service"
+        - name: SERVICE_PORT
+          value: "8222"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.media_service.main:app", "--host", "0.0.0.0", "--port", "8222"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8222
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8222
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: media
+  namespace: isa-cloud-staging
+  labels:
+    app: media
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8222
+    targetPort: 8222
+    protocol: TCP
+    name: http
+  selector:
+    app: media

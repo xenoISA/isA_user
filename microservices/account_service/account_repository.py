@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import logging
 import asyncio
+import json
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -20,16 +21,13 @@ from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
 from .models import User
+from .protocols import DuplicateEntryError, UserNotFoundError
 
 logger = logging.getLogger(__name__)
 
-class UserNotFoundException(Exception):
-    """User not found exception"""
-    pass
-
-class DuplicateEntryException(Exception):
-    """Duplicate entry exception"""
-    pass
+# Legacy aliases for backward compatibility
+UserNotFoundException = UserNotFoundError
+DuplicateEntryException = DuplicateEntryError
 
 
 class AccountRepository:
@@ -45,15 +43,22 @@ class AccountRepository:
             config = ConfigManager("account_service")
 
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id='account_service')
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            database=os.getenv("POSTGRES_DB", "isa_platform"),
+            username=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
+            user_id='account_service'
+        )
         self.schema = "account"
         self.users_table = "users"
 

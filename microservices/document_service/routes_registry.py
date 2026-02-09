@@ -5,7 +5,7 @@ Defines all API routes and metadata for Consul service discovery
 """
 
 SERVICE_METADATA = {
-    'service_name': 'document',
+    'service_name': 'document_service',
     'version': '1.0.0',
     'capabilities': [
         'knowledge_base',
@@ -15,6 +15,7 @@ SERVICE_METADATA = {
         'document_versioning'
     ],
     'tags': [
+        'v1',
         'document',
         'knowledge_base',
         'rag',
@@ -25,6 +26,10 @@ SERVICE_METADATA = {
 
 # API Routes for Consul metadata
 API_ROUTES = {
+    # Health
+    'GET /health': 'Service health check',
+    'GET /api/v1/documents/health': 'Service health check (API v1)',
+
     # Document CRUD
     'POST /api/v1/documents': 'Create knowledge document',
     'GET /api/v1/documents/{doc_id}': 'Get document by ID',

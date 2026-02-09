@@ -6,26 +6,22 @@ Handles validation, business rules, and error handling.
 
 Note: Account service is the identity anchor only.
 Subscription data is managed by subscription_service.
+
+Design: Uses dependency injection for testability.
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
 """
 
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from core.config_manager import ConfigManager
-
-from .account_repository import (
-    AccountRepository,
-    DuplicateEntryException,
-    UserNotFoundException,
-)
-
-from .events.publishers import (
-    publish_user_created,
-    publish_user_deleted,
-    publish_user_profile_updated,
-    publish_user_status_changed,
+# Import protocols (no I/O dependencies)
+from .protocols import (
+    AccountRepositoryProtocol,
+    DuplicateEntryError,
+    UserNotFoundError,
 )
 from .models import (
     AccountEnsureRequest,
@@ -40,6 +36,10 @@ from .models import (
     AccountUpdateRequest,
     User,
 )
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -68,12 +68,49 @@ class AccountService:
 
     Note: This service handles identity data only. For subscription info,
     use the subscription_client to query subscription_service.
+
+    Design: Uses dependency injection for testability.
+    - Pass repository=MockRepo for testing
+    - Pass repository=None for production (will be created via factory)
     """
 
-    def __init__(self, event_bus=None, config: Optional[ConfigManager] = None, subscription_client=None):
-        self.account_repo = AccountRepository(config=config)
+    def __init__(
+        self,
+        repository: Optional[AccountRepositoryProtocol] = None,
+        event_bus=None,
+        subscription_client=None,
+    ):
+        """
+        Initialize AccountService with injected dependencies.
+
+        Args:
+            repository: Account repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            subscription_client: Client for subscription service
+        """
+        self.account_repo = repository  # Will be set by factory if None
         self.event_bus = event_bus
         self.subscription_client = subscription_client
+        self._event_publishers_loaded = False
+
+    def _lazy_load_event_publishers(self):
+        """Lazy load event publishers to avoid import-time I/O"""
+        if not self._event_publishers_loaded:
+            try:
+                from .events.publishers import (
+                    publish_user_created,
+                    publish_user_deleted,
+                    publish_user_profile_updated,
+                    publish_user_status_changed,
+                )
+                self._publish_user_created = publish_user_created
+                self._publish_user_deleted = publish_user_deleted
+                self._publish_user_profile_updated = publish_user_profile_updated
+                self._publish_user_status_changed = publish_user_status_changed
+                self._event_publishers_loaded = True
+            except ImportError as e:
+                logger.warning(f"Could not load event publishers: {e}")
+                self._event_publishers_loaded = True  # Don't retry
 
     # Account Lifecycle Operations
 
@@ -111,6 +148,7 @@ class AccountService:
 
             if was_created and self.event_bus:
                 try:
+                    self._lazy_load_event_publishers()
                     # Get subscription tier from subscription_service
                     subscription_plan = "free"  # Default
                     if self.subscription_client:
@@ -125,23 +163,27 @@ class AccountService:
                         except Exception as sub_e:
                             logger.warning(f"Failed to get subscription for user {request.user_id}: {sub_e}")
 
-                    await publish_user_created(
-                        event_bus=self.event_bus,
-                        user_id=request.user_id,
-                        email=request.email,
-                        name=request.name,
-                        subscription_plan=subscription_plan,
-                    )
+                    if hasattr(self, '_publish_user_created'):
+                        await self._publish_user_created(
+                            event_bus=self.event_bus,
+                            user_id=request.user_id,
+                            email=request.email,
+                            name=request.name,
+                            subscription_plan=subscription_plan,
+                        )
                 except Exception as e:
                     logger.error(f"Failed to publish user.created event: {e}")
 
             logger.info(f"Account ensured: {request.user_id}, created: {was_created}")
             return account_response, was_created
 
-        except DuplicateEntryException as e:
+        except DuplicateEntryError as e:
             raise AccountValidationError(
                 f"Account with email already exists: {request.email}"
             )
+        except AccountValidationError:
+            # Re-raise validation errors without wrapping
+            raise
         except Exception as e:
             logger.error(f"Failed to ensure account: {e}")
             raise AccountServiceError(f"Failed to ensure account: {str(e)}")
@@ -211,13 +253,15 @@ class AccountService:
 
             if self.event_bus:
                 try:
-                    await publish_user_profile_updated(
-                        event_bus=self.event_bus,
-                        user_id=user_id,
-                        email=updated_user.email,
-                        name=updated_user.name,
-                        updated_fields=list(update_data.keys()),
-                    )
+                    self._lazy_load_event_publishers()
+                    if hasattr(self, '_publish_user_profile_updated'):
+                        await self._publish_user_profile_updated(
+                            event_bus=self.event_bus,
+                            user_id=user_id,
+                            email=updated_user.email,
+                            name=updated_user.name,
+                            updated_fields=list(update_data.keys()),
+                        )
                 except Exception as e:
                     logger.error(f"Failed to publish user.profile_updated event: {e}")
 
@@ -228,7 +272,7 @@ class AccountService:
             raise
         except AccountValidationError:
             raise
-        except UserNotFoundException as e:
+        except UserNotFoundError as e:
             raise AccountNotFoundError(str(e))
         except Exception as e:
             logger.error(f"Failed to update account profile {user_id}: {e}")
@@ -307,14 +351,16 @@ class AccountService:
             if success:
                 if self.event_bus:
                     try:
-                        await publish_user_status_changed(
-                            event_bus=self.event_bus,
-                            user_id=user_id,
-                            is_active=request.is_active,
-                            email=user.email if user else None,
-                            reason=request.reason,
-                            changed_by="admin",
-                        )
+                        self._lazy_load_event_publishers()
+                        if hasattr(self, '_publish_user_status_changed'):
+                            await self._publish_user_status_changed(
+                                event_bus=self.event_bus,
+                                user_id=user_id,
+                                is_active=request.is_active,
+                                email=user.email if user else None,
+                                reason=request.reason,
+                                changed_by="admin",
+                            )
                     except Exception as e:
                         logger.error(
                             f"Failed to publish user.status_changed event: {e}"
@@ -350,12 +396,14 @@ class AccountService:
             if success:
                 if self.event_bus:
                     try:
-                        await publish_user_deleted(
-                            event_bus=self.event_bus,
-                            user_id=user_id,
-                            email=user.email if user else None,
-                            reason=reason,
-                        )
+                        self._lazy_load_event_publishers()
+                        if hasattr(self, '_publish_user_deleted'):
+                            await self._publish_user_deleted(
+                                event_bus=self.event_bus,
+                                user_id=user_id,
+                                email=user.email if user else None,
+                                reason=reason,
+                            )
                     except Exception as e:
                         logger.error(f"Failed to publish user.deleted event: {e}")
 
@@ -481,7 +529,8 @@ class AccountService:
         if not request.name or not request.name.strip():
             raise AccountValidationError("name is required")
 
-        if not re.match(r"^[^@]+@[^@]+\.[^@]+$", request.email):
+        # Validate email format - reject whitespace characters
+        if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", request.email):
             raise AccountValidationError("Invalid email format")
 
     def _validate_account_update_request(self, request: AccountUpdateRequest) -> None:
@@ -489,7 +538,7 @@ class AccountService:
         if request.name is not None and not request.name.strip():
             raise AccountValidationError("name cannot be empty")
         if request.email is not None and not re.match(
-            r"^[^@]+@[^@]+\.[^@]+$", request.email
+            r"^[^\s@]+@[^\s@]+\.[^\s@]+$", request.email
         ):
             raise AccountValidationError("Invalid email format")
 

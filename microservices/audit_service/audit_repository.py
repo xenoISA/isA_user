@@ -15,8 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    AuditEvent, UserActivity, SecurityEvent, ComplianceReport,
-    EventType, EventSeverity, EventStatus, AuditCategory
+    AuditEvent, UserActivity, SecurityEvent, ComplianceReport, EventSeverity, EventStatus, AuditCategory, EventType
 )
 
 logger = logging.getLogger(__name__)
@@ -30,9 +29,9 @@ class AuditRepository:
             config = ConfigManager("audit_service")
 
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
@@ -232,7 +231,7 @@ class AuditRepository:
     ) -> List[SecurityEvent]:
         """Get security events by severity"""
         events = await self.get_audit_events(
-            event_type=EventType.SECURITY_EVENT,
+            event_type="audit.security.event",
             limit=limit
         )
         return [SecurityEvent(**event.dict()) for event in events]
@@ -373,7 +372,7 @@ class AuditRepository:
             import uuid
             audit_event = AuditEvent(
                 id=str(uuid.uuid4()),
-                event_type=EventType.SECURITY_ALERT,
+                event_type="audit.security.alert",
                 category=AuditCategory.SECURITY,
                 severity=EventSeverity.HIGH,
                 action="security_alert",
@@ -401,7 +400,7 @@ class AuditRepository:
             start_time = datetime.now(timezone.utc) - timedelta(days=days)
 
             conditions = ["event_type = $1", "event_timestamp >= $2"]
-            params = [EventType.SECURITY_ALERT.value, start_time]
+            params = ["audit.security.alert".value, start_time]
             param_count = 2
 
             if severity:

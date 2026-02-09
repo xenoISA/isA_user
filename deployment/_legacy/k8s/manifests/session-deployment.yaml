@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: session_service
+# Regenerate with: python -m agents.tools.generate_config --deployment session_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session
+  namespace: isa-cloud-staging
+  labels:
+    app: session
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: session
+  template:
+    metadata:
+      labels:
+        app: session
+    spec:
+      containers:
+      - name: session
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8203
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "session_service"
+        - name: SERVICE_PORT
+          value: "8203"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.session_service.main:app", "--host", "0.0.0.0", "--port", "8203"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8203
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8203
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: session
+  namespace: isa-cloud-staging
+  labels:
+    app: session
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8203
+    targetPort: 8203
+    protocol: TCP
+    name: http
+  selector:
+    app: session

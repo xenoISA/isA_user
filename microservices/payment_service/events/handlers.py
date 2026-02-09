@@ -7,6 +7,9 @@ Handlers for events from other services
 import logging
 from typing import Dict, Any
 from datetime import datetime
+from decimal import Decimal
+
+from ..models import CreatePaymentIntentRequest, Currency
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,12 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
         order_id = event_data.get("order_id")
         user_id = event_data.get("user_id")
         amount = event_data.get("total_amount")
+        payment_intent_id = event_data.get("payment_intent_id")
+        currency = event_data.get("currency", "USD")
+
+        if payment_intent_id:
+            logger.info(f"Order {order_id} already has payment_intent_id, skipping")
+            return
 
         if not all([order_id, user_id, amount]):
             logger.warning("order.created event missing required fields")
@@ -28,9 +37,15 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
 
         logger.info(f"Processing order.created event for order {order_id}")
 
-        # Auto-create payment intent for the order
-        # This is typically done via sync API call, but we can prepare here
-        logger.info(f"Order {order_id} ready for payment processing")
+        request = CreatePaymentIntentRequest(
+            user_id=user_id,
+            amount=Decimal(str(amount)),
+            currency=Currency(currency),
+            order_id=order_id,
+            metadata={"order_id": order_id}
+        )
+
+        await payment_service.create_payment_intent(request)
 
     except Exception as e:
         logger.error(f"❌ Error handling order.created event: {e}")
@@ -125,12 +140,56 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
         logger.info(f"Processing user.deleted event for user {user_id}")
 
         # Get all active subscriptions for this user
-        # Cancel them and calculate prorated refunds
-        logger.info(f"Canceling all subscriptions for deleted user {user_id}")
-        # TODO: Implement subscription cancellation and refund logic
+        if hasattr(payment_service, 'repository'):
+            subscriptions = await payment_service.repository.get_user_subscriptions(user_id)
+
+            cancelled_count = 0
+            refund_total = 0
+
+            for subscription in subscriptions:
+                try:
+                    # Cancel subscription
+                    await payment_service.repository.cancel_subscription(
+                        subscription_id=subscription.get('subscription_id'),
+                        reason="user_deleted",
+                        immediate=True
+                    )
+                    cancelled_count += 1
+
+                    # Calculate prorated refund if applicable
+                    if subscription.get('status') == 'active':
+                        prorated_amount = await payment_service.calculate_prorated_refund(
+                            subscription_id=subscription.get('subscription_id')
+                        )
+                        if prorated_amount and prorated_amount > 0:
+                            refund_total += prorated_amount
+                            logger.info(
+                                f"Prorated refund of {prorated_amount} calculated for subscription "
+                                f"{subscription.get('subscription_id')}"
+                            )
+
+                except Exception as e:
+                    logger.error(
+                        f"Failed to cancel subscription {subscription.get('subscription_id')}: {e}"
+                    )
+
+            # Cancel pending payment intents
+            cancelled_intents = await payment_service.repository.cancel_user_payment_intents(user_id)
+
+            # Anonymize payment history (keep for accounting, remove PII)
+            await payment_service.repository.anonymize_user_payment_history(user_id)
+
+            logger.info(
+                f"✅ User {user_id} payment cleanup: "
+                f"{cancelled_count} subscriptions cancelled, "
+                f"{cancelled_intents} payment intents cancelled, "
+                f"prorated refund: {refund_total}"
+            )
+        else:
+            logger.warning(f"Payment service repository not available for user {user_id} cleanup")
 
     except Exception as e:
-        logger.error(f"❌ Error handling user.deleted event: {e}")
+        logger.error(f"❌ Error handling user.deleted event: {e}", exc_info=True)
 
 
 async def handle_user_upgraded(event_data: Dict[str, Any], payment_service) -> None:

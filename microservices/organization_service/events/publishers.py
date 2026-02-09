@@ -8,7 +8,7 @@ Following the standard event-driven architecture pattern.
 import logging
 from typing import List, Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_organization_created_event_data,
@@ -58,8 +58,8 @@ async def publish_organization_created(
         )
 
         event = Event(
-            event_type=EventType.ORG_CREATED,
-            source=ServiceSource.ORG_SERVICE,
+            event_type="organization.created",
+            source="organization_service",
             data=event_data.model_dump(),
         )
 
@@ -96,8 +96,8 @@ async def publish_organization_updated(
         )
 
         event = Event(
-            event_type=EventType.ORG_UPDATED,
-            source=ServiceSource.ORG_SERVICE,
+            event_type="organization.updated",
+            source="organization_service",
             data=event_data.model_dump(),
         )
 
@@ -136,8 +136,8 @@ async def publish_organization_deleted(
         )
 
         event = Event(
-            event_type=EventType.ORG_DELETED,
-            source=ServiceSource.ORG_SERVICE,
+            event_type="organization.deleted",
+            source="organization_service",
             data=event_data.model_dump(),
         )
 
@@ -174,8 +174,8 @@ async def publish_organization_member_added(
         )
 
         event = Event(
-            event_type=EventType.ORG_MEMBER_ADDED,
-            source=ServiceSource.ORG_SERVICE,
+            event_type="organization.member_added",
+            source="organization_service",
             data=event_data.model_dump(),
         )
 
@@ -214,8 +214,8 @@ async def publish_organization_member_removed(
         )
 
         event = Event(
-            event_type=EventType.ORG_MEMBER_REMOVED,
-            source=ServiceSource.ORG_SERVICE,
+            event_type="organization.member_removed",
+            source="organization_service",
             data=event_data.model_dump(),
         )
 
@@ -257,8 +257,8 @@ async def publish_organization_member_updated(
         )
 
         event = Event(
-            event_type=EventType.ORG_MEMBER_UPDATED,
-            source=ServiceSource.ORG_SERVICE,
+            event_type="organization.member_updated",
+            source="organization_service",
             data=event_data.model_dump(),
         )
 
@@ -303,8 +303,8 @@ async def publish_sharing_resource_created(
         )
 
         event = Event(
-            event_type=EventType.SHARING_CREATED,
-            source=ServiceSource.ORG_SERVICE,
+            event_type="organization.sharing.created",
+            source="organization_service",
             data=event_data.model_dump(),
         )
 
@@ -346,8 +346,8 @@ async def publish_sharing_resource_deleted(
         )
 
         event = Event(
-            event_type=EventType.SHARING_DELETED,
-            source=ServiceSource.ORG_SERVICE,
+            event_type="organization.sharing.deleted",
+            source="organization_service",
             data=event_data.model_dump(),
         )
 

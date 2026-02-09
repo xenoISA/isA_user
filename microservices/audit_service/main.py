@@ -24,13 +24,13 @@ from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
 
 from .audit_service import AuditService
+from .factory import create_audit_service
 from .events.handlers import AuditEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     AuditEventCreateRequest, AuditEventResponse, AuditQueryRequest, AuditQueryResponse,
-    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest,
-    EventType, EventSeverity, AuditCategory,
-    HealthResponse, ServiceInfo, ServiceStats
+    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest, EventSeverity, AuditCategory,
+    EventType, HealthResponse, ServiceInfo, ServiceStats
 )
 
 # Initialize configuration
@@ -55,8 +55,8 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Audit Service starting up...")
 
     try:
-        # 初始化服务
-        audit_service = AuditService(config=config_manager)
+        # 初始化服务 (使用工厂方法)
+        audit_service = create_audit_service(config=config_manager)
 
         # 检查数据库连接
         if await audit_service.repository.check_connection():
@@ -103,9 +103,10 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA['tags'],
                     meta=consul_meta,
-                    health_check_type='http'
+                    health_check_type='ttl'  # Use TTL for reliable health checks
                 )
                 consul_registry.register()
+                consul_registry.start_maintenance()  # Start TTL heartbeat
                 logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -173,6 +174,7 @@ def get_audit_service() -> AuditService:
 # 健康检查和服务信息
 # ====================
 
+@app.get("/api/v1/audit/health")
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """基础健康检查"""

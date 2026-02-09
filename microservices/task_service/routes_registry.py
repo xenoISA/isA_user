@@ -1,46 +1,35 @@
 """
 Task Service Routes Registry
-
 Defines all API routes for Consul service registration and discovery.
 This ensures route metadata is centralized and easy to maintain.
 """
-
 from typing import List, Dict, Any
-
-
 # Route definitions for task_service
 TASK_SERVICE_ROUTES = [
     # Health & Info
     {"path": "/health", "methods": ["GET"], "auth_required": False, "description": "Health check"},
+    {"path": "/api/v1/tasks/health", "methods": ["GET"], "auth_required": False, "description": "Service health check (API v1)"},
     {"path": "/health/detailed", "methods": ["GET"], "auth_required": False, "description": "Detailed health check"},
-
     # Task CRUD
     {"path": "/api/v1/tasks", "methods": ["POST"], "auth_required": True, "description": "Create task"},
     {"path": "/api/v1/tasks/{task_id}", "methods": ["GET"], "auth_required": True, "description": "Get task"},
     {"path": "/api/v1/tasks/{task_id}", "methods": ["PUT"], "auth_required": True, "description": "Update task"},
     {"path": "/api/v1/tasks/{task_id}", "methods": ["DELETE"], "auth_required": True, "description": "Delete task"},
     {"path": "/api/v1/tasks", "methods": ["GET"], "auth_required": True, "description": "List tasks"},
-
     # Task Execution
     {"path": "/api/v1/tasks/{task_id}/execute", "methods": ["POST"], "auth_required": True, "description": "Execute task"},
     {"path": "/api/v1/tasks/{task_id}/executions", "methods": ["GET"], "auth_required": True, "description": "Get task executions"},
-
     # Templates
     {"path": "/api/v1/templates", "methods": ["GET"], "auth_required": True, "description": "List task templates"},
     {"path": "/api/v1/tasks/from-template", "methods": ["POST"], "auth_required": True, "description": "Create task from template"},
-
     # Analytics
     {"path": "/api/v1/analytics", "methods": ["GET"], "auth_required": True, "description": "Get task analytics"},
-
     # Scheduler
     {"path": "/api/v1/scheduler/pending", "methods": ["GET"], "auth_required": True, "description": "Get pending tasks"},
     {"path": "/api/v1/scheduler/execute/{task_id}", "methods": ["POST"], "auth_required": True, "description": "Execute scheduled task"},
-
     # Service Statistics
     {"path": "/api/v1/service/stats", "methods": ["GET"], "auth_required": True, "description": "Get service statistics"},
 ]
-
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul registration.
@@ -54,12 +43,10 @@ def get_routes_for_consul() -> Dict[str, Any]:
     analytics_routes = []
     scheduler_routes = []
     stats_routes = []
-
     for route in TASK_SERVICE_ROUTES:
         path = route["path"]
         # Create compact representation (remove /api/v1/ prefix)
         compact_path = path.replace("/api/v1/", "")
-
         if path.startswith("/health"):
             health_routes.append(compact_path)
         elif "execute" in path or "executions" in path:
@@ -74,7 +61,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             stats_routes.append(compact_path)
         elif "tasks" in path:
             task_routes.append(compact_path)
-
     return {
         "route_count": str(len(TASK_SERVICE_ROUTES)),
         "base_path": "/api/v1/tasks",
@@ -89,8 +75,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in TASK_SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in TASK_SERVICE_ROUTES if r["auth_required"])),
     }
-
-
 def get_categorized_routes() -> Dict[str, List[Dict[str, Any]]]:
     """
     Get routes organized by category for documentation or other purposes.
@@ -104,7 +88,6 @@ def get_categorized_routes() -> Dict[str, List[Dict[str, Any]]]:
         "scheduler": [],
         "statistics": []
     }
-
     for route in TASK_SERVICE_ROUTES:
         path = route["path"]
         if path.startswith("/health"):
@@ -121,10 +104,7 @@ def get_categorized_routes() -> Dict[str, List[Dict[str, Any]]]:
             categories["statistics"].append(route)
         elif "tasks" in path:
             categories["tasks"].append(route)
-
     return categories
-
-
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "task_service",

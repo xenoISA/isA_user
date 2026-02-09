@@ -1,9 +1,11 @@
 """
 Authorization Service Clients Module
 
-HTTP clients for synchronous communication with other microservices.
-Currently, authorization_service primarily provides services to other microservices
-and doesn't require client connections.
+HTTP clients for async communication with other microservices.
+Used for user and organization validation in permission checks.
 """
 
-__all__ = []
+from .account_client import AccountClient
+from .organization_client import OrganizationClient
+
+__all__ = ["AccountClient", "OrganizationClient"]

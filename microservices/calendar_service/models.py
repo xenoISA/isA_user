@@ -155,11 +155,13 @@ class EventResponse(BaseModel):
     category: EventCategory
     color: Optional[str]
     recurrence_type: RecurrenceType
+    recurrence_end_date: Optional[datetime] = None
+    recurrence_rule: Optional[str] = None
     reminders: List[int]
     is_shared: bool
     created_at: datetime
     updated_at: Optional[datetime]
-    
+
     class Config:
         from_attributes = True
 
@@ -174,7 +176,7 @@ class EventListResponse(BaseModel):
 
 class SyncStatusResponse(BaseModel):
     """同步状态响应"""
-    provider: SyncProvider
+    provider: str  # Can be SyncProvider value or other string
     last_synced: Optional[datetime]
     synced_events: int
     status: str

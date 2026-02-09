@@ -17,7 +17,7 @@ from .models import (
     LocationListResponse, WeatherAlertResponse, WeatherAlert,
     WeatherProvider
 )
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +84,8 @@ class WeatherService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.WEATHER_DATA_FETCHED,
-                        source=ServiceSource.WEATHER_SERVICE,
+                        event_type="weather.data.fetched",
+                        source="weather_service",
                         data={
                             "location": request.location,
                             "temperature": weather_data.get("temperature"),
@@ -328,8 +328,8 @@ class WeatherService:
             if alert_objects and self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.WEATHER_ALERT_CREATED,
-                        source=ServiceSource.WEATHER_SERVICE,
+                        event_type="weather.alert.created",
+                        source="weather_service",
                         data={
                             "location": location,
                             "alert_count": len(alert_objects),

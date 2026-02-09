@@ -29,15 +29,22 @@ class DeviceAuthRepository:
             config = ConfigManager("auth_service")
 
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id='auth-service')
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            database=os.getenv("POSTGRES_DB", "isa_platform"),
+            username=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
+            user_id='auth-service'
+        )
         self.schema = "auth"
         self.devices_table = "devices"
         self.device_logs_table = "device_logs"

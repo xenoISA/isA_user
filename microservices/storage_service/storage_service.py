@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.config_manager import ConfigManager
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from fastapi import HTTPException, UploadFile
 
 # Use isa-common's AsyncMinIOClient for async gRPC
@@ -77,20 +77,30 @@ class StorageService:
         self.event_publisher = event_publisher  # 使用新的 publisher
         self.org_client = StorageOrganizationClient()  # 初始化 org client
 
-        # Discover MinIO gRPC service using config_manager (same as PostgresClient pattern)
-        # Priority: Environment variables (MINIO_GRPC_HOST/PORT) → Consul → fallback
+        # Discover MinIO S3 service using config_manager
+        # Priority: Environment variables (MINIO_HOST/PORT) → Consul → fallback
+        # Note: Now using native S3 protocol via aioboto3 (not gRPC gateway)
         minio_host, minio_port = config_manager.discover_service(
-            service_name="minio_grpc_service",
-            default_host="isa-minio-grpc",
-            default_port=50051,
-            env_host_key="MINIO_GRPC_HOST",
-            env_port_key="MINIO_GRPC_PORT",
+            service_name="minio",
+            default_host="minio",
+            default_port=9000,  # S3 API port (not gRPC 50051)
+            env_host_key="MINIO_HOST",
+            env_port_key="MINIO_PORT",
         )
 
-        logger.info(f"Connecting to MinIO gRPC at {minio_host}:{minio_port}")
-        # Initialize AsyncMinIOClient for non-blocking gRPC calls
+        # Get MinIO credentials from environment
+        import os
+        minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+        minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+
+        logger.info(f"Connecting to MinIO S3 API at {minio_host}:{minio_port}")
+        # Initialize AsyncMinIOClient with native S3 protocol (aioboto3)
         self.minio_client = AsyncMinIOClient(
-            user_id="storage_service", host=minio_host, port=minio_port
+            user_id="storage_service",
+            host=minio_host,
+            port=minio_port,
+            access_key=minio_access_key,
+            secret_key=minio_secret_key,
         )
         self._bucket_initialized = False  # Lazy init flag
 

@@ -12,7 +12,7 @@ from typing import Dict, Any
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
-from core.nats_client import Event, EventType
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ class InvitationEventHandler:
 
             if event_type == "organization.deleted":
                 return await self.handle_organization_deleted(event.data)
-            elif event_type == EventType.USER_DELETED.value:
+            elif event_type == "user.deleted".value:
                 return await self.handle_user_deleted(event.data)
             else:
                 logger.warning(f"Unknown event type: {event_type}")
@@ -130,5 +130,5 @@ class InvitationEventHandler:
         """
         return [
             "organization.deleted",
-            EventType.USER_DELETED.value,
+            "user.deleted".value,
         ]

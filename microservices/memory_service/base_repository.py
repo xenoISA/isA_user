@@ -38,15 +38,22 @@ class BaseMemoryRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
-            env_host_key='POSTGRES_GRPC_HOST',
-            env_port_key='POSTGRES_GRPC_PORT'
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id='memory_service')
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            database=os.getenv("POSTGRES_DB", "isa_platform"),
+            username=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
+            user_id='memory_service'
+        )
         self.schema = schema
         self.table_name = table_name
 
@@ -140,7 +147,7 @@ class BaseMemoryRepository:
 
     def _serialize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Serialize data for PostgreSQL gRPC client
+        Serialize data for PostgreSQL native asyncpg client
         Converts Python types to PostgreSQL-compatible types
         """
         import json
@@ -159,8 +166,8 @@ class BaseMemoryRepository:
             if value is None:
                 serialized[key] = None
             elif isinstance(value, datetime):
-                # Convert datetime to ISO string
-                serialized[key] = value.isoformat()
+                # Keep datetime as-is for asyncpg (native driver handles it)
+                serialized[key] = value
             elif isinstance(value, list):
                 # Keep as Python list for array fields, convert to JSON for others
                 if key in array_fields:

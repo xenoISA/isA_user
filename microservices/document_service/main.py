@@ -41,13 +41,14 @@ from .models import (
     DocumentStatus,
     DocumentType,
 )
-from .document_service import (
-    DocumentService,
+from .document_service import DocumentService
+from .protocols import (
     DocumentServiceError,
     DocumentNotFoundError,
     DocumentValidationError,
     DocumentPermissionError,
 )
+from .factory import create_document_service
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize configuration
@@ -79,9 +80,9 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
 
-    # Initialize service
-    document_service = DocumentService(
-        event_bus=event_bus, config_manager=config_manager
+    # Initialize service using factory
+    document_service = create_document_service(
+        config=config_manager, event_bus=event_bus
     )
 
     # Subscribe to events (file.deleted, user.deleted, etc.)
@@ -142,9 +143,10 @@ async def lifespan(app: FastAPI):
                 consul_port=service_config.consul_port,
                 tags=SERVICE_METADATA['tags'],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type='ttl'  # Use TTL for reliable health checks
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
             logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -214,6 +216,7 @@ async def root():
     )
 
 
+@app.get("/api/v1/documents/health")
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""

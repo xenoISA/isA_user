@@ -35,6 +35,7 @@ from .models import (
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .weather_repository import WeatherRepository
 from .weather_service import WeatherService
+from .factory import create_weather_service
 
 # Initialize config
 config_manager = ConfigManager("weather_service")
@@ -65,7 +66,7 @@ class WeatherMicroservice:
             self.event_bus = None
 
         self.repository = WeatherRepository(config=config_manager)
-        self.service = WeatherService(event_bus=self.event_bus)
+        self.service = create_weather_service(config=config_manager, event_bus=self.event_bus)
         logger.info("Weather service initialized")
 
         # Consul service registration
@@ -88,9 +89,11 @@ class WeatherMicroservice:
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type="http",
+                    health_check_type="ttl"  # Use TTL for reliable health checks,
                 )
                 self.consul_registry.register()
+                self.consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
                 logger.info(
                     f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
                 )
@@ -149,6 +152,7 @@ app = FastAPI(
 # =============================================================================
 
 
+@app.get("/api/v1/weather/health")
 @app.get("/health")
 async def health_check():
     """健康检查"""
@@ -313,6 +317,6 @@ async def delete_location(
 if __name__ == "__main__":
     import uvicorn
 
-    port = config.service_port if hasattr(config, "service_port") else 8241
+    port = config.service_port if hasattr(config, "service_port") else 8218
 
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

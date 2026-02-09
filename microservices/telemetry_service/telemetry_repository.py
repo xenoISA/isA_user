@@ -38,9 +38,9 @@ class TelemetryRepository:
         # Discover PostgreSQL service
         # Priority: environment variables → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
@@ -683,6 +683,62 @@ class TelemetryRepository:
 
         except Exception as e:
             logger.error(f"Error deleting metric definition: {e}")
+            return False
+
+    async def update_metric_definition(self, metric_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update a metric definition (data_type cannot be changed per BR-MET-002)"""
+        try:
+            # Remove immutable fields
+            update_data = {k: v for k, v in update_data.items()
+                          if k not in ['data_type', 'metric_id', 'created_at', 'created_by']}
+
+            if not update_data:
+                return await self.get_metric_definition(metric_id)
+
+            set_clauses = []
+            params = []
+            param_count = 0
+
+            for key, value in update_data.items():
+                param_count += 1
+                set_clauses.append(f"{key} = ${param_count}")
+                params.append(value)
+
+            param_count += 1
+            set_clauses.append(f"updated_at = ${param_count}")
+            params.append(datetime.now(timezone.utc))
+
+            param_count += 1
+            params.append(metric_id)
+
+            query = f'''
+                UPDATE {self.schema}.{self.metric_definitions_table}
+                SET {", ".join(set_clauses)}
+                WHERE metric_id = ${param_count}
+                RETURNING *
+            '''
+
+            async with self.db:
+                result = await self.db.fetch_one(query, params, schema=self.schema)
+
+            return dict(result) if result else None
+
+        except Exception as e:
+            logger.error(f"Error updating metric definition: {e}")
+            return None
+
+    async def delete_alert_rule(self, rule_id: str) -> bool:
+        """Delete an alert rule"""
+        try:
+            query = f'DELETE FROM {self.schema}.{self.alert_rules_table} WHERE rule_id = $1'
+
+            async with self.db:
+                count = await self.db.execute(query, [rule_id], schema=self.schema)
+
+            return count is not None and count > 0
+
+        except Exception as e:
+            logger.error(f"Error deleting alert rule: {e}")
             return False
 
     async def get_alert_rules(

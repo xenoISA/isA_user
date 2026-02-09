@@ -10,6 +10,9 @@ from .account_client import AccountClient
 from .storage_client import StorageClient
 from .billing_client import BillingClient
 from .order_client import OrderServiceClient
+from .inventory_client import InventoryClient
+from .tax_client import TaxClient
+from .fulfillment_client import FulfillmentClient
 
 __all__ = [
     "PaymentClient",
@@ -17,5 +20,8 @@ __all__ = [
     "AccountClient",
     "StorageClient",
     "BillingClient",
-    "OrderServiceClient"
+    "OrderServiceClient",
+    "InventoryClient",
+    "TaxClient",
+    "FulfillmentClient",
 ]

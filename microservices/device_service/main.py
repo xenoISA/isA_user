@@ -28,7 +28,7 @@ from .models import (
     DeviceHealthResponse, DeviceGroupResponse, DeviceListResponse,
     DeviceStatus, DeviceType, ConnectivityType
 )
-from .device_service import DeviceService
+from .factory import create_device_service
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from microservices.organization_service.clients import OrganizationServiceClient
 from microservices.auth_service.client import AuthServiceClient
@@ -58,7 +58,7 @@ class DeviceMicroservice:
             logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
             self.event_bus = None
 
-        self.service = DeviceService(event_bus=self.event_bus, config=config_manager)
+        self.service = create_device_service(config=config_manager, event_bus=self.event_bus)
         logger.info("Device service initialized")
 
     async def shutdown(self):
@@ -92,22 +92,22 @@ async def lifespan(app: FastAPI):
 
             # Subscribe to firmware.uploaded events - notify devices of updates
             await microservice.event_bus.subscribe(
-                subject="events.firmware.uploaded",
-                callback=lambda msg: event_handler.handle_event(msg)
+                pattern="events.firmware.uploaded",
+                handler=lambda msg: event_handler.handle_event(msg)
             )
             logger.info("✅ Subscribed to firmware.uploaded events")
 
             # Subscribe to update.completed events - update device firmware version
             await microservice.event_bus.subscribe(
-                subject="events.update.completed",
-                callback=lambda msg: event_handler.handle_event(msg)
+                pattern="events.update.completed",
+                handler=lambda msg: event_handler.handle_event(msg)
             )
             logger.info("✅ Subscribed to update.completed events")
 
             # Subscribe to telemetry.data.received events - update device health
             await microservice.event_bus.subscribe(
-                subject="events.telemetry.data.received",
-                callback=lambda msg: event_handler.handle_event(msg)
+                pattern="events.telemetry.data.received",
+                handler=lambda msg: event_handler.handle_event(msg)
             )
             logger.info("✅ Subscribed to telemetry.data.received events")
 
@@ -134,9 +134,10 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA['tags'],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type='ttl'  # Use TTL for reliable health checks
             )
             microservice.consul_registry.register()
+            microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
             logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -159,6 +160,7 @@ app = FastAPI(
 # Health Check Endpoints
 # ======================
 
+@app.get("/api/v1/devices/health")
 @app.get("/health")
 async def health_check():
     """基础健康检查"""
@@ -338,30 +340,16 @@ async def get_device(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取设备详情"""
-    # 模拟返回设备信息
-    return DeviceResponse(
-        device_id=device_id,
-        device_name="Smart Sensor 001",
-        device_type=DeviceType.SENSOR,
-        manufacturer="IoT Corp",
-        model="SS-2024",
-        serial_number="SN123456789",
-        firmware_version="1.2.3",
-        hardware_version="1.0",
-        mac_address="AA:BB:CC:DD:EE:FF",
-        connectivity_type=ConnectivityType.WIFI,
-        security_level="standard",
-        status=DeviceStatus.ACTIVE,
-        location={"latitude": 39.9042, "longitude": 116.4074},
-        metadata={},
-        group_id=None,
-        tags=["production", "beijing"],
-        last_seen=datetime.utcnow(),
-        registered_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-        user_id=user_context["user_id"],
-        organization_id=user_context.get("organization_id")
-    )
+    try:
+        device = await microservice.service.get_device(device_id)
+        if device:
+            return device
+        raise HTTPException(status_code=404, detail="Device not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting device {device_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/v1/devices/{device_id}", response_model=DeviceResponse)
 async def update_device(
@@ -371,46 +359,32 @@ async def update_device(
 ):
     """更新设备信息"""
     try:
-        logger.info(f"Updating device {device_id} with data: {request}")
-        
-        # 简单实现：如果有状态更新就更新状态
+        # Build update data from request
+        update_data = {}
+        if request.device_name:
+            update_data["device_name"] = request.device_name
+        if request.firmware_version:
+            update_data["firmware_version"] = request.firmware_version
         if request.status:
-            success = await microservice.service.update_device_status(device_id, request.status)
-            if not success:
-                raise HTTPException(status_code=404, detail="Device not found")
-        
-        # 返回一个模拟的设备响应
-        # 在实际实现中，这里应该从数据库获取更新后的设备信息
-        updated_device = DeviceResponse(
-            device_id=device_id,
-            device_name=request.device_name or "Updated Device",
-            device_type=DeviceType.SMART_FRAME,  # Default type, should be fetched from storage
-            manufacturer="IoT Corp",
-            model="SS-2024",
-            serial_number="SN123456789",
-            firmware_version=request.firmware_version or "1.2.3",
-            hardware_version="1.0",
-            mac_address="AA:BB:CC:DD:EE:FF",
-            connectivity_type=ConnectivityType.WIFI,
-            security_level="standard",
-            status=request.status or DeviceStatus.ACTIVE,
-            location=request.location or {},
-            metadata=request.metadata or {},  # Smart frame config stored here
-            group_id=request.group_id,
-            tags=request.tags or [],
-            last_seen=datetime.now(timezone.utc),
-            registered_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-            user_id=user_context.get("user_id"),
-            organization_id=user_context.get("organization_id"),
-            total_commands=0,
-            total_telemetry_points=0,
-            uptime_percentage=0.0
-        )
-        
-        logger.info(f"Device {device_id} updated successfully")
-        return updated_device
-        
+            update_data["status"] = request.status
+        if request.location:
+            update_data["location"] = request.location
+        if request.metadata:
+            update_data["metadata"] = request.metadata
+        if request.group_id:
+            update_data["group_id"] = request.group_id
+        if request.tags:
+            update_data["tags"] = request.tags
+
+        # Call service layer to update device
+        updated_device = await microservice.service.update_device(device_id, update_data)
+
+        if updated_device:
+            return updated_device
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating device {device_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -441,19 +415,38 @@ async def list_devices(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取设备列表"""
-    # 返回设备列表
-    return DeviceListResponse(
-        devices=[],
-        count=0,
-        limit=limit,
-        offset=offset,
-        filters={
-            "status": status,
-            "device_type": device_type,
-            "connectivity": connectivity,
-            "group_id": group_id
-        }
-    )
+    try:
+        # Get devices from service layer
+        devices = await microservice.service.list_user_devices(
+            user_id=user_context["user_id"],
+            device_type=device_type.value if device_type else None,
+            status=status.value if status else None,
+            limit=limit,
+            offset=offset
+        )
+
+        # Filter by connectivity and group_id if provided (repository doesn't support these yet)
+        filtered_devices = devices
+        if connectivity:
+            filtered_devices = [d for d in filtered_devices if d.connectivity_type == connectivity]
+        if group_id:
+            filtered_devices = [d for d in filtered_devices if d.group_id == group_id]
+
+        return DeviceListResponse(
+            devices=filtered_devices,
+            count=len(filtered_devices),
+            limit=limit,
+            offset=offset,
+            filters={
+                "status": status,
+                "device_type": device_type,
+                "connectivity": connectivity,
+                "group_id": group_id
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error listing devices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ======================
 # Device Authentication
@@ -507,12 +500,20 @@ async def send_command(
 ):
     """向设备发送命令"""
     try:
+        # First verify device exists
+        device = await microservice.service.get_device(device_id)
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        # Send command to device
         result = await microservice.service.send_command(
             device_id,
             user_context["user_id"],
             request.model_dump()
         )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error sending command: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -521,7 +522,6 @@ async def send_command(
 # Device Health & Monitoring
 # ======================
 
-@app.get("/api/v1/devices/{device_id}/health", response_model=DeviceHealthResponse)
 async def get_device_health(
     device_id: str = Path(..., description="Device ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)

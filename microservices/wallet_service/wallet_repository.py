@@ -4,7 +4,7 @@ Wallet Repository Implementation
 Handles all wallet and transaction database operations using PostgresClient
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import uuid
@@ -38,9 +38,9 @@ class WalletRepository:
         # Discover PostgreSQL service
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
@@ -77,8 +77,8 @@ class WalletRepository:
                 'blockchain_network': wallet_data.blockchain_network.value if wallet_data.blockchain_network else None,
                 'metadata': wallet_data.metadata or {},  # Direct dict
                 'is_active': True,
-                'created_at': now.isoformat(),
-                'updated_at': now.isoformat()
+                'created_at': now,
+                'updated_at': now
             }
 
             async with self.db:
@@ -188,7 +188,7 @@ class WalletRepository:
             async with self.db:
                 count = await self.db.execute(
                     query,
-                    [float(new_balance), datetime.now(timezone.utc).isoformat(), wallet_id],
+                    [float(new_balance), datetime.now(timezone.utc), wallet_id],
                     schema=self.schema
                 )
 
@@ -321,6 +321,92 @@ class WalletRepository:
             return transaction
         except Exception as e:
             logger.error(f"Error consuming credits: {e}")
+            return None
+
+    async def transfer(
+        self,
+        from_wallet_id: str,
+        to_wallet_id: str,
+        amount: Decimal,
+        description: Optional[str] = None,
+        metadata: Dict[str, Any] = None
+    ) -> Optional[Tuple[WalletTransaction, WalletTransaction]]:
+        """Transfer funds between wallets"""
+        try:
+            # Get both wallets
+            from_wallet = await self.get_wallet(from_wallet_id)
+            to_wallet = await self.get_wallet(to_wallet_id)
+
+            if not from_wallet or not to_wallet:
+                logger.error(f"Transfer failed: wallet not found")
+                return None
+
+            # Check sufficient balance
+            if from_wallet.balance < amount:
+                logger.error(f"Transfer failed: insufficient balance")
+                return None
+
+            # Withdraw from source wallet
+            from_balance_before = from_wallet.balance
+            from_new_balance = await self.update_balance(from_wallet_id, amount, "subtract")
+            if from_new_balance is None:
+                return None
+
+            # Deposit to destination wallet
+            to_balance_before = to_wallet.balance
+            to_new_balance = await self.update_balance(to_wallet_id, amount, "add")
+            if to_new_balance is None:
+                # Rollback the withdrawal
+                await self.update_balance(from_wallet_id, amount, "add")
+                return None
+
+            # Create transactions for both wallets
+            transfer_metadata = metadata or {}
+            transfer_metadata.update({
+                "transfer_type": "internal",
+                "counterparty_wallet_id": to_wallet_id
+            })
+
+            from_transaction = await self._create_transaction(
+                TransactionCreate(
+                    wallet_id=from_wallet_id,
+                    user_id=from_wallet.user_id,
+                    transaction_type=TransactionType.TRANSFER,
+                    amount=amount,
+                    description=description or "Transfer out",
+                    to_wallet_id=to_wallet_id,
+                    metadata=transfer_metadata
+                ),
+                balance_before=from_balance_before,
+                balance_after=from_new_balance
+            )
+
+            to_metadata = metadata or {}
+            to_metadata.update({
+                "transfer_type": "internal",
+                "counterparty_wallet_id": from_wallet_id
+            })
+
+            to_transaction = await self._create_transaction(
+                TransactionCreate(
+                    wallet_id=to_wallet_id,
+                    user_id=to_wallet.user_id,
+                    transaction_type=TransactionType.TRANSFER,
+                    amount=amount,
+                    description=description or "Transfer in",
+                    metadata=to_metadata
+                ),
+                balance_before=to_balance_before,
+                balance_after=to_new_balance
+            )
+
+            if from_transaction and to_transaction:
+                return (from_transaction, to_transaction)
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error transferring funds: {e}")
             return None
 
     async def refund(
@@ -553,8 +639,8 @@ class WalletRepository:
                 'to_wallet_id': transaction_data.to_wallet_id,
                 'blockchain_txn_hash': transaction_data.blockchain_tx_hash,
                 'metadata': transaction_data.metadata or {},  # Direct dict
-                'created_at': datetime.now(timezone.utc).isoformat(),
-                'updated_at': datetime.now(timezone.utc).isoformat()
+                'created_at': datetime.now(timezone.utc),
+                'updated_at': datetime.now(timezone.utc)
             }
 
             async with self.db:
@@ -586,6 +672,11 @@ class WalletRepository:
         balance = Decimal(str(data['balance']))
         locked_balance = Decimal(str(data.get('locked_balance', 0)))
 
+        # Handle updated_at as datetime or string
+        updated_at = data['updated_at']
+        if isinstance(updated_at, str):
+            updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+
         return WalletBalance(
             wallet_id=data['wallet_id'],
             user_id=data['user_id'],
@@ -594,7 +685,7 @@ class WalletRepository:
             available_balance=balance - locked_balance,
             currency=data['currency'],
             wallet_type=WalletType(data['wallet_type']),
-            last_updated=datetime.fromisoformat(data['updated_at'].replace('Z', '+00:00')),
+            last_updated=updated_at,
             blockchain_address=data.get('blockchain_address'),
             blockchain_network=BlockchainNetwork(data['blockchain_network']) if data.get('blockchain_network') else None,
             on_chain_balance=Decimal(str(data['on_chain_balance'])) if data.get('on_chain_balance') else None,
@@ -610,6 +701,15 @@ class WalletRepository:
             metadata = json.loads(metadata)
         elif not isinstance(metadata, dict):
             metadata = {}
+
+        # Handle datetime fields - may be datetime objects or strings
+        created_at = data['created_at']
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+
+        updated_at = data.get('updated_at')
+        if updated_at and isinstance(updated_at, str):
+            updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
 
         return WalletTransaction(
             transaction_id=data['transaction_id'],
@@ -631,6 +731,6 @@ class WalletRepository:
             blockchain_confirmations=data.get('blockchain_confirmation_count'),
             gas_fee=Decimal(str(data['fee_amount'])) if data.get('fee_amount') else None,
             metadata=metadata,
-            created_at=datetime.fromisoformat(data['created_at'].replace('Z', '+00:00')),
-            updated_at=datetime.fromisoformat(data['updated_at'].replace('Z', '+00:00')) if data.get('updated_at') else None
+            created_at=created_at,
+            updated_at=updated_at
         )

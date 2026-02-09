@@ -120,6 +120,24 @@ class AccountClient:
         except Exception:
             return False
 
+    async def get_account(self, user_id: str) -> Optional[dict]:
+        """
+        Get account by user ID (matches AccountClientProtocol).
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            Account data dict or None if not found
+        """
+        try:
+            result = await self._client.get_account_profile(user_id)
+            if result and result.get("success"):
+                return result.get("account") or result
+            return None
+        except Exception:
+            return None
+
     # =============================================================================
     # Direct delegation to AccountServiceClient
     # =============================================================================

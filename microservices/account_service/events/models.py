@@ -5,9 +5,42 @@ Event data models for account lifecycle and profile management events.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class AccountEventType(str, Enum):
+    """
+    Events published by account_service.
+
+    Stream: account-stream
+    Subjects: account.>
+    """
+    USER_CREATED = "user.created"
+    USER_UPDATED = "user.updated"
+    USER_DELETED = "user.deleted"
+    USER_PROFILE_UPDATED = "user.profile_updated"
+    USER_LOGGED_IN = "user.logged_in"
+    USER_LOGGED_OUT = "user.logged_out"
+
+
+class AccountSubscribedEventType(str, Enum):
+    """Events that account_service subscribes to from other services."""
+    pass  # No subscribed events
+
+
+class AccountStreamConfig:
+    """Stream configuration for account_service"""
+    STREAM_NAME = "account-stream"
+    SUBJECTS = ["account.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "account"
+
 
 # ============================================================================
 # User Account Event Models

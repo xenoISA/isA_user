@@ -1,7 +1,9 @@
 """
 Device Management Service - Business Logic
 
-设备管理服务业务逻辑 - 集成 PostgreSQL Repository
+Uses dependency injection for testability.
+- Repository is injected, not created at import time
+- Event publishers and MQTT clients are lazily loaded
 """
 
 import hashlib
@@ -12,14 +14,15 @@ from typing import Optional, Dict, Any, List
 import logging
 import asyncio
 
-from .device_repository import DeviceRepository
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import DeviceRepositoryProtocol
 from .models import (
     DeviceStatus, DeviceType, SecurityLevel,
     DeviceResponse, DeviceAuthResponse, DeviceStatsResponse,
     DeviceHealthResponse, DeviceGroupResponse
 )
 # Import event bus components
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 logger = logging.getLogger("device_service")
 
@@ -35,19 +38,33 @@ except ImportError:
 
 
 class DeviceService:
-    """设备管理服务 - 带数据库持久化"""
+    """设备管理服务 - 带数据库持久化
 
-    def __init__(self, event_bus=None, config=None):
+    Uses dependency injection for testability.
+    """
+
+    def __init__(
+        self,
+        repository: Optional[DeviceRepositoryProtocol] = None,
+        event_bus=None,
+        mqtt_client=None,
+    ):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            mqtt_client: MQTT client for device commands (optional)
+        """
         self.secret_key = "device_service_secret_key_2024"  # 实际应从环境变量读取
         self.token_expiry = 86400  # 24小时
         self.event_bus = event_bus
-
-        # Initialize repository with config for service discovery
-        self.device_repo = DeviceRepository(config=config)
+        self.device_repo = repository  # Will be set by factory if None
 
         # Initialize MQTT command client (async, lazy init)
-        self.mqtt_command_client: Optional[DeviceCommandClient] = None
-        self._mqtt_initialized = False
+        self.mqtt_command_client = mqtt_client
+        self._mqtt_initialized = mqtt_client is not None
 
     async def register_device(self, user_id: str, device_data: Dict[str, Any]) -> Optional[DeviceResponse]:
         """注册新设备"""
@@ -92,8 +109,8 @@ class DeviceService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.DEVICE_REGISTERED,
-                        source=ServiceSource.DEVICE_SERVICE,
+                        event_type="device.registered",
+                        source="device_service",
                         data={
                             "device_id": device_id,
                             "device_name": device.device_name,
@@ -243,11 +260,11 @@ class DeviceService:
                         device = await self.device_repo.get_device_by_id(device_id)
 
                         if device:
-                            event_type = EventType.DEVICE_ONLINE if status == DeviceStatus.ACTIVE else EventType.DEVICE_OFFLINE
+                            event_type = "device.online" if status == DeviceStatus.ACTIVE else "device.offline"
 
                             event = Event(
                                 event_type=event_type,
-                                source=ServiceSource.DEVICE_SERVICE,
+                                source="device_service",
                                 data={
                                     "device_id": device_id,
                                     "device_name": device.device_name,
@@ -310,8 +327,8 @@ class DeviceService:
                     if self.event_bus:
                         try:
                             event = Event(
-                                event_type=EventType.DEVICE_COMMAND_SENT,
-                                source=ServiceSource.DEVICE_SERVICE,
+                                event_type="device.command_sent",
+                                source="device_service",
                                 data={
                                     "command_id": command_id,
                                     "device_id": device_id,
@@ -352,8 +369,8 @@ class DeviceService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.DEVICE_COMMAND_SENT,
-                            source=ServiceSource.DEVICE_SERVICE,
+                            event_type="device.command_sent",
+                            source="device_service",
                             data={
                                 "command_id": command_id,
                                 "device_id": device_id,
@@ -530,6 +547,21 @@ class DeviceService:
         except Exception as e:
             logger.error(f"Error creating device group: {e}")
             raise
+
+    async def get_device_group(self, group_id: str) -> Optional[DeviceGroupResponse]:
+        """获取设备组信息"""
+        try:
+            group = await self.device_repo.get_device_group_by_id(group_id)
+
+            if not group:
+                logger.warning(f"Device group not found: {group_id}")
+                return None
+
+            return group
+
+        except Exception as e:
+            logger.error(f"Error getting device group: {e}")
+            return None
 
     async def decommission_device(self, device_id: str) -> bool:
         """停用设备"""

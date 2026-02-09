@@ -8,7 +8,7 @@ Following the standard event-driven architecture pattern.
 import logging
 from typing import List, Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_user_created_event_data,
@@ -45,9 +45,9 @@ async def publish_user_created(
         )
 
         event = Event(
-            event_type=EventType.USER_CREATED,
-            source=ServiceSource.ACCOUNT_SERVICE,
-            data=event_data.model_dump(),
+            event_type="user.created",
+            source="account_service",
+            data=event_data.model_dump(mode='json'),  # Serialize datetime to ISO string
         )
 
         await event_bus.publish_event(event)
@@ -78,9 +78,9 @@ async def publish_user_profile_updated(
         )
 
         event = Event(
-            event_type=EventType.USER_PROFILE_UPDATED,
-            source=ServiceSource.ACCOUNT_SERVICE,
-            data=event_data.model_dump(),
+            event_type="user.profile_updated",
+            source="account_service",
+            data=event_data.model_dump(mode='json'),  # Serialize datetime to ISO string
         )
 
         await event_bus.publish_event(event)
@@ -110,9 +110,9 @@ async def publish_user_deleted(
         )
 
         event = Event(
-            event_type=EventType.USER_DELETED,
-            source=ServiceSource.ACCOUNT_SERVICE,
-            data=event_data.model_dump(),
+            event_type="user.deleted",
+            source="account_service",
+            data=event_data.model_dump(mode='json'),  # Serialize datetime to ISO string
         )
 
         await event_bus.publish_event(event)
@@ -151,9 +151,9 @@ async def publish_user_subscription_changed(
         )
 
         event = Event(
-            event_type=EventType.SUBSCRIPTION_UPDATED,
-            source=ServiceSource.ACCOUNT_SERVICE,
-            data=event_data.model_dump(),
+            event_type="subscription.updated",
+            source="account_service",
+            data=event_data.model_dump(mode='json'),  # Serialize datetime to ISO string
         )
 
         await event_bus.publish_event(event)
@@ -194,9 +194,9 @@ async def publish_user_status_changed(
         )
 
         event = Event(
-            event_type=EventType.USER_UPDATED,
-            source=ServiceSource.ACCOUNT_SERVICE,
-            data=event_data.model_dump(),
+            event_type="user.updated",
+            source="account_service",
+            data=event_data.model_dump(mode='json'),  # Serialize datetime to ISO string
         )
 
         await event_bus.publish_event(event)

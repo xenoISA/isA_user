@@ -28,10 +28,11 @@ from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
 
 from .album_repository import AlbumRepository
-from .album_service import (
+from .album_service import AlbumService
+from .factory import create_album_service
+from .protocols import (
     AlbumNotFoundError,
     AlbumPermissionError,
-    AlbumService,
     AlbumServiceError,
     AlbumValidationError,
 )
@@ -98,8 +99,11 @@ async def lifespan(app: FastAPI):
         )
         event_bus = None
 
-    # Initialize service with event bus
-    album_service = AlbumService(event_bus=event_bus)
+    # Initialize service with factory (uses real repository)
+    album_service = create_album_service(
+        config=config_manager,
+        event_bus=event_bus,
+    )
 
     # Check database connection
     db_connected = await album_service.check_connection()
@@ -139,6 +143,22 @@ async def lifespan(app: FastAPI):
             )
             logger.info("✅ Subscribed to device.offline events")
 
+            # Subscribe to device.deleted events
+            await event_bus.subscribe_to_events(
+                pattern="events.*.device.deleted",
+                handler=event_handler.handle_event,
+                durable="album_service_device_deleted",
+            )
+            logger.info("✅ Subscribed to device.deleted events")
+
+            # Subscribe to user.deleted events for cleanup
+            await event_bus.subscribe_to_events(
+                pattern="events.*.user.deleted",
+                handler=event_handler.handle_event,
+                durable="album_service_user_deleted",
+            )
+            logger.info("✅ Subscribed to user.deleted events")
+
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 
@@ -162,9 +182,11 @@ async def lifespan(app: FastAPI):
                 consul_port=service_config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl"  # Use TTL for reliable health checks,
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info(
                 f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
             )
@@ -247,6 +269,7 @@ async def root():
     )
 
 
+@app.get("/api/v1/albums/health")
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""

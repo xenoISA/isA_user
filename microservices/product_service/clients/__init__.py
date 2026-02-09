@@ -1,11 +1,12 @@
 """
 Product Service Clients Module
 
-HTTP clients for synchronous communication with other services
+HTTP clients for async communication with other services
 """
 
 from .account_client import AccountClient
 from .organization_client import OrganizationClient
+from .subscription_client import SubscriptionClient
 
 # Import ProductServiceClient from parent directory
 import sys
@@ -16,5 +17,6 @@ from client import ProductServiceClient
 __all__ = [
     "AccountClient",
     "OrganizationClient",
+    "SubscriptionClient",
     "ProductServiceClient"
 ]

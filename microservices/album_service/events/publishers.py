@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     AlbumCreatedEventData,
     AlbumPhotoAddedEventData,
@@ -67,8 +67,8 @@ class AlbumEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.ALBUM_CREATED,
-                source=ServiceSource.ALBUM_SERVICE,
+                event_type="album.created",
+                source="album_service",
                 data=event_data.model_dump()
             )
 
@@ -108,8 +108,8 @@ class AlbumEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.ALBUM_PHOTO_ADDED,
-                source=ServiceSource.ALBUM_SERVICE,
+                event_type="album.photo.added",
+                source="album_service",
                 data=event_data.model_dump()
             )
 
@@ -146,8 +146,8 @@ class AlbumEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.ALBUM_PHOTO_REMOVED,
-                source=ServiceSource.ALBUM_SERVICE,
+                event_type="album.photo.removed",
+                source="album_service",
                 data=event_data.model_dump()
             )
 
@@ -190,8 +190,8 @@ class AlbumEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.ALBUM_SHARED,
-                source=ServiceSource.ALBUM_SERVICE,
+                event_type="album.shared",
+                source="album_service",
                 data=event_data.model_dump()
             )
 
@@ -228,8 +228,8 @@ class AlbumEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.ALBUM_DELETED,
-                source=ServiceSource.ALBUM_SERVICE,
+                event_type="album.deleted",
+                source="album_service",
                 data=event_data.model_dump()
             )
 
@@ -269,8 +269,8 @@ class AlbumEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.ALBUM_SYNCED,
-                source=ServiceSource.ALBUM_SERVICE,
+                event_type="album.synced",
+                source="album_service",
                 data=event_data.model_dump()
             )
 

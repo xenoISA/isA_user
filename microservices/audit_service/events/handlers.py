@@ -7,8 +7,8 @@ Audit Service Event Handlers
 import logging
 from typing import Optional
 from ..models import (
-    AuditEventCreateRequest, EventType, EventSeverity,
-    EventStatus, AuditCategory
+    AuditEventCreateRequest, EventSeverity,
+    EventStatus, AuditCategory, EventType
 )
 
 logger = logging.getLogger(__name__)
@@ -113,37 +113,37 @@ class AuditEventHandlers:
         # Map based on event type patterns
         if "user." in nats_event_type:
             if "created" in nats_event_type:
-                return EventType.USER_REGISTER
+                return "user.registered"
             elif "updated" in nats_event_type or "logged_in" in nats_event_type:
-                return EventType.USER_LOGIN if "logged_in" in nats_event_type else EventType.USER_UPDATE
+                return "user.logged_in" if "logged_in" in nats_event_type else "user.updated"
             elif "deleted" in nats_event_type:
-                return EventType.USER_DELETE
+                return "user.deleted"
         elif "payment." in nats_event_type or "subscription." in nats_event_type:
-            return EventType.RESOURCE_UPDATE  # Payment/subscription events as resource updates
+            return "audit.resource.update"  # Payment/subscription events as resource updates
         elif "organization." in nats_event_type:
             if "created" in nats_event_type:
-                return EventType.ORGANIZATION_CREATE
+                return "organization.created"
             elif "member_added" in nats_event_type:
-                return EventType.ORGANIZATION_JOIN
+                return "organization.member_added"
             elif "member_removed" in nats_event_type:
-                return EventType.ORGANIZATION_LEAVE
+                return "organization.member_removed"
             else:
-                return EventType.ORGANIZATION_UPDATE
+                return "organization.updated"
         elif "device." in nats_event_type:
             if "registered" in nats_event_type:
-                return EventType.RESOURCE_CREATE
+                return "resource.created"
             else:
-                return EventType.RESOURCE_UPDATE
+                return "audit.resource.update"
         elif "file." in nats_event_type:
             if "uploaded" in nats_event_type:
-                return EventType.RESOURCE_CREATE
+                return "resource.created"
             elif "deleted" in nats_event_type:
-                return EventType.RESOURCE_DELETE
+                return "resource.deleted"
             elif "shared" in nats_event_type:
-                return EventType.PERMISSION_GRANT
+                return "authorization.permission.granted"
 
         # Default to resource access
-        return EventType.RESOURCE_ACCESS
+        return "audit.resource.access"
 
     def _determine_audit_category(self, nats_event_type: str) -> AuditCategory:
         """Determine audit category based on event type"""

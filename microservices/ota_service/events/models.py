@@ -5,6 +5,42 @@ Pydantic models for all events published by OTA Service
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class OtaEventType(str, Enum):
+    """
+    Events published by ota_service.
+
+    Stream: ota-stream
+    Subjects: ota.>
+    """
+    FIRMWARE_UPLOADED = "firmware.uploaded"
+    FIRMWARE_DELETED = "firmware.deleted"
+    CAMPAIGN_CREATED = "campaign.created"
+    CAMPAIGN_STARTED = "campaign.started"
+    UPDATE_STARTED = "update.started"
+    UPDATE_COMPLETED = "update.completed"
+    UPDATE_FAILED = "update.failed"
+    ROLLBACK_INITIATED = "rollback.initiated"
+
+
+class OtaSubscribedEventType(str, Enum):
+    """Events that ota_service subscribes to from other services."""
+    DEVICE_REGISTERED = "device.registered"
+    DEVICE_ONLINE = "device.online"
+
+
+class OtaStreamConfig:
+    """Stream configuration for ota_service"""
+    STREAM_NAME = "ota-stream"
+    SUBJECTS = ["ota.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "ota"
+
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 

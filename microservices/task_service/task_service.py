@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 # Service communication imports
 import httpx
 from core.config_manager import ConfigManager
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .clients import NotificationClient
 from .models import (
@@ -240,8 +240,8 @@ class TaskService:
                     from datetime import timezone
 
                     event = Event(
-                        event_type=EventType.TASK_CREATED,
-                        source=ServiceSource.TASK_SERVICE,
+                        event_type="task.created",
+                        source="task_service",
                         data={
                             "task_id": task.task_id,
                             "user_id": user_id,
@@ -374,8 +374,8 @@ class TaskService:
                     from datetime import timezone
 
                     event = Event(
-                        event_type=EventType.TASK_UPDATED,
-                        source=ServiceSource.TASK_SERVICE,
+                        event_type="task.updated",
+                        source="task_service",
                         data={
                             "task_id": task_id,
                             "user_id": user_id,
@@ -420,8 +420,8 @@ class TaskService:
                         from datetime import timezone
 
                         event = Event(
-                            event_type=EventType.TASK_CANCELLED,
-                            source=ServiceSource.TASK_SERVICE,
+                            event_type="task.cancelled",
+                            source="task_service",
                             data={
                                 "task_id": task_id,
                                 "user_id": user_id,
@@ -624,8 +624,8 @@ class TaskService:
                     from datetime import timezone as tz
 
                     event = Event(
-                        event_type=EventType.TASK_COMPLETED,
-                        source=ServiceSource.TASK_SERVICE,
+                        event_type="task.completed",
+                        source="task_service",
                         data={
                             "task_id": task.task_id,
                             "user_id": task.user_id,
@@ -677,8 +677,8 @@ class TaskService:
                     from datetime import timezone as tz
 
                     event = Event(
-                        event_type=EventType.TASK_FAILED,
-                        source=ServiceSource.TASK_SERVICE,
+                        event_type="task.failed",
+                        source="task_service",
                         data={
                             "task_id": task.task_id,
                             "user_id": task.user_id,

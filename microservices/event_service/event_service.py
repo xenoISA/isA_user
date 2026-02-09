@@ -19,7 +19,7 @@ from .models import (
     RudderStackEvent
 )
 from .event_repository import EventRepository
-from core.nats_client import Event as NATSEvent, EventType, ServiceSource
+from core.nats_client import Event as NATSEvent
 from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
@@ -83,8 +83,8 @@ class EventService:
         if self.event_bus:
             try:
                 nats_event = NATSEvent(
-                    event_type=EventType.EVENT_STORED,
-                    source=ServiceSource.EVENT_SERVICE,
+                    event_type="event.stored",
+                    source="event_service",
                     data={
                         "event_id": stored_event.event_id,
                         "event_type": stored_event.event_type,
@@ -309,8 +309,8 @@ class EventService:
             if self.event_bus:
                 try:
                     nats_event = NATSEvent(
-                        event_type=EventType.EVENT_PROCESSED_SUCCESS,
-                        source=ServiceSource.EVENT_SERVICE,
+                        event_type="event.processed.success",
+                        source="event_service",
                         data={
                             "event_id": event.event_id,
                             "event_type": event.event_type,
@@ -332,8 +332,8 @@ class EventService:
             if self.event_bus:
                 try:
                     nats_event = NATSEvent(
-                        event_type=EventType.EVENT_PROCESSED_FAILED,
-                        source=ServiceSource.EVENT_SERVICE,
+                        event_type="event.processed.failed",
+                        source="event_service",
                         data={
                             "event_id": event.event_id,
                             "event_type": event.event_type,
@@ -392,8 +392,8 @@ class EventService:
         if self.event_bus and not request.dry_run:
             try:
                 nats_event = NATSEvent(
-                    event_type=EventType.EVENT_REPLAY_STARTED,
-                    source=ServiceSource.EVENT_SERVICE,
+                    event_type="event.replay.started",
+                    source="event_service",
                     data={
                         "events_count": len(events),
                         "stream_id": request.stream_id,
@@ -464,8 +464,8 @@ class EventService:
         if self.event_bus:
             try:
                 nats_event = NATSEvent(
-                    event_type=EventType.EVENT_PROJECTION_CREATED,
-                    source=ServiceSource.EVENT_SERVICE,
+                    event_type="event.projection.created",
+                    source="event_service",
                     data={
                         "projection_id": projection.projection_id,
                         "projection_name": projection_name,
@@ -503,8 +503,8 @@ class EventService:
         if self.event_bus:
             try:
                 nats_event = NATSEvent(
-                    event_type=EventType.EVENT_SUBSCRIPTION_CREATED,
-                    source=ServiceSource.EVENT_SERVICE,
+                    event_type="event.subscription.created",
+                    source="event_service",
                     data={
                         "subscription_id": subscription.subscription_id,
                         "subscriber_name": subscription.subscriber_name,
@@ -525,7 +525,38 @@ class EventService:
         # Return all subscriptions in memory
         # TODO: Load from repository if persistence is implemented
         return list(self.subscriptions.values())
-    
+
+    async def delete_subscription(self, subscription_id: str) -> bool:
+        """删除事件订阅"""
+        if subscription_id in self.subscriptions:
+            del self.subscriptions[subscription_id]
+            logger.info(f"Deleted subscription: {subscription_id}")
+            return True
+        return False
+
+    # ==================== 事件处理器 ====================
+
+    async def register_processor(self, processor: EventProcessor) -> EventProcessor:
+        """注册事件处理器"""
+        # 保存处理器
+        await self.repository.save_processor(processor)
+        self.processors[processor.processor_id] = processor
+
+        logger.info(f"Registered processor: {processor.processor_name}")
+        return processor
+
+    async def list_processors(self) -> List[EventProcessor]:
+        """列出所有处理器"""
+        return list(self.processors.values())
+
+    async def toggle_processor(self, processor_id: str, enabled: bool) -> bool:
+        """启用/禁用处理器"""
+        if processor_id in self.processors:
+            self.processors[processor_id].enabled = enabled
+            logger.info(f"Toggled processor {processor_id} to enabled={enabled}")
+            return True
+        return False
+
     async def trigger_subscriptions(self, event: Event):
         """触发事件订阅"""
         for subscription in self.subscriptions.values():

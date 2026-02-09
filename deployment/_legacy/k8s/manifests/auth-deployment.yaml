@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: auth_service
+# Regenerate with: python -m agents.tools.generate_config --deployment auth_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: isa-cloud-staging
+  labels:
+    app: auth
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+      - name: auth
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8201
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "auth_service"
+        - name: SERVICE_PORT
+          value: "8201"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.auth_service.main:app", "--host", "0.0.0.0", "--port", "8201"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8201
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8201
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+  namespace: isa-cloud-staging
+  labels:
+    app: auth
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8201
+    targetPort: 8201
+    protocol: TCP
+    name: http
+  selector:
+    app: auth

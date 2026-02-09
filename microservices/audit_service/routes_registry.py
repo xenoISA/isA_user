@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 SERVICE_ROUTES = [
     # Health checks
     {"path": "/health", "methods": ["GET"], "auth_required": False, "description": "Basic health check"},
+    {"path": "/api/v1/audit/health", "methods": ["GET"], "auth_required": False, "description": "Service health check (API v1)"},
     {"path": "/health/detailed", "methods": ["GET"], "auth_required": False, "description": "Detailed health check"},
 
     # Service info

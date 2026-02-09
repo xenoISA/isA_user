@@ -176,7 +176,7 @@ class ConfigManager:
         # 3. Map environment values to deployment folder names and env file names
         env_config_map = {
             "development": ("dev", ".env"),
-            "testing": ("test", ".env.test"),
+            "testing": ("test/config", ".env.test"),
             "staging": ("staging/config", ".env.staging"),
             "production": ("production", ".env.production"),
             "local": ("dev", ".env")  # local uses dev environment

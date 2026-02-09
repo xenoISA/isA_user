@@ -23,10 +23,12 @@ from decimal import Decimal
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 # Import local components
-from .order_service import OrderService, OrderServiceError, OrderValidationError, OrderNotFoundError
+from .order_service import OrderService
+from .protocols import OrderServiceError, OrderValidationError, OrderNotFoundError
+from .factory import create_order_service
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.nats_client import get_event_bus, Event, EventType, ServiceSource
+from core.nats_client import get_event_bus, Event
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     OrderCreateRequest, OrderUpdateRequest, OrderCancelRequest,
@@ -51,6 +53,9 @@ wallet_client = None
 account_client = None
 storage_client = None
 billing_client = None
+inventory_client = None
+tax_client = None
+fulfillment_client = None
 
 
 class OrderMicroservice:
@@ -67,18 +72,26 @@ class OrderMicroservice:
         wallet_client=None,
         account_client=None,
         storage_client=None,
-        billing_client=None
+        billing_client=None,
+        inventory_client=None,
+        tax_client=None,
+        fulfillment_client=None,
     ):
         """Initialize the microservice"""
         try:
             self.event_bus = event_bus
-            self.order_service = OrderService(
+            # Use factory to create service with real dependencies
+            self.order_service = create_order_service(
+                config=config_manager,
                 event_bus=event_bus,
                 payment_client=payment_client,
                 wallet_client=wallet_client,
                 account_client=account_client,
                 storage_client=storage_client,
-                billing_client=billing_client
+                billing_client=billing_client,
+                inventory_client=inventory_client,
+                tax_client=tax_client,
+                fulfillment_client=fulfillment_client,
             )
             logger.info("Order microservice initialized successfully")
         except Exception as e:
@@ -105,6 +118,7 @@ consul_registry: Optional[ConsulRegistry] = None
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
     global consul_registry, payment_client, wallet_client, account_client, storage_client, billing_client
+    global inventory_client, tax_client, fulfillment_client
 
     # Initialize event bus
     event_bus = None
@@ -117,13 +131,25 @@ async def lifespan(app: FastAPI):
 
     # Initialize service clients
     try:
-        from .clients import PaymentClient, WalletClient, AccountClient, StorageClient, BillingClient
+        from .clients import (
+            PaymentClient,
+            WalletClient,
+            AccountClient,
+            StorageClient,
+            BillingClient,
+            InventoryClient,
+            TaxClient,
+            FulfillmentClient,
+        )
 
         payment_client = PaymentClient(config=config_manager)
         wallet_client = WalletClient(config=config_manager)
         account_client = AccountClient(config=config_manager)
         storage_client = StorageClient(config=config_manager)
         billing_client = BillingClient(config=config_manager)
+        inventory_client = InventoryClient(config=config_manager)
+        tax_client = TaxClient(config=config_manager)
+        fulfillment_client = FulfillmentClient(config=config_manager)
 
         logger.info("✅ Service clients initialized successfully")
     except Exception as e:
@@ -133,6 +159,9 @@ async def lifespan(app: FastAPI):
         account_client = None
         storage_client = None
         billing_client = None
+        inventory_client = None
+        tax_client = None
+        fulfillment_client = None
 
     # Initialize microservice with event bus and clients
     await order_microservice.initialize(
@@ -141,7 +170,10 @@ async def lifespan(app: FastAPI):
         wallet_client=wallet_client,
         account_client=account_client,
         storage_client=storage_client,
-        billing_client=billing_client
+        billing_client=billing_client,
+        inventory_client=inventory_client,
+        tax_client=tax_client,
+        fulfillment_client=fulfillment_client,
     )
 
     # Register event handlers
@@ -184,9 +216,10 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA['tags'],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type='ttl'  # Use TTL for reliable health checks
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
             logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -269,6 +302,7 @@ def get_order_service() -> OrderService:
 
 
 # Health check endpoints
+@app.get("/api/v1/orders/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""

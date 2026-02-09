@@ -2,9 +2,7 @@
 Invitation Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # 定义所有路由
 SERVICE_ROUTES = [
     {
@@ -19,6 +17,12 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Service health check"
     },
+        {
+            "path": "/api/v1/invitations/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     {
         "path": "/info",
         "methods": ["GET"],
@@ -70,7 +74,6 @@ SERVICE_ROUTES = [
         "description": "Expire old invitations (admin)"
     },
 ]
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -80,10 +83,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
     health_routes = []
     invitation_routes = []
     admin_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
-
         # 使用紧凑表示：只保留路径的关键部分
         if "health" in path or "/info" in path:
             health_routes.append("h")
@@ -91,7 +92,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             admin_routes.append("a")
         elif "/invitations" in path:
             invitation_routes.append("i")
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "base_path": "/api/v1/invitations",
@@ -102,7 +102,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "invitation_service",

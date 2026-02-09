@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     MediaVersionCreatedEventData,
     MediaCacheReadyEventData,
@@ -71,8 +71,8 @@ class MediaEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.MEDIA_VERSION_CREATED,
-                source=ServiceSource.MEDIA_SERVICE,
+                event_type="media.version.created",
+                source="media_service",
                 data=event_data.model_dump()
             )
 
@@ -112,8 +112,8 @@ class MediaEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.MEDIA_CACHE_READY,
-                source=ServiceSource.MEDIA_SERVICE,
+                event_type="media.cache.ready",
+                source="media_service",
                 data=event_data.model_dump()
             )
 
@@ -156,8 +156,8 @@ class MediaEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.MEDIA_METADATA_UPDATED,
-                source=ServiceSource.MEDIA_SERVICE,
+                event_type="media.metadata.updated",
+                source="media_service",
                 data=event_data.model_dump()
             )
 
@@ -200,8 +200,8 @@ class MediaEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.MEDIA_PLAYLIST_CREATED,
-                source=ServiceSource.MEDIA_SERVICE,
+                event_type="media.playlist.created",
+                source="media_service",
                 data=event_data.model_dump()
             )
 

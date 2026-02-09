@@ -13,10 +13,11 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 
+import httpx
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -47,14 +48,15 @@ from .models import (
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Import local components
-from .session_service import (
+from .session_service import SessionService
+from .protocols import (
     MemoryNotFoundError,
     MessageNotFoundError,
     SessionNotFoundError,
-    SessionService,
     SessionServiceError,
     SessionValidationError,
 )
+from .factory import create_session_service
 
 # Initialize configuration
 config_manager = ConfigManager("session_service")
@@ -77,8 +79,10 @@ class SessionMicroservice:
         """Initialize the microservice"""
         try:
             self.event_bus = event_bus
-            self.session_service = SessionService(
-                event_bus=event_bus, config=config_manager
+            # Use factory to create service with real dependencies
+            self.session_service = create_session_service(
+                config=config_manager,
+                event_bus=event_bus,
             )
             logger.info("Session microservice initialized successfully")
         except Exception as e:
@@ -164,9 +168,10 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl",  # Use TTL for reliable health checks
             )
             session_microservice.consul_registry.register()
+            session_microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
             logger.info(
                 f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
             )
@@ -203,6 +208,7 @@ def get_session_service() -> SessionService:
 
 
 # Health check endpoints
+@app.get("/api/v1/sessions/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""
@@ -412,8 +418,80 @@ async def get_session_messages(
         )
 
 
-# Note: Memory management is handled by dedicated memory_service
-# See microservices/memory_service for session memory functionality
+# ============ Session Memory Proxy Routes ============
+# Proxy to memory_service for SDK compatibility
+
+MEMORY_SERVICE_URL = os.getenv("MEMORY_SERVICE_URL", "http://localhost:8223")
+
+
+@app.post("/api/v1/sessions/{session_id}/memory")
+async def store_session_memory(
+    session_id: str,
+    request: Request,
+    session_service: SessionService = Depends(get_session_service),
+):
+    """Store memory for a session (proxies to memory_service)"""
+    # Verify session exists
+    try:
+        await session_service.get_session(session_id)
+    except SessionNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session {session_id} not found")
+
+    # Forward to memory service
+    try:
+        body = await request.json()
+        body["session_id"] = session_id
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{MEMORY_SERVICE_URL}/api/v1/memories/session/store",
+                json=body,
+                timeout=10.0,
+            )
+            return response.json()
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Memory service unavailable",
+        )
+    except Exception as e:
+        logger.error(f"Error proxying to memory service: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to store memory: {str(e)}",
+        )
+
+
+@app.get("/api/v1/sessions/{session_id}/memory")
+async def get_session_memory(
+    session_id: str,
+    session_service: SessionService = Depends(get_session_service),
+):
+    """Get memory for a session (proxies to memory_service)"""
+    # Verify session exists
+    try:
+        await session_service.get_session(session_id)
+    except SessionNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session {session_id} not found")
+
+    # Forward to memory service
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{MEMORY_SERVICE_URL}/api/v1/memories/session/{session_id}",
+                timeout=10.0,
+            )
+            return response.json()
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Memory service unavailable",
+        )
+    except Exception as e:
+        logger.error(f"Error proxying to memory service: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get memory: {str(e)}",
+        )
 
 
 # Moved stats route to before session_id route to avoid conflicts

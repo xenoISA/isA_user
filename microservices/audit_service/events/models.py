@@ -6,9 +6,39 @@ Note: Audit service primarily consumes events from other services.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class AuditEventType(str, Enum):
+    """
+    Events published by audit_service.
+
+    Stream: audit-stream
+    Subjects: audit.>
+    """
+    AUDIT_LOG_CREATED = "audit.log.created"
+    AUDIT_QUERY_EXECUTED = "audit.query.executed"
+
+
+class AuditSubscribedEventType(str, Enum):
+    """Events that audit_service subscribes to from other services."""
+    USER_CREATED = "user.created"
+    USER_DELETED = "user.deleted"
+
+
+class AuditStreamConfig:
+    """Stream configuration for audit_service"""
+    STREAM_NAME = "audit-stream"
+    SUBJECTS = ["audit.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "audit"
+
 
 
 class AuditEventRecordedEventData(BaseModel):

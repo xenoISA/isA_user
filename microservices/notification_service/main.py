@@ -48,6 +48,7 @@ from .models import (
     UpdateTemplateRequest,
 )
 from .notification_service import NotificationService
+from .factory import create_notification_service
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Initialize configuration
@@ -102,9 +103,9 @@ async def lifespan(app: FastAPI):
         )
         event_bus = None
 
-    # Initialize service with event bus and config_manager
+    # Initialize service with event bus and config_manager (using factory pattern)
     logger.info("Starting Notification Service...")
-    service = NotificationService(event_bus=event_bus, config_manager=config_manager)
+    service = create_notification_service(event_bus=event_bus, config_manager=config_manager)
 
     # Initialize event handlers if event bus is available
     if event_bus:
@@ -151,9 +152,11 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl"  # Use TTL for reliable health checks,
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info(
                 f"Service registered with Consul: {route_meta.get('route_count', 0)} routes"
             )
@@ -211,6 +214,7 @@ app = FastAPI(
 # ====================
 
 
+@app.get("/api/v1/notifications/health")
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 async def health_check():
     """健康检查"""

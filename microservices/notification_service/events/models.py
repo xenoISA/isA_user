@@ -5,6 +5,38 @@ Defines Pydantic models for events published and consumed by notification_servic
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class NotificationEventType(str, Enum):
+    """
+    Events published by notification_service.
+
+    Stream: notification-stream
+    Subjects: notification.>
+    """
+    NOTIFICATION_SENT = "notification.sent"
+    NOTIFICATION_READ = "notification.read"
+    NOTIFICATION_DELIVERED = "notification.delivered"
+
+
+class NotificationSubscribedEventType(str, Enum):
+    """Events that notification_service subscribes to from other services."""
+    USER_CREATED = "user.created"
+    ORDER_COMPLETED = "order.completed"
+    PAYMENT_COMPLETED = "payment.completed"
+
+
+class NotificationStreamConfig:
+    """Stream configuration for notification_service"""
+    STREAM_NAME = "notification-stream"
+    SUBJECTS = ["notification.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "notification"
+
 from typing import Optional, Dict, Any
 from datetime import datetime
 

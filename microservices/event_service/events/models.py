@@ -5,8 +5,40 @@ Defines event payloads published by the event service.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class EventEventType(str, Enum):
+    """
+    Events published by event_service.
+
+    Stream: event-stream
+    Subjects: event.>
+    """
+    EVENT_STORED = "event.stored"
+    EVENT_PROCESSED_SUCCESS = "event.processed.success"
+    EVENT_PROCESSED_FAILED = "event.processed.failed"
+    SUBSCRIPTION_CREATED = "event.subscription.created"
+    REPLAY_STARTED = "event.replay.started"
+
+
+class EventSubscribedEventType(str, Enum):
+    """Events that event_service subscribes to from other services."""
+    pass  # No subscribed events
+
+
+class EventStreamConfig:
+    """Stream configuration for event_service"""
+    STREAM_NAME = "event-stream"
+    SUBJECTS = ["event.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "event"
+
 
 
 class EventModel(BaseModel):

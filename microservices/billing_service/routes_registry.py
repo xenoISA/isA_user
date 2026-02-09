@@ -2,9 +2,7 @@
 Billing Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # Define all routes
 SERVICE_ROUTES = [
     # Health and Service Info
@@ -14,13 +12,18 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Health check endpoint"
     },
+        {
+            "path": "/api/v1/billing/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     {
         "path": "/api/v1/billing/info",
         "methods": ["GET"],
         "auth_required": False,
         "description": "Service information and capabilities"
     },
-
     # Core Billing APIs
     {
         "path": "/api/v1/billing/usage/record",
@@ -40,7 +43,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Process billing (actual charge)"
     },
-
     # Quota Management
     {
         "path": "/api/v1/billing/quota/check",
@@ -48,7 +50,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Check quota limits"
     },
-
     # Query and Statistics
     {
         "path": "/api/v1/billing/records/user/{user_id}",
@@ -74,7 +75,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Get billing statistics"
     },
-
     # Management
     {
         "path": "/api/v1/billing/record/{billing_id}/status",
@@ -83,8 +83,6 @@ SERVICE_ROUTES = [
         "description": "Update billing record status (admin)"
     }
 ]
-
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -96,12 +94,10 @@ def get_routes_for_consul() -> Dict[str, Any]:
     query_routes = []
     quota_routes = []
     admin_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
         # Use compact representation
         compact_path = path.replace("/api/v1/billing/", "")
-
         if path.startswith("/health"):
             health_routes.append(compact_path)
         elif "quota" in path:
@@ -112,7 +108,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             query_routes.append(compact_path)
         elif path.startswith("/api/v1/billing"):
             core_routes.append(compact_path)
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "base_path": "/api/v1/billing",
@@ -125,8 +120,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
-
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "billing_service",

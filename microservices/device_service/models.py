@@ -179,6 +179,8 @@ class DeviceAuthResponse(BaseModel):
 class DeviceGroupResponse(BaseModel):
     """设备组响应"""
     group_id: str
+    user_id: str  # Owner of the device group (for authorization & multi-tenancy)
+    organization_id: Optional[str]  # Organization ownership (for multi-tenancy)
     group_name: str
     description: Optional[str]
     parent_group_id: Optional[str]

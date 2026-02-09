@@ -8,7 +8,7 @@ All events published by vault service should be defined here.
 import logging
 from typing import Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_secret_accessed_event_data,
@@ -60,8 +60,8 @@ async def publish_secret_created(
         )
 
         event = Event(
-            event_type=EventType.VAULT_CREATED,
-            source=ServiceSource.VAULT_SERVICE,
+            event_type="vault.created",
+            source="vault_service",
             data=event_data.model_dump(),
         )
 
@@ -124,8 +124,8 @@ async def publish_secret_accessed(
         )
 
         event = Event(
-            event_type=EventType.VAULT_ACCESSED,
-            source=ServiceSource.VAULT_SERVICE,
+            event_type="vault.accessed",
+            source="vault_service",
             data=event_data.model_dump(),
         )
 
@@ -182,8 +182,8 @@ async def publish_secret_deleted(
         )
 
         event = Event(
-            event_type=EventType.VAULT_DELETED,
-            source=ServiceSource.VAULT_SERVICE,
+            event_type="vault.deleted",
+            source="vault_service",
             data=event_data.model_dump(),
         )
 
@@ -246,8 +246,8 @@ async def publish_secret_shared(
         )
 
         event = Event(
-            event_type=EventType.VAULT_SHARED,
-            source=ServiceSource.VAULT_SERVICE,
+            event_type="vault.shared",
+            source="vault_service",
             data=event_data.model_dump(),
         )
 

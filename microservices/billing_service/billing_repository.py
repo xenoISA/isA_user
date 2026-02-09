@@ -36,9 +36,9 @@ class BillingRepository:
         # Discover PostgreSQL service
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
@@ -364,7 +364,7 @@ class BillingRepository:
                         total_usage=Decimal(str(row.get("total_usage", 0))),
                         total_cost=Decimal(str(row.get("total_cost", 0))),
                         currency=Currency(row.get("currency", "USD")),
-                        usage_breakdown=row.get("usage_breakdown", {})
+                        usage_breakdown=row.get("usage_breakdown", {}) if isinstance(row.get("usage_breakdown"), dict) else json.loads(row.get("usage_breakdown", "{}"))
                     ))
 
             return aggregations
@@ -571,7 +571,7 @@ class BillingRepository:
             wallet_transaction_id=row.get("wallet_transaction_id"),
             payment_transaction_id=row.get("payment_transaction_id"),
             failure_reason=row.get("failure_reason"),
-            billing_metadata=row.get("billing_metadata", {}),
+            billing_metadata=row.get("billing_metadata", {}) if isinstance(row.get("billing_metadata"), dict) else json.loads(row.get("billing_metadata", "{}")),
             billing_period_start=row.get("billing_period_start"),
             billing_period_end=row.get("billing_period_end"),
             created_at=row.get("created_at"),
@@ -589,7 +589,7 @@ class BillingRepository:
             user_id=row.get("user_id"),
             organization_id=row.get("organization_id"),
             service_type=ServiceType(row.get("service_type")) if row.get("service_type") else None,
-            event_data=row.get("event_data", {}),
+            event_data=row.get("event_data", {}) if isinstance(row.get("event_data"), dict) else json.loads(row.get("event_data", "{}")),
             amount=Decimal(str(row.get("amount"))) if row.get("amount") is not None else None,
             currency=None,  # Not stored in billing schema
             event_timestamp=row.get("event_timestamp"),
@@ -610,7 +610,7 @@ class BillingRepository:
             period_start=row.get("period_start"),
             period_end=row.get("period_end"),
             reset_frequency=row.get("reset_frequency"),
-            metadata=row.get("metadata", {}),
+            metadata=row.get("metadata", {}) if isinstance(row.get("metadata"), dict) else json.loads(row.get("metadata", "{}")),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")
         )

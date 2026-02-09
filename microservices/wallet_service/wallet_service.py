@@ -1,14 +1,20 @@
 """
 Wallet Service Business Logic
 
-Handles wallet operations, transaction management, and blockchain integration
+Handles wallet operations, transaction management, and blockchain integration.
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
 """
 
-from typing import Optional, List, Dict, Any, Tuple
+from typing import TYPE_CHECKING, Optional, List, Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import logging
 import uuid
+
+from core.nats_client import Event
 
 from .models import (
     WalletBalance, WalletTransaction, WalletCreate, WalletUpdate,
@@ -17,23 +23,87 @@ from .models import (
     WalletStatistics, WalletResponse, TransactionType, WalletType,
     BlockchainNetwork, BlockchainIntegration
 )
-from .wallet_repository import WalletRepository
-from microservices.account_service.client import AccountServiceClient
-from core.nats_client import Event, EventType, ServiceSource
+
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import (
+    WalletRepositoryProtocol,
+    EventBusProtocol,
+    AccountClientProtocol,
+    WalletNotFoundError,
+    InsufficientBalanceError,
+    DuplicateWalletError,
+)
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
+    from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
 
-class WalletService:
-    """Main wallet service for managing digital assets"""
+class WalletServiceError(Exception):
+    """Base exception for wallet service errors"""
+    pass
 
-    def __init__(self, event_bus=None, config=None):
-        self.repository = WalletRepository(config=config)
-        self.account_client = AccountServiceClient()
+
+class WalletValidationError(WalletServiceError):
+    """Validation error"""
+    pass
+
+
+class WalletService:
+    """
+    Main wallet service for managing digital assets.
+
+    Handles all business operations while delegating
+    data access to the repository layer.
+    """
+
+    def __init__(
+        self,
+        repository: Optional[WalletRepositoryProtocol] = None,
+        event_bus: Optional[EventBusProtocol] = None,
+        account_client: Optional[AccountClientProtocol] = None,
+    ):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            account_client: Account service client for user validation
+        """
+        self.repository = repository  # Will be set by factory if None
+        self.repo = repository  # Alias for backward compatibility
         self.event_bus = event_bus
+        self.account_client = account_client
+        self._event_publishers_loaded = False
+
+    def _lazy_load_event_publishers(self):
+        """Lazy load event publishers to avoid import-time I/O"""
+        if not self._event_publishers_loaded:
+            try:
+                from .events.publishers import (
+                    publish_wallet_created,
+                    publish_deposit_completed,
+                    publish_tokens_deducted,
+                )
+                self._publish_wallet_created = publish_wallet_created
+                self._publish_deposit_completed = publish_deposit_completed
+                self._publish_tokens_deducted = publish_tokens_deducted
+            except ImportError:
+                self._publish_wallet_created = None
+                self._publish_deposit_completed = None
+                self._publish_tokens_deducted = None
+            self._event_publishers_loaded = True
 
     async def validate_user_exists(self, user_id: str) -> bool:
         """Validate user exists via account service"""
+        if not self.account_client:
+            logger.warning("Account client not configured, skipping user validation")
+            return True
+
         try:
             user = await self.account_client.get_account(user_id)
             return user is not None
@@ -66,8 +136,8 @@ class WalletService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.WALLET_CREATED,
-                            source=ServiceSource.WALLET_SERVICE,
+                            event_type="wallet.created",
+                            source="wallet_service",
                             data={
                                 "wallet_id": wallet.wallet_id,
                                 "user_id": wallet.user_id,
@@ -162,8 +232,8 @@ class WalletService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.WALLET_DEPOSITED,
-                            source=ServiceSource.WALLET_SERVICE,
+                            event_type="wallet.deposited",
+                            source="wallet_service",
                             data={
                                 "wallet_id": wallet_id,
                                 "user_id": transaction.user_id,
@@ -224,8 +294,8 @@ class WalletService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.WALLET_WITHDRAWN,
-                            source=ServiceSource.WALLET_SERVICE,
+                            event_type="wallet.withdrawn",
+                            source="wallet_service",
                             data={
                                 "wallet_id": wallet_id,
                                 "user_id": transaction.user_id,
@@ -289,8 +359,8 @@ class WalletService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.WALLET_CONSUMED,
-                            source=ServiceSource.WALLET_SERVICE,
+                            event_type="wallet.consumed",
+                            source="wallet_service",
                             data={
                                 "wallet_id": wallet_id,
                                 "user_id": transaction.user_id,
@@ -375,8 +445,8 @@ class WalletService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.WALLET_REFUNDED,
-                            source=ServiceSource.WALLET_SERVICE,
+                            event_type="wallet.refunded",
+                            source="wallet_service",
                             data={
                                 "wallet_id": transaction.wallet_id,
                                 "user_id": transaction.user_id,
@@ -433,8 +503,8 @@ class WalletService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.WALLET_TRANSFERRED,
-                            source=ServiceSource.WALLET_SERVICE,
+                            event_type="wallet.transferred",
+                            source="wallet_service",
                             data={
                                 "from_wallet_id": from_wallet_id,
                                 "to_wallet_id": request.to_wallet_id,

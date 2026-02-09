@@ -9,22 +9,13 @@ import logging
 import os
 import sys
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
-from core.blockchain_client import BlockchainClient
-
-# from .clients import AccountClient, NotificationClient, OrganizationClient  # clients are empty files
-from .encryption import (
-    BlockchainVaultIntegration,
-    VaultEncryption,
-    decrypt_field,
-    encrypt_field,
-)
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     EncryptionMethod,
     SecretType,
@@ -42,27 +33,24 @@ from .models import (
     VaultTestResponse,
     VaultUpdateRequest,
 )
-from .vault_repository import VaultRepository
+
+# Import protocols for type hints only (no I/O at import time)
+if TYPE_CHECKING:
+    from .protocols import (
+        VaultRepositoryProtocol,
+        VaultEncryptionProtocol,
+        BlockchainIntegrationProtocol,
+        EventBusProtocol,
+    )
+
+# Re-export exceptions from protocols for backwards compatibility
+from .protocols import (
+    VaultServiceError,
+    VaultAccessDeniedError,
+    VaultNotFoundError,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class VaultServiceError(Exception):
-    """Base exception for vault service"""
-
-    pass
-
-
-class VaultAccessDeniedError(VaultServiceError):
-    """Raised when user doesn't have permission"""
-
-    pass
-
-
-class VaultNotFoundError(VaultServiceError):
-    """Raised when vault item not found"""
-
-    pass
 
 
 class VaultService:
@@ -70,16 +58,45 @@ class VaultService:
 
     def __init__(
         self,
-        blockchain_client: Optional[BlockchainClient] = None,
-        event_bus=None,
+        repository: Optional["VaultRepositoryProtocol"] = None,
+        encryption: Optional["VaultEncryptionProtocol"] = None,
+        blockchain: Optional["BlockchainIntegrationProtocol"] = None,
+        event_bus: Optional["EventBusProtocol"] = None,
+        # Legacy parameters for backwards compatibility
+        blockchain_client=None,
         config=None,
     ):
-        self.repository = VaultRepository(config=config)
-        self.encryption = VaultEncryption()
-        self.event_bus = event_bus
+        """
+        Initialize VaultService with dependencies.
 
-        # Initialize blockchain integration if client provided
-        self.blockchain = BlockchainVaultIntegration(blockchain_client)
+        For production use, prefer using factory.create_vault_service().
+        For testing, inject mock dependencies directly.
+
+        Args:
+            repository: Vault repository (injected for testing)
+            encryption: Encryption service (injected for testing)
+            blockchain: Blockchain integration (injected for testing)
+            event_bus: Event bus for publishing events
+            blockchain_client: Legacy - blockchain client (creates blockchain integration)
+            config: Legacy - config manager (creates repository)
+        """
+        # Handle legacy initialization (backwards compatibility)
+        if repository is None:
+            from .vault_repository import VaultRepository
+            repository = VaultRepository(config=config)
+
+        if encryption is None:
+            from .encryption import VaultEncryption
+            encryption = VaultEncryption()
+
+        if blockchain is None:
+            from .encryption import BlockchainVaultIntegration
+            blockchain = BlockchainVaultIntegration(blockchain_client)
+
+        self.repository = repository
+        self.encryption = encryption
+        self.blockchain = blockchain
+        self.event_bus = event_bus
 
         logger.info(
             f"Vault service initialized (Blockchain: {'enabled' if self.blockchain.enabled else 'disabled'})"
@@ -183,8 +200,8 @@ class VaultService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.VAULT_SECRET_CREATED,
-                        source=ServiceSource.VAULT_SERVICE,
+                        event_type="vault.secret.created",
+                        source="vault_service",
                         data={
                             "vault_id": result.vault_id,
                             "user_id": user_id,
@@ -300,8 +317,8 @@ class VaultService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.VAULT_SECRET_ACCESSED,
-                        source=ServiceSource.VAULT_SERVICE,
+                        event_type="vault.secret.accessed",
+                        source="vault_service",
                         data={
                             "vault_id": vault_id,
                             "user_id": user_id,
@@ -431,8 +448,8 @@ class VaultService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.VAULT_SECRET_UPDATED,
-                        source=ServiceSource.VAULT_SERVICE,
+                        event_type="vault.secret.updated",
+                        source="vault_service",
                         data={
                             "vault_id": vault_id,
                             "user_id": user_id,
@@ -496,8 +513,8 @@ class VaultService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.VAULT_SECRET_DELETED,
-                        source=ServiceSource.VAULT_SERVICE,
+                        event_type="vault.secret.deleted",
+                        source="vault_service",
                         data={
                             "vault_id": vault_id,
                             "user_id": user_id,
@@ -614,8 +631,8 @@ class VaultService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.VAULT_SECRET_SHARED,
-                        source=ServiceSource.VAULT_SERVICE,
+                        event_type="vault.secret.shared",
+                        source="vault_service",
                         data={
                             "vault_id": vault_id,
                             "owner_user_id": owner_user_id,
@@ -699,8 +716,8 @@ class VaultService:
             if success and self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.VAULT_SECRET_ROTATED,
-                        source=ServiceSource.VAULT_SERVICE,
+                        event_type="vault.secret.rotated",
+                        source="vault_service",
                         data={
                             "vault_id": vault_id,
                             "user_id": user_id,

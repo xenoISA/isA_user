@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: order_service
+# Regenerate with: python -m agents.tools.generate_config --deployment order_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  namespace: isa-cloud-staging
+  labels:
+    app: order
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order
+  template:
+    metadata:
+      labels:
+        app: order
+    spec:
+      containers:
+      - name: order
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8210
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "order_service"
+        - name: SERVICE_PORT
+          value: "8210"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.order_service.main:app", "--host", "0.0.0.0", "--port", "8210"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8210
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8210
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  namespace: isa-cloud-staging
+  labels:
+    app: order
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8210
+    targetPort: 8210
+    protocol: TCP
+    name: http
+  selector:
+    app: order

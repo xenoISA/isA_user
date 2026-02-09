@@ -175,10 +175,15 @@ class Payment(BaseModel):
     payment_id: str = Field(..., description="支付ID")
     user_id: str = Field(..., description="用户ID")
     organization_id: Optional[str] = None
+    order_id: Optional[str] = None
     
     # 支付详情
     amount: Decimal = Field(..., ge=0, description="支付金额")
     currency: Currency = Currency.USD
+    subtotal_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    shipping_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
     description: Optional[str] = None
     
     # 支付状态
@@ -310,6 +315,11 @@ class CreatePaymentIntentRequest(BaseModel):
     description: Optional[str] = None
     user_id: str
     payment_method_id: Optional[str] = None
+    order_id: Optional[str] = None
+    subtotal_amount: Optional[Decimal] = Field(default=None, ge=0)
+    tax_amount: Optional[Decimal] = Field(default=None, ge=0)
+    shipping_amount: Optional[Decimal] = Field(default=None, ge=0)
+    discount_amount: Optional[Decimal] = Field(default=None, ge=0)
     metadata: Optional[Dict[str, Any]] = None
 
 

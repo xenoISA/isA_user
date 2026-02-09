@@ -17,7 +17,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import Product, PricingModel, ProductType, Currency, ProductCategory
+from .models import (
+    Product,
+    PricingModel,
+    ProductType,
+    ProductKind,
+    FulfillmentType,
+    InventoryPolicy,
+    TaxCategory,
+    Currency,
+    ProductCategory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +49,11 @@ class ProductRepository:
         # Discover PostgreSQL service
         # Priority: Environment variables → Consul → localhost fallback
         postgres_host, postgres_port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
-            env_host_key='POSTGRES_GRPC_HOST',
-            env_port_key='POSTGRES_GRPC_PORT'
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
+            env_host_key='POSTGRES_HOST',
+            env_port_key='POSTGRES_PORT'
         )
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
@@ -73,17 +83,28 @@ class ProductRepository:
                 INSERT INTO {self.schema}.{self.products_table} (
                     product_id, product_name, product_code, description, category,
                     product_type, base_price, currency, billing_interval,
+                    product_kind, fulfillment_type, inventory_policy, requires_shipping,
+                    tax_category, default_sku_id,
                     features, quota_limits, is_active, is_featured, display_order,
                     metadata, tags, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                    $10, $11, $12, $13, $14, $15,
+                    $16, $17, $18, $19, $20, $21,
+                    $22, $23, $24, $25
+                )
                 RETURNING *
             '''
 
             now = datetime.now(timezone.utc)
+            product_code = product.product_code or f"code_{product.product_id}"
             params = [
-                product.product_id, product.product_name, product.product_code,
-                product.description, product.category, product.product_type.value,
+                product.product_id, product.name, product_code,
+                product.description, product.category_id, product.product_type.value,
                 float(product.base_price), product.currency.value, product.billing_interval,
+                product.product_kind.value, product.fulfillment_type.value,
+                product.inventory_policy.value, product.requires_shipping,
+                product.tax_category.value, product.default_sku_id,
                 json.dumps(product.features) if product.features else "[]",
                 json.dumps(product.quota_limits) if product.quota_limits else "{}",
                 product.is_active, product.is_featured, product.display_order,
@@ -236,6 +257,21 @@ class ProductRepository:
             description=row.get("description"),
             product_type=ProductType(row.get("product_type")),
             provider=row.get("provider"),
+            product_kind=ProductKind(row.get("product_kind") or ProductKind.DIGITAL.value),
+            fulfillment_type=FulfillmentType(row.get("fulfillment_type") or FulfillmentType.DIGITAL.value),
+            inventory_policy=InventoryPolicy(row.get("inventory_policy") or InventoryPolicy.INFINITE.value),
+            requires_shipping=bool(row.get("requires_shipping", False)),
+            tax_category=TaxCategory(row.get("tax_category") or TaxCategory.DIGITAL_GOODS.value),
+            default_sku_id=row.get("default_sku_id"),
+            product_code=row.get("product_code"),
+            base_price=Decimal(str(row.get("base_price", 0.0))),
+            currency=Currency(row.get("currency", "USD")),
+            billing_interval=row.get("billing_interval"),
+            features=row.get("features") or [],
+            quota_limits=row.get("quota_limits") or {},
+            is_featured=bool(row.get("is_featured", False)),
+            display_order=int(row.get("display_order", 0) or 0),
+            tags=row.get("tags"),
             specifications=row.get("specifications", {}),
             is_active=row.get("is_active", True),
             created_at=row.get("created_at"),

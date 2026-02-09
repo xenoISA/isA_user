@@ -9,7 +9,7 @@ import asyncio
 import os
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import AsyncGenerator, Dict, Any, Optional
 
 import pytest
@@ -17,10 +17,22 @@ import pytest_asyncio
 import httpx
 import asyncpg
 
-# Add project root to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+# Add paths for imports
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.join(_current_dir, "../..")
+sys.path.insert(0, _project_root)
+sys.path.insert(0, _current_dir)
 
-from core.nats_client import Event, EventType, ServiceSource, get_event_bus
+# NATS imports - optional, may not be available locally
+try:
+    from core.nats_client import Event, get_event_bus
+    NATS_AVAILABLE = True
+except ImportError:
+    NATS_AVAILABLE = False
+    Event = None
+    EventType = None
+    ServiceSource = None
+    get_event_bus = None
 
 
 # ==================== 环境配置 ====================
@@ -29,35 +41,37 @@ class TestConfig:
     """测试配置"""
 
     # Service URLs (通过 APISIX Gateway 或直接访问)
+    # Authoritative source: deployment/k8s/build-all-images.sh
+    # Port order: 8201-8230 (sequential by service priority)
     AUTH_URL = os.getenv("AUTH_BASE_URL", "http://localhost:8201")
     ACCOUNT_URL = os.getenv("ACCOUNT_BASE_URL", "http://localhost:8202")
-    DEVICE_URL = os.getenv("DEVICE_BASE_URL", "http://localhost:8203")
-    ORGANIZATION_URL = os.getenv("ORG_BASE_URL", "http://localhost:8204")
-    SESSION_URL = os.getenv("SESSION_BASE_URL", "http://localhost:8205")
+    SESSION_URL = os.getenv("SESSION_BASE_URL", "http://localhost:8203")
+    AUTHORIZATION_URL = os.getenv("AUTHORIZATION_BASE_URL", "http://localhost:8204")
+    AUDIT_URL = os.getenv("AUDIT_BASE_URL", "http://localhost:8205")
     NOTIFICATION_URL = os.getenv("NOTIFICATION_BASE_URL", "http://localhost:8206")
-    CALENDAR_URL = os.getenv("CALENDAR_BASE_URL", "http://localhost:8207")
-    TASK_URL = os.getenv("TASK_BASE_URL", "http://localhost:8208")
+    PAYMENT_URL = os.getenv("PAYMENT_BASE_URL", "http://localhost:8207")
+    WALLET_URL = os.getenv("WALLET_BASE_URL", "http://localhost:8208")
     STORAGE_URL = os.getenv("STORAGE_BASE_URL", "http://localhost:8209")
-    BILLING_URL = os.getenv("BILLING_BASE_URL", "http://localhost:8210")
-    WALLET_URL = os.getenv("WALLET_BASE_URL", "http://localhost:8211")
-    PRODUCT_URL = os.getenv("PRODUCT_BASE_URL", "http://localhost:8212")
-    PAYMENT_URL = os.getenv("PAYMENT_BASE_URL", "http://localhost:8213")
-    ORDER_URL = os.getenv("ORDER_BASE_URL", "http://localhost:8214")
-    SUBSCRIPTION_URL = os.getenv("SUBSCRIPTION_BASE_URL", "http://localhost:8215")
-    LOCATION_URL = os.getenv("LOCATION_BASE_URL", "http://localhost:8216")
-    OTA_URL = os.getenv("OTA_BASE_URL", "http://localhost:8217")
-    TELEMETRY_URL = os.getenv("TELEMETRY_BASE_URL", "http://localhost:8218")
+    ORDER_URL = os.getenv("ORDER_BASE_URL", "http://localhost:8210")
+    TASK_URL = os.getenv("TASK_BASE_URL", "http://localhost:8211")
+    ORGANIZATION_URL = os.getenv("ORG_BASE_URL", "http://localhost:8212")
+    INVITATION_URL = os.getenv("INVITATION_BASE_URL", "http://localhost:8213")
+    VAULT_URL = os.getenv("VAULT_BASE_URL", "http://localhost:8214")
+    PRODUCT_URL = os.getenv("PRODUCT_BASE_URL", "http://localhost:8215")
+    BILLING_URL = os.getenv("BILLING_BASE_URL", "http://localhost:8216")
+    CALENDAR_URL = os.getenv("CALENDAR_BASE_URL", "http://localhost:8217")
+    WEATHER_URL = os.getenv("WEATHER_BASE_URL", "http://localhost:8218")
     ALBUM_URL = os.getenv("ALBUM_BASE_URL", "http://localhost:8219")
+    DEVICE_URL = os.getenv("DEVICE_BASE_URL", "http://localhost:8220")
+    OTA_URL = os.getenv("OTA_BASE_URL", "http://localhost:8221")
     MEDIA_URL = os.getenv("MEDIA_BASE_URL", "http://localhost:8222")
-    AUTHORIZATION_URL = os.getenv("AUTHORIZATION_BASE_URL", "http://localhost:8220")
-    INVITATION_URL = os.getenv("INVITATION_BASE_URL", "http://localhost:8221")
     MEMORY_URL = os.getenv("MEMORY_BASE_URL", "http://localhost:8223")
-    VAULT_URL = os.getenv("VAULT_BASE_URL", "http://localhost:8224")
-    AUDIT_URL = os.getenv("AUDIT_BASE_URL", "http://localhost:8225")
+    LOCATION_URL = os.getenv("LOCATION_BASE_URL", "http://localhost:8224")
+    TELEMETRY_URL = os.getenv("TELEMETRY_BASE_URL", "http://localhost:8225")
     COMPLIANCE_URL = os.getenv("COMPLIANCE_BASE_URL", "http://localhost:8226")
     DOCUMENT_URL = os.getenv("DOCUMENT_BASE_URL", "http://localhost:8227")
-    EVENT_URL = os.getenv("EVENT_BASE_URL", "http://localhost:8228")
-    WEATHER_URL = os.getenv("WEATHER_BASE_URL", "http://localhost:8229")
+    SUBSCRIPTION_URL = os.getenv("SUBSCRIPTION_BASE_URL", "http://localhost:8228")
+    EVENT_URL = os.getenv("EVENT_BASE_URL", "http://localhost:8230")
 
     # Database
     POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
@@ -76,14 +90,52 @@ class TestConfig:
 # ==================== Event Collector ====================
 
 class EventCollector:
-    """事件收集器 - 用于集成测试中验证事件发布"""
+    """
+    事件收集器 - 用于集成测试中验证事件发布
+
+    重要: JetStream 消费者默认从流的开头开始消费 (DeliverAll)，
+    会导致收到大量历史事件。为避免这个问题，EventCollector
+    会过滤掉订阅建立之前发生的事件，只收集新事件。
+    """
 
     def __init__(self):
         self.events: list[Dict[str, Any]] = []
         self._lock = asyncio.Lock()
+        # 记录订阅开始时间，过滤历史事件
+        self._subscribe_time = datetime.utcnow()
+
+    def set_subscribe_time(self):
+        """设置订阅开始时间 (在所有订阅建立后调用)"""
+        self._subscribe_time = datetime.utcnow()
 
     async def collect(self, event: Event):
-        """收集事件"""
+        """
+        收集事件
+
+        注意: JetStream 消费者默认使用 DeliverAll 策略，会先投递所有历史事件。
+        这里通过时间戳过滤，只保留订阅时间之后的事件。
+
+        TODO: 修改 core/nats_client.py 支持 DeliverNew 策略，
+        这样消费者只会收到订阅后发布的新事件，避免历史事件堆积问题。
+        """
+        # 解析事件时间戳并与订阅时间比较
+        try:
+            event_time_str = event.timestamp
+            if isinstance(event_time_str, str):
+                # 移除时区后缀以便比较 (简化处理)
+                event_time_str = event_time_str.replace('+00:00', '').replace('Z', '')
+                if '.' in event_time_str:
+                    event_time = datetime.fromisoformat(event_time_str)
+                else:
+                    event_time = datetime.fromisoformat(event_time_str)
+
+                # 只收集订阅建立后的事件 (给 30 秒缓冲时间，避免时间同步问题)
+                cutoff_time = self._subscribe_time - timedelta(seconds=30)
+                if event_time < cutoff_time:
+                    return  # 跳过历史事件
+        except Exception:
+            pass  # 如果解析失败，仍然收集事件
+
         async with self._lock:
             self.events.append({
                 "id": event.id,
@@ -173,7 +225,7 @@ class TestDataGenerator:
 
     @staticmethod
     def email() -> str:
-        return f"test_{uuid.uuid4().hex[:8]}@integration-test.local"
+        return f"test_{uuid.uuid4().hex[:8]}@example.com"
 
     @staticmethod
     def phone() -> str:
@@ -207,12 +259,28 @@ async def http_client(config: TestConfig) -> AsyncGenerator[httpx.AsyncClient, N
         yield client
 
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture(scope="session")
 async def event_bus():
-    """NATS 事件总线"""
+    """
+    NATS 事件总线 (session scope)
+
+    注意: 使用 session scope 避免 async channel pool 在测试间被关闭的问题。
+    isa_common.async_base_client 使用全局 channel pool，如果每个测试创建/关闭
+    event_bus，会导致 channel pool 状态损坏 ("Event loop is closed" 错误)。
+
+    每个测试通过 event_collector fixture 使用唯一的 consumer 名称来隔离事件。
+    """
+    if not NATS_AVAILABLE:
+        yield None
+        return
+
+    from core.nats_client import NATSEventBus
+
     bus = None
     try:
-        bus = await get_event_bus("integration_test")
+        # 直接创建新实例，不使用 get_event_bus() 的 singleton
+        bus = NATSEventBus(service_name="integration_test")
+        await bus.connect()
         yield bus
     except Exception as e:
         print(f"Warning: Could not connect to NATS: {e}")
@@ -224,16 +292,73 @@ async def event_bus():
 
 @pytest_asyncio.fixture(scope="function")
 async def event_collector(event_bus) -> AsyncGenerator[EventCollector, None]:
-    """事件收集器"""
+    """
+    事件收集器 - 订阅所有常用事件流
+
+    注意: NATS gRPC gateway 按 stream 隔离事件，必须订阅具体的事件模式
+    才能收到对应 stream 的事件。pattern=">" 会创建独立的 >-stream，
+    无法收到 user-stream、device-stream 等的事件。
+
+    重要: 每次测试使用唯一的 consumer 名称，避免 durable consumer 状态共享。
+    JetStream durable consumer 记录消息投递位置，如果多个测试共享同一个 consumer，
+    前一个测试消费的消息不会再投递给后续测试。
+
+    Stream 映射 (定义在 core/nats_client.py._get_stream_name_for_event):
+    - user.* -> user-stream (account_service 事件)
+    - device.* -> device-stream
+    - wallet.* -> wallet-stream
+    - billing.* -> billing-stream
+    - session.* -> session-stream
+    - order.* -> order-stream
+    - organization.* -> organization-stream
+    - notification.* -> notification-stream
+    - file.* -> storage-stream
+    - album.* -> album-stream
+    - task.* -> task-stream
+    - memory.* -> memory-stream
+    """
     collector = EventCollector()
 
+    # 为每个测试生成唯一的 consumer 后缀，避免 durable consumer 状态共享
+    test_id = uuid.uuid4().hex[:8]
+
     if event_bus:
-        # 订阅所有事件
-        await event_bus.subscribe_to_events(
-            pattern=">",
-            handler=collector.collect
-        )
-        await asyncio.sleep(0.5)  # 等待订阅建立
+        # 订阅各个服务的事件流 (必须分别订阅才能收到对应 stream 的事件)
+        event_patterns = [
+            "user.*",           # account_service: user.created, user.updated, user.deleted, user.profile_updated
+            "device.*",         # device_service: device.registered, device.authenticated, etc.
+            "wallet.*",         # wallet_service: wallet.created, wallet.deposited, etc.
+            "billing.*",        # billing_service
+            "session.*",        # session_service
+            "order.*",          # order_service
+            "organization.*",   # organization_service
+            "subscription.*",   # subscription_service
+            "payment.*",        # payment_service
+            "notification.*",   # notification_service
+            "file.*",           # storage_service
+            "album.*",          # album_service
+            "task.*",           # task_service
+            "memory.*",         # memory_service
+            "invitation.*",     # invitation_service
+        ]
+
+        for pattern in event_patterns:
+            try:
+                # 使用唯一的 consumer 名称，格式: {prefix}-test-{uuid}
+                prefix = pattern.split('.')[0]
+                durable_name = f"{prefix}-test-{test_id}"
+                await event_bus.subscribe_to_events(
+                    pattern=pattern,
+                    handler=collector.collect,
+                    durable=durable_name,
+                    delivery_policy='new'  # 只接收新事件，跳过历史积压
+                )
+            except Exception as e:
+                # 某些 stream 可能不存在，忽略错误
+                pass
+
+        # 等待订阅建立 - delivery_policy='new' 后不需要等太久
+        await asyncio.sleep(1.0)
 
     yield collector
 

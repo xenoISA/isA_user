@@ -38,6 +38,7 @@ from .account_service import (
     AccountServiceError,
     AccountValidationError,
 )
+from .factory import create_account_service
 from .clients import (
     BillingServiceClient,
     OrganizationServiceClient,
@@ -108,9 +109,11 @@ class AccountMicroservice:
                         consul_port=config.consul_port,
                         tags=SERVICE_METADATA["tags"],
                         meta=consul_meta,
-                        health_check_type="http",
+                        health_check_type="ttl"  # Use TTL for reliable health checks,
                     )
                     self.consul_registry.register()
+                    self.consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
                     logger.info(
                         f"Service registered with Consul: {route_meta.get('route_count', 0)} routes"
                     )
@@ -131,9 +134,9 @@ class AccountMicroservice:
                 logger.warning(f"Failed to initialize service clients: {e}")
                 self.subscription_client = None
 
-            self.account_service = AccountService(
-                event_bus=event_bus,
+            self.account_service = create_account_service(
                 config=config_manager,
+                event_bus=event_bus,
                 subscription_client=self.subscription_client
             )
             logger.info("Account microservice initialized successfully")
@@ -237,6 +240,7 @@ def get_account_service() -> AccountService:
 
 
 # Health check endpoints
+@app.get("/api/v1/accounts/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""

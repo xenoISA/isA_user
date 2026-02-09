@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     NotificationSentEventData,
     NotificationFailedEventData,
@@ -72,8 +72,8 @@ class NotificationEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.NOTIFICATION_SENT,
-                source=ServiceSource.NOTIFICATION_SERVICE,
+                event_type="notification.sent",
+                source="notification_service",
                 data=event_data.model_dump()
             )
 
@@ -119,8 +119,8 @@ class NotificationEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.NOTIFICATION_FAILED,
-                source=ServiceSource.NOTIFICATION_SERVICE,
+                event_type="notification.failed",
+                source="notification_service",
                 data=event_data.model_dump()
             )
 
@@ -157,8 +157,8 @@ class NotificationEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.NOTIFICATION_DELIVERED,
-                source=ServiceSource.NOTIFICATION_SERVICE,
+                event_type="notification.delivered",
+                source="notification_service",
                 data=event_data.model_dump()
             )
 
@@ -195,8 +195,8 @@ class NotificationEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.NOTIFICATION_CLICKED,
-                source=ServiceSource.NOTIFICATION_SERVICE,
+                event_type="notification.clicked",
+                source="notification_service",
                 data=event_data.model_dump()
             )
 
@@ -239,8 +239,8 @@ class NotificationEventPublishers:
             )
 
             event = Event(
-                event_type=EventType.NOTIFICATION_BATCH_COMPLETED,
-                source=ServiceSource.NOTIFICATION_SERVICE,
+                event_type="notification.batch.completed",
+                source="notification_service",
                 data=event_data.model_dump()
             )
 

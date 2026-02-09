@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_weather_alert_event_data,
@@ -59,8 +59,8 @@ async def publish_weather_location_saved(
         )
 
         event = Event(
-            event_type=EventType.WEATHER_LOCATION_SAVED,
-            source=ServiceSource.WEATHER_SERVICE,
+            event_type="weather.location.saved",
+            source="weather_service",
             data=event_data.model_dump(),
         )
 
@@ -107,8 +107,8 @@ async def publish_weather_alert(
         )
 
         event = Event(
-            event_type=EventType.WEATHER_ALERT_ISSUED,
-            source=ServiceSource.WEATHER_SERVICE,
+            event_type="weather.alert.issued",
+            source="weather_service",
             data=event_data.model_dump(),
         )
 

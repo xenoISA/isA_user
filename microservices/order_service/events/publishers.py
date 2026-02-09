@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     OrderCreatedEvent,
     OrderUpdatedEvent,
@@ -53,8 +53,8 @@ async def publish_order_created(
         )
 
         event = Event(
-            event_type=EventType.ORDER_CREATED,
-            source=ServiceSource.ORDER_SERVICE,
+            event_type="order.created",
+            source="order_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -90,8 +90,8 @@ async def publish_order_updated(
         )
 
         event = Event(
-            event_type=EventType.ORDER_UPDATED,
-            source=ServiceSource.ORDER_SERVICE,
+            event_type="order.updated",
+            source="order_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -131,8 +131,8 @@ async def publish_order_canceled(
         )
 
         event = Event(
-            event_type=EventType.ORDER_CANCELED,
-            source=ServiceSource.ORDER_SERVICE,
+            event_type="order.canceled",
+            source="order_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -174,8 +174,8 @@ async def publish_order_completed(
         )
 
         event = Event(
-            event_type=EventType.ORDER_COMPLETED,
-            source=ServiceSource.ORDER_SERVICE,
+            event_type="order.completed",
+            source="order_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -213,8 +213,8 @@ async def publish_order_expired(
         )
 
         event = Event(
-            event_type=EventType.ORDER_EXPIRED,
-            source=ServiceSource.ORDER_SERVICE,
+            event_type="order.expired",
+            source="order_service",
             data=event_data.model_dump(mode='json')
         )
 

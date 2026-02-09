@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     MemoryCreatedEvent,
     MemoryUpdatedEvent,
@@ -62,8 +62,8 @@ async def publish_memory_created(
         )
 
         event = Event(
-            event_type=EventType.MEMORY_CREATED,
-            source=ServiceSource.MEMORY_SERVICE,
+            event_type="memory.created",
+            source="memory_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -106,8 +106,8 @@ async def publish_memory_updated(
         )
 
         event = Event(
-            event_type=EventType.MEMORY_UPDATED,
-            source=ServiceSource.MEMORY_SERVICE,
+            event_type="memory.updated",
+            source="memory_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -147,8 +147,8 @@ async def publish_memory_deleted(
         )
 
         event = Event(
-            event_type=EventType.MEMORY_DELETED,
-            source=ServiceSource.MEMORY_SERVICE,
+            event_type="memory.deleted",
+            source="memory_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -191,8 +191,8 @@ async def publish_factual_memory_stored(
         )
 
         event = Event(
-            event_type=EventType.FACTUAL_MEMORY_STORED,
-            source=ServiceSource.MEMORY_SERVICE,
+            event_type="memory.factual.stored",
+            source="memory_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -235,8 +235,8 @@ async def publish_episodic_memory_stored(
         )
 
         event = Event(
-            event_type=EventType.EPISODIC_MEMORY_STORED,
-            source=ServiceSource.MEMORY_SERVICE,
+            event_type="memory.episodic.stored",
+            source="memory_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -279,8 +279,8 @@ async def publish_procedural_memory_stored(
         )
 
         event = Event(
-            event_type=EventType.PROCEDURAL_MEMORY_STORED,
-            source=ServiceSource.MEMORY_SERVICE,
+            event_type="memory.procedural.stored",
+            source="memory_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -323,8 +323,8 @@ async def publish_semantic_memory_stored(
         )
 
         event = Event(
-            event_type=EventType.SEMANTIC_MEMORY_STORED,
-            source=ServiceSource.MEMORY_SERVICE,
+            event_type="memory.semantic.stored",
+            source="memory_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -367,8 +367,8 @@ async def publish_session_memory_deactivated(
         )
 
         event = Event(
-            event_type=EventType.SESSION_MEMORY_DEACTIVATED,
-            source=ServiceSource.MEMORY_SERVICE,
+            event_type="memory.session.deactivated",
+            source="memory_service",
             data=event_data.model_dump(mode='json')
         )
 

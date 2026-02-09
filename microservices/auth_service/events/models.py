@@ -6,8 +6,39 @@ Following wallet_service pattern.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class AuthEventType(str, Enum):
+    """
+    Events published by auth_service.
+
+    Stream: auth-stream
+    Subjects: auth.>
+    """
+    DEVICE_AUTHENTICATED = "device.authenticated"
+    TOKEN_GENERATED = "auth.token.generated"
+    TOKEN_REFRESHED = "auth.token.refreshed"
+    TOKEN_REVOKED = "auth.token.revoked"
+
+
+class AuthSubscribedEventType(str, Enum):
+    """Events that auth_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+
+
+class AuthStreamConfig:
+    """Stream configuration for auth_service"""
+    STREAM_NAME = "auth-stream"
+    SUBJECTS = ["auth.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "auth"
+
 
 
 # ============================================================================

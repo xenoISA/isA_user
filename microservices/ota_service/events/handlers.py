@@ -12,7 +12,7 @@ from typing import Dict, Any
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
-from core.nats_client import Event, EventType
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,39 @@ async def handle_device_deleted(event_data: Dict[str, Any], ota_repository):
         logger.error(f"Error handling device.deleted event: {e}", exc_info=True)
 
 
+async def handle_user_deleted(event_data: Dict[str, Any], ota_repository):
+    """
+    Handle user.deleted event from account_service
+
+    When a user is deleted, cancel all pending updates for all their devices
+
+    Event data:
+        - user_id: User ID
+
+    Args:
+        event_data: Event data containing user_id
+        ota_repository: OTARepository instance for data access
+    """
+    try:
+        user_id = event_data.get('user_id')
+        if not user_id:
+            logger.warning("user.deleted event missing user_id")
+            return
+
+        logger.info(f"Received user.deleted event for user {user_id}")
+
+        # Cancel all pending OTA updates for all user's devices
+        cancelled_count = await ota_repository.cancel_user_updates(user_id)
+
+        # Clean up user's firmware preferences if any
+        await ota_repository.delete_user_firmware_preferences(user_id)
+
+        logger.info(f"✅ Cancelled {cancelled_count} OTA updates for deleted user {user_id}")
+
+    except Exception as e:
+        logger.error(f"Error handling user.deleted event: {e}", exc_info=True)
+
+
 # ============================================================================
 # Event Handler Registry
 # ============================================================================
@@ -74,4 +107,5 @@ def get_event_handlers(ota_repository) -> Dict[str, callable]:
     """
     return {
         "device_service.device.deleted": lambda event: handle_device_deleted(event.data, ota_repository),
+        "account_service.user.deleted": lambda event: handle_user_deleted(event.data, ota_repository),
     }

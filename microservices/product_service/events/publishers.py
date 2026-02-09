@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     SubscriptionCreatedEvent,
     SubscriptionStatusChangedEvent,
@@ -69,8 +69,8 @@ async def publish_subscription_created(
         )
 
         event = Event(
-            event_type=EventType.SUBSCRIPTION_CREATED,
-            source=ServiceSource.PRODUCT_SERVICE,
+            event_type="subscription.created",
+            source="product_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -129,17 +129,17 @@ async def publish_subscription_status_changed(
 
         # Determine event type based on new status
         if new_status == "active":
-            event_type = EventType.SUBSCRIPTION_ACTIVATED
+            event_type = "subscription.activated"
         elif new_status == "canceled":
-            event_type = EventType.SUBSCRIPTION_CANCELED
+            event_type = "subscription.canceled"
         elif new_status in ("incomplete_expired", "expired"):
-            event_type = EventType.SUBSCRIPTION_EXPIRED
+            event_type = "subscription.expired"
         else:
-            event_type = EventType.SUBSCRIPTION_UPDATED
+            event_type = "subscription.updated"
 
         event = Event(
             event_type=event_type,
-            source=ServiceSource.PRODUCT_SERVICE,
+            source="product_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -203,8 +203,8 @@ async def publish_product_usage_recorded(
         )
 
         event = Event(
-            event_type=EventType.PRODUCT_USAGE_RECORDED,
-            source=ServiceSource.PRODUCT_SERVICE,
+            event_type="product.usage.recorded",
+            source="product_service",
             data=event_data.model_dump(mode='json')
         )
 

@@ -51,6 +51,43 @@ class TelemetryEventHandler:
             logger.error(f"Failed to handle device.deleted event: {e}", exc_info=True)
             return False
 
+    async def handle_user_deleted(self, event_data: Dict[str, Any]) -> bool:
+        """
+        Handle user.deleted event
+
+        When a user is deleted, we should:
+        - Delete or anonymize telemetry data for privacy compliance
+        - Disable alert rules for this user
+
+        Args:
+            event_data: Event data containing user_id
+
+        Returns:
+            bool: True if handled successfully
+        """
+        try:
+            user_id = event_data.get('user_id')
+            if not user_id:
+                logger.warning("user.deleted event missing user_id")
+                return False
+
+            logger.info(f"Handling user.deleted event for user {user_id}")
+
+            # Disable all alert rules for this user
+            disabled_count = await self.telemetry_repo.disable_user_alert_rules(user_id)
+            logger.info(f"Disabled {disabled_count} alert rules for user {user_id}")
+
+            # Optionally anonymize or delete user telemetry data
+            # For now, we keep historical data but mark it as from deleted user
+            await self.telemetry_repo.anonymize_user_telemetry(user_id)
+            logger.info(f"Anonymized telemetry data for user {user_id}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to handle user.deleted event: {e}", exc_info=True)
+            return False
+
     async def handle_event(self, event) -> bool:
         """
         Route events to appropriate handlers
@@ -70,6 +107,8 @@ class TelemetryEventHandler:
             # Route to specific handler
             if event_type == "device.deleted":
                 return await self.handle_device_deleted(event_data)
+            elif event_type == "user.deleted":
+                return await self.handle_user_deleted(event_data)
             else:
                 logger.debug(f"No handler for event type: {event_type}")
                 return False
@@ -86,5 +125,6 @@ class TelemetryEventHandler:
             List of event type patterns
         """
         return [
-            "device.deleted"
+            "device.deleted",
+            "user.deleted",
         ]

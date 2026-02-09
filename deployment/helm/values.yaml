@@ -1,0 +1,164 @@
+# =============================================================================
+# ISA User Platform - Base Helm Values
+# =============================================================================
+# Minimal base values. Use environment-specific files for deployment.
+#
+# Deploy individual service:
+#   helm upgrade --install user-auth-service \
+#     ~/Documents/Fun/isA/isA_Cloud/deployments/charts/isa-service \
+#     -f deployment/helm/values-staging.yaml \
+#     --set name=user-auth-service \
+#     --set image.repository=isa/user-auth \
+#     --set port=8201 \
+#     -n isa-cloud-staging
+#
+# Or deploy all services using the deploy script:
+#   ./deployment/helm/deploy.sh staging
+# =============================================================================
+
+# Common settings for all user microservices
+namespace: isa-cloud-staging
+
+image:
+  pullPolicy: Always
+  tag: latest
+
+health:
+  path: /health
+  initialDelaySeconds: 60
+  periodSeconds: 10
+
+service:
+  type: ClusterIP
+
+consul:
+  enabled: true
+
+# =============================================================================
+# Microservices Configuration
+# =============================================================================
+services:
+  auth:
+    name: user-auth-service
+    repository: isa/user-auth
+    port: 8201
+  account:
+    name: user-account-service
+    repository: isa/user-account
+    port: 8202
+  session:
+    name: user-session-service
+    repository: isa/user-session
+    port: 8203
+  authorization:
+    name: user-authorization-service
+    repository: isa/user-authorization
+    port: 8204
+  audit:
+    name: user-audit-service
+    repository: isa/user-audit
+    port: 8205
+  notification:
+    name: user-notification-service
+    repository: isa/user-notification
+    port: 8206
+  payment:
+    name: user-payment-service
+    repository: isa/user-payment
+    port: 8207
+  wallet:
+    name: user-wallet-service
+    repository: isa/user-wallet
+    port: 8208
+  storage:
+    name: user-storage-service
+    repository: isa/user-storage
+    port: 8209
+  order:
+    name: user-order-service
+    repository: isa/user-order
+    port: 8210
+  task:
+    name: user-task-service
+    repository: isa/user-task
+    port: 8211
+  organization:
+    name: user-organization-service
+    repository: isa/user-organization
+    port: 8212
+  invitation:
+    name: user-invitation-service
+    repository: isa/user-invitation
+    port: 8213
+  vault:
+    name: user-vault-service
+    repository: isa/user-vault
+    port: 8214
+  product:
+    name: user-product-service
+    repository: isa/user-product
+    port: 8215
+  billing:
+    name: user-billing-service
+    repository: isa/user-billing
+    port: 8216
+  calendar:
+    name: user-calendar-service
+    repository: isa/user-calendar
+    port: 8217
+  weather:
+    name: user-weather-service
+    repository: isa/user-weather
+    port: 8218
+  album:
+    name: user-album-service
+    repository: isa/user-album
+    port: 8219
+  device:
+    name: user-device-service
+    repository: isa/user-device
+    port: 8220
+  ota:
+    name: user-ota-service
+    repository: isa/user-ota
+    port: 8221
+  media:
+    name: user-media-service
+    repository: isa/user-media
+    port: 8222
+  memory:
+    name: user-memory-service
+    repository: isa/user-memory
+    port: 8223
+  location:
+    name: user-location-service
+    repository: isa/user-location
+    port: 8224
+  telemetry:
+    name: user-telemetry-service
+    repository: isa/user-telemetry
+    port: 8225
+  compliance:
+    name: user-compliance-service
+    repository: isa/user-compliance
+    port: 8226
+  document:
+    name: user-document-service
+    repository: isa/user-document
+    port: 8227
+  subscription:
+    name: user-subscription-service
+    repository: isa/user-subscription
+    port: 8228
+  credit:
+    name: user-credit-service
+    repository: isa/user-credit
+    port: 8229
+  event:
+    name: user-event-service
+    repository: isa/user-event
+    port: 8230
+  membership:
+    name: user-membership-service
+    repository: isa/user-membership
+    port: 8250

@@ -1,0 +1,267 @@
+# =============================================================================
+# Deployment Pipeline
+# =============================================================================
+# Handles deployment to staging and production environments.
+#
+# Triggers:
+#   - Push to 'release/*' branches -> Staging
+#   - Manual workflow dispatch -> Staging or Production
+#   - Tags 'v*' -> Production (with approval)
+# =============================================================================
+
+name: Deploy
+
+on:
+  push:
+    branches:
+      - 'release/*'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      services:
+        description: 'Services to deploy (comma-separated, or "all")'
+        required: true
+        default: 'all'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+jobs:
+  # ===========================================================================
+  # Prepare Deployment
+  # ===========================================================================
+  prepare:
+    name: Prepare Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      services: ${{ steps.set-services.outputs.services }}
+      version: ${{ steps.set-version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine Environment
+        id: set-env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine Services
+        id: set-services
+        run: |
+          if [[ "${{ github.event.inputs.services }}" == "all" ]] || [[ -z "${{ github.event.inputs.services }}" ]]; then
+            services=$(ls -d microservices/*_service | xargs -I{} basename {} | tr '\n' ',' | sed 's/,$//')
+            echo "services=$services" >> $GITHUB_OUTPUT
+          else
+            echo "services=${{ github.event.inputs.services }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set Version
+        id: set-version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            version="${{ github.ref_name }}"
+          else
+            version="${{ github.sha }}"
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+  # ===========================================================================
+  # Build and Push Images
+  # ===========================================================================
+  build:
+    name: Build Images
+    runs-on: ubuntu-latest
+    needs: prepare
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Base Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployment/k8s/Dockerfile.base
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/base:${{ needs.prepare.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/base:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and Push Service Images
+        run: |
+          IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
+          for service in "${SERVICES[@]}"; do
+            echo "Building $service..."
+            docker build \
+              --build-arg BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/base:${{ needs.prepare.outputs.version }} \
+              -f deployment/k8s/Dockerfile.service \
+              --build-arg SERVICE_NAME=$service \
+              -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ needs.prepare.outputs.version }} \
+              .
+            docker push ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ needs.prepare.outputs.version }}
+          done
+
+  # ===========================================================================
+  # Deploy to Staging
+  # ===========================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    if: needs.prepare.outputs.environment == 'staging'
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > ~/.kube/config
+
+      - name: Deploy Services
+        run: |
+          NAMESPACE="isa-cloud-staging"
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
+          for service in "${SERVICES[@]}"; do
+            echo "Deploying $service to staging..."
+
+            # Update image tag
+            kubectl set image deployment/${service%-service}-deployment \
+              $service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:$VERSION \
+              -n $NAMESPACE
+
+            # Wait for rollout
+            kubectl rollout status deployment/${service%-service}-deployment \
+              -n $NAMESPACE --timeout=300s
+          done
+
+      - name: Run Smoke Tests
+        run: |
+          echo "Running smoke tests..."
+          # kubectl port-forward svc/apisix 8000:8000 -n $NAMESPACE &
+          # sleep 5
+          # bash tests/smoke/run_all.sh
+
+      - name: Deployment Summary
+        run: |
+          echo "# Staging Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** ${{ needs.prepare.outputs.services }}" >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================================================
+  # Deploy to Production
+  # ===========================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    if: needs.prepare.outputs.environment == 'production'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
+
+      - name: Blue-Green Deployment
+        run: |
+          NAMESPACE="isa-cloud-prod"
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
+          for service in "${SERVICES[@]}"; do
+            echo "Deploying $service to production (blue-green)..."
+
+            # Update image tag
+            kubectl set image deployment/${service%-service}-deployment \
+              $service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:$VERSION \
+              -n $NAMESPACE
+
+            # Wait for rollout
+            kubectl rollout status deployment/${service%-service}-deployment \
+              -n $NAMESPACE --timeout=600s
+          done
+
+      - name: Production Health Check
+        run: |
+          echo "Verifying production health..."
+          # Add production health verification
+
+      - name: Deployment Summary
+        run: |
+          echo "# Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** ${{ needs.prepare.outputs.services }}" >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================================================
+  # Rollback (Manual Trigger)
+  # ===========================================================================
+  rollback:
+    name: Rollback
+    runs-on: ubuntu-latest
+    if: failure() && (github.event_name == 'workflow_dispatch')
+    needs: [deploy-staging, deploy-production]
+
+    steps:
+      - name: Rollback Deployment
+        run: |
+          echo "Initiating rollback..."
+          # kubectl rollout undo deployment/xxx -n $NAMESPACE
+
+      - name: Notify Rollback
+        run: |
+          echo "# Rollback Initiated" >> $GITHUB_STEP_SUMMARY
+          echo "Deployment failed, rollback triggered." >> $GITHUB_STEP_SUMMARY

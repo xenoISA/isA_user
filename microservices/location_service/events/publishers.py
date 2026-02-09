@@ -8,7 +8,7 @@ All events published by location service should be defined here.
 import logging
 from typing import Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_geofence_created_event_data,
@@ -79,8 +79,8 @@ async def publish_location_updated(
         )
 
         event = Event(
-            event_type=EventType.LOCATION_UPDATED,
-            source=ServiceSource.LOCATION_SERVICE,
+            event_type="location.updated",
+            source="location_service",
             data=event_data.model_dump(),
         )
 
@@ -144,8 +144,8 @@ async def publish_geofence_entered(
         )
 
         event = Event(
-            event_type=EventType.GEOFENCE_ENTERED,
-            source=ServiceSource.LOCATION_SERVICE,
+            event_type="location.geofence.entered",
+            source="location_service",
             data=event_data.model_dump(),
         )
 
@@ -211,8 +211,8 @@ async def publish_geofence_exited(
         )
 
         event = Event(
-            event_type=EventType.GEOFENCE_EXITED,
-            source=ServiceSource.LOCATION_SERVICE,
+            event_type="location.geofence.exited",
+            source="location_service",
             data=event_data.model_dump(),
         )
 
@@ -277,8 +277,8 @@ async def publish_geofence_created(
         )
 
         event = Event(
-            event_type=EventType.GEOFENCE_CREATED,
-            source=ServiceSource.LOCATION_SERVICE,
+            event_type="location.geofence.created",
+            source="location_service",
             data=event_data.model_dump(),
         )
 
@@ -340,8 +340,8 @@ async def publish_place_created(
         )
 
         event = Event(
-            event_type=EventType.PLACE_CREATED,
-            source=ServiceSource.LOCATION_SERVICE,
+            event_type="location.place.created",
+            source="location_service",
             data=event_data.model_dump(),
         )
 

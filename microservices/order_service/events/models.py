@@ -5,6 +5,38 @@ Pydantic models for events published by order service
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class OrderEventType(str, Enum):
+    """
+    Events published by order_service.
+
+    Stream: order-stream
+    Subjects: order.>
+    """
+    ORDER_CREATED = "order.created"
+    ORDER_COMPLETED = "order.completed"
+    ORDER_CANCELED = "order.canceled"
+    ORDER_FULFILLED = "order.fulfilled"
+
+
+class OrderSubscribedEventType(str, Enum):
+    """Events that order_service subscribes to from other services."""
+    PAYMENT_COMPLETED = "payment.completed"
+    PAYMENT_FAILED = "payment.failed"
+
+
+class OrderStreamConfig:
+    """Stream configuration for order_service"""
+    STREAM_NAME = "order-stream"
+    SUBJECTS = ["order.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "order"
+
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from decimal import Decimal

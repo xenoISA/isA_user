@@ -27,7 +27,7 @@ from isa_common.consul_client import ConsulRegistry
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.nats_client import Event, EventType, ServiceSource, get_event_bus
+from core.nats_client import Event, get_event_bus
 
 from .models import (
     ConsumeRequest,
@@ -47,6 +47,7 @@ from .models import (
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .wallet_service import WalletService
+from .factory import create_wallet_service
 
 # Initialize configuration
 config_manager = ConfigManager("wallet_service")
@@ -110,8 +111,9 @@ class WalletMicroservice:
         """Initialize the microservice"""
         try:
             self.event_bus = event_bus
-            self.wallet_service = WalletService(
-                event_bus=event_bus, config=config_manager
+            self.wallet_service = create_wallet_service(
+                config=config_manager,
+                event_bus=event_bus
             )
             logger.info("Wallet microservice initialized successfully")
         except Exception as e:
@@ -222,9 +224,11 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl"  # Use TTL for reliable health checks,
             )
             wallet_microservice.consul_registry.register()
+            wallet_microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info(
                 f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
             )
@@ -265,6 +269,7 @@ def get_wallet_service() -> WalletService:
 
 
 # Health check endpoints
+@app.get("/api/v1/wallets/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""
@@ -293,6 +298,65 @@ async def create_wallet(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=result.message
             )
         return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+# Backward compatibility for credit balance (must be before {wallet_id} routes)
+@app.get("/api/v1/wallets/credits/balance")
+async def get_user_credit_balance(
+    user_id: str = Query(..., description="User ID"),
+    wallet_service: WalletService = Depends(get_wallet_service),
+):
+    """Get user's credit balance (backward compatibility)"""
+    try:
+        wallets = await wallet_service.get_user_wallets(user_id)
+
+        # Get primary fiat wallet
+        fiat_wallets = [w for w in wallets if w.wallet_type == WalletType.FIAT]
+        if not fiat_wallets:
+            # Create default wallet if doesn't exist
+            create_result = await wallet_service.create_wallet(
+                WalletCreate(
+                    user_id=user_id,
+                    wallet_type=WalletType.FIAT,
+                    initial_balance=Decimal(0),
+                    currency="CREDIT",
+                )
+            )
+            if create_result.success:
+                balance = float(create_result.balance or 0)
+                return {
+                    "success": True,
+                    "balance": balance,
+                    "available_balance": balance,
+                    "locked_balance": 0.0,
+                    "currency": "CREDIT",
+                    "wallet_id": create_result.wallet_id,
+                }
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to create wallet",
+                )
+
+        wallet = fiat_wallets[0]
+        return {
+            "success": True,
+            "balance": float(wallet.balance),
+            "available_balance": float(wallet.available_balance)
+            if hasattr(wallet, "available_balance")
+            else float(wallet.balance - wallet.locked_balance),
+            "locked_balance": float(wallet.locked_balance)
+            if hasattr(wallet, "locked_balance")
+            else 0.0,
+            "currency": wallet.currency,
+            "wallet_id": wallet.wallet_id,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -597,65 +661,6 @@ async def get_user_statistics(
     try:
         stats = await wallet_service.get_user_statistics(user_id, start_date, end_date)
         return stats
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
-
-
-# Backward compatibility for credit balance
-@app.get("/api/v1/wallets/credits/balance")
-async def get_user_credit_balance(
-    user_id: str = Query(..., description="User ID"),
-    wallet_service: WalletService = Depends(get_wallet_service),
-):
-    """Get user's credit balance (backward compatibility)"""
-    try:
-        wallets = await wallet_service.get_user_wallets(user_id)
-
-        # Get primary fiat wallet
-        fiat_wallets = [w for w in wallets if w.wallet_type == WalletType.FIAT]
-        if not fiat_wallets:
-            # Create default wallet if doesn't exist
-            create_result = await wallet_service.create_wallet(
-                WalletCreate(
-                    user_id=user_id,
-                    wallet_type=WalletType.FIAT,
-                    initial_balance=Decimal(0),
-                    currency="CREDIT",
-                )
-            )
-            if create_result.success:
-                balance = float(create_result.balance or 0)
-                return {
-                    "success": True,
-                    "balance": balance,
-                    "available_balance": balance,
-                    "locked_balance": 0.0,
-                    "currency": "CREDIT",
-                    "wallet_id": create_result.wallet_id,
-                }
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to create wallet",
-                )
-
-        wallet = fiat_wallets[0]
-        return {
-            "success": True,
-            "balance": float(wallet.balance),
-            "available_balance": float(wallet.available_balance)
-            if hasattr(wallet, "available_balance")
-            else float(wallet.balance - wallet.locked_balance),
-            "locked_balance": float(wallet.locked_balance)
-            if hasattr(wallet, "locked_balance")
-            else 0.0,
-            "currency": wallet.currency,
-            "wallet_id": wallet.wallet_id,
-        }
     except HTTPException:
         raise
     except Exception as e:

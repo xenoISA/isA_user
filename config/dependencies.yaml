@@ -1,0 +1,283 @@
+# =============================================================================
+# Dependencies Configuration - Single Point of Truth for Python Dependencies
+# =============================================================================
+# This file is the ONLY source of truth for Python dependencies across:
+# - deployment/requirements/base.txt (runtime dependencies)
+# - deployment/requirements/dev.txt (development dependencies)
+# - deployment/requirements/agent.txt (AI agent framework dependencies)
+#
+# Regenerate requirements files with:
+#   python -m agents.tools.generate_config --requirements
+# =============================================================================
+
+# Output Configuration
+output:
+  base_file: "deployment/requirements/base.txt"
+  dev_file: "deployment/requirements/dev.txt"
+  agent_file: "deployment/requirements/agent.txt"
+
+# =============================================================================
+# Base Runtime Dependencies (used by all microservices in K8s)
+# =============================================================================
+base:
+  # Web Framework
+  web_framework:
+    - package: "fastapi"
+      version: ">=0.104.0"
+      description: "FastAPI web framework"
+    - package: "uvicorn[standard]"
+      version: ">=0.24.0"
+      description: "ASGI server"
+    - package: "gunicorn"
+      version: ">=21.0.0"
+      description: "WSGI HTTP Server"
+
+  # Data Validation
+  data_validation:
+    - package: "pydantic"
+      version: ">=2.5.0"
+      description: "Data validation"
+    - package: "pydantic[email]"
+      version: ">=2.5.0"
+      description: "Email validation support"
+
+  # HTTP Clients
+  http_clients:
+    - package: "httpx"
+      version: ">=0.25.2"
+      description: "Async HTTP client"
+    - package: "aiohttp"
+      version: ">=3.9.0"
+      description: "Async HTTP client/server"
+    - package: "requests"
+      version: ">=2.31.0"
+      description: "Sync HTTP client"
+
+  # Database Support
+  database:
+    - package: "asyncpg"
+      version: ">=0.29.0"
+      description: "PostgreSQL async driver"
+    - package: "psycopg[binary]"
+      version: ">=3.0.0"
+      description: "PostgreSQL driver"
+    - package: "pgvector"
+      version: ">=0.2.0"
+      description: "pgvector extension support"
+
+  # Message Queue
+  message_queue:
+    - package: "nats-py"
+      version: ">=2.7.0"
+      description: "NATS JetStream client"
+
+  # Object Storage
+  object_storage:
+    - package: "minio"
+      version: ">=7.2.16"
+      description: "MinIO S3-compatible client"
+
+  # Authentication & Security
+  security:
+    - package: "cryptography"
+      version: ">=41.0.0"
+      description: "Cryptographic primitives"
+    - package: "python-jose[cryptography]"
+      version: ">=3.3.0"
+      description: "JWT implementation"
+    - package: "PyJWT"
+      version: ">=2.8.0"
+      description: "JWT encoding/decoding"
+    - package: "python-multipart"
+      version: ">=0.0.6"
+      description: "Multipart form data parsing"
+    - package: "argon2-cffi"
+      version: ">=25.1.0"
+      description: "Argon2 password hashing"
+    - package: "pycryptodome"
+      version: ">=3.23.0"
+      description: "Cryptographic library"
+
+  # Payment Processing
+  payment:
+    - package: "stripe"
+      version: ">=7.8.0"
+      description: "Stripe payment integration"
+
+  # Monitoring & Logging
+  monitoring:
+    - package: "structlog"
+      version: ">=23.2.0"
+      description: "Structured logging"
+    - package: "prometheus-client"
+      version: ">=0.19.0"
+      description: "Prometheus metrics"
+    - package: "python-logging-loki"
+      version: ">=0.3.1"
+      description: "Loki log shipping"
+    - package: "python-json-logger"
+      version: ">=2.0.7"
+      description: "JSON log formatter"
+
+  # Configuration
+  configuration:
+    - package: "python-dotenv"
+      version: ">=1.0.0"
+      description: "Environment variable loading"
+    - package: "pyyaml"
+      version: ">=6.0"
+      description: "YAML parsing"
+
+  # Utilities
+  utilities:
+    - package: "aiolimiter"
+      version: ">=1.1.0"
+      description: "Async rate limiter"
+    - package: "rich"
+      version: ">=13.6.0"
+      description: "Rich terminal output"
+    - package: "click"
+      version: ">=8.1.0"
+      description: "CLI framework"
+
+  # Shared Infrastructure Library
+  internal:
+    - package: "isa-common"
+      version: "==0.2.2"
+      description: "isA shared infrastructure library"
+
+  # AI Model Client
+  ai:
+    - package: "isa-model[cloud]"
+      version: ""
+      description: "isA AI model client"
+
+  # Process Management
+  process:
+    - package: "supervisor"
+      version: ">=4.2.0"
+      description: "Process management for containers"
+
+# =============================================================================
+# Development & Test Dependencies
+# =============================================================================
+dev:
+  # Testing Framework
+  testing:
+    - package: "pytest"
+      version: ">=8.0.0"
+      description: "Test framework"
+    - package: "pytest-asyncio"
+      version: ">=0.23.0"
+      description: "Async test support"
+    - package: "pytest-cov"
+      version: ">=4.1.0"
+      description: "Coverage plugin"
+    - package: "pytest-xdist"
+      version: ">=3.5.0"
+      description: "Parallel test execution"
+    - package: "pytest-timeout"
+      version: ">=2.2.0"
+      description: "Test timeout support"
+    - package: "pytest-mock"
+      version: ">=3.12.0"
+      description: "Mock plugin"
+
+  # Snapshot Testing
+  snapshot:
+    - package: "syrupy"
+      version: ">=4.6.0"
+      description: "Snapshot testing"
+
+  # Test Coverage
+  coverage:
+    - package: "coverage"
+      version: ">=7.3.0"
+      description: "Code coverage"
+
+  # Mocking & Fixtures
+  fixtures:
+    - package: "factory-boy"
+      version: ">=3.3.0"
+      description: "Test fixtures"
+    - package: "faker"
+      version: ">=22.0.0"
+      description: "Fake data generation"
+
+  # Code Formatting & Linting
+  linting:
+    - package: "black"
+      version: ">=23.12.0"
+      description: "Code formatter"
+    - package: "isort"
+      version: ">=5.12.0"
+      description: "Import sorter"
+    - package: "flake8"
+      version: ">=6.1.0"
+      description: "Linter"
+    - package: "mypy"
+      version: ">=1.8.0"
+      description: "Type checker"
+
+  # Documentation
+  documentation:
+    - package: "mkdocs"
+      version: ">=1.5.0"
+      description: "Documentation generator"
+    - package: "mkdocs-material"
+      version: ">=9.4.0"
+      description: "Material theme"
+
+  # CDD/TDD Support
+  templates:
+    - package: "jinja2"
+      version: ">=3.1.0"
+      description: "Template engine"
+
+# =============================================================================
+# AI Agent Framework Dependencies
+# =============================================================================
+agent:
+  # MCP SDK
+  mcp:
+    - package: "mcp"
+      version: ">=0.1.0"
+      description: "Model Context Protocol SDK"
+
+  # Service Discovery
+  consul:
+    - package: "python-consul"
+      version: ">=1.1.0"
+      description: "Consul client for MCP servers"
+
+  # Claude Agent SDK
+  claude:
+    - package: "claude-agent-sdk"
+      version: ">=0.1.11"
+      description: "Official Anthropic Agent SDK"
+
+  # Async Utilities
+  async:
+    - package: "anyio"
+      version: ">=4.0.0"
+      description: "Async coordination"
+
+  # Markdown Processing
+  markdown:
+    - package: "mistune"
+      version: ">=3.0.0"
+      description: "CDD document parsing"
+
+  # JSON Schema
+  validation:
+    - package: "jsonschema"
+      version: ">=4.20.0"
+      description: "Contract validation"
+
+# =============================================================================
+# File Hierarchy
+# =============================================================================
+# agent.txt -> includes dev.txt
+# dev.txt   -> includes base.txt
+# base.txt  -> standalone runtime dependencies
+# =============================================================================

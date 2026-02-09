@@ -3,19 +3,18 @@ Session Service Business Logic
 
 Session management business logic layer for the microservice.
 Handles validation, business rules, and error handling.
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
 """
 
 import logging
 import os
-
-# Import Consul registry for service discovery
 import sys
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-
-import requests
-from microservices.account_service.client import AccountServiceClient
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .models import (
     MemoryCreateRequest,
@@ -34,49 +33,30 @@ from .models import (
     SessionSummaryResponse,
     SessionUpdateRequest,
 )
-from .session_repository import (
-    SessionMessageRepository,
-    SessionNotFoundException,
-    SessionRepository,
+
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import (
+    SessionRepositoryProtocol,
+    SessionMessageRepositoryProtocol,
+    EventBusProtocol,
+    AccountClientProtocol,
+    SessionNotFoundError,
+    MessageNotFoundError,
+    MemoryNotFoundError,
+    SessionServiceError,
+    SessionValidationError,
 )
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
 
 sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
-from core.config_manager import ConfigManager
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
-
-
-class SessionServiceError(Exception):
-    """Base exception for session service errors"""
-
-    pass
-
-
-class SessionValidationError(SessionServiceError):
-    """Session validation error"""
-
-    pass
-
-
-class SessionNotFoundError(SessionServiceError):
-    """Session not found error"""
-
-    pass
-
-
-class MessageNotFoundError(SessionServiceError):
-    """Message not found error"""
-
-    pass
-
-
-class MemoryNotFoundError(SessionServiceError):
-    """Memory not found error"""
-
-    pass
 
 
 class SessionService:
@@ -85,15 +65,75 @@ class SessionService:
 
     Handles all session-related business operations while delegating
     data access to the Repository layers.
+
+    Uses dependency injection for testability:
+    - Repository is injected, not created at import time
+    - Event publishers are lazily loaded
     """
 
-    def __init__(self, event_bus=None, config=None):
-        # Initialize repositories with config for service discovery
-        self.session_repo = SessionRepository(config=config)
-        self.message_repo = SessionMessageRepository(config=config)
-        # Note: Memory functionality is handled by dedicated memory_service
-        self.account_client = AccountServiceClient()
+    def __init__(
+        self,
+        session_repo: Optional[SessionRepositoryProtocol] = None,
+        message_repo: Optional[SessionMessageRepositoryProtocol] = None,
+        event_bus: Optional[EventBusProtocol] = None,
+        account_client: Optional[AccountClientProtocol] = None,
+        config=None,
+    ):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            session_repo: Session repository (inject mock for testing)
+            message_repo: Message repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            account_client: Account service client for user validation
+            config: Configuration manager (for backward compatibility)
+        """
+        # Store injected dependencies or create real ones lazily
+        self._session_repo = session_repo
+        self._message_repo = message_repo
         self.event_bus = event_bus
+        self._account_client = account_client
+        self._config = config
+        self._repos_initialized = False
+
+    def _ensure_repos_initialized(self):
+        """Lazy initialization of repositories if not injected"""
+        if self._repos_initialized:
+            return
+
+        if self._session_repo is None or self._message_repo is None:
+            # Import real repositories only when needed
+            from .session_repository import SessionRepository, SessionMessageRepository
+
+            if self._session_repo is None:
+                self._session_repo = SessionRepository(config=self._config)
+            if self._message_repo is None:
+                self._message_repo = SessionMessageRepository(config=self._config)
+
+        if self._account_client is None:
+            from microservices.account_service.client import AccountServiceClient
+            self._account_client = AccountServiceClient()
+
+        self._repos_initialized = True
+
+    @property
+    def session_repo(self) -> SessionRepositoryProtocol:
+        """Get session repository, initializing if needed"""
+        self._ensure_repos_initialized()
+        return self._session_repo
+
+    @property
+    def message_repo(self) -> SessionMessageRepositoryProtocol:
+        """Get message repository, initializing if needed"""
+        self._ensure_repos_initialized()
+        return self._message_repo
+
+    @property
+    def account_client(self) -> AccountClientProtocol:
+        """Get account client, initializing if needed"""
+        self._ensure_repos_initialized()
+        return self._account_client
 
     # Session Operations
 
@@ -154,8 +194,8 @@ class SessionService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.SESSION_STARTED,
-                        source=ServiceSource.SESSION_SERVICE,
+                        event_type="session.started",
+                        source="session_service",
                         data={
                             "session_id": session_id,
                             "user_id": request.user_id,
@@ -329,8 +369,8 @@ class SessionService:
                             session_id
                         )
                         event = Event(
-                            event_type=EventType.SESSION_ENDED,
-                            source=ServiceSource.SESSION_SERVICE,
+                            event_type="session.ended",
+                            source="session_service",
                             data={
                                 "session_id": session_id,
                                 "user_id": session.user_id,
@@ -419,8 +459,8 @@ class SessionService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type=EventType.SESSION_MESSAGE_SENT,
-                        source=ServiceSource.SESSION_SERVICE,
+                        event_type="session.message_sent",
+                        source="session_service",
                         data={
                             "session_id": session_id,
                             "user_id": session.user_id,
@@ -446,8 +486,8 @@ class SessionService:
             if self.event_bus and request.tokens_used and request.tokens_used > 0:
                 try:
                     event = Event(
-                        event_type=EventType.SESSION_TOKENS_USED,
-                        source=ServiceSource.SESSION_SERVICE,
+                        event_type="session.tokens_used",
+                        source="session_service",
                         data={
                             "session_id": session_id,
                             "user_id": session.user_id,

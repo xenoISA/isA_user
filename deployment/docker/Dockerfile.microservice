@@ -1,0 +1,38 @@
+# =============================================================================
+# ISA User Platform - Microservice Image
+# =============================================================================
+# Inherits from user-base which has all shared dependencies.
+# Only adds service-specific code for fast builds.
+#
+# Build (staging):
+#   docker build --build-arg SERVICE_NAME=auth_service --build-arg SERVICE_PORT=8201 \
+#     -t harbor.local:30443/isa/user-auth:latest \
+#     -f deployment/docker/Dockerfile.microservice .
+#
+# Build (production):
+#   docker build --build-arg SERVICE_NAME=auth_service --build-arg SERVICE_PORT=8201 \
+#     -t harbor.isa.io/isa/user-auth:latest \
+#     -f deployment/docker/Dockerfile.microservice .
+# =============================================================================
+
+ARG REGISTRY=harbor.local:30443
+
+FROM ${REGISTRY}/isa/user-base:latest
+
+WORKDIR /app
+
+# Copy microservices code
+COPY microservices /app/microservices
+
+ARG SERVICE_NAME
+ARG SERVICE_PORT
+
+ENV SERVICE_NAME=${SERVICE_NAME}
+ENV SERVICE_PORT=${SERVICE_PORT}
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${SERVICE_PORT}/health || exit 1
+
+EXPOSE ${SERVICE_PORT}
+
+CMD python -u -m uvicorn microservices.${SERVICE_NAME}.main:app --host 0.0.0.0 --port ${SERVICE_PORT}

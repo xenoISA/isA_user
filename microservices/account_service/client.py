@@ -75,7 +75,7 @@ class AccountServiceClient:
 
     async def ensure_account(
         self,
-        auth0_id: str,
+        user_id: str,
         email: str,
         name: str,
         subscription_plan: str = "free"
@@ -84,10 +84,10 @@ class AccountServiceClient:
         Ensure account exists, create if needed
 
         Args:
-            auth0_id: Auth0 user ID
+            user_id: User ID (from auth service)
             email: User email
             name: User name
-            subscription_plan: Initial subscription plan
+            subscription_plan: Initial subscription plan (deprecated, use subscription_service)
 
         Returns:
             Account profile data
@@ -95,7 +95,7 @@ class AccountServiceClient:
         Example:
             >>> client = AccountServiceClient()
             >>> account = await client.ensure_account(
-            ...     auth0_id="auth0|123",
+            ...     user_id="usr_abc123",
             ...     email="user@example.com",
             ...     name="John Doe"
             ... )
@@ -105,10 +105,9 @@ class AccountServiceClient:
             response = await self.client.post(
                 f"{self._get_base_url()}/api/v1/accounts/ensure",
                 json={
-                    "auth0_id": auth0_id,
+                    "user_id": user_id,
                     "email": email,
                     "name": name,
-                    "subscription_plan": subscription_plan
                 }
             )
             response.raise_for_status()

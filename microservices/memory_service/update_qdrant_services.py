@@ -35,8 +35,8 @@ import_to_add = "from isa_common.qdrant_client import QdrantClient\n"
 init_code_template = """
         # Initialize Qdrant client for vector storage
         self.qdrant = QdrantClient(
-            host=os.getenv('QDRANT_HOST', 'isa-qdrant-grpc'),
-            port=int(os.getenv('QDRANT_PORT', 50062)),
+            host=os.getenv('QDRANT_HOST', 'localhost'),
+            port=int(os.getenv('QDRANT_PORT', 6333)),
             user_id='memory_service'
         )
         self._ensure_collection()

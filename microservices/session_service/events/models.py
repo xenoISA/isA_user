@@ -5,9 +5,40 @@ Event data models for session lifecycle events.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class SessionEventType(str, Enum):
+    """
+    Events published by session_service.
+
+    Stream: session-stream
+    Subjects: session.>
+    """
+    SESSION_STARTED = "session.started"
+    SESSION_ENDED = "session.ended"
+    SESSION_MESSAGE_SENT = "session.message_sent"
+    SESSION_TOKENS_USED = "session.tokens_used"
+
+
+class SessionSubscribedEventType(str, Enum):
+    """Events that session_service subscribes to from other services."""
+    USER_DELETED = "user.deleted"
+
+
+class SessionStreamConfig:
+    """Stream configuration for session_service"""
+    STREAM_NAME = "session-stream"
+    SUBJECTS = ["session.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "session"
+
 
 # ============================================================================
 # Session Event Models

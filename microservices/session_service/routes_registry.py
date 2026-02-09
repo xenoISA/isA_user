@@ -2,9 +2,7 @@
 Session Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # Define all routes
 SERVICE_ROUTES = [
     # Health Check
@@ -14,13 +12,18 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Basic health check"
     },
+        {
+            "path": "/api/v1/sessions/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
         "description": "Detailed health check"
     },
-
     # Session Management
     {
         "path": "/api/v1/sessions",
@@ -52,7 +55,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "List user sessions (with user_id query parameter)"
     },
-
     # Session Messages
     {
         "path": "/api/v1/sessions/{session_id}/messages",
@@ -66,7 +68,6 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Get session messages"
     },
-
     # Session Analytics
     {
         "path": "/api/v1/sessions/{session_id}/summary",
@@ -79,10 +80,21 @@ SERVICE_ROUTES = [
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get session statistics"
+    },
+    # Session Memory (proxy to memory_service)
+    {
+        "path": "/api/v1/sessions/{session_id}/memory",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Store session memory (proxy to memory_service)"
+    },
+    {
+        "path": "/api/v1/sessions/{session_id}/memory",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get session memory (proxy to memory_service)"
     }
 ]
-
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -93,12 +105,10 @@ def get_routes_for_consul() -> Dict[str, Any]:
     session_routes = []
     message_routes = []
     stats_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
         # Use compact representation
         compact_path = path.replace("/api/v1/sessions/", "").replace("/api/v1/", "")
-
         if path.startswith("/health"):
             health_routes.append(compact_path)
         elif "/messages" in path:
@@ -107,7 +117,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             stats_routes.append(compact_path)
         elif path.startswith("/api/v1/sessions") or "/sessions" in path:
             session_routes.append(compact_path)
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "base_path": "/api/v1/sessions",
@@ -119,8 +128,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
-
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "session_service",

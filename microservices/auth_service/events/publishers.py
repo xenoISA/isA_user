@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_pairing_token_generated_event_data,
@@ -50,8 +50,8 @@ async def publish_device_pairing_token_generated(
         
         event = Event(
             event_id=event_id,
-            event_type=EventType.DEVICE_PAIRING_TOKEN_GENERATED,
-            source=ServiceSource.AUTH_SERVICE,
+            event_type="device.pairing_token.generated",
+            source="auth_service",
             data=event_data.model_dump()
         )
         
@@ -89,8 +89,8 @@ async def publish_device_pairing_token_verified(
         
         event = Event(
             event_id=event_id,
-            event_type=EventType.DEVICE_PAIRING_TOKEN_VERIFIED,
-            source=ServiceSource.AUTH_SERVICE,
+            event_type="device.pairing_token.verified",
+            source="auth_service",
             data=event_data.model_dump()
         )
         
@@ -131,8 +131,8 @@ async def publish_device_pairing_completed(
         
         event = Event(
             event_id=event_id,
-            event_type=EventType.DEVICE_PAIRING_COMPLETED,
-            source=ServiceSource.AUTH_SERVICE,
+            event_type="device.pairing.completed",
+            source="auth_service",
             data=event_data.model_dump()
         )
         

@@ -588,6 +588,212 @@ async def handle_task_assigned(event: Event, notification_service):
         logger.error(f"Failed to handle task.assigned event {event.id}: {e}")
 
 
+async def handle_task_due_soon(event: Event, notification_service):
+    """
+    Handle task.due_soon event
+    Send reminder notification about upcoming task
+    """
+    try:
+        from ..models import (
+            NotificationPriority,
+            NotificationType,
+            SendNotificationRequest,
+        )
+
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        task_id = event.data.get("task_id")
+        name = event.data.get("name")
+        user_id = event.data.get("user_id")
+        due_date = event.data.get("due_date")
+        hours_until_due = event.data.get("hours_until_due", 24)
+
+        if not task_id or not user_id:
+            logger.warning(f"task.due_soon event missing required fields: {event.id}")
+            return
+
+        notification_request = SendNotificationRequest(
+            type=NotificationType.IN_APP,
+            recipient_id=user_id,
+            subject=f"Task Due Soon: {name}",
+            content=f"Your task '{name}' is due in {hours_until_due} hours.",
+            priority=NotificationPriority.HIGH,
+            metadata={
+                "event_id": event.id,
+                "task_id": task_id,
+                "due_date": due_date,
+                "category": "task",
+            },
+        )
+
+        await notification_service.send_notification(notification_request)
+        _mark_event_processed(event.id)
+
+        logger.info(
+            f"Sent task due soon reminder for task {task_id} (event: {event.id})"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to handle task.due_soon event {event.id}: {e}")
+
+
+async def handle_invoice_created(event: Event, notification_service):
+    """
+    Handle invoice.created event
+    Send invoice notification to user
+    """
+    try:
+        from ..models import (
+            NotificationPriority,
+            NotificationType,
+            SendNotificationRequest,
+        )
+
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        invoice_id = event.data.get("invoice_id")
+        user_id = event.data.get("user_id")
+        customer_email = event.data.get("customer_email")
+        amount = event.data.get("amount")
+        currency = event.data.get("currency", "USD")
+        due_date = event.data.get("due_date")
+        invoice_url = event.data.get("invoice_url")
+
+        if not invoice_id or not user_id:
+            logger.warning(f"invoice.created event missing required fields: {event.id}")
+            return
+
+        amount_str = f"{currency} {amount:.2f}" if amount else "N/A"
+
+        email_request = SendNotificationRequest(
+            type=NotificationType.EMAIL,
+            recipient_id=user_id,
+            recipient_email=customer_email,
+            subject=f"Invoice #{invoice_id}",
+            content=f"Your invoice for {amount_str} is ready.\n\nInvoice ID: {invoice_id}\nDue Date: {due_date or 'N/A'}",
+            html_content=f"""
+            <h2>Invoice Ready</h2>
+            <p>Your invoice is ready for review.</p>
+            <table style="border: 1px solid #ddd; padding: 10px;">
+                <tr><td><strong>Invoice ID:</strong></td><td>{invoice_id}</td></tr>
+                <tr><td><strong>Amount:</strong></td><td>{amount_str}</td></tr>
+                <tr><td><strong>Due Date:</strong></td><td>{due_date or 'Upon Receipt'}</td></tr>
+            </table>
+            {f'<p><a href="{invoice_url}">View Invoice</a></p>' if invoice_url else ''}
+            """,
+            priority=NotificationPriority.HIGH,
+            metadata={
+                "event_id": event.id,
+                "invoice_id": invoice_id,
+                "category": "billing",
+            },
+        )
+
+        in_app_request = SendNotificationRequest(
+            type=NotificationType.IN_APP,
+            recipient_id=user_id,
+            subject=f"Invoice Ready: {amount_str}",
+            content=f"Invoice #{invoice_id} for {amount_str} is ready.",
+            priority=NotificationPriority.HIGH,
+            metadata={
+                "event_id": event.id,
+                "invoice_id": invoice_id,
+                "category": "billing",
+            },
+        )
+
+        await notification_service.send_notification(email_request)
+        await notification_service.send_notification(in_app_request)
+        _mark_event_processed(event.id)
+
+        logger.info(f"Sent invoice notification for invoice {invoice_id} (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle invoice.created event {event.id}: {e}")
+
+
+async def handle_payment_refunded(event: Event, notification_service):
+    """
+    Handle payment.refunded event
+    Send refund confirmation to user
+    """
+    try:
+        from ..models import (
+            NotificationPriority,
+            NotificationType,
+            SendNotificationRequest,
+        )
+
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        payment_id = event.data.get("payment_id")
+        refund_id = event.data.get("refund_id")
+        user_id = event.data.get("user_id")
+        customer_email = event.data.get("customer_email")
+        amount = event.data.get("amount")
+        currency = event.data.get("currency", "USD")
+        reason = event.data.get("reason", "Refund processed")
+
+        if not user_id:
+            logger.warning(f"payment.refunded event missing user_id: {event.id}")
+            return
+
+        amount_str = f"{currency} {amount:.2f}" if amount else "N/A"
+
+        email_request = SendNotificationRequest(
+            type=NotificationType.EMAIL,
+            recipient_id=user_id,
+            recipient_email=customer_email,
+            subject=f"Refund Processed - {amount_str}",
+            content=f"Your refund of {amount_str} has been processed.\n\nRefund ID: {refund_id or payment_id}\nReason: {reason}",
+            html_content=f"""
+            <h2>Refund Confirmation</h2>
+            <p>Your refund has been processed successfully.</p>
+            <table style="border: 1px solid #ddd; padding: 10px;">
+                <tr><td><strong>Amount:</strong></td><td>{amount_str}</td></tr>
+                <tr><td><strong>Refund ID:</strong></td><td>{refund_id or payment_id}</td></tr>
+                <tr><td><strong>Reason:</strong></td><td>{reason}</td></tr>
+            </table>
+            <p>The refund should appear in your account within 5-10 business days.</p>
+            """,
+            priority=NotificationPriority.HIGH,
+            metadata={
+                "event_id": event.id,
+                "payment_id": payment_id,
+                "refund_id": refund_id,
+                "category": "payment",
+            },
+        )
+
+        in_app_request = SendNotificationRequest(
+            type=NotificationType.IN_APP,
+            recipient_id=user_id,
+            subject="Refund Processed",
+            content=f"Your refund of {amount_str} has been processed.",
+            priority=NotificationPriority.HIGH,
+            metadata={
+                "event_id": event.id,
+                "payment_id": payment_id,
+                "category": "payment",
+            },
+        )
+
+        await notification_service.send_notification(email_request)
+        await notification_service.send_notification(in_app_request)
+        _mark_event_processed(event.id)
+
+        logger.info(f"Sent refund confirmation for payment {payment_id} (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle payment.refunded event {event.id}: {e}")
+
+
 async def handle_invitation_created(event: Event, notification_service):
     """
     Handle invitation.created event
@@ -646,6 +852,148 @@ async def handle_invitation_created(event: Event, notification_service):
 
     except Exception as e:
         logger.error(f"Failed to handle invitation.created event {event.id}: {e}")
+
+
+async def handle_subscription_renewed(event: Event, notification_service):
+    """
+    Handle subscription.renewed event
+    Send renewal confirmation
+    """
+    try:
+        from ..models import (
+            NotificationPriority,
+            NotificationType,
+            SendNotificationRequest,
+        )
+
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        subscription_id = event.data.get("subscription_id")
+        user_id = event.data.get("user_id")
+        credits_allocated = event.data.get("credits_allocated")
+        new_period_end = event.data.get("new_period_end")
+
+        if not user_id:
+            logger.warning(f"subscription.renewed event missing user_id: {event.id}")
+            return
+
+        notification_request = SendNotificationRequest(
+            type=NotificationType.IN_APP,
+            recipient_id=user_id,
+            subject="Subscription Renewed",
+            content=f"Your subscription has been renewed! {credits_allocated} credits have been added to your account.",
+            priority=NotificationPriority.NORMAL,
+            metadata={
+                "event_id": event.id,
+                "subscription_id": subscription_id,
+                "category": "subscription",
+            },
+        )
+
+        await notification_service.send_notification(notification_request)
+        _mark_event_processed(event.id)
+
+        logger.info(f"Sent subscription renewal notification (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle subscription.renewed event {event.id}: {e}")
+
+
+async def handle_trial_ending_soon(event: Event, notification_service):
+    """
+    Handle subscription.trial.ending_soon event
+    Send reminder about trial expiring
+    """
+    try:
+        from ..models import (
+            NotificationPriority,
+            NotificationType,
+            SendNotificationRequest,
+        )
+
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        subscription_id = event.data.get("subscription_id")
+        user_id = event.data.get("user_id")
+        days_remaining = event.data.get("days_remaining", 3)
+        trial_end_date = event.data.get("trial_end_date")
+
+        if not user_id:
+            logger.warning(f"trial.ending_soon event missing user_id: {event.id}")
+            return
+
+        notification_request = SendNotificationRequest(
+            type=NotificationType.IN_APP,
+            recipient_id=user_id,
+            subject=f"Trial Ending in {days_remaining} Days",
+            content=f"Your free trial ends in {days_remaining} days. Upgrade now to keep access to all features!",
+            priority=NotificationPriority.HIGH,
+            metadata={
+                "event_id": event.id,
+                "subscription_id": subscription_id,
+                "trial_end_date": trial_end_date,
+                "category": "subscription",
+            },
+        )
+
+        await notification_service.send_notification(notification_request)
+        _mark_event_processed(event.id)
+
+        logger.info(f"Sent trial ending soon notification (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle trial.ending_soon event {event.id}: {e}")
+
+
+async def handle_credits_low(event: Event, notification_service):
+    """
+    Handle subscription.credits.low event
+    Send low credits warning
+    """
+    try:
+        from ..models import (
+            NotificationPriority,
+            NotificationType,
+            SendNotificationRequest,
+        )
+
+        if _is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        subscription_id = event.data.get("subscription_id")
+        user_id = event.data.get("user_id")
+        credits_remaining = event.data.get("credits_remaining")
+        percentage_remaining = event.data.get("percentage_remaining")
+
+        if not user_id:
+            logger.warning(f"credits.low event missing user_id: {event.id}")
+            return
+
+        notification_request = SendNotificationRequest(
+            type=NotificationType.IN_APP,
+            recipient_id=user_id,
+            subject="Low Credits Warning",
+            content=f"You have {credits_remaining} credits remaining ({percentage_remaining:.0f}%). Consider upgrading or purchasing more credits.",
+            priority=NotificationPriority.HIGH,
+            metadata={
+                "event_id": event.id,
+                "subscription_id": subscription_id,
+                "category": "subscription",
+            },
+        )
+
+        await notification_service.send_notification(notification_request)
+        _mark_event_processed(event.id)
+
+        logger.info(f"Sent credits low notification (event: {event.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to handle credits.low event {event.id}: {e}")
 
 
 async def handle_wallet_balance_low(event: Event, notification_service):
@@ -749,10 +1097,28 @@ def get_event_handlers(notification_service):
         "task_service.task.assigned": lambda event: handle_task_assigned(
             event, notification_service
         ),
+        "task_service.task.due_soon": lambda event: handle_task_due_soon(
+            event, notification_service
+        ),
+        "payment_service.invoice.created": lambda event: handle_invoice_created(
+            event, notification_service
+        ),
+        "payment_service.payment.refunded": lambda event: handle_payment_refunded(
+            event, notification_service
+        ),
         "invitation_service.invitation.created": lambda event: handle_invitation_created(
             event, notification_service
         ),
         "wallet_service.wallet.balance_low": lambda event: handle_wallet_balance_low(
+            event, notification_service
+        ),
+        "subscription_service.subscription.renewed": lambda event: handle_subscription_renewed(
+            event, notification_service
+        ),
+        "subscription_service.subscription.trial.ending_soon": lambda event: handle_trial_ending_soon(
+            event, notification_service
+        ),
+        "subscription_service.subscription.credits.low": lambda event: handle_credits_low(
             event, notification_service
         ),
     }
@@ -762,6 +1128,7 @@ __all__ = [
     "get_event_handlers",
     "handle_user_logged_in",
     "handle_payment_completed",
+    "handle_payment_refunded",
     "handle_organization_member_added",
     "handle_device_offline",
     "handle_file_uploaded",
@@ -769,6 +1136,11 @@ __all__ = [
     "handle_user_registered",
     "handle_order_created",
     "handle_task_assigned",
+    "handle_task_due_soon",
+    "handle_invoice_created",
     "handle_invitation_created",
     "handle_wallet_balance_low",
+    "handle_subscription_renewed",
+    "handle_trial_ending_soon",
+    "handle_credits_low",
 ]

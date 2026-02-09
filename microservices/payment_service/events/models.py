@@ -5,6 +5,37 @@ Pydantic models for events published by payment service
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class PaymentEventType(str, Enum):
+    """
+    Events published by payment_service.
+
+    Stream: payment-stream
+    Subjects: payment.>
+    """
+    PAYMENT_INITIATED = "payment.initiated"
+    PAYMENT_COMPLETED = "payment.completed"
+    PAYMENT_FAILED = "payment.failed"
+    PAYMENT_REFUNDED = "payment.refunded"
+
+
+class PaymentSubscribedEventType(str, Enum):
+    """Events that payment_service subscribes to from other services."""
+    ORDER_CREATED = "order.created"
+
+
+class PaymentStreamConfig:
+    """Stream configuration for payment_service"""
+    STREAM_NAME = "payment-stream"
+    SUBJECTS = ["payment.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "payment"
+
 from typing import Optional, Dict, Any
 from datetime import datetime
 from decimal import Decimal

@@ -7,7 +7,7 @@ Storage Service - Event Handlers
 import logging
 from datetime import datetime
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -182,8 +182,88 @@ async def handle_file_indexing_request(
         logger.error(f"Error handling file indexing request: {e}")
 
 
-# 添加其他 event handlers（如果需要订阅其他服务的事件）
-# 例如：
-# async def handle_album_created(event: Event, storage_service):
-#     """处理相册创建事件"""
-#     pass
+async def handle_user_deleted(event: Event, storage_service, event_bus):
+    """
+    Handle user.deleted event - Clean up all user files from storage
+
+    When a user is deleted:
+    1. Delete all files owned by the user from MinIO
+    2. Delete file records from database
+    3. Remove vector embeddings from Qdrant
+
+    Args:
+        event: The event object
+        storage_service: StorageService instance
+        event_bus: Event bus for publishing events
+    """
+    try:
+        logger.info(f"Received user.deleted event: {event.id}")
+
+        data = event.data
+        user_id = data.get("user_id")
+
+        if not user_id:
+            logger.error("user.deleted event missing user_id")
+            return
+
+        logger.info(f"Processing user.deleted for user {user_id}")
+
+        # 1. Get all files for this user
+        try:
+            user_files = await storage_service.repository.list_user_files(user_id)
+            logger.info(f"Found {len(user_files)} files for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to list files for user {user_id}: {e}")
+            user_files = []
+
+        # 2. Delete each file from MinIO and database
+        deleted_count = 0
+        for file_record in user_files:
+            try:
+                file_id = file_record.get("file_id") or file_record.get("id")
+                bucket_name = file_record.get("bucket_name")
+                object_name = file_record.get("object_name")
+
+                # Delete from MinIO
+                if bucket_name and object_name:
+                    storage_service.minio_client.delete_object(bucket_name, object_name)
+
+                # Delete from database
+                await storage_service.repository.delete_file(file_id, user_id)
+                deleted_count += 1
+
+            except Exception as e:
+                logger.error(f"Failed to delete file {file_id}: {e}")
+
+        logger.info(f"Deleted {deleted_count} files for user {user_id}")
+
+        # 3. Clean up user's vector embeddings (if intelligence service available)
+        try:
+            if hasattr(storage_service, 'intelligence_service') and storage_service.intelligence_service:
+                collection_name = f"user_{user_id}_media"
+                await storage_service.intelligence_service.delete_collection(collection_name)
+                logger.info(f"Deleted vector collection {collection_name}")
+        except Exception as e:
+            logger.warning(f"Failed to delete vector collection for user {user_id}: {e}")
+
+        logger.info(f"Successfully handled user.deleted event for user {user_id}")
+
+    except Exception as e:
+        logger.error(f"Error handling user.deleted event: {e}", exc_info=True)
+
+
+def get_event_handlers(storage_service, intelligence_service, event_bus):
+    """
+    Get all event handlers for storage service
+
+    Returns:
+        dict: {pattern: handler_function} mapping
+    """
+    return {
+        "storage.file.indexing_requested": lambda event: handle_file_indexing_request(
+            event, intelligence_service, storage_service, event_bus
+        ),
+        "user.deleted": lambda event: handle_user_deleted(
+            event, storage_service, event_bus
+        ),
+    }

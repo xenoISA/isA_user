@@ -24,7 +24,7 @@ from .models import (
     UpdateSubscriptionRequest, CancelSubscriptionRequest,
     CreateRefundRequest, PaymentIntentResponse,
     SubscriptionResponse, PaymentHistoryResponse,
-    InvoiceResponse, UsageRecord
+    InvoiceResponse, UsageRecord, PaymentMethod
 )
 
 # Import event publishers
@@ -121,7 +121,7 @@ class PaymentService:
     ) -> SubscriptionPlan:
         """
         创建订阅计划
-        
+
         Args:
             plan_id: 计划ID
             name: 计划名称
@@ -132,10 +132,20 @@ class PaymentService:
             trial_days: 试用天数
             stripe_product_id: Stripe产品ID
             stripe_price_id: Stripe价格ID
-            
+
         Returns:
             创建的订阅计划
         """
+        # Validate required fields per logic contract BR-PLN-001, BR-PLN-002
+        if not plan_id or not plan_id.strip():
+            raise ValueError("plan_id is required")
+        if not name or not name.strip():
+            raise ValueError("Plan name is required")
+        if price < 0:
+            raise ValueError("Price cannot be negative")
+        if trial_days < 0:
+            raise ValueError("Trial days cannot be negative")
+
         # 如果提供了Stripe集成，创建Stripe产品和价格
         if stripe.api_key and not stripe_price_id:
             try:
@@ -535,11 +545,16 @@ class PaymentService:
         payment = Payment(
             payment_id=payment_intent_id,
             user_id=request.user_id,
+            order_id=request.order_id,
             amount=request.amount,
             currency=request.currency,
+            subtotal_amount=request.subtotal_amount or Decimal("0"),
+            tax_amount=request.tax_amount or Decimal("0"),
+            shipping_amount=request.shipping_amount or Decimal("0"),
+            discount_amount=request.discount_amount or Decimal("0"),
             description=request.description,
             status=PaymentStatus.PENDING,
-            payment_method="stripe",
+            payment_method=PaymentMethod.STRIPE,
             processor_payment_id=payment_intent_id,
             metadata=request.metadata
         )
@@ -554,6 +569,7 @@ class PaymentService:
                 user_id=request.user_id,
                 amount=request.amount,
                 currency=request.currency.value,
+                order_id=request.order_id,
                 metadata=request.metadata or {}
             )
         except Exception as e:
@@ -871,6 +887,11 @@ class PaymentService:
         approved_by: Optional[str] = None
     ) -> Refund:
         """处理退款"""
+        # First check if refund exists
+        refund = await self.repository.get_refund(refund_id)
+        if not refund:
+            raise ValueError(f"Refund not found: {refund_id}")
+
         return await self.repository.process_refund(refund_id, approved_by)
     
     # ====================

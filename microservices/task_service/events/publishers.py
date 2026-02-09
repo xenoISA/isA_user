@@ -8,7 +8,7 @@ All events published by task service should be defined here.
 import logging
 from typing import Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_task_completed_event_data,
@@ -62,8 +62,8 @@ async def publish_task_created(
         )
 
         event = Event(
-            event_type=EventType.TASK_CREATED,
-            source=ServiceSource.TASK_SERVICE,
+            event_type="task.created",
+            source="task_service",
             data=event_data.model_dump(),
         )
 
@@ -129,8 +129,8 @@ async def publish_task_completed(
         )
 
         event = Event(
-            event_type=EventType.TASK_COMPLETED,
-            source=ServiceSource.TASK_SERVICE,
+            event_type="task.completed",
+            source="task_service",
             data=event_data.model_dump(),
         )
 
@@ -152,6 +152,126 @@ async def publish_task_completed(
 
     except Exception as e:
         logger.error(f"Error publishing task.completed event: {e}", exc_info=True)
+        return False
+
+
+async def publish_task_assigned(
+    event_bus,
+    user_id: str,
+    task_id: str,
+    assigned_to: str,
+    assigned_by: str,
+    name: str,
+    due_date: Optional[str] = None,
+) -> bool:
+    """
+    Publish task.assigned event
+
+    Notifies when a task is assigned to a user.
+
+    Args:
+        event_bus: NATS event bus instance
+        user_id: Owner user ID
+        task_id: Task ID
+        assigned_to: User ID task is assigned to
+        assigned_by: User ID who assigned the task
+        name: Task name/title
+        due_date: Optional due date
+
+    Returns:
+        True if event published successfully, False otherwise
+
+    Subscribers:
+        - notification_service: Notify assignee about new task
+        - calendar_service: Add to assignee's calendar
+    """
+    try:
+        event_data = {
+            "user_id": user_id,
+            "task_id": task_id,
+            "assigned_to": assigned_to,
+            "assigned_by": assigned_by,
+            "name": name,
+            "due_date": due_date,
+        }
+
+        event = Event(
+            event_type="task.created",  # Reuse enum, but override type
+            source="task_service",
+            data=event_data,
+        )
+
+        event.type = "task.assigned"
+
+        result = await event_bus.publish_event(event)
+
+        if result:
+            logger.info(f"✅ Published task.assigned event for task {task_id} to {assigned_to}")
+        else:
+            logger.error(f"❌ Failed to publish task.assigned event for task {task_id}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error publishing task.assigned event: {e}", exc_info=True)
+        return False
+
+
+async def publish_task_due_soon(
+    event_bus,
+    user_id: str,
+    task_id: str,
+    name: str,
+    due_date: str,
+    hours_until_due: int,
+) -> bool:
+    """
+    Publish task.due_soon event
+
+    Notifies when a task is approaching its due date.
+
+    Args:
+        event_bus: NATS event bus instance
+        user_id: User ID
+        task_id: Task ID
+        name: Task name/title
+        due_date: Due date ISO string
+        hours_until_due: Hours until task is due
+
+    Returns:
+        True if event published successfully, False otherwise
+
+    Subscribers:
+        - notification_service: Send reminder to user
+    """
+    try:
+        event_data = {
+            "user_id": user_id,
+            "task_id": task_id,
+            "name": name,
+            "due_date": due_date,
+            "hours_until_due": hours_until_due,
+        }
+
+        event = Event(
+            event_type="task.created",  # Reuse enum, but override type
+            source="task_service",
+            data=event_data,
+        )
+
+        event.type = "task.due_soon"
+
+        result = await event_bus.publish_event(event)
+
+        if result:
+            logger.info(f"✅ Published task.due_soon event for task {task_id} ({hours_until_due}h)")
+        else:
+            logger.error(f"❌ Failed to publish task.due_soon event for task {task_id}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error publishing task.due_soon event: {e}", exc_info=True)
         return False
 
 
@@ -196,8 +316,8 @@ async def publish_task_failed(
         )
 
         event = Event(
-            event_type=EventType.TASK_FAILED,
-            source=ServiceSource.TASK_SERVICE,
+            event_type="task.failed",
+            source="task_service",
             data=event_data.model_dump(),
         )
 
@@ -208,7 +328,7 @@ async def publish_task_failed(
 
         if result:
             logger.warning(
-                f"�  Published task.failed event for task {task_id}, execution {execution_id}"
+                f"�  Published task.failed event for task {task_id}, execution {execution_id}"
             )
         else:
             logger.error(
@@ -225,5 +345,7 @@ async def publish_task_failed(
 __all__ = [
     "publish_task_created",
     "publish_task_completed",
+    "publish_task_assigned",
+    "publish_task_due_soon",
     "publish_task_failed",
 ]

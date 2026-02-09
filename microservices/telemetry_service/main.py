@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.nats_client import get_event_bus, Event, EventType, ServiceSource
+from core.nats_client import get_event_bus, Event
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     TelemetryDataPoint, TelemetryBatchRequest, MetricDefinitionRequest,
@@ -75,9 +75,10 @@ class TelemetryMicroservice:
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA['tags'],
                     meta=consul_meta,
-                    health_check_type='http'
+                    health_check_type='ttl'  # Use TTL for reliable health checks
                 )
                 self.consul_registry.register()
+                self.consul_registry.start_maintenance()  # Start TTL heartbeat
                 logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -128,10 +129,18 @@ async def lifespan(app: FastAPI):
             # Subscribe to device.deleted events
             await event_bus.subscribe_to_events(
                 pattern="device_service.device.deleted",
-                handler=event_handler.handle_event
+                handler=event_handler.handle_event,
+                durable="telemetry_device_deleted"
             )
 
-            logger.info("✅ Event subscriptions set up successfully")
+            # Subscribe to user.deleted events for cleanup
+            await event_bus.subscribe_to_events(
+                pattern="account_service.user.deleted",
+                handler=event_handler.handle_event,
+                durable="telemetry_user_deleted"
+            )
+
+            logger.info("✅ Event subscriptions set up successfully (device.deleted, user.deleted)")
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
 
@@ -152,6 +161,7 @@ app = FastAPI(
 # Health Check Endpoints
 # ======================
 
+@app.get("/api/v1/telemetry/health")
 @app.get("/health")
 async def health_check():
     """基础健康检查"""
@@ -410,6 +420,61 @@ async def get_metric_definition(
         raise HTTPException(status_code=404, detail="Metric definition not found")
     except Exception as e:
         logger.error(f"Error getting metric definition: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/v1/telemetry/metrics/{metric_name}", response_model=MetricDefinitionResponse)
+async def update_metric_definition(
+    metric_name: str = Path(..., description="Metric name"),
+    request: MetricDefinitionRequest = Body(...),
+    user_context: Dict[str, Any] = Depends(get_user_context)
+):
+    """更新指标定义 (data_type不可更改)"""
+    try:
+        # First check if it exists
+        metric_def = await microservice.service.repository.get_metric_definition_by_name(metric_name)
+        if not metric_def:
+            raise HTTPException(status_code=404, detail="Metric definition not found")
+
+        # Prepare update data (excluding immutable fields)
+        update_data = {
+            "description": request.description,
+            "metric_type": request.metric_type.value if hasattr(request.metric_type, 'value') else request.metric_type,
+            "unit": request.unit,
+            "min_value": request.min_value,
+            "max_value": request.max_value,
+            "retention_days": request.retention_days,
+            "aggregation_interval": request.aggregation_interval,
+            "tags": request.tags,
+            "metadata": request.metadata
+        }
+
+        result = await microservice.service.repository.update_metric_definition(
+            metric_def["metric_id"], update_data
+        )
+
+        if result:
+            return MetricDefinitionResponse(
+                metric_id=result["metric_id"],
+                name=result["name"],
+                description=result.get("description"),
+                data_type=DataType(result["data_type"]),
+                metric_type=MetricType(result["metric_type"]),
+                unit=result.get("unit"),
+                min_value=result.get("min_value"),
+                max_value=result.get("max_value"),
+                retention_days=result["retention_days"],
+                aggregation_interval=result["aggregation_interval"],
+                tags=result.get("tags", []),
+                metadata=result.get("metadata", {}),
+                created_at=result["created_at"],
+                updated_at=result["updated_at"],
+                created_by=result["created_by"]
+            )
+        raise HTTPException(status_code=500, detail="Failed to update metric definition")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating metric definition: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/v1/telemetry/metrics/{metric_name}")
@@ -717,6 +782,29 @@ async def enable_alert_rule(
         raise HTTPException(status_code=404, detail="Alert rule not found")
     except Exception as e:
         logger.error(f"Error enabling/disabling alert rule: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/v1/telemetry/alerts/rules/{rule_id}")
+async def delete_alert_rule(
+    rule_id: str = Path(..., description="Alert rule ID"),
+    user_context: Dict[str, Any] = Depends(get_user_context)
+):
+    """删除警报规则"""
+    try:
+        # First check if it exists
+        rule = await microservice.service.repository.get_alert_rule(rule_id)
+        if not rule:
+            raise HTTPException(status_code=404, detail="Alert rule not found")
+
+        success = await microservice.service.repository.delete_alert_rule(rule_id)
+        if success:
+            return {"message": "Alert rule deleted successfully"}
+
+        raise HTTPException(status_code=500, detail="Failed to delete alert rule")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting alert rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/telemetry/alerts", response_model=AlertListResponse)

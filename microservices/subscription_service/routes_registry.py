@@ -5,9 +5,9 @@ Defines service metadata and routes for Consul registration.
 """
 
 SERVICE_METADATA = {
-    "service_name": "subscription",
+    "service_name": "subscription_service",
     "version": "1.0.0",
-    "tags": ["subscription", "credits", "billing", "microservice"],
+    "tags": ["v1", "subscription", "credits", "billing", "microservice"],
     "capabilities": [
         "subscription_management",
         "credit_allocation",
@@ -21,6 +21,7 @@ SERVICE_METADATA = {
 ROUTES = [
     # Health endpoints
     {"path": "/health", "methods": ["GET"], "description": "Health check"},
+    {"path": "/api/v1/subscriptions/health", "methods": ["GET"], "auth_required": False, "description": "Service health check (API v1)"},
     {"path": "/health/detailed", "methods": ["GET"], "description": "Detailed health check"},
 
     # Subscription CRUD

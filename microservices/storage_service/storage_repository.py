@@ -35,15 +35,22 @@ class StorageRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_grpc_service',
-            default_host='isa-postgres-grpc',
-            default_port=50061,
+            service_name='postgres_service',
+            default_host='localhost',
+            default_port=5432,
             env_host_key='POSTGRES_HOST',
             env_port_key='POSTGRES_PORT'
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id='storage_service')
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            database=os.getenv("POSTGRES_DB", "isa_platform"),
+            username=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
+            user_id='storage_service'
+        )
         # Table names (storage schema)
         self.schema = "storage"
         self.files_table = "storage_files"

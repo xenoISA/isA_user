@@ -59,6 +59,8 @@ class MediaEventHandler:
                 await self.handle_file_uploaded_with_ai(data)
             elif event_type == "file.uploaded" or event_type == "FILE_UPLOADED":
                 await self.handle_file_uploaded(data)
+            elif event_type == "user.deleted" or event_type == "USER_DELETED":
+                await self.handle_user_deleted(data)
             else:
                 logger.warning(f"Unknown event type: {event_type}")
 
@@ -172,6 +174,53 @@ class MediaEventHandler:
 
         except Exception as e:
             logger.error(f"Error handling device.deleted event: {e}", exc_info=True)
+
+    async def handle_user_deleted(self, event_data: Dict[str, Any]):
+        """
+        Handle user.deleted event - Clean up all user media resources
+
+        When a user is deleted, we need to:
+        1. Delete all photo metadata for this user
+        2. Delete all rotation schedules for this user
+        3. Delete all photo versions for this user
+
+        Args:
+            event_data: Event data containing user_id
+        """
+        try:
+            user_id = event_data.get("user_id")
+
+            if not user_id:
+                logger.warning("user.deleted event missing user_id")
+                return
+
+            logger.info(f"Handling user.deleted event for user_id={user_id}")
+
+            # 1. Delete all photo metadata for this user
+            try:
+                deleted_count = await self.media_service.repository.delete_all_user_metadata(user_id)
+                logger.info(f"Deleted {deleted_count} photo metadata records for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error deleting photo metadata for user {user_id}: {e}")
+
+            # 2. Delete all rotation schedules for this user
+            try:
+                schedules_deleted = await self.media_service.repository.delete_all_user_schedules(user_id)
+                logger.info(f"Deleted {schedules_deleted} rotation schedules for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error deleting rotation schedules for user {user_id}: {e}")
+
+            # 3. Delete all photo versions for this user
+            try:
+                versions_deleted = await self.media_service.repository.delete_all_user_photo_versions(user_id)
+                logger.info(f"Deleted {versions_deleted} photo versions for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error deleting photo versions for user {user_id}: {e}")
+
+            logger.info(f"Successfully handled user.deleted event for user_id={user_id}")
+
+        except Exception as e:
+            logger.error(f"Error handling user.deleted event: {e}", exc_info=True)
 
     async def handle_file_uploaded(self, event_data: Dict[str, Any]):
         """

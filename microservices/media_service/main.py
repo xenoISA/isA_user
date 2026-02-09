@@ -41,6 +41,7 @@ from .media_service import (
     MediaPermissionError
 )
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
+from .factory import create_media_service
 
 # Initialize configuration
 config_manager = ConfigManager("media_service")
@@ -64,49 +65,69 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Media Service...")
 
     # Initialize NATS event bus
+    nats_healthy = False
     try:
         event_bus = await get_event_bus("media_service")
-        logger.info("✅ Event bus initialized successfully")
+        # Check if NATS is actually healthy before subscribing
+        if event_bus and hasattr(event_bus, 'check_health'):
+            health = await event_bus.check_health()
+            nats_healthy = health.get('healthy', False)
+        else:
+            nats_healthy = event_bus is not None
+        logger.info(f"✅ Event bus initialized (healthy: {nats_healthy})")
     except Exception as e:
         logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
 
-    # Initialize service
-    media_service = MediaService(event_bus=event_bus)
+    # Initialize service (using factory pattern)
+    media_service = create_media_service(config=config_manager, event_bus=event_bus)
 
-    # Subscribe to events for cleanup and synchronization
-    if event_bus:
+    # Subscribe to events ONLY if NATS is healthy (to avoid infinite reconnection loops)
+    if event_bus and nats_healthy:
         try:
             from .events import MediaEventHandler
             event_handler = MediaEventHandler(media_service)
 
-            # Subscribe to all storage/device events using wildcard pattern
-            # This catches: file.uploaded, file.uploaded.with_ai, file.deleted, device.deleted
-            # Note: EventType enum values are lowercase (e.g., "file.uploaded.with_ai")
-            # Events are published to: events.storage_service.file.uploaded.with_ai
-            # subscribe_to_events automatically prepends "events." so we don't include it here
+            # Subscribe to storage/device events using same pattern format as album_service
             await event_bus.subscribe_to_events(
-                pattern="*.file.>",  # Will match events.storage_service.file.* (subscribe_to_events adds "events." prefix)
+                pattern="events.*.file.uploaded.with_ai",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="media-file-consumer-v3"  # Changed to v3 with correct pattern
+                durable="media-file-uploaded-consumer"
             )
-            logger.info("✅ Subscribed to file events (*.file.>)")
+            logger.info("✅ Subscribed to file.uploaded.with_ai events")
 
             await event_bus.subscribe_to_events(
-                pattern="*.device.>",  # Will match events.device_service.device.* (subscribe_to_events adds "events." prefix)
+                pattern="events.*.file.deleted",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="media-device-consumer-v3"  # Changed to v3 with correct pattern
+                durable="media-file-deleted-consumer"
             )
-            logger.info("✅ Subscribed to device events (*.device.>)")
+            logger.info("✅ Subscribed to file.deleted events")
+
+            await event_bus.subscribe_to_events(
+                pattern="events.*.device.deleted",
+                handler=lambda msg: event_handler.handle_event(msg),
+                durable="media-device-deleted-consumer"
+            )
+            logger.info("✅ Subscribed to device.deleted events")
+
+            await event_bus.subscribe_to_events(
+                pattern="events.*.user.deleted",
+                handler=lambda msg: event_handler.handle_event(msg),
+                durable="media-user-deleted-consumer"
+            )
+            logger.info("✅ Subscribed to user.deleted events")
 
         except Exception as e:
             logger.error(f"Failed to subscribe to events: {e}")
+    elif event_bus:
+        logger.warning("⚠️  Skipping event subscriptions - NATS not healthy (prevents infinite reconnection loops)")
 
     # Check database connection
     health = await media_service.check_health()
     if health.get("status") != "healthy":
-        logger.error("Failed to connect to database")
-        raise RuntimeError("Database connection failed")
+        logger.warning("⚠️  Database connection failed. Service will start but some features may be unavailable.")
+    else:
+        logger.info("✅ Database connection verified")
 
     # Consul 服务注册
     if service_config.consul_enabled:
@@ -128,9 +149,10 @@ async def lifespan(app: FastAPI):
                 consul_port=service_config.consul_port,
                 tags=SERVICE_METADATA['tags'],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type='ttl'  # Use TTL for reliable health checks
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
             logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -200,6 +222,7 @@ async def root():
     )
 
 
+@app.get("/api/v1/media/health")
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""

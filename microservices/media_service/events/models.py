@@ -5,6 +5,40 @@ Defines Pydantic models for events published and consumed by media_service
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class MediaEventType(str, Enum):
+    """
+    Events published by media_service.
+
+    Stream: media-stream
+    Subjects: media.>
+    """
+    PHOTO_VERSION_CREATED = "media.photo_version.created"
+    PHOTO_METADATA_UPDATED = "media.photo_metadata.updated"
+    PLAYLIST_CREATED = "media.playlist.created"
+    PLAYLIST_UPDATED = "media.playlist.updated"
+    PLAYLIST_DELETED = "media.playlist.deleted"
+    PHOTO_CACHED = "media.photo.cached"
+
+
+class MediaSubscribedEventType(str, Enum):
+    """Events that media_service subscribes to from other services."""
+    FILE_UPLOADED = "file.uploaded"
+    FILE_UPLOADED_WITH_AI = "file.uploaded.with_ai"
+
+
+class MediaStreamConfig:
+    """Stream configuration for media_service"""
+    STREAM_NAME = "media-stream"
+    SUBJECTS = ["media.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "media"
+
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 

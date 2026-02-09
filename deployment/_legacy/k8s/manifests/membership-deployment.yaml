@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: membership_service
+# Regenerate with: python -m agents.tools.generate_config --deployment membership_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: membership
+  namespace: isa-cloud-staging
+  labels:
+    app: membership
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: membership
+  template:
+    metadata:
+      labels:
+        app: membership
+    spec:
+      containers:
+      - name: membership
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8250
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "membership_service"
+        - name: SERVICE_PORT
+          value: "8250"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.membership_service.main:app", "--host", "0.0.0.0", "--port", "8250"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8250
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8250
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: membership
+  namespace: isa-cloud-staging
+  labels:
+    app: membership
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8250
+    targetPort: 8250
+    protocol: TCP
+    name: http
+  selector:
+    app: membership

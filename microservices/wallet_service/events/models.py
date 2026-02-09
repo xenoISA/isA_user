@@ -5,10 +5,44 @@ wallet_service 专属的事件数据结构定义
 """
 
 from datetime import datetime
+from enum import Enum
 from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class WalletEventType(str, Enum):
+    """
+    Events published by wallet_service.
+
+    Stream: wallet-stream
+    Subjects: wallet.>
+    """
+    WALLET_CREATED = "wallet.created"
+    WALLET_DEPOSITED = "wallet.deposited"
+    WALLET_WITHDRAWN = "wallet.withdrawn"
+    WALLET_CONSUMED = "wallet.consumed"
+    WALLET_TRANSFERRED = "wallet.transferred"
+    WALLET_REFUNDED = "wallet.refunded"
+
+
+class WalletSubscribedEventType(str, Enum):
+    """Events that wallet_service subscribes to from other services."""
+    USER_CREATED = "user.created"
+    BILLING_CALCULATED = "billing.calculated"
+
+
+class WalletStreamConfig:
+    """Stream configuration for wallet_service"""
+    STREAM_NAME = "wallet-stream"
+    SUBJECTS = ["wallet.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "wallet"
+
 
 
 class BillingCalculatedEventData(BaseModel):

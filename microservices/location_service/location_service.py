@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .location_repository import LocationRepository
 from .models import (
@@ -130,8 +130,8 @@ class LocationService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.LOCATION_UPDATED,
-                            source=ServiceSource.LOCATION_SERVICE,
+                            event_type="location.updated",
+                            source="location_service",
                             data={
                                 "location_id": location_id,
                                 "device_id": request.device_id,
@@ -333,8 +333,8 @@ class LocationService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.GEOFENCE_CREATED,
-                            source=ServiceSource.LOCATION_SERVICE,
+                            event_type="location.geofence.created",
+                            source="location_service",
                             data={
                                 "geofence_id": geofence_id,
                                 "name": request.name,
@@ -461,8 +461,8 @@ class LocationService:
                 if self.event_bus:
                     try:
                         event = Event(
-                            event_type=EventType.GEOFENCE_DELETED,
-                            source=ServiceSource.LOCATION_SERVICE,
+                            event_type="location.geofence.deleted",
+                            source="location_service",
                             data={"geofence_id": geofence_id, "user_id": user_id},
                         )
                         await self.event_bus.publish_event(event)
@@ -556,8 +556,8 @@ class LocationService:
                 if self.event_bus and geofence.get("trigger_on_enter"):
                     try:
                         event = Event(
-                            event_type=EventType.GEOFENCE_ENTERED,
-                            source=ServiceSource.LOCATION_SERVICE,
+                            event_type="location.geofence.entered",
+                            source="location_service",
                             data={
                                 "geofence_id": geofence["geofence_id"],
                                 "geofence_name": geofence["name"],

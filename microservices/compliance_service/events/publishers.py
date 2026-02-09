@@ -7,7 +7,7 @@ Compliance Service Event Publishers
 import logging
 from datetime import datetime
 from typing import Optional
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,8 @@ async def publish_compliance_check_performed(
 
     try:
         event = Event(
-            event_type=EventType.COMPLIANCE_CHECK_PERFORMED,
-            source=ServiceSource.COMPLIANCE_SERVICE,
+            event_type="compliance.check.performed",
+            source="compliance_service",
             data={
                 "check_id": check_id,
                 "user_id": user_id,
@@ -109,8 +109,8 @@ async def publish_compliance_violation_detected(
 
     try:
         event = Event(
-            event_type=EventType.COMPLIANCE_VIOLATION_DETECTED,
-            source=ServiceSource.COMPLIANCE_SERVICE,
+            event_type="compliance.violation.detected",
+            source="compliance_service",
             data={
                 "check_id": check_id,
                 "user_id": user_id,
@@ -164,8 +164,8 @@ async def publish_compliance_warning_issued(
         warning_types = [w.get("check_type", "unknown") for w in warnings]
 
         event = Event(
-            event_type=EventType.COMPLIANCE_WARNING_ISSUED,
-            source=ServiceSource.COMPLIANCE_SERVICE,
+            event_type="compliance.warning.issued",
+            source="compliance_service",
             data={
                 "check_id": check_id,
                 "user_id": user_id,

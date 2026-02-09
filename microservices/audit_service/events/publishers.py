@@ -7,7 +7,7 @@ Note: Audit service primarily consumes events from other services.
 
 import logging
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import create_audit_event_recorded_event_data
 
@@ -49,8 +49,8 @@ async def publish_audit_event_recorded(
         )
 
         event = Event(
-            event_type=EventType.AUDIT_EVENT_RECORDED,
-            source=ServiceSource.AUDIT_SERVICE,
+            event_type="audit.event.recorded",
+            source="audit_service",
             data=event_data.model_dump(),
         )
 

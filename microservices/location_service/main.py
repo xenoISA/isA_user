@@ -100,9 +100,11 @@ async def lifespan(app: FastAPI):
                 consul_port=service_config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl"  # Use TTL for reliable health checks,
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info(
                 f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
             )
@@ -165,6 +167,7 @@ def get_user_id_from_request() -> str:
 # ==================== Health Check ====================
 
 
+@app.get("/api/v1/locations/health")
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""

@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: compliance_service
+# Regenerate with: python -m agents.tools.generate_config --deployment compliance_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compliance
+  namespace: isa-cloud-staging
+  labels:
+    app: compliance
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compliance
+  template:
+    metadata:
+      labels:
+        app: compliance
+    spec:
+      containers:
+      - name: compliance
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8226
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "compliance_service"
+        - name: SERVICE_PORT
+          value: "8226"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.compliance_service.main:app", "--host", "0.0.0.0", "--port", "8226"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8226
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8226
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: compliance
+  namespace: isa-cloud-staging
+  labels:
+    app: compliance
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8226
+    targetPort: 8226
+    protocol: TCP
+    name: http
+  selector:
+    app: compliance

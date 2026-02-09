@@ -2,17 +2,26 @@
 Billing Event Handlers
 
 处理计费相关的事件订阅
+
+Supports both:
+- Legacy: core.nats_client.Event (from NATSEventBus)
+- New: core.nats_transport.EventEnvelope (from NATSTransport)
+
+Both Event and EventEnvelope have the same interface:
+- .id, .type, .source, .data, .timestamp, .metadata
 """
 
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Set
+from typing import Set, Union
 
+# Support both old and new event types
 from core.nats_client import Event
+from core.nats_client import EventEnvelope
 
 from ..models import RecordUsageRequest, ServiceType
-from .models import UnitType, UsageEventData, parse_usage_event
+from .models import BillingSubscribedEventType, UnitType, UsageEventData, parse_usage_event
 from .publishers import (
     publish_billing_calculated,
     publish_billing_error,
@@ -20,6 +29,9 @@ from .publishers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Type alias for both event types
+EventType = Union[Event, EventEnvelope]
 
 
 # ============================================================================
@@ -346,6 +358,57 @@ async def handle_session_ended(event: Event, billing_service, event_bus):
 # ============================================================================
 
 
+async def handle_user_deleted(event: Event, billing_service, event_bus):
+    """
+    Handle user.deleted event
+
+    When a user is deleted:
+    - Finalize any pending billing records
+    - Mark user's billing history as from deleted account
+    - Cancel any active subscriptions
+
+    Args:
+        event: Event object
+        billing_service: BillingService instance
+        event_bus: Event bus instance
+    """
+    try:
+        # Check idempotency
+        if is_event_processed(event.id):
+            logger.debug(f"Event {event.id} already processed, skipping")
+            return
+
+        user_id = event.data.get("user_id")
+
+        if not user_id:
+            logger.warning(f"user.deleted event missing user_id: {event.id}")
+            return
+
+        logger.info(f"Handling user.deleted event for user {user_id}")
+
+        # Finalize any pending billing records
+        try:
+            await billing_service.finalize_user_billing(user_id)
+            logger.info(f"Finalized pending billing for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to finalize billing for user {user_id}: {e}")
+
+        # Cancel any active subscriptions
+        try:
+            await billing_service.cancel_user_subscriptions(user_id, reason="user_deleted")
+            logger.info(f"Cancelled subscriptions for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to cancel subscriptions for user {user_id}: {e}")
+
+        # Mark as processed
+        mark_event_processed(event.id)
+
+        logger.info(f"Successfully handled user.deleted event for user {user_id}")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to handle user.deleted event {event.id}: {e}")
+
+
 def get_event_handlers(billing_service, event_bus):
     """
     获取所有事件处理器的映射
@@ -370,6 +433,10 @@ def get_event_handlers(billing_service, event_bus):
             event, billing_service, event_bus
         ),
         "session.ended": lambda event: handle_session_ended(
+            event, billing_service, event_bus
+        ),
+        # User lifecycle
+        "user.deleted": lambda event: handle_user_deleted(
             event, billing_service, event_bus
         ),
     }

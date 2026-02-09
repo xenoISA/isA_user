@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 from .models import (
     TelemetryDataReceivedEvent,
     MetricDefinedEvent,
@@ -47,8 +47,8 @@ async def publish_telemetry_data_received(
         )
 
         event = Event(
-            event_type=EventType.TELEMETRY_DATA_RECEIVED,
-            source=ServiceSource.TELEMETRY_SERVICE,
+            event_type="telemetry.data.received",
+            source="telemetry_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -97,8 +97,8 @@ async def publish_metric_defined(
         )
 
         event = Event(
-            event_type=EventType.METRIC_DEFINED,
-            source=ServiceSource.TELEMETRY_SERVICE,
+            event_type="metric.defined",
+            source="telemetry_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -153,8 +153,8 @@ async def publish_alert_rule_created(
         )
 
         event = Event(
-            event_type=EventType.ALERT_RULE_CREATED,
-            source=ServiceSource.TELEMETRY_SERVICE,
+            event_type="alert.rule.created",
+            source="telemetry_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -209,8 +209,8 @@ async def publish_alert_triggered(
         )
 
         event = Event(
-            event_type=EventType.ALERT_TRIGGERED,
-            source=ServiceSource.TELEMETRY_SERVICE,
+            event_type="alert.triggered",
+            source="telemetry_service",
             data=event_data.model_dump(mode='json')
         )
 
@@ -265,8 +265,8 @@ async def publish_alert_resolved(
         )
 
         event = Event(
-            event_type=EventType.ALERT_RESOLVED,
-            source=ServiceSource.TELEMETRY_SERVICE,
+            event_type="alert.resolved",
+            source="telemetry_service",
             data=event_data.model_dump(mode='json')
         )
 

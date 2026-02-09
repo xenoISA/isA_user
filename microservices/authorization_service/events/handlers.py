@@ -34,6 +34,7 @@ class AuthorizationEventHandlers:
         """
         return {
             "user.deleted": self.handle_user_deleted,
+            "organization.deleted": self.handle_organization_deleted,
             "organization.member_added": self.handle_org_member_added,
             "organization.member_removed": self.handle_org_member_removed,
         }
@@ -78,6 +79,43 @@ class AuthorizationEventHandlers:
 
         except Exception as e:
             logger.error(f"Error handling user.deleted event: {e}")
+
+    async def handle_organization_deleted(self, event_data: dict):
+        """
+        Handle organization.deleted event - cleanup all organization permissions
+
+        Event data expected:
+        {
+            "organization_id": "org123",
+            "timestamp": "2024-01-01T00:00:00Z"
+        }
+        """
+        try:
+            organization_id = event_data.get("organization_id")
+            if not organization_id:
+                logger.error("organization.deleted event missing organization_id")
+                return
+
+            logger.info(f"Handling organization.deleted event for org: {organization_id}")
+
+            # Delete all organization-level permissions
+            try:
+                deleted_org_perms = await self.repository.delete_organization_permissions(organization_id)
+                logger.info(f"Deleted {deleted_org_perms} organization permission records")
+            except Exception as e:
+                logger.error(f"Failed to delete organization permissions: {e}")
+
+            # Revoke all user permissions granted by this organization
+            try:
+                revoked_user_perms = await self.repository.revoke_permissions_by_organization(organization_id)
+                logger.info(f"Revoked {revoked_user_perms} user permissions from org {organization_id}")
+            except Exception as e:
+                logger.error(f"Failed to revoke user permissions: {e}")
+
+            logger.info(f"Cleaned up permissions for deleted organization {organization_id}")
+
+        except Exception as e:
+            logger.error(f"Error handling organization.deleted event: {e}")
 
     async def handle_org_member_added(self, event_data: dict):
         """

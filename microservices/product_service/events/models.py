@@ -5,9 +5,39 @@ Pydantic models for events published by product service
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class ProductEventType(str, Enum):
+    """
+    Events published by product_service.
+
+    Stream: product-stream
+    Subjects: product.>
+    """
+    PRODUCT_CREATED = "product.created"
+    PRODUCT_UPDATED = "product.updated"
+    PRODUCT_AVAILABILITY_CHANGED = "product.availability.changed"
+    USAGE_RECORDED = "product.usage.recorded"
+
+
+class ProductSubscribedEventType(str, Enum):
+    """Events that product_service subscribes to from other services."""
+    pass  # No subscribed events
+
+
+class ProductStreamConfig:
+    """Stream configuration for product_service"""
+    STREAM_NAME = "product-stream"
+    SUBJECTS = ["product.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "product"
+
 from typing import Optional, Dict, Any
 from datetime import datetime
-from enum import Enum
 
 
 class SubscriptionCreatedEvent(BaseModel):

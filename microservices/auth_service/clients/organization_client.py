@@ -34,7 +34,7 @@ class OrganizationServiceClient:
 
         Args:
             organization_id: Organization ID
-            user_id: User ID (optional, for access control)
+            user_id: User ID for access control (required by underlying client)
 
         Returns:
             Organization details or None if not found
@@ -45,7 +45,8 @@ class OrganizationServiceClient:
                 return None
 
             result = await self.client.get_organization(
-                organization_id=organization_id
+                organization_id=organization_id,
+                user_id=user_id or "internal-service"
             )
 
             return result

@@ -281,3 +281,49 @@ async def handle_device_pairing_completed(
         
     except Exception as e:
         logger.error(f"Error handling device.pairing.completed event: {e}", exc_info=True)
+
+
+# ============================================================================
+# DeviceEventHandler Class (for compatibility with main.py)
+# ============================================================================
+
+class DeviceEventHandler:
+    """Event handler class for device service"""
+
+    def __init__(self, device_service: 'DeviceService'):
+        self.device_service = device_service
+        self._handlers = {
+            "firmware.uploaded": self._handle_firmware_uploaded,
+            "update.completed": self._handle_update_completed,
+            "telemetry.data.received": self._handle_telemetry_data,
+            "device.pairing.completed": self._handle_device_pairing_completed,
+        }
+
+    async def handle_event(self, msg):
+        """Handle incoming NATS message"""
+        try:
+            import json
+            data = json.loads(msg.data.decode()) if hasattr(msg, 'data') else msg
+            event_type = data.get('type', data.get('event_type', ''))
+
+            # Find matching handler
+            for pattern, handler in self._handlers.items():
+                if pattern in event_type.lower():
+                    await handler(data)
+                    return
+
+            logger.debug(f"No handler for event type: {event_type}")
+        except Exception as e:
+            logger.error(f"Error handling event: {e}", exc_info=True)
+
+    async def _handle_firmware_uploaded(self, event_data):
+        await handle_firmware_uploaded(event_data, self.device_service, None)
+
+    async def _handle_update_completed(self, event_data):
+        await handle_update_completed(event_data, self.device_service, None)
+
+    async def _handle_telemetry_data(self, event_data):
+        await handle_telemetry_data(event_data, self.device_service, None)
+
+    async def _handle_device_pairing_completed(self, event_data):
+        await handle_device_pairing_completed(event_data, self.device_service, None)

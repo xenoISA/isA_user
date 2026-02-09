@@ -5,6 +5,43 @@ Pydantic models for all events published by Memory Service
 """
 
 from pydantic import BaseModel, Field
+from enum import Enum
+
+# =============================================================================
+# Event Type Definitions (Service-Specific)
+# =============================================================================
+
+class MemoryEventType(str, Enum):
+    """
+    Events published by memory_service.
+
+    Stream: memory-stream
+    Subjects: memory.>
+    """
+    MEMORY_CREATED = "memory.created"
+    MEMORY_UPDATED = "memory.updated"
+    MEMORY_DELETED = "memory.deleted"
+    FACTUAL_MEMORY_STORED = "memory.factual.stored"
+    EPISODIC_MEMORY_STORED = "memory.episodic.stored"
+    PROCEDURAL_MEMORY_STORED = "memory.procedural.stored"
+    SEMANTIC_MEMORY_STORED = "memory.semantic.stored"
+    WORKING_MEMORY_ACTIVATED = "memory.working.activated"
+    SESSION_MEMORY_DEACTIVATED = "memory.session.deactivated"
+
+
+class MemorySubscribedEventType(str, Enum):
+    """Events that memory_service subscribes to from other services."""
+    SESSION_ENDED = "session.ended"
+    USER_DELETED = "user.deleted"
+
+
+class MemoryStreamConfig:
+    """Stream configuration for memory_service"""
+    STREAM_NAME = "memory-stream"
+    SUBJECTS = ["memory.>"]
+    MAX_MESSAGES = 100000
+    CONSUMER_PREFIX = "memory"
+
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 

@@ -9,7 +9,7 @@ import logging
 from decimal import Decimal
 from typing import Optional
 
-from core.nats_client import Event, EventType, ServiceSource
+from core.nats_client import Event
 
 from .models import (
     create_tokens_deducted_event_data,
@@ -74,8 +74,8 @@ async def publish_tokens_deducted(
 
         # Create event
         event = Event(
-            event_type=EventType.WALLET_CONSUMED,
-            source=ServiceSource.WALLET_SERVICE,
+            event_type="wallet.consumed",
+            source="wallet_service",
             data=event_data.model_dump(),
         )
 
@@ -142,8 +142,8 @@ async def publish_tokens_insufficient(
 
         # Create event
         event = Event(
-            event_type=EventType.WALLET_CONSUMED,
-            source=ServiceSource.WALLET_SERVICE,
+            event_type="wallet.consumed",
+            source="wallet_service",
             data=event_data.model_dump(),
         )
 
@@ -208,8 +208,8 @@ async def publish_wallet_created(
         }
 
         event = Event(
-            event_type=EventType.WALLET_CREATED,
-            source=ServiceSource.WALLET_SERVICE,
+            event_type="wallet.created",
+            source="wallet_service",
             data=event_data,
         )
 
@@ -265,8 +265,8 @@ async def publish_balance_low_warning(
         }
 
         event = Event(
-            event_type=EventType.WALLET_CONSUMED,  # Reuse existing type
-            source=ServiceSource.WALLET_SERVICE,
+            event_type="wallet.consumed",  # Reuse existing type
+            source="wallet_service",
             data=event_data,
         )
 
@@ -333,8 +333,8 @@ async def publish_deposit_completed(
         }
 
         event = Event(
-            event_type=EventType.WALLET_DEPOSITED,
-            source=ServiceSource.WALLET_SERVICE,
+            event_type="wallet.deposited",
+            source="wallet_service",
             data=event_data,
         )
 

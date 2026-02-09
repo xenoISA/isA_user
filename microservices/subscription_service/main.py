@@ -38,8 +38,9 @@ from .models import (
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Import local components
-from .subscription_service import (
-    SubscriptionService,
+from .subscription_service import SubscriptionService
+from .factory import create_subscription_service
+from .protocols import (
     SubscriptionServiceError,
     SubscriptionNotFoundError,
     SubscriptionValidationError,
@@ -68,8 +69,9 @@ class SubscriptionMicroservice:
         """Initialize the microservice"""
         try:
             self.event_bus = event_bus
-            self.subscription_service = SubscriptionService(
-                event_bus=event_bus, config=config_manager
+            # Use factory to create service with real dependencies
+            self.subscription_service = create_subscription_service(
+                config=config_manager, event_bus=event_bus
             )
             await self.subscription_service.initialize()
             logger.info("Subscription microservice initialized successfully")
@@ -152,9 +154,11 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="http",
+                health_check_type="ttl"  # Use TTL for reliable health checks,
             )
             subscription_microservice.consul_registry.register()
+            subscription_microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
+            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info(
                 f"Service registered with Consul: {route_meta.get('route_count')} routes"
             )
@@ -192,6 +196,7 @@ def get_subscription_service() -> SubscriptionService:
 # Health Endpoints
 # ====================
 
+@app.get("/api/v1/subscriptions/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""

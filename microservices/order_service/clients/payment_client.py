@@ -94,6 +94,47 @@ class PaymentClient:
             logger.error(f"Error creating payment intent: {e}")
             return None
 
+    async def create_payment_intent_v2(
+        self,
+        user_id: str,
+        amount: Decimal,
+        currency: str = "USD",
+        order_id: Optional[str] = None,
+        subtotal_amount: Optional[Decimal] = None,
+        tax_amount: Optional[Decimal] = None,
+        shipping_amount: Optional[Decimal] = None,
+        discount_amount: Optional[Decimal] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create payment intent (v2 path + amount breakdown)
+        """
+        payload = {
+            "user_id": user_id,
+            "amount": float(amount),
+            "currency": currency,
+            "order_id": order_id,
+            "subtotal_amount": float(subtotal_amount) if subtotal_amount is not None else None,
+            "tax_amount": float(tax_amount) if tax_amount is not None else None,
+            "shipping_amount": float(shipping_amount) if shipping_amount is not None else None,
+            "discount_amount": float(discount_amount) if discount_amount is not None else None,
+            "metadata": metadata or {},
+        }
+
+        try:
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/payments/payments/intent",
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to create payment intent v2: {e.response.status_code}")
+            return None
+        except Exception as e:
+            logger.error(f"Error creating payment intent v2: {e}")
+            return None
+
     async def get_payment_status(self, payment_intent_id: str) -> Optional[Dict[str, Any]]:
         """
         Get payment status

@@ -42,6 +42,7 @@ from .models import (
 from .memory_service import MemoryService
 from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
+from .factory import create_memory_service
 
 # Initialize configuration
 config_manager = ConfigManager("memory_service")
@@ -66,13 +67,13 @@ async def lifespan(app: FastAPI):
     event_bus = None
     event_handlers = None
     try:
-        from .event_handlers import MemoryEventHandlers
+        from .events import MemoryEventHandlers
 
         event_bus = await get_event_bus("memory_service")
         logger.info("✅ Event bus initialized successfully")
 
-        # Initialize service with event bus
-        memory_service = MemoryService(event_bus=event_bus)
+        # Initialize service with event bus (using factory pattern)
+        memory_service = create_memory_service(event_bus=event_bus)
 
         # Check database connection
         if not await memory_service.check_connection():
@@ -95,8 +96,8 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event subscriptions.")
         event_bus = None
 
-        # Initialize service without event bus
-        memory_service = MemoryService(event_bus=None)
+        # Initialize service without event bus (using factory pattern)
+        memory_service = create_memory_service(event_bus=None)
 
         # Check database connection
         if not await memory_service.check_connection():
@@ -123,9 +124,10 @@ async def lifespan(app: FastAPI):
                 consul_port=service_config.consul_port,
                 tags=SERVICE_METADATA['tags'],
                 meta=consul_meta,
-                health_check_type='http'
+                health_check_type='ttl'  # Use TTL for reliable health checks
             )
             consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
             logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -170,6 +172,7 @@ app.add_middleware(
 
 # ==================== Health Check ====================
 
+@app.get("/api/v1/memories/health")
 @app.get("/health", response_model=Dict[str, Any])
 async def health_check():
     """Health check endpoint"""
@@ -244,6 +247,12 @@ class StoreSessionMessageRequest(BaseModel):
     message_content: str
     message_type: str = "human"
     role: str = "user"
+
+
+class SummarizeSessionRequest(BaseModel):
+    user_id: str
+    force_update: bool = False
+    compression_level: str = "medium"  # low, medium, high
 
 
 @app.post("/api/v1/memories/factual/extract", response_model=MemoryOperationResult)
@@ -412,6 +421,92 @@ async def deactivate_session(
         return result
     except Exception as e:
         logger.error(f"Error deactivating session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/memories/session/{session_id}/summarize", response_model=MemoryOperationResult)
+async def summarize_session(
+    session_id: str,
+    request: SummarizeSessionRequest
+):
+    """
+    Summarize session conversation intelligently.
+
+    Creates or updates a summary of the session's messages based on compression level.
+    """
+    try:
+        # Get all session memories
+        memories = await memory_service.get_session_memories(request.user_id, session_id)
+
+        if not memories:
+            return MemoryOperationResult(
+                success=False,
+                operation="summarize_session",
+                message="No messages found in session to summarize"
+            )
+
+        # Get existing summary if not forcing update
+        existing_summary = None
+        if not request.force_update:
+            existing_summary = await memory_service.get_session_summary(request.user_id, session_id)
+            if existing_summary:
+                return MemoryOperationResult(
+                    success=True,
+                    operation="summarize_session",
+                    message="Using existing summary (use force_update=true to regenerate)",
+                    data=existing_summary
+                )
+
+        # Extract content from memories for summarization
+        contents = [m.get("content", "") for m in memories if m.get("content")]
+        combined_content = "\n".join(contents)
+
+        # Generate summary based on compression level
+        if request.compression_level == "low":
+            # Keep more detail
+            max_sentences = 10
+        elif request.compression_level == "high":
+            # Very compact
+            max_sentences = 3
+        else:
+            # Medium (default)
+            max_sentences = 5
+
+        # Simple sentence-based summarization (fallback without AI)
+        sentences = combined_content.replace("\n", " ").split(". ")
+        key_sentences = sentences[:max_sentences]
+        summary_text = ". ".join(key_sentences)
+        if summary_text and not summary_text.endswith("."):
+            summary_text += "."
+
+        # Store the summary
+        import uuid
+        summary_data = {
+            "id": str(uuid.uuid4()),
+            "session_id": session_id,
+            "summary": summary_text,
+            "key_points": key_sentences[:3],
+            "message_count": len(memories),
+            "compression_level": request.compression_level,
+            "created_at": datetime.now().isoformat()
+        }
+
+        # Store summary via repository
+        await memory_service.session_service.repository.store_session_summary(
+            user_id=request.user_id,
+            session_id=session_id,
+            summary_data=summary_data
+        )
+
+        return MemoryOperationResult(
+            success=True,
+            operation="summarize_session",
+            message=f"Session summarized ({len(memories)} messages → {len(key_sentences)} key points)",
+            data=summary_data
+        )
+
+    except Exception as e:
+        logger.error(f"Error summarizing session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -593,24 +688,126 @@ async def search_concepts_by_category(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== Vector Search Operations ====================
+
+@app.get("/api/v1/memories/factual/search/vector")
+async def search_factual_vector(
+    user_id: str = Query(...),
+    query: str = Query(...),
+    limit: int = Query(10, ge=1, le=100),
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0)
+):
+    """Vector similarity search for factual memories using Qdrant"""
+    try:
+        results = await memory_service.vector_search_factual(user_id, query, limit, score_threshold)
+        return {"memories": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Error in factual vector search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/memories/episodic/search/vector")
+async def search_episodic_vector(
+    user_id: str = Query(...),
+    query: str = Query(...),
+    limit: int = Query(10, ge=1, le=100),
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0)
+):
+    """Vector similarity search for episodic memories using Qdrant"""
+    try:
+        results = await memory_service.vector_search_episodic(user_id, query, limit, score_threshold)
+        return {"memories": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Error in episodic vector search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/memories/procedural/search/vector")
+async def search_procedural_vector(
+    user_id: str = Query(...),
+    query: str = Query(...),
+    limit: int = Query(10, ge=1, le=100),
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0)
+):
+    """Vector similarity search for procedural memories using Qdrant"""
+    try:
+        results = await memory_service.vector_search_procedural(user_id, query, limit, score_threshold)
+        return {"memories": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Error in procedural vector search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/memories/semantic/search/vector")
+async def search_semantic_vector(
+    user_id: str = Query(...),
+    query: str = Query(...),
+    limit: int = Query(10, ge=1, le=100),
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0)
+):
+    """Vector similarity search for semantic memories using Qdrant"""
+    try:
+        results = await memory_service.vector_search_semantic(user_id, query, limit, score_threshold)
+        return {"memories": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Error in semantic vector search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/memories/working/search/vector")
+async def search_working_vector(
+    user_id: str = Query(...),
+    query: str = Query(...),
+    limit: int = Query(10, ge=1, le=100),
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0),
+    include_expired: bool = Query(False)
+):
+    """Vector similarity search for working memories using Qdrant"""
+    try:
+        results = await memory_service.vector_search_working(user_id, query, limit, score_threshold, include_expired)
+        return {"memories": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Error in working vector search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/memories/session/search/vector")
+async def search_session_vector(
+    user_id: str = Query(...),
+    query: str = Query(...),
+    limit: int = Query(10, ge=1, le=100),
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0),
+    session_id: Optional[str] = Query(None)
+):
+    """Vector similarity search for session memories using Qdrant"""
+    try:
+        results = await memory_service.vector_search_session(user_id, query, limit, score_threshold, session_id)
+        return {"memories": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Error in session vector search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/v1/memories/search")
 async def search_all_memories(
     user_id: str = Query(...),
     query: str = Query(...),
     memory_types: Optional[str] = Query(None),
-    limit: int = Query(10, ge=1, le=100)
+    limit: int = Query(10, ge=1, le=100),
+    similarity_threshold: float = Query(0.15, ge=0.0, le=1.0)
 ):
     """
-    Universal search across all memory types or specified types
+    Universal semantic search across all memory types using vector similarity
 
     Args:
         user_id: User ID
         query: Search query string
         memory_types: Comma-separated memory types (e.g., "factual,episodic"). If not provided, searches all types.
         limit: Maximum number of results per memory type
+        similarity_threshold: Minimum similarity score (0.0-1.0)
 
     Returns:
-        Combined search results from all specified memory types
+        Combined search results from all specified memory types with similarity scores
     """
     try:
         results = {}
@@ -618,66 +815,121 @@ async def search_all_memories(
 
         # Parse memory types if provided, otherwise search all
         if memory_types:
-            types_to_search = [t.strip() for t in memory_types.split(',')]
+            types_to_search = [t.strip().upper() for t in memory_types.split(',')]
         else:
-            types_to_search = ['factual', 'episodic', 'procedural', 'semantic', 'working', 'session']
+            types_to_search = ['FACTUAL', 'EPISODIC', 'PROCEDURAL', 'SEMANTIC', 'WORKING', 'SESSION']
 
-        # Search factual memories
-        if 'factual' in types_to_search:
+        # Normalize to lowercase for internal use
+        types_lower = [t.lower() for t in types_to_search]
+
+        # Search factual memories using vector search
+        if 'factual' in types_lower:
             try:
-                factual_results = await memory_service.search_facts_by_subject(user_id, query, limit)
+                factual_results = await memory_service.vector_search_factual(
+                    user_id, query, limit, similarity_threshold
+                )
                 results['factual'] = factual_results
                 total_count += len(factual_results)
+                logger.info(f"Vector search found {len(factual_results)} factual memories for query: {query[:50]}...")
             except Exception as e:
-                logger.warning(f"Error searching factual memories: {e}")
-                results['factual'] = []
+                logger.warning(f"Error in factual vector search, falling back to text: {e}")
+                try:
+                    factual_results = await memory_service.search_facts_by_subject(user_id, query, limit)
+                    results['factual'] = factual_results
+                    total_count += len(factual_results)
+                except Exception as e2:
+                    logger.warning(f"Fallback text search also failed: {e2}")
+                    results['factual'] = []
 
-        # Search episodic memories
-        if 'episodic' in types_to_search:
+        # Search episodic memories using vector search
+        if 'episodic' in types_lower:
             try:
-                episodic_results = await memory_service.search_episodes_by_event_type(user_id, query, limit)
+                episodic_results = await memory_service.vector_search_episodic(
+                    user_id, query, limit, similarity_threshold
+                )
                 results['episodic'] = episodic_results
                 total_count += len(episodic_results)
+                logger.info(f"Vector search found {len(episodic_results)} episodic memories")
             except Exception as e:
-                logger.warning(f"Error searching episodic memories: {e}")
-                results['episodic'] = []
+                logger.warning(f"Error in episodic vector search, falling back to text: {e}")
+                try:
+                    episodic_results = await memory_service.search_episodes_by_event_type(user_id, query, limit)
+                    results['episodic'] = episodic_results
+                    total_count += len(episodic_results)
+                except Exception as e2:
+                    logger.warning(f"Fallback text search also failed: {e2}")
+                    results['episodic'] = []
 
-        # Search procedural memories
-        if 'procedural' in types_to_search:
+        # Search procedural memories using vector search
+        if 'procedural' in types_lower:
             try:
-                procedural_results = await memory_service.search_procedures_by_skill_type(user_id, query, limit)
+                procedural_results = await memory_service.vector_search_procedural(
+                    user_id, query, limit, similarity_threshold
+                )
                 results['procedural'] = procedural_results
                 total_count += len(procedural_results)
+                logger.info(f"Vector search found {len(procedural_results)} procedural memories")
             except Exception as e:
-                logger.warning(f"Error searching procedural memories: {e}")
-                results['procedural'] = []
+                logger.warning(f"Error in procedural vector search, falling back to text: {e}")
+                try:
+                    procedural_results = await memory_service.search_procedures_by_skill_type(user_id, query, limit)
+                    results['procedural'] = procedural_results
+                    total_count += len(procedural_results)
+                except Exception as e2:
+                    logger.warning(f"Fallback text search also failed: {e2}")
+                    results['procedural'] = []
 
-        # Search semantic memories
-        if 'semantic' in types_to_search:
+        # Search semantic memories using vector search
+        if 'semantic' in types_lower:
             try:
-                semantic_results = await memory_service.search_concepts_by_category(user_id, query, limit)
+                semantic_results = await memory_service.vector_search_semantic(
+                    user_id, query, limit, similarity_threshold
+                )
                 results['semantic'] = semantic_results
                 total_count += len(semantic_results)
+                logger.info(f"Vector search found {len(semantic_results)} semantic memories")
             except Exception as e:
-                logger.warning(f"Error searching semantic memories: {e}")
-                results['semantic'] = []
+                logger.warning(f"Error in semantic vector search, falling back to text: {e}")
+                try:
+                    semantic_results = await memory_service.search_concepts_by_category(user_id, query, limit)
+                    results['semantic'] = semantic_results
+                    total_count += len(semantic_results)
+                except Exception as e2:
+                    logger.warning(f"Fallback text search also failed: {e2}")
+                    results['semantic'] = []
 
-        # Search working memories (search by content match)
-        if 'working' in types_to_search:
+        # Search working memories using vector search
+        if 'working' in types_lower:
             try:
-                working_results = await memory_service.get_active_working_memories(user_id)
-                # Filter by query string in content
-                working_filtered = [m for m in working_results if query.lower() in m.get('content', '').lower()]
-                results['working'] = working_filtered[:limit]
-                total_count += len(results['working'])
+                working_results = await memory_service.vector_search_working(
+                    user_id, query, limit, similarity_threshold
+                )
+                results['working'] = working_results
+                total_count += len(working_results)
+                logger.info(f"Vector search found {len(working_results)} working memories")
             except Exception as e:
-                logger.warning(f"Error searching working memories: {e}")
-                results['working'] = []
+                logger.warning(f"Error in working vector search, falling back to filter: {e}")
+                try:
+                    working_results = await memory_service.get_active_working_memories(user_id)
+                    working_filtered = [m for m in working_results if query.lower() in m.get('content', '').lower()]
+                    results['working'] = working_filtered[:limit]
+                    total_count += len(results['working'])
+                except Exception as e2:
+                    logger.warning(f"Fallback filter also failed: {e2}")
+                    results['working'] = []
 
-        # Search session memories (not implemented - would need session_id)
-        if 'session' in types_to_search:
-            results['session'] = []
-            logger.info("Session memory search requires session_id, skipping")
+        # Search session memories using vector search
+        if 'session' in types_lower:
+            try:
+                session_results = await memory_service.vector_search_session(
+                    user_id, query, limit, similarity_threshold
+                )
+                results['session'] = session_results
+                total_count += len(session_results)
+                logger.info(f"Vector search found {len(session_results)} session memories")
+            except Exception as e:
+                logger.warning(f"Error in session vector search: {e}")
+                results['session'] = []
 
         return {
             "query": query,

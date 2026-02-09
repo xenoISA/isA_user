@@ -2,9 +2,7 @@
 Weather Service Routes Registry
 Defines all API routes for Consul service registration
 """
-
 from typing import List, Dict, Any
-
 # Define all routes
 SERVICE_ROUTES = [
     {
@@ -19,6 +17,12 @@ SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Service health check"
     },
+        {
+            "path": "/api/v1/weather/health",
+            "methods": ["GET"],
+            "auth_required": False,
+            "description": "Service health check (API v1)"
+        },
     {
         "path": "/api/v1/weather/current",
         "methods": ["GET"],
@@ -56,7 +60,6 @@ SERVICE_ROUTES = [
         "description": "Delete location"
     },
 ]
-
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -66,10 +69,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
     health_routes = []
     weather_routes = []
     location_routes = []
-
     for route in SERVICE_ROUTES:
         path = route["path"]
-
         if path in ["/", "/health"]:
             health_routes.append(path.replace("/", "root") if path == "/" else "health")
         elif "/weather/" in path and "/locations" not in path:
@@ -82,7 +83,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
             if not compact_path:
                 compact_path = "/"
             location_routes.append(compact_path)
-
     return {
         "route_count": str(len(SERVICE_ROUTES)),
         "base_path": "/api/v1/weather",
@@ -93,7 +93,6 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
-
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "weather_service",

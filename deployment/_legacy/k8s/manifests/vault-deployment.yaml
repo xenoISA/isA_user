@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: vault_service
+# Regenerate with: python -m agents.tools.generate_config --deployment vault_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  namespace: isa-cloud-staging
+  labels:
+    app: vault
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+    spec:
+      containers:
+      - name: vault
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8214
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "vault_service"
+        - name: SERVICE_PORT
+          value: "8214"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.vault_service.main:app", "--host", "0.0.0.0", "--port", "8214"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8214
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8214
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: isa-cloud-staging
+  labels:
+    app: vault
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8214
+    targetPort: 8214
+    protocol: TCP
+    name: http
+  selector:
+    app: vault

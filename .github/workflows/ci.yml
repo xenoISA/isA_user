@@ -1,0 +1,305 @@
+# =============================================================================
+# CI Pipeline - 5-Layer Test Pyramid
+# =============================================================================
+# Runs the complete test pyramid for all services.
+#
+# Test Layers:
+#   1. Unit Tests - Pure functions, no infrastructure
+#   2. Component Tests - Service logic with mocked dependencies
+#   3. Integration Tests - Real HTTP + Database
+#   4. API Tests - Full authentication flow
+#   5. Smoke Tests - E2E validation
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'release/*']
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: '3.11'
+  UV_VERSION: '0.4.0'
+
+jobs:
+  # ===========================================================================
+  # Layer 1 & 2: Unit + Component Tests (No Infrastructure)
+  # ===========================================================================
+  unit-component:
+    name: Unit & Component Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          uv pip install -r deployment/requirements/dev.txt
+
+      - name: Run Unit Tests
+        run: |
+          source .venv/bin/activate
+          pytest tests/unit -v --tb=short \
+            --junitxml=reports/unit-results.xml \
+            --cov=microservices \
+            --cov-report=xml:reports/unit-coverage.xml
+
+      - name: Run Component Tests
+        run: |
+          source .venv/bin/activate
+          pytest tests/component -v --tb=short \
+            --junitxml=reports/component-results.xml \
+            --cov=microservices \
+            --cov-report=xml:reports/component-coverage.xml
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-component-results
+          path: reports/
+
+  # ===========================================================================
+  # Layer 3: Integration Tests (Requires Database)
+  # ===========================================================================
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-component
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      nats:
+        image: nats:latest
+        ports:
+          - 4222:4222
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          uv pip install -r deployment/requirements/dev.txt
+
+      - name: Run Integration Tests
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+          NATS_URL: nats://localhost:4222
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          source .venv/bin/activate
+          pytest tests/integration -v --tb=short \
+            --junitxml=reports/integration-results.xml
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-results
+          path: reports/
+
+  # ===========================================================================
+  # Code Quality Checks
+  # ===========================================================================
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          uv pip install ruff mypy black
+
+      - name: Check formatting with Black
+        run: |
+          source .venv/bin/activate
+          black --check microservices/ tests/ --exclude migrations
+
+      - name: Lint with Ruff
+        run: |
+          source .venv/bin/activate
+          ruff check microservices/ tests/
+
+      - name: Type check with mypy
+        run: |
+          source .venv/bin/activate
+          mypy microservices/ --ignore-missing-imports --no-error-summary || true
+
+  # ===========================================================================
+  # Contract Validation
+  # ===========================================================================
+  contracts:
+    name: Validate Contracts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          uv pip install pydantic
+
+      - name: Validate Data Contracts
+        run: |
+          source .venv/bin/activate
+          python -m py_compile tests/contracts/*/data_contract.py || true
+
+      - name: Check Contract Coverage
+        run: |
+          echo "Checking CDD Layer Coverage..."
+          for service in microservices/*_service; do
+            name=$(basename $service | sed 's/_service//')
+            echo "Service: $name"
+            [ -f "docs/domain/${name}_service.md" ] && echo "  L1: OK" || echo "  L1: MISSING"
+            [ -f "docs/prd/${name}_service.md" ] && echo "  L2: OK" || echo "  L2: MISSING"
+            [ -f "docs/design/${name}_service.md" ] && echo "  L3: OK" || echo "  L3: MISSING"
+            [ -f "tests/contracts/${name}_service/data_contract.py" ] && echo "  L4: OK" || echo "  L4: MISSING"
+            [ -f "tests/contracts/${name}_service/logic_contract.md" ] && echo "  L5: OK" || echo "  L5: MISSING"
+            [ -f "tests/contracts/${name}_service/system_contract.md" ] && echo "  L6: OK" || echo "  L6: MISSING"
+          done
+
+  # ===========================================================================
+  # Build Docker Images
+  # ===========================================================================
+  build:
+    name: Build Images
+    runs-on: ubuntu-latest
+    needs: [unit-component, lint]
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Base Image
+        run: |
+          docker build -f deployment/k8s/Dockerfile.base -t isa-base:latest .
+
+      - name: Build Service Images
+        run: |
+          for service in microservices/*_service; do
+            name=$(basename $service)
+            echo "Building $name..."
+            # docker build -f deployment/k8s/Dockerfile.$name -t $name:${{ github.sha }} .
+          done
+
+  # ===========================================================================
+  # Summary Report
+  # ===========================================================================
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-component, integration, contracts]
+    if: always()
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: reports/
+
+      - name: Generate Summary
+        run: |
+          echo "# Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Layer | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.unit-component.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Component Tests | ${{ needs.unit-component.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Tests | ${{ needs.integration.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Contract Validation | ${{ needs.contracts.result }} |" >> $GITHUB_STEP_SUMMARY
