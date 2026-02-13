@@ -52,7 +52,7 @@ class ApiKeyRepository:
         self.schema = "auth"
         self.organizations_table = "organizations"
 
-    def _generate_api_key(self, prefix: str = "mcp") -> str:
+    def _generate_api_key(self, prefix: str = "isa") -> str:
         """Generate a new API key with prefix"""
         key_data = secrets.token_urlsafe(32)
         return f"{prefix}_{key_data}"
@@ -79,7 +79,7 @@ class ApiKeyRepository:
                              expires_at: Optional[datetime] = None, created_by: str = None) -> Dict[str, Any]:
         """Create a new API key for an organization"""
         try:
-            api_key = self._generate_api_key("mcp")
+            api_key = self._generate_api_key("isa")
             key_hash = self._hash_api_key(api_key)
 
             now = datetime.now(timezone.utc)
@@ -95,14 +95,18 @@ class ApiKeyRepository:
                 "last_used": None
             }
 
-            # Verify organization exists via organization_service
+            # Verify organization exists via organization_service (soft check)
+            # Personal accounts use user_id as org scope, so the org may not exist
             if self.organization_service_client:
-                org = await self.organization_service_client.get_organization(
-                    organization_id=organization_id,
-                    user_id=created_by or "system"
-                )
-                if not org:
-                    raise ValueError(f"Organization '{organization_id}' not found in database.")
+                try:
+                    org = await self.organization_service_client.get_organization(
+                        organization_id=organization_id,
+                        user_id=created_by or "system"
+                    )
+                    if not org:
+                        logger.info(f"Organization '{organization_id}' not found — treating as personal account")
+                except Exception as e:
+                    logger.info(f"Could not verify organization '{organization_id}': {e}")
 
             # Get current API keys from organization
             async with self.db:
@@ -215,7 +219,8 @@ class ApiKeyRepository:
                 )
 
             if not result:
-                raise ValueError(f"Organization '{organization_id}' not found in database.")
+                # No record yet — return empty list (personal accounts may not have a record)
+                return []
 
             api_keys = self._parse_api_keys(result.get('api_keys', []))
 
@@ -231,7 +236,7 @@ class ApiKeyRepository:
                     "expires_at": key_data.get('expires_at'),
                     "is_active": key_data.get('is_active', False),
                     "last_used": key_data.get('last_used'),
-                    "key_preview": f"mcp_...{key_data.get('key_hash', '')[-8:]}" if key_data.get('key_hash') else None
+                    "key_preview": f"isa_...{key_data.get('key_hash', '')[-8:]}" if key_data.get('key_hash') else None
                 }
                 cleaned_keys.append(cleaned_key)
 
