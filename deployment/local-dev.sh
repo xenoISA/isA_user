@@ -156,7 +156,7 @@ case "${1:-}" in
                     env "$SERVICE_PORT_ENV=$SERVICE_PORT" PORT="$SERVICE_PORT" \
                     PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/microservices/$SERVICE_NAME" \
                     nohup .venv/bin/python -m uvicorn microservices.$SERVICE_NAME.main:app \
-                        --host 0.0.0.0 --port $SERVICE_PORT \
+                        --host 0.0.0.0 --port $SERVICE_PORT --reload \
                         > logs/$SERVICE_NAME.log 2>&1 &
 
                     COUNT=$((COUNT+1))

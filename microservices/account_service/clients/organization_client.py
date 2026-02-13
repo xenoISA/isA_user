@@ -57,6 +57,45 @@ class OrganizationServiceClient:
             logger.error(f"Error calling organization_service.get_organization: {e}")
             return None
 
+    async def get_user_organizations(
+        self,
+        user_id: str,
+        authorization: Optional[str] = None,
+    ) -> Optional[list]:
+        """
+        Get organizations for a user.
+
+        Args:
+            user_id: User ID
+            authorization: Optional bearer token
+
+        Returns:
+            List of organizations or None on error
+        """
+        headers: Dict[str, str] = {"user-id": user_id}
+        if authorization:
+            headers["authorization"] = authorization
+
+        try:
+            url = f"{self.base_url}/api/v1/organization/organizations"
+            response = await self.client.get(url, headers=headers)
+
+            if response.status_code == 200:
+                data = response.json() or {}
+                return data.get("organizations", [])
+            elif response.status_code == 404:
+                logger.warning(f"No organizations for user: {user_id}")
+                return []
+            else:
+                logger.error(
+                    f"Failed to get user organizations: {response.status_code}"
+                )
+                return None
+
+        except Exception as e:
+            logger.error(f"Error calling organization_service.get_user_organizations: {e}")
+            return None
+
     async def validate_organization_exists(self, organization_id: str) -> bool:
         """
         Validate that an organization exists
