@@ -99,7 +99,7 @@ AUTH_SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Get pending registration (dev only)"
     },
-    # API Key management
+    # API Key management (authenticated users can manage own org keys, admins any org)
     {
         "path": "/api/v1/auth/verify-api-key",
         "methods": ["POST"],
@@ -110,19 +110,19 @@ AUTH_SERVICE_ROUTES = [
         "path": "/api/v1/auth/api-keys",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create API key"
+        "description": "Create API key (user or admin)"
     },
     {
         "path": "/api/v1/auth/api-keys/{organization_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List organization API keys"
+        "description": "List organization API keys (user or admin)"
     },
     {
         "path": "/api/v1/auth/api-keys/{key_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Revoke API key"
+        "description": "Revoke API key (user or admin)"
     },
     {
         "path": "/api/v1/auth/oauth/clients",

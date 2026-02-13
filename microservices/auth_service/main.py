@@ -1011,9 +1011,17 @@ async def verify_api_key(
 async def create_api_key(
     request: ApiKeyCreateRequest,
     api_key_service: ApiKeyService = Depends(get_api_key_service),
-    _caller: Dict[str, Any] = Depends(require_admin_caller),
+    caller: Dict[str, Any] = Depends(get_current_caller),
 ):
-    """Create API key"""
+    """Create API key (authenticated users for own org, admins for any org)"""
+    # Authorize: admins can create for any org, users only for their own
+    if not _is_admin_caller(caller):
+        caller_org = caller.get("organization_id")
+        if caller_org and caller_org != request.organization_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only create API keys for your own organization",
+            )
     try:
         result = await api_key_service.create_api_key(
             organization_id=request.organization_id,
@@ -1050,9 +1058,17 @@ async def create_api_key(
 async def list_api_keys(
     organization_id: str,
     api_key_service: ApiKeyService = Depends(get_api_key_service),
-    _caller: Dict[str, Any] = Depends(require_admin_caller),
+    caller: Dict[str, Any] = Depends(get_current_caller),
 ):
-    """List organization API keys"""
+    """List organization API keys (authenticated users for own org, admins for any org)"""
+    # Authorize: admins can list any org, users only their own
+    if not _is_admin_caller(caller):
+        caller_org = caller.get("organization_id")
+        if caller_org and caller_org != organization_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only view API keys for your own organization",
+            )
     try:
         result = await api_key_service.list_api_keys(organization_id)
 
@@ -1079,9 +1095,17 @@ async def revoke_api_key(
     key_id: str,
     organization_id: str,
     api_key_service: ApiKeyService = Depends(get_api_key_service),
-    _caller: Dict[str, Any] = Depends(require_admin_caller),
+    caller: Dict[str, Any] = Depends(get_current_caller),
 ):
-    """Revoke API key"""
+    """Revoke API key (authenticated users for own org, admins for any org)"""
+    # Authorize: admins can revoke any org's keys, users only their own
+    if not _is_admin_caller(caller):
+        caller_org = caller.get("organization_id")
+        if caller_org and caller_org != organization_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only revoke API keys for your own organization",
+            )
     try:
         result = await api_key_service.revoke_api_key(key_id, organization_id)
 
