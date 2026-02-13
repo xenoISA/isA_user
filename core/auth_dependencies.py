@@ -44,6 +44,26 @@ async def _extract_user_id_from_bearer(authorization: str) -> Optional[str]:
         return None
 
 
+async def _extract_user_id_from_api_key(api_key: str) -> Optional[str]:
+    """Verify an API key by calling auth service and return the associated user/org ID."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{AUTH_SERVICE_URL}/api/v1/auth/verify-api-key",
+                json={"api_key": api_key},
+                timeout=5.0,
+            )
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("valid"):
+                    # Return organization_id as the caller identity
+                    return result.get("organization_id")
+            return None
+    except Exception as e:
+        logger.warning(f"Failed to verify API key via auth service: {e}")
+        return None
+
+
 async def require_auth_or_internal_service(
     request: Request,
     user_id: Optional[str] = Header(None, alias="user-id"),
@@ -51,38 +71,22 @@ async def require_auth_or_internal_service(
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
     x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
     authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> str:
     """
     认证依赖：允许用户认证或内部服务认证
 
     认证优先级：
     1. 内部服务认证（X-Internal-Service + X-Internal-Service-Secret）
-    2. 用户ID认证（user-id 或 X-User-Id）
-
-    Args:
-        request: FastAPI Request
-        user_id: 用户ID (user-id header)
-        x_user_id: 用户ID (X-User-Id header)
-        x_internal_service: 内部服务标识
-        x_internal_service_secret: 内部服务密钥
+    2. Bearer JWT 认证（Authorization: Bearer <jwt>）
+    3. API Key 认证（X-API-Key）
+    4. 用户ID认证（user-id 或 X-User-Id）
 
     Returns:
         user_id: 用户ID 或 "internal-service"
 
     Raises:
         HTTPException 401: 认证失败
-
-    使用示例：
-        @app.get("/api/resource")
-        async def get_resource(
-            user_id: str = Depends(require_auth_or_internal_service)
-        ):
-            if user_id == "internal-service":
-                # 内部服务调用，绕过权限检查
-                pass
-            else:
-                # 普通用户调用，检查权限
-                pass
     """
     # 1. 检查内部服务认证
     if x_internal_service == "true" and x_internal_service_secret:
@@ -98,12 +102,18 @@ async def require_auth_or_internal_service(
         if bearer_user_id:
             return bearer_user_id
 
-    # 3. 检查用户ID认证
+    # 3. 检查 X-API-Key 认证
+    if x_api_key:
+        api_key_user_id = await _extract_user_id_from_api_key(x_api_key)
+        if api_key_user_id:
+            return api_key_user_id
+
+    # 4. 检查用户ID认证
     user_id_value = user_id or x_user_id
     if user_id_value:
         return user_id_value
 
-    # 4. 认证失败
+    # 5. 认证失败
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="User authentication required"
@@ -116,27 +126,13 @@ async def optional_auth_or_internal_service(
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
     x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
     authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> Optional[str]:
     """
     可选认证依赖：允许匿名、用户或内部服务访问
 
     Returns:
         user_id: 用户ID、"internal-service" 或 None
-
-    使用示例：
-        @app.get("/api/public-resource")
-        async def get_public_resource(
-            user_id: Optional[str] = Depends(optional_auth_or_internal_service)
-        ):
-            if user_id is None:
-                # 匿名用户
-                pass
-            elif user_id == "internal-service":
-                # 内部服务
-                pass
-            else:
-                # 已认证用户
-                pass
     """
     # 检查内部服务认证
     if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
@@ -147,6 +143,12 @@ async def optional_auth_or_internal_service(
         bearer_user_id = await _extract_user_id_from_bearer(authorization)
         if bearer_user_id:
             return bearer_user_id
+
+    # 检查 X-API-Key 认证
+    if x_api_key:
+        api_key_user_id = await _extract_user_id_from_api_key(x_api_key)
+        if api_key_user_id:
+            return api_key_user_id
 
     # 返回用户ID（可能为None）
     return user_id or x_user_id
