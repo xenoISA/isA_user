@@ -1,13 +1,14 @@
 """
 Configuration Manager for Microservices
 Handles environment-specific configuration loading with best practices
+Supports Consul service discovery for infrastructure services
 """
 
 import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from enum import Enum
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
@@ -70,6 +71,10 @@ class ServiceConfig:
     gateway_url: Optional[str] = None
     gateway_enabled: bool = False
 
+    # Digital Analytics Service (isA_Data - RAG & Multimodal Processing)
+    digital_analytics_url: Optional[str] = None
+    digital_analytics_enabled: bool = False
+
     # JWT/Auth Configuration
     local_jwt_secret: Optional[str] = None
     local_jwt_algorithm: str = "HS256"
@@ -117,7 +122,7 @@ class ServiceConfig:
 class ConfigManager:
     """
     Centralized configuration manager for microservices
-    
+
     Load order (highest priority first):
     1. Environment variables
     2. .env.{environment} file (e.g., .env.production)
@@ -125,12 +130,17 @@ class ConfigManager:
     4. config/{environment}.json file
     5. config/default.json file
     6. Default values
+
+    Service Discovery Priority (for services):
+    1. Environment variable (e.g., POSTGRES_HOST)
+    2. Consul service discovery
+    3. Localhost fallback
     """
-    
+
     def __init__(self, service_name: str, config_dir: Optional[Path] = None):
         """
         Initialize config manager
-        
+
         Args:
             service_name: Name of the microservice
             config_dir: Directory containing config files (default: ./config)
@@ -139,7 +149,8 @@ class ConfigManager:
         self.config_dir = config_dir or Path("config")
         self.environment = self._detect_environment()
         self._config_cache: Dict[str, Any] = {}
-        
+        self._consul_registry = None
+
         # Load configurations in order
         self._load_configs()
     
@@ -165,8 +176,8 @@ class ConfigManager:
         # 3. Map environment values to deployment folder names and env file names
         env_config_map = {
             "development": ("dev", ".env"),
-            "testing": ("test", ".env.test"),
-            "staging": ("staging", ".env.staging"),
+            "testing": ("test/config", ".env.test"),
+            "staging": ("staging/config", ".env.staging"),
             "production": ("production", ".env.production"),
             "local": ("dev", ".env")  # local uses dev environment
         }
@@ -261,6 +272,92 @@ class ConfigManager:
         if isinstance(value, str):
             return value.lower() in ('true', '1', 'yes', 'on')
         return bool(value)
+
+    def _get_consul_registry(self):
+        """Get or create Consul registry instance"""
+        if self._consul_registry is None:
+            try:
+                from isa_common.consul_client import ConsulRegistry
+                consul_host = self.get("CONSUL_HOST", "localhost")
+                consul_port = int(self.get("CONSUL_PORT", 8500))
+                self._consul_registry = ConsulRegistry(
+                    consul_host=consul_host,
+                    consul_port=consul_port
+                )
+                logger.debug(f"Consul registry initialized: {consul_host}:{consul_port}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Consul registry: {e}")
+                self._consul_registry = None
+        return self._consul_registry
+
+    def discover_service(
+        self,
+        service_name: str,
+        default_host: str = "localhost",
+        default_port: Optional[int] = None,
+        env_host_key: Optional[str] = None,
+        env_port_key: Optional[str] = None
+    ) -> Tuple[str, Optional[int]]:
+        """
+        Discover service host and port using priority:
+        1. Environment variables (POSTGRES_HOST, POSTGRES_PORT)
+        2. Consul service discovery
+        3. Default fallback (localhost)
+
+        Args:
+            service_name: Name of service in Consul (e.g., 'postgres_grpc_service', 'auth_service')
+            default_host: Default host if not found (default: 'localhost')
+            default_port: Default port if not found
+            env_host_key: Environment variable key for host (e.g., 'POSTGRES_HOST')
+            env_port_key: Environment variable key for port (e.g., 'POSTGRES_PORT')
+
+        Returns:
+            Tuple of (host, port)
+
+        Example:
+            >>> config = ConfigManager("auth_service")
+            >>> host, port = config.discover_service(
+            ...     service_name='postgres_grpc_service',
+            ...     default_host='localhost',
+            ...     default_port=50061,
+            ...     env_host_key='POSTGRES_HOST',
+            ...     env_port_key='POSTGRES_PORT'
+            ... )
+        """
+        # Priority 1: Check environment variables
+        env_host = self.get(env_host_key) if env_host_key else None
+        env_port = self.get(env_port_key) if env_port_key else None
+
+        if env_host:
+            port = int(env_port) if env_port else default_port
+            logger.debug(f"Service {service_name} from env: {env_host}:{port}")
+            return env_host, port
+
+        # Priority 2: Consul service discovery
+        consul = self._get_consul_registry()
+        if consul and self._parse_bool(self.get("consul_enabled", True)):
+            try:
+                endpoint = consul.get_service_endpoint(service_name)
+                if endpoint:
+                    # Parse endpoint: http://host:port or host:port
+                    endpoint = endpoint.replace("http://", "").replace("https://", "")
+                    if ":" in endpoint:
+                        host, port_str = endpoint.rsplit(":", 1)
+                        port = int(port_str)
+                    else:
+                        host = endpoint
+                        port = default_port
+
+                    logger.info(f"Service {service_name} discovered via Consul: {host}:{port}")
+                    return host, port
+                else:
+                    logger.debug(f"Service {service_name} not found in Consul")
+            except Exception as e:
+                logger.warning(f"Consul service discovery failed for {service_name}: {e}")
+
+        # Priority 3: Default fallback
+        logger.debug(f"Service {service_name} using fallback: {default_host}:{default_port}")
+        return default_host, default_port
     
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -323,9 +420,21 @@ class ConfigManager:
         nats_servers_str = self.get("NATS_SERVERS", self.get("nats_servers"))
         nats_servers = nats_servers_str.split(",") if nats_servers_str else None
 
+        # 优先从服务特定的环境变量读取端口（如 STORAGE_SERVICE_PORT）
+        # 然后尝试通用 PORT 环境变量
+        # 最后使用配置文件中的端口或默认值
+        service_prefix = self.service_name.upper().replace("-", "_")
+        port_env_key = f"{service_prefix}_PORT"
+        port_value = os.getenv(port_env_key, os.getenv("PORT"))
+        
+        if port_value:
+            service_port = int(port_value)
+        else:
+            service_port = int(self.get("port", self.get("service_port", 8000)))
+        
         return ServiceConfig(
             service_name=self.service_name,
-            service_port=int(self.get("port", self.get("service_port", 8000))),
+            service_port=service_port,
             environment=self.environment,
             debug=self._parse_bool(self.get("debug", self.environment == Environment.DEVELOPMENT)),
             log_level=self.get("log_level", "DEBUG" if self.environment == Environment.DEVELOPMENT else "INFO"),
@@ -367,6 +476,10 @@ class ConfigManager:
             gateway_url=self.get("GATEWAY_URL", self.get("gateway_url")),
             gateway_enabled=self._parse_bool(self.get("GATEWAY_ENABLED", self.get("gateway_enabled", False))),
 
+            # Digital Analytics Service
+            digital_analytics_url=self.get("DIGITAL_ANALYTICS_URL", self.get("digital_analytics_url")),
+            digital_analytics_enabled=self._parse_bool(self.get("DIGITAL_ANALYTICS_ENABLED", self.get("digital_analytics_enabled", False))),
+
             # JWT/Auth Configuration
             local_jwt_secret=self.get("LOCAL_JWT_SECRET", self.get("AUTH_SERVICE_JWT_SECRET", self.get("local_jwt_secret"))),
             local_jwt_algorithm=self.get("LOCAL_JWT_ALGORITHM", self.get("local_jwt_algorithm", "HS256")),
@@ -389,6 +502,7 @@ class ConfigManager:
             "minio_secure", "minio_bucket_name",
             "s3_enabled", "s3_bucket_name", "s3_region", "s3_access_key", "s3_secret_key",
             "gateway_url", "gateway_enabled",
+            "digital_analytics_url", "digital_analytics_enabled",
             "local_jwt_secret", "local_jwt_algorithm", "jwt_expiration", "auth0_domain", "auth0_audience",
             "auth_service_jwt_secret", "auth_service_jwt_expiration"
         }

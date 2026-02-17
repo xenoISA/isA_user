@@ -241,3 +241,183 @@ class BlockchainIntegration(BaseModel):
     gas_price_strategy: str = "medium"  # low, medium, high, custom
     confirmation_blocks: int = 3
     webhook_url: Optional[str] = None  # For transaction notifications
+
+
+# ====================
+# Credit Account Models
+# ====================
+# Reference: /docs/design/billing-credit-subscription-design.md
+# 1 Credit = $0.00001 USD (100,000 Credits = $1)
+
+class CreditType(str, Enum):
+    """Credit types with different expiration policies"""
+    PURCHASED = "purchased"        # Never expires, priority 100
+    BONUS = "bonus"                # May expire, priority 200
+    REFERRAL = "referral"          # May expire, priority 200
+    PROMOTIONAL = "promotional"    # May expire, priority 300
+
+
+class CreditTransactionType(str, Enum):
+    """Credit transaction types"""
+    CREDIT_PURCHASE = "credit_purchase"      # Purchasing credits with USD
+    CREDIT_CONSUME = "credit_consume"        # Using credits for services
+    CREDIT_REFUND = "credit_refund"          # Refunding credits
+    CREDIT_EXPIRE = "credit_expire"          # Credits expired
+    CREDIT_TRANSFER = "credit_transfer"      # Transfer between accounts
+    CREDIT_BONUS = "credit_bonus"            # Bonus credit allocation
+
+
+class CreditAccount(BaseModel):
+    """Credit account model - stores purchased/bonus credits"""
+    id: Optional[int] = None
+    credit_account_id: str = Field(..., description="Unique credit account ID")
+
+    # Owner
+    user_id: str
+    organization_id: Optional[str] = None
+    wallet_id: Optional[str] = None
+
+    # Credit Type
+    credit_type: CreditType
+
+    # Balance (in credits - 1 Credit = $0.00001 USD)
+    balance: int = Field(default=0, ge=0, description="Current balance in credits")
+    total_credited: int = Field(default=0, ge=0, description="Total credits ever added")
+    total_consumed: int = Field(default=0, ge=0, description="Total credits ever consumed")
+
+    # Expiration
+    expires_at: Optional[datetime] = None  # NULL = never expires
+    is_expired: bool = False
+
+    # Purchase info
+    purchase_amount_usd: Optional[Decimal] = None
+    payment_transaction_id: Optional[str] = None
+
+    # Priority (lower = consumed first)
+    consumption_priority: int = Field(default=100, description="Lower = consumed first")
+
+    # Status
+    is_active: bool = True
+
+    # Metadata
+    description: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CreditTransaction(BaseModel):
+    """Credit transaction model - audit trail for credit operations"""
+    id: Optional[int] = None
+    transaction_id: str = Field(..., description="Unique transaction ID")
+
+    # Account reference
+    credit_account_id: str
+    user_id: str
+    organization_id: Optional[str] = None
+
+    # Transaction details
+    transaction_type: CreditTransactionType
+    credits_amount: int = Field(..., description="Positive=add, Negative=deduct")
+    balance_before: int
+    balance_after: int
+
+    # USD equivalent
+    usd_equivalent: Optional[Decimal] = None  # credits_amount * 0.00001
+
+    # Reference
+    reference_type: Optional[str] = None
+    reference_id: Optional[str] = None
+
+    # Usage details
+    service_type: Optional[str] = None
+    usage_record_id: Optional[str] = None
+
+    # Payment details
+    payment_method: Optional[str] = None
+    payment_transaction_id: Optional[str] = None
+
+    # Description
+    description: Optional[str] = None
+    status: str = "completed"
+
+    # Metadata
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    processed_at: Optional[datetime] = None
+
+
+# ====================
+# Credit Request/Response Models
+# ====================
+
+class PurchaseCreditsRequest(BaseModel):
+    """Request to purchase credits"""
+    user_id: str
+    organization_id: Optional[str] = None
+    credits_amount: int = Field(..., gt=0, description="Credits to purchase")
+    payment_method_id: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class PurchaseCreditsResponse(BaseModel):
+    """Response after purchasing credits"""
+    success: bool
+    message: str
+    credit_account_id: Optional[str] = None
+    credits_purchased: int = 0
+    usd_amount: Optional[Decimal] = None
+    payment_transaction_id: Optional[str] = None
+    new_balance: int = 0
+
+
+class ConsumeCreditsRequest(BaseModel):
+    """Request to consume credits"""
+    user_id: str
+    organization_id: Optional[str] = None
+    credits_amount: int = Field(..., gt=0, description="Credits to consume")
+    service_type: str
+    usage_record_id: Optional[str] = None
+    description: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ConsumeCreditsResponse(BaseModel):
+    """Response after consuming credits"""
+    success: bool
+    message: str
+    credits_consumed: int = 0
+    credits_remaining: int = 0
+    consumed_from: Optional[str] = None  # subscription, purchased, bonus
+    transaction_id: Optional[str] = None
+
+
+class CreditBalanceResponse(BaseModel):
+    """Credit balance response"""
+    success: bool
+    message: str
+    user_id: str
+    organization_id: Optional[str] = None
+
+    # Total balance
+    total_credits: int = 0
+    total_usd_equivalent: Decimal = Decimal("0")
+
+    # Breakdown by type
+    purchased_credits: int = 0
+    bonus_credits: int = 0
+    referral_credits: int = 0
+    promotional_credits: int = 0
+
+    # Accounts
+    credit_accounts: List[CreditAccount] = Field(default_factory=list)
+
+
+class CreditHistoryResponse(BaseModel):
+    """Credit transaction history response"""
+    success: bool
+    message: str
+    transactions: List[CreditTransaction] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50

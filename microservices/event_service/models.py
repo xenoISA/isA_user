@@ -30,20 +30,21 @@ class EventCategory(str, Enum):
     PAGE_VIEW = "page_view"
     FORM_SUBMIT = "form_submit"
     CLICK = "click"
-    
+
     # 业务事件
     USER_LIFECYCLE = "user_lifecycle"
     PAYMENT = "payment"
     ORDER = "order"
     TASK = "task"
-    
+
     # 系统事件
     SYSTEM = "system"
     SECURITY = "security"
     PERFORMANCE = "performance"
     ERROR = "error"
-    
+
     # IoT事件
+    DEVICE = "device"  # 兼容旧数据
     DEVICE_STATUS = "device_status"
     TELEMETRY = "telemetry"
     COMMAND = "command"
@@ -275,8 +276,8 @@ class EventProcessor(BaseModel):
 class EventSubscription(BaseModel):
     """事件订阅"""
     subscription_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    subscriber_name: str = Field(..., description="订阅者名称")
-    subscriber_type: str = Field(..., description="订阅者类型")
+    subscriber_name: str = Field(default="default_subscriber", description="订阅者名称")
+    subscriber_type: str = Field(default="service", description="订阅者类型")
     
     event_types: List[str] = Field(..., description="订阅的事件类型")
     event_sources: Optional[List[EventSource]] = Field(None, description="订阅的事件源")

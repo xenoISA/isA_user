@@ -1,17 +1,30 @@
 """
-Authorization Service
+Authorization Service with Dependency Injection
 
 Business logic layer for the authorization microservice.
 Provides comprehensive resource authorization and permission management.
+
+This service uses dependency injection for all external dependencies:
+- Repository is injected (not created at import time)
+- Event bus is injected (optional)
 """
 
 import logging
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import TYPE_CHECKING, Optional, List, Dict, Any
 from datetime import datetime, timedelta
 import uuid
 
-from .authorization_repository import AuthorizationRepository
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import (
+    AuthorizationRepositoryProtocol,
+    EventBusProtocol,
+    AuthorizationException,
+    PermissionNotFoundException,
+    UserNotFoundException,
+    OrganizationNotFoundException,
+    InvalidPermissionError,
+)
 from .models import (
     ResourcePermission, UserPermissionRecord, OrganizationPermission,
     ResourceType, AccessLevel, PermissionSource, SubscriptionTier,
@@ -22,15 +35,33 @@ from .models import (
     PermissionAuditLog, AuthorizationError
 )
 
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
+
 logger = logging.getLogger(__name__)
 
 
 class AuthorizationService:
-    """Core authorization service with business logic"""
-    
-    def __init__(self):
-        self.repository = AuthorizationRepository()
-        
+    """Core authorization service with business logic - using dependency injection"""
+
+    def __init__(
+        self,
+        repository: Optional[AuthorizationRepositoryProtocol] = None,
+        event_bus: Optional[EventBusProtocol] = None,
+        config: Optional["ConfigManager"] = None,
+    ):
+        """
+        Initialize authorization service with injected dependencies.
+
+        Args:
+            repository: Authorization repository (inject mock for testing)
+            event_bus: Event bus for publishing events (optional)
+            config: Configuration manager (optional, for backwards compatibility)
+        """
+        self.repository = repository  # Will be set by factory if None
+        self.event_bus = event_bus
+
         # Subscription tier hierarchy for access control
         self.subscription_hierarchy = {
             SubscriptionTier.FREE: 0,
@@ -136,6 +167,45 @@ class AuthorizationService:
             
             # 5. Access denied
             await self._log_access_check(user_id, resource_type, resource_name, "deny", False, "Insufficient permissions")
+
+            # Publish access denied event
+            if self.event_bus:
+                try:
+                    # Try to import Event classes, fall back to dict if not available
+                    try:
+                        from core.nats_client import Event
+
+                        event = Event(
+                            event_type="authorization.access.denied",
+                            source="authorization_service",
+                            data={
+                                "user_id": user_id,
+                                "resource_type": resource_type.value,
+                                "resource_name": resource_name,
+                                "required_access_level": required_level.value,
+                                "reason": "Insufficient permissions",
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                        )
+                    except ImportError:
+                        # Fall back to simple dict-based event for testing
+                        event = {
+                            "event_type": "access.denied",
+                            "source": "authorization_service",
+                            "data": {
+                                "user_id": user_id,
+                                "resource_type": resource_type.value,
+                                "resource_name": resource_name,
+                                "required_access_level": required_level.value,
+                                "reason": "Insufficient permissions",
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                        }
+
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish access.denied event: {e}")
+
             return ResourceAccessResponse(
                 has_access=False,
                 user_access_level=AccessLevel.NONE,
@@ -327,7 +397,49 @@ class AuthorizationService:
                     reason=request.reason,
                     success=True
                 )
-                
+
+                # Publish permission granted event
+                if self.event_bus:
+                    try:
+                        # Try to import Event classes, fall back to dict if not available
+                        try:
+                            from core.nats_client import Event
+
+                            event = Event(
+                                event_type="authorization.permission.granted",
+                                source="authorization_service",
+                                data={
+                                    "user_id": request.user_id,
+                                    "resource_type": request.resource_type.value,
+                                    "resource_name": request.resource_name,
+                                    "access_level": request.access_level.value,
+                                    "permission_source": request.permission_source.value,
+                                    "granted_by_user_id": request.granted_by_user_id,
+                                    "organization_id": request.organization_id,
+                                    "timestamp": datetime.utcnow().isoformat()
+                                }
+                            )
+                        except ImportError:
+                            # Fall back to simple dict-based event for testing
+                            event = {
+                                "event_type": "permission.granted",
+                                "source": "authorization_service",
+                                "data": {
+                                    "user_id": request.user_id,
+                                    "resource_type": request.resource_type.value,
+                                    "resource_name": request.resource_name,
+                                    "access_level": request.access_level.value,
+                                    "permission_source": request.permission_source.value,
+                                    "granted_by_user_id": request.granted_by_user_id,
+                                    "organization_id": request.organization_id,
+                                    "timestamp": datetime.utcnow().isoformat()
+                                }
+                            }
+
+                        await self.event_bus.publish_event(event)
+                    except Exception as e:
+                        logger.error(f"Failed to publish permission.granted event: {e}")
+
                 logger.info(f"Granted permission: user={request.user_id}, resource={request.resource_type}:{request.resource_name}, level={request.access_level}")
                 return True
             
@@ -375,7 +487,47 @@ class AuthorizationService:
                     reason=request.reason,
                     success=True
                 )
-                
+
+                # Publish permission revoked event
+                if self.event_bus:
+                    try:
+                        # Try to import Event classes, fall back to dict if not available
+                        try:
+                            from core.nats_client import Event
+
+                            event = Event(
+                                event_type="authorization.permission.revoked",
+                                source="authorization_service",
+                                data={
+                                    "user_id": request.user_id,
+                                    "resource_type": request.resource_type.value,
+                                    "resource_name": request.resource_name,
+                                    "previous_access_level": current_permission.access_level.value if current_permission else "none",
+                                    "revoked_by_user_id": request.revoked_by_user_id,
+                                    "reason": request.reason,
+                                    "timestamp": datetime.utcnow().isoformat()
+                                }
+                            )
+                        except ImportError:
+                            # Fall back to simple dict-based event for testing
+                            event = {
+                                "event_type": "permission.revoked",
+                                "source": "authorization_service",
+                                "data": {
+                                    "user_id": request.user_id,
+                                    "resource_type": request.resource_type.value,
+                                    "resource_name": request.resource_name,
+                                    "previous_access_level": current_permission.access_level.value if current_permission else "none",
+                                    "revoked_by_user_id": request.revoked_by_user_id,
+                                    "reason": request.reason,
+                                    "timestamp": datetime.utcnow().isoformat()
+                                }
+                            }
+
+                        await self.event_bus.publish_event(event)
+                    except Exception as e:
+                        logger.error(f"Failed to publish permission.revoked event: {e}")
+
                 logger.info(f"Revoked permission: user={request.user_id}, resource={request.resource_type}:{request.resource_name}")
                 return True
             
@@ -658,7 +810,12 @@ class AuthorizationService:
     
     async def cleanup(self) -> None:
         """Service cleanup on shutdown"""
-        logger.info("Authorization service cleanup completed")
+        try:
+            # Cleanup repository resources (close service clients)
+            await self.repository.cleanup()
+            logger.info("Authorization service cleanup completed")
+        except Exception as e:
+            logger.error(f"Error during authorization service cleanup: {e}")
     
     # ====================
     # Helper Methods

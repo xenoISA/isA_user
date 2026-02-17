@@ -2,18 +2,23 @@
 Notification Service Business Logic Layer
 
 业务逻辑层，处理通知发送、模板管理、邮件发送等
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
+- Service clients are injected
 """
 
 import json
 import httpx
 import os
-from typing import List, Optional, Dict, Any
+from typing import TYPE_CHECKING, List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import logging
 import re
 import asyncio
 
-from .notification_repository import NotificationRepository
+# Import only models (no I/O dependencies)
 from .models import (
     Notification, NotificationTemplate, InAppNotification,
     NotificationBatch, SendNotificationRequest, SendBatchRequest,
@@ -25,23 +30,77 @@ from .models import (
     RegisterPushSubscriptionRequest
 )
 
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
+    from .notification_repository import NotificationRepository
+    from .events.publishers import NotificationEventPublishers
+    from .clients import AccountServiceClient, OrganizationServiceClient
+
 
 logger = logging.getLogger(__name__)
 
 
 class NotificationService:
     """通知服务业务逻辑层"""
-    
-    def __init__(self):
-        self.repository = NotificationRepository()
-        
+
+    def __init__(
+        self,
+        event_bus=None,
+        config_manager=None,
+        repository=None,
+        account_client=None,
+        organization_client=None,
+        email_client=None,
+    ):
+        """
+        Initialize notification service.
+
+        Args:
+            event_bus: Event bus for publishing events
+            config_manager: ConfigManager instance for service discovery
+            repository: Optional NotificationRepository (for DI/testing)
+            account_client: Optional AccountServiceClient (for DI/testing)
+            organization_client: Optional OrganizationServiceClient (for DI/testing)
+            email_client: Optional email client (for DI/testing)
+        """
+        self.event_bus = event_bus
+        self.config_manager = config_manager
+        self._event_publishers_loaded = False
+
+        # Support dependency injection - lazy import real dependencies only if not provided
+        if repository is not None:
+            self.repository = repository
+        else:
+            from .notification_repository import NotificationRepository
+            self.repository = NotificationRepository(config=config_manager)
+
+        # Lazy load event publishers
+        self.event_publishers = None
+        self._lazy_load_event_publishers()
+
+        # Initialize service clients with lazy imports
+        if account_client is not None:
+            self.account_client = account_client
+        else:
+            from .clients import AccountServiceClient
+            self.account_client = AccountServiceClient(config_manager)
+
+        if organization_client is not None:
+            self.organization_client = organization_client
+        else:
+            from .clients import OrganizationServiceClient
+            self.organization_client = OrganizationServiceClient(config_manager)
+
         # Resend API配置
         self.resend_api_key = os.environ.get("RESEND_API_KEY")
         self.resend_base_url = "https://api.resend.com"
         self.default_from_email = "noreply@iapro.ai"
-        
-        # HTTP客户端（用于发送邮件）
-        if self.resend_api_key:
+
+        # HTTP客户端（用于发送邮件）- support DI
+        if email_client is not None:
+            self.email_client = email_client
+        elif self.resend_api_key:
             self.email_client = httpx.AsyncClient(
                 base_url=self.resend_base_url,
                 headers={
@@ -53,7 +112,19 @@ class NotificationService:
         else:
             self.email_client = None
             logger.warning("Resend API key not configured. Email sending disabled.")
-    
+
+    def _lazy_load_event_publishers(self):
+        """Lazy load event publishers to avoid import-time I/O"""
+        if not self._event_publishers_loaded:
+            if self.event_bus:
+                try:
+                    from .events.publishers import NotificationEventPublishers
+                    self.event_publishers = NotificationEventPublishers(self.event_bus)
+                except ImportError:
+                    logger.warning("Event publishers not available")
+                    self.event_publishers = None
+            self._event_publishers_loaded = True
+
     # ====================
     # 通知模板管理
     # ====================
@@ -398,6 +469,18 @@ class NotificationService:
                     provider_message_id=result_data.get("id")
                 )
                 logger.info(f"Email sent successfully: {notification.notification_id}")
+
+                # Publish notification.sent event using publishers
+                if self.event_publishers:
+                    await self.event_publishers.publish_notification_sent(
+                        notification_id=notification.notification_id,
+                        notification_type=notification.type.value,
+                        recipient_id=notification.recipient_id,
+                        recipient_email=notification.recipient_email,
+                        status=notification.status.value,
+                        subject=notification.subject,
+                        priority=notification.priority.value
+                    )
             else:
                 error_message = f"Email API error: {response.status_code} - {response.text}"
                 await self.repository.update_notification_status(
@@ -438,8 +521,20 @@ class NotificationService:
                 notification.notification_id,
                 NotificationStatus.DELIVERED
             )
-            
+
             logger.info(f"In-app notification created: {notification.notification_id}")
+
+            # Publish notification.sent event using publishers
+            if self.event_publishers:
+                await self.event_publishers.publish_notification_sent(
+                    notification_id=notification.notification_id,
+                    notification_type=notification.type.value,
+                    recipient_id=notification.recipient_id,
+                    recipient_email=notification.recipient_email,
+                    status=notification.status.value,
+                    subject=notification.subject,
+                    priority=notification.priority.value
+                )
             
         except Exception as e:
             logger.error(f"Failed to send in-app notification {notification.notification_id}: {str(e)}")
@@ -484,6 +579,18 @@ class NotificationService:
                         provider_message_id=f"webhook_{response.status_code}"
                     )
                     logger.info(f"Webhook sent successfully: {notification.notification_id}")
+
+                    # Publish notification.sent event using publishers
+                    if self.event_publishers:
+                        await self.event_publishers.publish_notification_sent(
+                            notification_id=notification.notification_id,
+                            notification_type=notification.type.value,
+                            recipient_id=notification.recipient_id,
+                            recipient_email=notification.recipient_email,
+                            status=notification.status.value,
+                            subject=notification.subject,
+                            priority=notification.priority.value
+                        )
                 else:
                     error_message = f"Webhook error: {response.status_code}"
                     await self.repository.update_notification_status(
@@ -589,6 +696,18 @@ class NotificationService:
                     NotificationStatus.DELIVERED,
                     provider_message_id=f"push_{success_count}_devices"
                 )
+
+                # Publish notification.sent event using publishers
+                if self.event_publishers:
+                    await self.event_publishers.publish_notification_sent(
+                        notification_id=notification.notification_id,
+                        notification_type=notification.type.value,
+                        recipient_id=notification.recipient_id,
+                        recipient_email=notification.recipient_email,
+                        status=notification.status.value,
+                        subject=notification.subject,
+                        priority=notification.priority.value
+                    )
             else:
                 await self.repository.update_notification_status(
                     notification.notification_id,
@@ -852,7 +971,7 @@ class NotificationService:
     # ====================
     # 辅助方法
     # ====================
-    
+
     def _replace_template_variables(
         self,
         content: str,
@@ -861,17 +980,23 @@ class NotificationService:
         """替换模板变量"""
         if not variables:
             return content
-        
+
         # 使用正则表达式替换变量 {{variable_name}}
         pattern = r'\{\{(\w+)\}\}'
-        
+
         def replace_var(match):
             var_name = match.group(1)
             return str(variables.get(var_name, match.group(0)))
-        
+
         return re.sub(pattern, replace_var, content)
     
     async def cleanup(self):
         """清理资源"""
         if self.email_client:
             await self.email_client.aclose()
+
+        # Close service clients
+        if self.account_client:
+            await self.account_client.close()
+        if self.organization_client:
+            await self.organization_client.close()

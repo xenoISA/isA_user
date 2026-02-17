@@ -1,0 +1,442 @@
+# =============================================================================
+# Service Initialization Configuration - Single Point of Truth
+# =============================================================================
+# This file defines initialization requirements for all gRPC gateway services
+# and infrastructure components. Used by agents to:
+# - Generate initialization scripts
+# - Create health check endpoints
+# - Configure service dependencies
+#
+# Regenerate initialization scripts with:
+#   python -m agents.tools.generate_config --init
+# =============================================================================
+
+# =============================================================================
+# gRPC Gateway Services Initialization
+# =============================================================================
+grpc_services:
+  # PostgreSQL gRPC Gateway
+  postgres_grpc:
+    port: 50061
+    k8s_service: "isa-postgres-grpc"
+    description: "PostgreSQL gRPC gateway for all microservices"
+    depends_on:
+      - postgres
+    initialization:
+      type: "database_schemas"
+      # All 31 microservice schemas to create
+      schemas:
+        - account
+        - album
+        - audit
+        - auth
+        - authorization
+        - billing
+        - calendar
+        - compliance
+        - credit
+        - device
+        - document
+        - event
+        - invitation
+        - location
+        - media
+        - membership
+        - memory
+        - notification
+        - order
+        - organization
+        - ota
+        - payment
+        - product
+        - session
+        - storage
+        - subscription
+        - task
+        - telemetry
+        - vault
+        - wallet
+        - weather
+      extensions:
+        - pgvector
+        - uuid-ossp
+    health_check:
+      endpoint: "/health"
+      query: "SELECT 1"
+
+  # NATS gRPC Gateway
+  nats_grpc:
+    port: 50056
+    k8s_service: "nats-grpc"
+    description: "NATS JetStream gRPC gateway"
+    depends_on:
+      - nats
+    initialization:
+      type: "jetstream_streams"
+      # All JetStream streams needed by microservices
+      streams:
+        - name: "ACCOUNT"
+          subjects: ["account.>"]
+          retention: "limits"
+          max_age_hours: 168  # 7 days
+
+        - name: "ALBUM"
+          subjects: ["album.>"]
+          retention: "limits"
+          max_age_hours: 168
+
+        - name: "AUDIT"
+          subjects: ["audit.>"]
+          retention: "limits"
+          max_age_hours: 720  # 30 days - audit logs retained longer
+
+        - name: "AUTH"
+          subjects: ["auth.>"]
+          retention: "limits"
+          max_age_hours: 72  # 3 days
+
+        - name: "AUTHORIZATION"
+          subjects: ["authorization.>"]
+          retention: "limits"
+          max_age_hours: 168
+
+        - name: "BILLING"
+          subjects: ["billing.>"]
+          retention: "limits"
+          max_age_hours: 720  # 30 days
+
+        - name: "CALENDAR"
+          subjects: ["calendar.>"]
+          retention: "limits"
+          max_age_hours: 168
+
+        - name: "DEVICE"
+          subjects: ["device.>"]
+          retention: "limits"
+          max_age_hours: 168
+
+        - name: "MEDIA"
+          subjects: ["media.>"]
+          retention: "limits"
+          max_age_hours: 168
+
+        - name: "MEMORY"
+          subjects: ["memory.>"]
+          retention: "limits"
+          max_age_hours: 168
+
+        - name: "NOTIFICATION"
+          subjects: ["notification.>"]
+          retention: "limits"
+          max_age_hours: 72
+
+        - name: "ORGANIZATION"
+          subjects: ["organization.>"]
+          retention: "limits"
+          max_age_hours: 168
+
+        - name: "PAYMENT"
+          subjects: ["payment.>"]
+          retention: "limits"
+          max_age_hours: 720  # 30 days
+
+        - name: "STORAGE"
+          subjects: ["storage.>"]
+          retention: "limits"
+          max_age_hours: 168
+
+        - name: "SUBSCRIPTION"
+          subjects: ["subscription.>"]
+          retention: "limits"
+          max_age_hours: 168
+    health_check:
+      endpoint: "/health"
+      check: "stream_info"
+
+  # MinIO gRPC Gateway
+  minio_grpc:
+    port: 50051
+    k8s_service: "minio-grpc"
+    description: "MinIO S3-compatible gRPC gateway"
+    depends_on:
+      - minio
+    initialization:
+      type: "s3_buckets"
+      buckets:
+        - name: "isa-media"
+          description: "Photos, videos, and processed media"
+          lifecycle:
+            enabled: true
+            transition_days: 90
+            storage_class: "GLACIER"
+
+        - name: "isa-documents"
+          description: "User documents and PDFs"
+          versioning: true
+
+        - name: "isa-storage"
+          description: "General file storage"
+
+        - name: "isa-backups"
+          description: "Database and configuration backups"
+          lifecycle:
+            enabled: true
+            expiration_days: 365
+
+        - name: "isa-temp"
+          description: "Temporary uploads and processing"
+          lifecycle:
+            enabled: true
+            expiration_days: 7
+    health_check:
+      endpoint: "/health"
+      check: "list_buckets"
+
+  # Redis gRPC Gateway
+  redis_grpc:
+    port: 50055
+    k8s_service: "redis-grpc"
+    description: "Redis cache gRPC gateway"
+    depends_on:
+      - redis
+    initialization:
+      type: "redis_config"
+      config:
+        maxmemory_policy: "allkeys-lru"
+        databases: 16
+      key_prefixes:
+        - "session:"      # Session data
+        - "cache:"        # General cache
+        - "rate_limit:"   # Rate limiting
+        - "lock:"         # Distributed locks
+        - "pubsub:"       # Pub/sub channels
+    health_check:
+      endpoint: "/health"
+      command: "PING"
+
+  # Qdrant gRPC Gateway
+  qdrant_grpc:
+    port: 50062
+    k8s_service: "qdrant-grpc"
+    description: "Qdrant vector database gRPC gateway"
+    depends_on:
+      - qdrant
+    initialization:
+      type: "vector_collections"
+      collections:
+        - name: "memory_embeddings"
+          description: "Semantic memory embeddings"
+          vector_size: 1536  # OpenAI ada-002
+          distance: "Cosine"
+
+        - name: "document_embeddings"
+          description: "Document content embeddings"
+          vector_size: 1536
+          distance: "Cosine"
+
+        - name: "media_embeddings"
+          description: "Image/video embeddings"
+          vector_size: 512  # CLIP
+          distance: "Cosine"
+    health_check:
+      endpoint: "/health"
+      check: "collections_info"
+
+  # Neo4j gRPC Gateway
+  neo4j_grpc:
+    port: 50063
+    k8s_service: "neo4j-grpc"
+    description: "Neo4j graph database gRPC gateway"
+    depends_on:
+      - neo4j
+    initialization:
+      type: "graph_schema"
+      constraints:
+        - "CREATE CONSTRAINT user_id IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE"
+        - "CREATE CONSTRAINT org_id IF NOT EXISTS FOR (o:Organization) REQUIRE o.id IS UNIQUE"
+        - "CREATE CONSTRAINT device_id IF NOT EXISTS FOR (d:Device) REQUIRE d.id IS UNIQUE"
+      indexes:
+        - "CREATE INDEX user_email IF NOT EXISTS FOR (u:User) ON (u.email)"
+        - "CREATE INDEX org_name IF NOT EXISTS FOR (o:Organization) ON (o.name)"
+    health_check:
+      endpoint: "/health"
+      query: "RETURN 1"
+
+  # DuckDB gRPC Gateway
+  duckdb_grpc:
+    port: 50052
+    k8s_service: "duckdb-grpc"
+    description: "DuckDB analytics gRPC gateway"
+    initialization:
+      type: "analytics_tables"
+      tables:
+        - name: "usage_metrics"
+          description: "Aggregated usage metrics for billing"
+        - name: "telemetry_events"
+          description: "Device telemetry for analysis"
+    health_check:
+      endpoint: "/health"
+      query: "SELECT 1"
+
+  # MQTT gRPC Gateway
+  mqtt_grpc:
+    port: 50053
+    k8s_service: "mqtt-grpc"
+    description: "MQTT IoT messaging gRPC gateway"
+    depends_on:
+      - mosquitto
+    initialization:
+      type: "mqtt_topics"
+      topics:
+        # Device telemetry
+        - pattern: "devices/+/telemetry"
+          qos: 1
+          description: "Device telemetry data"
+
+        # Device commands
+        - pattern: "devices/+/commands"
+          qos: 2
+          description: "Device command channel"
+
+        # Photo sharing
+        - pattern: "family/+/photos/+"
+          qos: 1
+          description: "Family photo sharing"
+
+        # Notifications
+        - pattern: "users/+/notifications"
+          qos: 1
+          description: "User push notifications"
+    health_check:
+      endpoint: "/health"
+      check: "broker_status"
+
+  # Loki gRPC Gateway
+  loki_grpc:
+    port: 50054
+    k8s_service: "loki-grpc"
+    description: "Loki log aggregation gRPC gateway"
+    depends_on:
+      - loki
+    initialization:
+      type: "log_labels"
+      labels:
+        - "service"
+        - "namespace"
+        - "pod"
+        - "level"
+        - "trace_id"
+    health_check:
+      endpoint: "/health"
+      check: "ready"
+
+# =============================================================================
+# Infrastructure Dependencies
+# =============================================================================
+infrastructure:
+  postgres:
+    port: 5432
+    k8s_service: "postgres"
+    startup_probe:
+      command: "pg_isready"
+      timeout_seconds: 5
+
+  redis:
+    port: 6379
+    k8s_service: "redis"
+    startup_probe:
+      command: "redis-cli ping"
+      timeout_seconds: 2
+
+  nats:
+    port: 4222
+    k8s_service: "nats"
+    startup_probe:
+      command: "nats server check"
+      timeout_seconds: 5
+
+  minio:
+    port: 9000
+    k8s_service: "minio"
+    startup_probe:
+      endpoint: "/minio/health/live"
+      timeout_seconds: 5
+
+  qdrant:
+    port: 6333
+    k8s_service: "qdrant"
+    startup_probe:
+      endpoint: "/readyz"
+      timeout_seconds: 5
+
+  neo4j:
+    port: 7687
+    k8s_service: "neo4j"
+    startup_probe:
+      endpoint: "/"
+      timeout_seconds: 10
+
+  mosquitto:
+    port: 1883
+    k8s_service: "mosquitto"
+    startup_probe:
+      command: "mosquitto_pub -t test -m ping"
+      timeout_seconds: 5
+
+  loki:
+    port: 3100
+    k8s_service: "loki"
+    startup_probe:
+      endpoint: "/ready"
+      timeout_seconds: 5
+
+# =============================================================================
+# Startup Order
+# =============================================================================
+# Services must start in this order to ensure dependencies are ready
+startup_order:
+  - tier: 1
+    description: "Core Infrastructure"
+    services:
+      - postgres
+      - redis
+      - nats
+      - minio
+
+  - tier: 2
+    description: "Extended Infrastructure"
+    services:
+      - qdrant
+      - neo4j
+      - mosquitto
+      - loki
+
+  - tier: 3
+    description: "gRPC Gateways"
+    services:
+      - postgres_grpc
+      - nats_grpc
+      - minio_grpc
+      - redis_grpc
+      - qdrant_grpc
+      - neo4j_grpc
+      - mqtt_grpc
+      - loki_grpc
+      - duckdb_grpc
+
+  - tier: 4
+    description: "Business Microservices"
+    services:
+      - auth_service
+      - account_service
+      - session_service
+      # ... remaining 28 services can start in parallel
+
+# =============================================================================
+# Health Check Configuration
+# =============================================================================
+health_checks:
+  default_timeout_seconds: 5
+  default_interval_seconds: 30
+  default_failure_threshold: 3
+  default_success_threshold: 1

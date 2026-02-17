@@ -1,0 +1,810 @@
+{
+	"info": {
+		"_postman_id": "auth-service-staging-v2",
+		"name": "Auth Service API - Staging",
+		"description": "Authentication Microservice - JWT verification, API key management, and device authentication\n\nBase URL: http://localhost:8201\nEnvironment: Staging (Docker)\nVersion: 2.0.0\n\nCapabilities:\n- JWT Token verification (Auth0, Supabase, Local)\n- API Key management\n- Device authentication and management\n- Token generation for development",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "2.0.0"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8201",
+			"type": "string",
+			"description": "Auth service base URL (port 8201 in staging)"
+		},
+		{
+			"key": "api_base",
+			"value": "{{base_url}}/api/v1/auth",
+			"type": "string",
+			"description": "API base path"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"type": "string",
+			"description": "JWT token for testing (set by dev-token endpoint)"
+		},
+		{
+			"key": "api_key",
+			"value": "",
+			"type": "string",
+			"description": "API key for testing (set by create-api-key endpoint)"
+		},
+		{
+			"key": "device_secret",
+			"value": "",
+			"type": "string",
+			"description": "Device secret for testing (set by register-device endpoint)"
+		},
+		{
+			"key": "device_token",
+			"value": "",
+			"type": "string",
+			"description": "Device access token (set by authenticate-device endpoint)"
+		}
+	],
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Root Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has service name', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.eql('auth_microservice');",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": ["{{base_url}}"],
+							"path": [""]
+						},
+						"description": "Root health check endpoint\n\nReturns:\n- service: auth_microservice\n- status: healthy\n- version: 2.0.0\n- timestamp: ISO 8601 timestamp"
+					},
+					"response": []
+				},
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Service is healthy', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('healthy');",
+									"    pm.expect(jsonData.capabilities).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Detailed service health check with capabilities\n\nReturns:\n- status: healthy\n- service: auth_microservice\n- port: 8201\n- version: 2.0.0\n- capabilities: [jwt_verification, api_key_management, token_generation]\n- providers: [auth0, supabase, local]"
+					},
+					"response": []
+				},
+				{
+					"name": "Auth Info",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Has service information', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.service).to.eql('auth_microservice');",
+									"    pm.expect(jsonData.capabilities).to.be.an('object');",
+									"    pm.expect(jsonData.endpoints).to.be.an('object');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/info",
+							"host": ["{{api_base}}"],
+							"path": ["info"]
+						},
+						"description": "Get authentication service information and available endpoints\n\nReturns detailed information about:\n- Service capabilities\n- Supported JWT providers\n- Available endpoints\n- API version"
+					},
+					"response": []
+				},
+				{
+					"name": "Auth Stats",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Has statistics', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('operational');",
+									"    pm.expect(jsonData.stats).to.be.an('object');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/stats",
+							"host": ["{{api_base}}"],
+							"path": ["stats"]
+						},
+						"description": "Get authentication service statistics\n\nReturns:\n- Service status\n- Capabilities\n- Uptime\n- Endpoint count"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check and service information endpoints for monitoring and discovery"
+		},
+		{
+			"name": "JWT Token Authentication",
+			"item": [
+				{
+					"name": "Generate Dev Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Token generated successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.token).to.be.a('string');",
+									"    ",
+									"    // Save token to collection variable",
+									"    pm.collectionVariables.set('jwt_token', jsonData.token);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"test_user_123\",\n  \"email\": \"test@example.com\",\n  \"expires_in\": 3600\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/dev-token",
+							"host": ["{{api_base}}"],
+							"path": ["dev-token"]
+						},
+						"description": "Generate a development JWT token for testing purposes\n\nRequest Body:\n- user_id: User identifier (required)\n- email: User email address (required)\n- expires_in: Token expiration in seconds (default: 3600)\n\nResponse:\n- success: boolean\n- token: JWT token string\n- expires_in: seconds until expiration\n- token_type: \"Bearer\"\n- user_id: user identifier\n- email: user email\n\nNote: Token is automatically saved to {{jwt_token}} variable"
+					},
+					"response": []
+				},
+				{
+					"name": "Verify JWT Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"// Note: Currently failing with 'Invalid audience' error",
+									"// See auth_issues.md Issue #1"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"{{jwt_token}}\",\n  \"provider\": \"local\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/verify-token",
+							"host": ["{{api_base}}"],
+							"path": ["verify-token"]
+						},
+						"description": "Verify JWT token from Auth0, Supabase, or local provider\n\nRequest Body:\n- token: JWT token to verify (required)\n- provider: Token provider - \"auth0\", \"supabase\", or \"local\" (optional)\n\nResponse:\n- valid: boolean indicating if token is valid\n- provider: detected provider\n- user_id: user identifier from token\n- email: user email from token\n- expires_at: token expiration timestamp\n- error: error message if validation fails\n\n⚠️ KNOWN ISSUE: Currently failing with 'Invalid audience' error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #1"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Info from Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Note: Currently failing with 'Expected a string value' error",
+									"// See auth_issues.md Issue #2"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/user-info?token={{jwt_token}}",
+							"host": ["{{api_base}}"],
+							"path": ["user-info"],
+							"query": [
+								{
+									"key": "token",
+									"value": "{{jwt_token}}",
+									"description": "JWT token to extract user info from"
+								}
+							]
+						},
+						"description": "Extract user information from a JWT token\n\nQuery Parameters:\n- token: JWT token (required)\n\nExpected Response:\n- user_id: user identifier\n- email: user email\n- provider: token provider\n- expires_at: expiration timestamp\n\n⚠️ KNOWN ISSUE: Currently failing with 'Expected a string value' error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #2"
+					},
+					"response": []
+				}
+			],
+			"description": "JWT token verification and generation endpoints.\n\nSupports multiple providers:\n- Auth0\n- Supabase\n- Local (development)\n\n⚠️ Some endpoints have known issues - see auth_issues.md"
+		},
+		{
+			"name": "API Key Management",
+			"item": [
+				{
+					"name": "Create API Key",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('API Key created successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"        pm.expect(jsonData.api_key).to.be.a('string');",
+									"        ",
+									"        // Save API key to collection variable",
+									"        pm.collectionVariables.set('api_key', jsonData.api_key);",
+									"    });",
+									"}",
+									"",
+									"// Note: Currently failing with database error",
+									"// See auth_issues.md Issue #3"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"organization_id\": \"org_test_123\",\n  \"name\": \"Test API Key\",\n  \"permissions\": [\"read\", \"write\", \"admin\"],\n  \"expires_days\": 365\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/api-keys",
+							"host": ["{{api_base}}"],
+							"path": ["api-keys"]
+						},
+						"description": "Create a new API key for an organization\n\nRequest Body:\n- organization_id: Organization identifier (required)\n- name: Descriptive name for the API key (required)\n- permissions: Array of permission strings (default: [])\n- expires_days: Number of days until expiration (optional)\n\nResponse:\n- success: boolean\n- api_key: Generated API key string\n- key_id: Key identifier\n- name: Key name\n- expires_at: Expiration timestamp\n\n⚠️ KNOWN ISSUE: Currently failing with database error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #3"
+					},
+					"response": []
+				},
+				{
+					"name": "Verify API Key",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('API key validation response', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('valid');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"api_key\": \"{{api_key}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/verify-api-key",
+							"host": ["{{api_base}}"],
+							"path": ["verify-api-key"]
+						},
+						"description": "Verify an API key and get associated permissions\n\nRequest Body:\n- api_key: API key to verify (required)\n\nResponse:\n- valid: boolean indicating if key is valid\n- key_id: key identifier\n- organization_id: organization identifier\n- name: key name\n- permissions: array of permission strings\n- error: error message if validation fails"
+					},
+					"response": []
+				},
+				{
+					"name": "List API Keys",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('API keys listed successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"        pm.expect(jsonData.api_keys).to.be.an('array');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/api-keys/:organization_id",
+							"host": ["{{api_base}}"],
+							"path": ["api-keys", ":organization_id"],
+							"variable": [
+								{
+									"key": "organization_id",
+									"value": "org_test_123",
+									"description": "Organization ID"
+								}
+							]
+						},
+						"description": "List all API keys for an organization\n\nPath Parameters:\n- organization_id: Organization identifier (required)\n\nResponse:\n- success: boolean\n- api_keys: array of API key objects\n  - key_id: key identifier\n  - name: key name\n  - permissions: permission array\n  - created_at: creation timestamp\n  - expires_at: expiration timestamp\n  - last_used: last usage timestamp"
+					},
+					"response": []
+				},
+				{
+					"name": "Revoke API Key",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('API key revoked successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/api-keys/:key_id?organization_id=org_test_123",
+							"host": ["{{api_base}}"],
+							"path": ["api-keys", ":key_id"],
+							"query": [
+								{
+									"key": "organization_id",
+									"value": "org_test_123",
+									"description": "Organization ID (required)"
+								}
+							],
+							"variable": [
+								{
+									"key": "key_id",
+									"value": "key_123",
+									"description": "API Key ID to revoke"
+								}
+							]
+						},
+						"description": "Revoke an API key\n\nPath Parameters:\n- key_id: API key identifier (required)\n\nQuery Parameters:\n- organization_id: Organization identifier (required)\n\nResponse:\n- success: boolean\n- message: confirmation message"
+					},
+					"response": []
+				}
+			],
+			"description": "API key creation, verification, and management endpoints.\n\nAPI keys provide:\n- Organization-level authentication\n- Permission-based access control\n- Expiration management\n- Usage tracking\n\n⚠️ Some endpoints have known issues - see auth_issues.md"
+		},
+		{
+			"name": "Device Authentication",
+			"item": [
+				{
+					"name": "Register Device",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('Device registered successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"        pm.expect(jsonData.device_secret).to.be.a('string');",
+									"        ",
+									"        // Save device secret to collection variable",
+									"        pm.collectionVariables.set('device_secret', jsonData.device_secret);",
+									"    });",
+									"}",
+									"",
+									"// Note: Currently failing",
+									"// See auth_issues.md Issue #4"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_id\": \"device_test_001\",\n  \"organization_id\": \"org_test_123\",\n  \"device_name\": \"Smart Frame Living Room\",\n  \"device_type\": \"smart_frame\",\n  \"metadata\": {\n    \"model\": \"SF-2024\",\n    \"firmware\": \"1.0.0\",\n    \"location\": \"Living Room\"\n  },\n  \"expires_days\": 365\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/device/register",
+							"host": ["{{api_base}}"],
+							"path": ["device", "register"]
+						},
+						"description": "Register a new device and get credentials\n\nRequest Body:\n- device_id: Unique device identifier (required)\n- organization_id: Organization identifier (required)\n- device_name: Human-readable device name (optional)\n- device_type: Device type (optional)\n- metadata: Device metadata object (optional)\n- expires_days: Credential expiration in days (optional)\n\nResponse:\n- success: boolean\n- device_id: device identifier\n- device_secret: Secret for authentication (store securely!)\n- expires_at: credential expiration timestamp\n\n⚠️ KNOWN ISSUE: Currently failing with database error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #4"
+					},
+					"response": []
+				},
+				{
+					"name": "Authenticate Device",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('Device authenticated successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.authenticated).to.be.true;",
+									"        pm.expect(jsonData.access_token).to.be.a('string');",
+									"        ",
+									"        // Save device token to collection variable",
+									"        pm.collectionVariables.set('device_token', jsonData.access_token);",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_id\": \"device_test_001\",\n  \"device_secret\": \"{{device_secret}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/device/authenticate",
+							"host": ["{{api_base}}"],
+							"path": ["device", "authenticate"]
+						},
+						"description": "Authenticate a device and get access token\n\nRequest Body:\n- device_id: Device identifier (required)\n- device_secret: Device secret from registration (required)\n\nResponse:\n- authenticated: boolean\n- access_token: JWT token for device\n- token_type: \"Bearer\"\n- expires_in: seconds until expiration\n- device_id: device identifier\n- organization_id: organization identifier\n\nNote: Token is automatically saved to {{device_token}} variable"
+					},
+					"response": []
+				},
+				{
+					"name": "Verify Device Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Token validation response', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('valid');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"{{device_token}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_base}}/device/verify-token",
+							"host": ["{{api_base}}"],
+							"path": ["device", "verify-token"]
+						},
+						"description": "Verify a device JWT token\n\nRequest Body:\n- token: Device JWT token (required)\n\nResponse:\n- valid: boolean indicating if token is valid\n- device_id: device identifier\n- organization_id: organization identifier\n- expires_at: token expiration timestamp\n- error: error message if validation fails"
+					},
+					"response": []
+				},
+				{
+					"name": "List Devices",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('Devices listed successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"        pm.expect(jsonData.devices).to.be.an('array');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/device/list?organization_id=org_test_123",
+							"host": ["{{api_base}}"],
+							"path": ["device", "list"],
+							"query": [
+								{
+									"key": "organization_id",
+									"value": "org_test_123",
+									"description": "Organization ID (required)"
+								}
+							]
+						},
+						"description": "List all devices for an organization\n\nQuery Parameters:\n- organization_id: Organization identifier (required)\n\nResponse:\n- success: boolean\n- devices: array of device objects\n  - device_id: device identifier\n  - device_name: device name\n  - device_type: device type\n  - metadata: device metadata\n  - status: active/revoked\n  - created_at: registration timestamp\n  - expires_at: credential expiration\n  - last_seen: last authentication timestamp"
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Device Secret",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('Device secret refreshed', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"        pm.expect(jsonData.device_secret).to.be.a('string');",
+									"        ",
+									"        // Update device secret variable",
+									"        pm.collectionVariables.set('device_secret', jsonData.device_secret);",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/device/:device_id/refresh-secret?organization_id=org_test_123",
+							"host": ["{{api_base}}"],
+							"path": ["device", ":device_id", "refresh-secret"],
+							"query": [
+								{
+									"key": "organization_id",
+									"value": "org_test_123",
+									"description": "Organization ID (required)"
+								}
+							],
+							"variable": [
+								{
+									"key": "device_id",
+									"value": "device_test_001",
+									"description": "Device ID"
+								}
+							]
+						},
+						"description": "Refresh device secret credentials\n\nPath Parameters:\n- device_id: Device identifier (required)\n\nQuery Parameters:\n- organization_id: Organization identifier (required)\n\nResponse:\n- success: boolean\n- device_secret: New device secret\n- expires_at: new expiration timestamp\n\nNote: Old secret is immediately invalidated"
+					},
+					"response": []
+				},
+				{
+					"name": "Revoke Device",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    pm.test('Device revoked successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{api_base}}/device/:device_id?organization_id=org_test_123",
+							"host": ["{{api_base}}"],
+							"path": ["device", ":device_id"],
+							"query": [
+								{
+									"key": "organization_id",
+									"value": "org_test_123",
+									"description": "Organization ID (required)"
+								}
+							],
+							"variable": [
+								{
+									"key": "device_id",
+									"value": "device_test_001",
+									"description": "Device ID to revoke"
+								}
+							]
+						},
+						"description": "Revoke device credentials\n\nPath Parameters:\n- device_id: Device identifier (required)\n\nQuery Parameters:\n- organization_id: Organization identifier (required)\n\nResponse:\n- success: boolean\n- message: confirmation message\n\nNote: Device can be re-registered after revocation"
+					},
+					"response": []
+				}
+			],
+			"description": "Device registration, authentication, and management endpoints.\n\nSupports:\n- Device credential management\n- JWT token-based device authentication\n- Device metadata tracking\n- Secret rotation\n- Multi-organization device isolation\n\n⚠️ Some endpoints have known issues - see auth_issues.md"
+		}
+	],
+	"auth": {
+		"type": "noauth"
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}

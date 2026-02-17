@@ -1,0 +1,291 @@
+# =============================================================================
+# ISA User Platform - PRODUCTION Helm Values
+# =============================================================================
+# Deploy all services:
+#   ./deployment/helm/deploy.sh production
+#
+# Deploy individual service:
+#   helm upgrade --install user-auth-service \
+#     ~/Documents/Fun/isA/isA_Cloud/deployments/charts/isa-service \
+#     -f deployment/helm/values-production.yaml \
+#     --set name=user-auth-service \
+#     --set image.repository=isa/user-auth \
+#     --set port=8201 \
+#     -n isa-cloud-production
+# =============================================================================
+
+namespace: isa-cloud-production
+
+image:
+  registry: harbor.isa.io
+  tag: latest
+  pullPolicy: Always
+
+replicas: 2
+
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+
+health:
+  path: /health
+  initialDelaySeconds: 60
+  periodSeconds: 10
+
+service:
+  type: ClusterIP
+
+consul:
+  enabled: true
+
+# =============================================================================
+# Shared Environment Variables (injected into all services)
+# =============================================================================
+env:
+  # --- System ---
+  - name: ENV
+    value: "production"
+  - name: PYTHONPATH
+    value: "/app"
+  - name: PYTHONUNBUFFERED
+    value: "1"
+  - name: DEBUG
+    value: "false"
+
+  # --- Logging ---
+  - name: LOG_LEVEL
+    value: "INFO"
+  - name: LOKI_ENABLED
+    value: "true"
+  - name: ENABLE_STRUCTURED_LOGGING
+    value: "true"
+
+  # --- Consul ---
+  - name: CONSUL_HOST
+    value: "consul-server.isa-cloud-production.svc.cluster.local"
+  - name: CONSUL_PORT
+    value: "8500"
+  - name: CONSUL_ENABLED
+    value: "true"
+
+  # --- PostgreSQL (native asyncpg - 5432) ---
+  - name: POSTGRES_HOST
+    value: "postgresql.isa-cloud-production.svc.cluster.local"
+  - name: POSTGRES_PORT
+    value: "5432"
+  - name: POSTGRES_DB
+    value: "isa_platform"
+  - name: POSTGRES_USER
+    valueFrom:
+      secretKeyRef:
+        name: user-secrets
+        key: postgres-user
+  - name: POSTGRES_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: user-secrets
+        key: postgres-password
+
+  # --- Redis (native - 6379) ---
+  - name: REDIS_HOST
+    value: "redis-master.isa-cloud-production.svc.cluster.local"
+  - name: REDIS_PORT
+    value: "6379"
+  - name: REDIS_DB
+    value: "0"
+  - name: REDIS_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: user-secrets
+        key: redis-password
+
+  # --- Qdrant (native HTTP - 6333) ---
+  - name: QDRANT_HOST
+    value: "qdrant.isa-cloud-production.svc.cluster.local"
+  - name: QDRANT_PORT
+    value: "6333"
+
+  # --- Neo4j (native bolt - 7687) ---
+  - name: NEO4J_HOST
+    value: "neo4j.isa-cloud-production.svc.cluster.local"
+  - name: NEO4J_PORT
+    value: "7687"
+  - name: NEO4J_USER
+    value: "neo4j"
+  - name: NEO4J_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: user-secrets
+        key: neo4j-password
+
+  # --- NATS (native - 4222) ---
+  - name: NATS_HOST
+    value: "nats.isa-cloud-production.svc.cluster.local"
+  - name: NATS_PORT
+    value: "4222"
+  - name: NATS_URL
+    value: "nats://nats.isa-cloud-production.svc.cluster.local:4222"
+
+  # --- MinIO (S3 - 9000) ---
+  - name: MINIO_HOST
+    value: "minio.isa-cloud-production.svc.cluster.local"
+  - name: MINIO_PORT
+    value: "9000"
+  - name: MINIO_SECURE
+    value: "true"
+  - name: MINIO_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: user-secrets
+        key: minio-access-key
+  - name: MINIO_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: user-secrets
+        key: minio-secret-key
+
+  # --- MQTT (EMQX - 1883) ---
+  - name: MQTT_HOST
+    value: "emqx.isa-cloud-production.svc.cluster.local"
+  - name: MQTT_PORT
+    value: "1883"
+
+# =============================================================================
+# Microservices Configuration
+# =============================================================================
+services:
+  auth:
+    name: user-auth-service
+    repository: isa/user-auth
+    port: 8201
+  account:
+    name: user-account-service
+    repository: isa/user-account
+    port: 8202
+  session:
+    name: user-session-service
+    repository: isa/user-session
+    port: 8203
+  authorization:
+    name: user-authorization-service
+    repository: isa/user-authorization
+    port: 8204
+  audit:
+    name: user-audit-service
+    repository: isa/user-audit
+    port: 8205
+  notification:
+    name: user-notification-service
+    repository: isa/user-notification
+    port: 8206
+  payment:
+    name: user-payment-service
+    repository: isa/user-payment
+    port: 8207
+  wallet:
+    name: user-wallet-service
+    repository: isa/user-wallet
+    port: 8208
+  storage:
+    name: user-storage-service
+    repository: isa/user-storage
+    port: 8209
+  order:
+    name: user-order-service
+    repository: isa/user-order
+    port: 8210
+  task:
+    name: user-task-service
+    repository: isa/user-task
+    port: 8211
+  organization:
+    name: user-organization-service
+    repository: isa/user-organization
+    port: 8212
+  invitation:
+    name: user-invitation-service
+    repository: isa/user-invitation
+    port: 8213
+  vault:
+    name: user-vault-service
+    repository: isa/user-vault
+    port: 8214
+  product:
+    name: user-product-service
+    repository: isa/user-product
+    port: 8215
+  billing:
+    name: user-billing-service
+    repository: isa/user-billing
+    port: 8216
+  calendar:
+    name: user-calendar-service
+    repository: isa/user-calendar
+    port: 8217
+  weather:
+    name: user-weather-service
+    repository: isa/user-weather
+    port: 8218
+  album:
+    name: user-album-service
+    repository: isa/user-album
+    port: 8219
+  device:
+    name: user-device-service
+    repository: isa/user-device
+    port: 8220
+  ota:
+    name: user-ota-service
+    repository: isa/user-ota
+    port: 8221
+  media:
+    name: user-media-service
+    repository: isa/user-media
+    port: 8222
+  memory:
+    name: user-memory-service
+    repository: isa/user-memory
+    port: 8223
+  location:
+    name: user-location-service
+    repository: isa/user-location
+    port: 8224
+  telemetry:
+    name: user-telemetry-service
+    repository: isa/user-telemetry
+    port: 8225
+  compliance:
+    name: user-compliance-service
+    repository: isa/user-compliance
+    port: 8226
+  document:
+    name: user-document-service
+    repository: isa/user-document
+    port: 8227
+  subscription:
+    name: user-subscription-service
+    repository: isa/user-subscription
+    port: 8228
+  credit:
+    name: user-credit-service
+    repository: isa/user-credit
+    port: 8229
+  event:
+    name: user-event-service
+    repository: isa/user-event
+    port: 8230
+  membership:
+    name: user-membership-service
+    repository: isa/user-membership
+    port: 8250

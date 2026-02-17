@@ -1,0 +1,1 @@
+# Location Service Smoke Tests

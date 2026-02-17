@@ -4,56 +4,103 @@ Vault Service
 Business logic for secure credential and secret management with blockchain integration.
 """
 
-import logging
-from typing import Optional, Tuple, List, Dict, Any
-from datetime import datetime
 import base64
-
-import sys
+import logging
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sys
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from .vault_repository import VaultRepository
-from .encryption import VaultEncryption, BlockchainVaultIntegration, encrypt_field, decrypt_field
-from .models import (
-    VaultItem, VaultAccessLog, VaultShare,
-    VaultCreateRequest, VaultUpdateRequest, VaultShareRequest,
-    VaultItemResponse, VaultSecretResponse, VaultListResponse,
-    VaultShareResponse, VaultAccessLogResponse, VaultStatsResponse,
-    VaultTestResponse, SecretType, VaultAction, PermissionLevel,
-    EncryptionMethod
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
-from core.blockchain_client import BlockchainClient
+
+from core.nats_client import Event
+from .models import (
+    EncryptionMethod,
+    SecretType,
+    VaultAccessLogResponse,
+    VaultAction,
+    VaultCreateRequest,
+    VaultItem,
+    VaultItemResponse,
+    VaultListResponse,
+    VaultSecretResponse,
+    VaultShare,
+    VaultShareRequest,
+    VaultShareResponse,
+    VaultStatsResponse,
+    VaultTestResponse,
+    VaultUpdateRequest,
+)
+
+# Import protocols for type hints only (no I/O at import time)
+if TYPE_CHECKING:
+    from .protocols import (
+        VaultRepositoryProtocol,
+        VaultEncryptionProtocol,
+        BlockchainIntegrationProtocol,
+        EventBusProtocol,
+    )
+
+# Re-export exceptions from protocols for backwards compatibility
+from .protocols import (
+    VaultServiceError,
+    VaultAccessDeniedError,
+    VaultNotFoundError,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class VaultServiceError(Exception):
-    """Base exception for vault service"""
-    pass
-
-
-class VaultAccessDeniedError(VaultServiceError):
-    """Raised when user doesn't have permission"""
-    pass
-
-
-class VaultNotFoundError(VaultServiceError):
-    """Raised when vault item not found"""
-    pass
 
 
 class VaultService:
     """Vault service for secure credential management"""
 
-    def __init__(self, blockchain_client: Optional[BlockchainClient] = None):
-        self.repository = VaultRepository()
-        self.encryption = VaultEncryption()
+    def __init__(
+        self,
+        repository: Optional["VaultRepositoryProtocol"] = None,
+        encryption: Optional["VaultEncryptionProtocol"] = None,
+        blockchain: Optional["BlockchainIntegrationProtocol"] = None,
+        event_bus: Optional["EventBusProtocol"] = None,
+        # Legacy parameters for backwards compatibility
+        blockchain_client=None,
+        config=None,
+    ):
+        """
+        Initialize VaultService with dependencies.
 
-        # Initialize blockchain integration if client provided
-        self.blockchain = BlockchainVaultIntegration(blockchain_client)
+        For production use, prefer using factory.create_vault_service().
+        For testing, inject mock dependencies directly.
 
-        logger.info(f"Vault service initialized (Blockchain: {'enabled' if self.blockchain.enabled else 'disabled'})")
+        Args:
+            repository: Vault repository (injected for testing)
+            encryption: Encryption service (injected for testing)
+            blockchain: Blockchain integration (injected for testing)
+            event_bus: Event bus for publishing events
+            blockchain_client: Legacy - blockchain client (creates blockchain integration)
+            config: Legacy - config manager (creates repository)
+        """
+        # Handle legacy initialization (backwards compatibility)
+        if repository is None:
+            from .vault_repository import VaultRepository
+            repository = VaultRepository(config=config)
+
+        if encryption is None:
+            from .encryption import VaultEncryption
+            encryption = VaultEncryption()
+
+        if blockchain is None:
+            from .encryption import BlockchainVaultIntegration
+            blockchain = BlockchainVaultIntegration(blockchain_client)
+
+        self.repository = repository
+        self.encryption = encryption
+        self.blockchain = blockchain
+        self.event_bus = event_bus
+
+        logger.info(
+            f"Vault service initialized (Blockchain: {'enabled' if self.blockchain.enabled else 'disabled'})"
+        )
 
     # ============ Core Vault Operations ============
 
@@ -62,33 +109,42 @@ class VaultService:
         user_id: str,
         request: VaultCreateRequest,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
     ) -> Tuple[bool, Optional[VaultItemResponse], str]:
         """Create a new secret"""
         try:
+            logger.info(
+                f"Creating secret for user {user_id}, type: {request.secret_type}"
+            )
+
             # Encrypt the secret
-            encrypted_data, dek_encrypted, kek_salt, nonce = self.encryption.encrypt_secret(
-                request.secret_value,
-                user_id
+            encrypted_data, dek_encrypted, kek_salt, nonce = (
+                self.encryption.encrypt_secret(request.secret_value, user_id)
+            )
+            logger.info(
+                f"Secret encrypted successfully, encrypted_data length: {len(encrypted_data)}"
             )
 
             # Create blockchain hash if requested
             blockchain_tx_hash = None
             if request.blockchain_verify and self.blockchain.enabled:
-                secret_hash = self.encryption.hash_secret_for_blockchain(request.secret_value)
+                secret_hash = self.encryption.hash_secret_for_blockchain(
+                    request.secret_value
+                )
                 blockchain_tx_hash = await self.blockchain.store_secret_hash(
                     vault_id="temp",  # Will be updated after creation
-                    secret_hash=secret_hash
+                    secret_hash=secret_hash,
                 )
 
             # Prepare encryption metadata
             encryption_metadata = {
-                'dek_encrypted': base64.b64encode(dek_encrypted).decode(),
-                'kek_salt': base64.b64encode(kek_salt).decode(),
-                'nonce': base64.b64encode(nonce).decode()
+                "dek_encrypted": base64.b64encode(dek_encrypted).decode(),
+                "kek_salt": base64.b64encode(kek_salt).decode(),
+                "nonce": base64.b64encode(nonce).decode(),
             }
 
             # Create vault item
+            logger.info(f"Creating VaultItem model with provider: {request.provider}")
             vault_item = VaultItem(
                 user_id=user_id,
                 organization_id=request.organization_id,
@@ -104,30 +160,68 @@ class VaultService:
                 expires_at=request.expires_at,
                 rotation_enabled=request.rotation_enabled,
                 rotation_days=request.rotation_days,
-                blockchain_reference=blockchain_tx_hash
+                blockchain_reference=blockchain_tx_hash,
             )
+            logger.info("VaultItem model created successfully")
 
+            logger.info("Calling repository.create_vault_item")
             result = await self.repository.create_vault_item(vault_item)
+            logger.info(f"Repository create result: {result}")
 
             if not result:
-                await self._log_access(user_id, "temp", VaultAction.CREATE, False,
-                                      ip_address, user_agent, "Failed to create vault item")
+                await self._log_access(
+                    user_id,
+                    "temp",
+                    VaultAction.CREATE,
+                    False,
+                    ip_address,
+                    user_agent,
+                    "Failed to create vault item",
+                )
                 return False, None, "Failed to create secret"
 
             # Update blockchain reference if needed
             if blockchain_tx_hash:
-                await self.repository.update_vault_item(result.vault_id, {
-                    'blockchain_reference': blockchain_tx_hash
-                })
+                await self.repository.update_vault_item(
+                    result.vault_id, {"blockchain_reference": blockchain_tx_hash}
+                )
 
             # Log successful creation
-            await self._log_access(user_id, result.vault_id, VaultAction.CREATE, True,
-                                  ip_address, user_agent)
+            await self._log_access(
+                user_id,
+                result.vault_id,
+                VaultAction.CREATE,
+                True,
+                ip_address,
+                user_agent,
+            )
 
+            # Publish vault.secret.created event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="vault.secret.created",
+                        source="vault_service",
+                        data={
+                            "vault_id": result.vault_id,
+                            "user_id": user_id,
+                            "organization_id": request.organization_id,
+                            "secret_type": request.secret_type.value,
+                            "provider": request.provider,
+                            "name": request.name,
+                            "blockchain_verified": blockchain_tx_hash is not None,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.created event: {e}")
+
+            logger.info(f"Secret created successfully with vault_id: {result.vault_id}")
             return True, result, "Secret created successfully"
 
         except Exception as e:
-            logger.error(f"Error creating secret: {e}")
+            logger.error(f"Error creating secret: {e}", exc_info=True)
             return False, None, f"Failed to create secret: {str(e)}"
 
     async def get_secret(
@@ -136,15 +230,22 @@ class VaultService:
         user_id: str,
         decrypt: bool = True,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
     ) -> Tuple[bool, Optional[VaultSecretResponse], str]:
         """Get and optionally decrypt a secret"""
         try:
             # Check access
             permission = await self.repository.check_user_access(vault_id, user_id)
             if not permission:
-                await self._log_access(user_id, vault_id, VaultAction.READ, False,
-                                      ip_address, user_agent, "Access denied")
+                await self._log_access(
+                    user_id,
+                    vault_id,
+                    VaultAction.READ,
+                    False,
+                    ip_address,
+                    user_agent,
+                    "Access denied",
+                )
                 return False, None, "Access denied"
 
             # Get vault item
@@ -153,12 +254,12 @@ class VaultService:
                 return False, None, "Secret not found"
 
             # Check if active
-            if not item.get('is_active'):
+            if not item.get("is_active"):
                 return False, None, "Secret is inactive"
 
             # Check expiration
-            if item.get('expires_at'):
-                expires_at = datetime.fromisoformat(item['expires_at'])
+            if item.get("expires_at"):
+                expires_at = datetime.fromisoformat(item["expires_at"])
                 if expires_at < datetime.utcnow():
                     return False, None, "Secret has expired"
 
@@ -169,46 +270,79 @@ class VaultService:
             if decrypt:
                 try:
                     # Extract encryption components from metadata
-                    metadata = item.get('metadata', {})
-                    encrypted_data = base64.b64decode(item['encrypted_value'])
-                    dek_encrypted = base64.b64decode(metadata['dek_encrypted'])
-                    kek_salt = base64.b64decode(metadata['kek_salt'])
-                    nonce = base64.b64decode(metadata['nonce'])
+                    metadata = item.get("metadata", {})
+                    encrypted_data = base64.b64decode(item["encrypted_value"])
+                    dek_encrypted = base64.b64decode(metadata["dek_encrypted"])
+                    kek_salt = base64.b64decode(metadata["kek_salt"])
+                    nonce = base64.b64decode(metadata["nonce"])
 
                     # Decrypt
                     secret_value = self.encryption.decrypt_secret(
-                        encrypted_data, dek_encrypted, kek_salt, nonce, item['user_id']
+                        encrypted_data, dek_encrypted, kek_salt, nonce, item["user_id"]
                     )
 
                     # Verify with blockchain if available
-                    if item.get('blockchain_reference') and self.blockchain.enabled:
-                        secret_hash = self.encryption.hash_secret_for_blockchain(secret_value)
-                        blockchain_verified = await self.blockchain.verify_secret_from_blockchain(
-                            vault_id, secret_hash, item['blockchain_reference']
+                    if item.get("blockchain_reference") and self.blockchain.enabled:
+                        secret_hash = self.encryption.hash_secret_for_blockchain(
+                            secret_value
+                        )
+                        blockchain_verified = (
+                            await self.blockchain.verify_secret_from_blockchain(
+                                vault_id, secret_hash, item["blockchain_reference"]
+                            )
                         )
 
                 except Exception as e:
                     logger.error(f"Decryption failed: {e}")
-                    await self._log_access(user_id, vault_id, VaultAction.READ, False,
-                                          ip_address, user_agent, f"Decryption failed: {str(e)}")
+                    await self._log_access(
+                        user_id,
+                        vault_id,
+                        VaultAction.READ,
+                        False,
+                        ip_address,
+                        user_agent,
+                        f"Decryption failed: {str(e)}",
+                    )
                     return False, None, "Failed to decrypt secret"
 
             # Increment access count
             await self.repository.increment_access_count(vault_id)
 
             # Log successful access
-            await self._log_access(user_id, vault_id, VaultAction.READ, True,
-                                  ip_address, user_agent)
+            await self._log_access(
+                user_id, vault_id, VaultAction.READ, True, ip_address, user_agent
+            )
+
+            # Publish vault.secret.accessed event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="vault.secret.accessed",
+                        source="vault_service",
+                        data={
+                            "vault_id": vault_id,
+                            "user_id": user_id,
+                            "secret_type": item["secret_type"],
+                            "decrypted": decrypt,
+                            "blockchain_verified": blockchain_verified,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.accessed event: {e}")
 
             response = VaultSecretResponse(
                 vault_id=vault_id,
-                name=item['name'],
-                secret_type=SecretType(item['secret_type']),
-                provider=item.get('provider'),
+                name=item["name"],
+                secret_type=SecretType(item["secret_type"]),
+                provider=item.get("provider"),
                 secret_value=secret_value,
-                metadata=item.get('metadata', {}),
-                expires_at=datetime.fromisoformat(item['expires_at']) if item.get('expires_at') else None,
-                blockchain_verified=blockchain_verified
+                metadata=item.get("metadata", {}),
+                expires_at=datetime.fromisoformat(item["expires_at"])
+                if item.get("expires_at")
+                else None,
+                blockchain_verified=blockchain_verified,
             )
 
             return True, response, "Secret retrieved successfully"
@@ -223,74 +357,110 @@ class VaultService:
         user_id: str,
         request: VaultUpdateRequest,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
     ) -> Tuple[bool, Optional[VaultItemResponse], str]:
         """Update a secret"""
         try:
             # Check write permission
             permission = await self.repository.check_user_access(vault_id, user_id)
-            if permission not in ['owner', 'read_write']:
-                await self._log_access(user_id, vault_id, VaultAction.UPDATE, False,
-                                      ip_address, user_agent, "Access denied")
+            if permission not in ["owner", "read_write"]:
+                await self._log_access(
+                    user_id,
+                    vault_id,
+                    VaultAction.UPDATE,
+                    False,
+                    ip_address,
+                    user_agent,
+                    "Access denied",
+                )
                 return False, None, "Access denied"
 
             update_data = {}
 
             # Update non-secret fields
             if request.name:
-                update_data['name'] = request.name
+                update_data["name"] = request.name
             if request.description is not None:
-                update_data['description'] = request.description
+                update_data["description"] = request.description
             if request.metadata:
                 # Merge with existing metadata
                 item = await self.repository.get_vault_item(vault_id)
-                existing_metadata = item.get('metadata', {})
-                update_data['metadata'] = {**existing_metadata, **request.metadata}
+                existing_metadata = item.get("metadata", {})
+                update_data["metadata"] = {**existing_metadata, **request.metadata}
             if request.tags:
-                update_data['tags'] = request.tags
+                update_data["tags"] = request.tags
             if request.expires_at:
-                update_data['expires_at'] = request.expires_at.isoformat()
+                update_data["expires_at"] = request.expires_at.isoformat()
             if request.rotation_enabled is not None:
-                update_data['rotation_enabled'] = request.rotation_enabled
+                update_data["rotation_enabled"] = request.rotation_enabled
             if request.rotation_days:
-                update_data['rotation_days'] = request.rotation_days
+                update_data["rotation_days"] = request.rotation_days
             if request.is_active is not None:
-                update_data['is_active'] = request.is_active
+                update_data["is_active"] = request.is_active
 
             # Update secret value if provided
             if request.secret_value:
                 item = await self.repository.get_vault_item(vault_id)
-                encrypted_data, dek_encrypted, kek_salt, nonce = self.encryption.encrypt_secret(
-                    request.secret_value,
-                    item['user_id']
+                encrypted_data, dek_encrypted, kek_salt, nonce = (
+                    self.encryption.encrypt_secret(
+                        request.secret_value, item["user_id"]
+                    )
                 )
 
-                update_data['encrypted_value'] = base64.b64encode(encrypted_data).decode()
-                update_data['version'] = item.get('version', 1) + 1
+                update_data["encrypted_value"] = base64.b64encode(
+                    encrypted_data
+                ).decode()
+                update_data["version"] = item.get("version", 1) + 1
 
                 # Update metadata with new encryption components
                 encryption_metadata = {
-                    'dek_encrypted': base64.b64encode(dek_encrypted).decode(),
-                    'kek_salt': base64.b64encode(kek_salt).decode(),
-                    'nonce': base64.b64encode(nonce).decode()
+                    "dek_encrypted": base64.b64encode(dek_encrypted).decode(),
+                    "kek_salt": base64.b64encode(kek_salt).decode(),
+                    "nonce": base64.b64encode(nonce).decode(),
                 }
-                existing_metadata = item.get('metadata', {})
-                update_data['metadata'] = {**existing_metadata, **encryption_metadata}
+                existing_metadata = item.get("metadata", {})
+                update_data["metadata"] = {**existing_metadata, **encryption_metadata}
 
             # Perform update
             success = await self.repository.update_vault_item(vault_id, update_data)
 
             if not success:
-                await self._log_access(user_id, vault_id, VaultAction.UPDATE, False,
-                                      ip_address, user_agent, "Update failed")
+                await self._log_access(
+                    user_id,
+                    vault_id,
+                    VaultAction.UPDATE,
+                    False,
+                    ip_address,
+                    user_agent,
+                    "Update failed",
+                )
                 return False, None, "Failed to update secret"
 
             # Get updated item
             updated_item = await self.repository.get_vault_item(vault_id)
             response = VaultItemResponse(**updated_item)
 
-            await self._log_access(user_id, vault_id, VaultAction.UPDATE, True,
-                                  ip_address, user_agent)
+            await self._log_access(
+                user_id, vault_id, VaultAction.UPDATE, True, ip_address, user_agent
+            )
+
+            # Publish vault.secret.updated event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="vault.secret.updated",
+                        source="vault_service",
+                        data={
+                            "vault_id": vault_id,
+                            "user_id": user_id,
+                            "secret_value_updated": request.secret_value is not None,
+                            "metadata_updated": request.metadata is not None,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.updated event: {e}")
 
             return True, response, "Secret updated successfully"
 
@@ -303,26 +473,58 @@ class VaultService:
         vault_id: str,
         user_id: str,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """Delete a secret (soft delete)"""
         try:
             # Check owner permission
             item = await self.repository.get_vault_item(vault_id)
-            if not item or item.get('user_id') != user_id:
-                await self._log_access(user_id, vault_id, VaultAction.DELETE, False,
-                                      ip_address, user_agent, "Access denied")
+            if not item or item.get("user_id") != user_id:
+                await self._log_access(
+                    user_id,
+                    vault_id,
+                    VaultAction.DELETE,
+                    False,
+                    ip_address,
+                    user_agent,
+                    "Access denied",
+                )
                 return False, "Access denied"
 
             success = await self.repository.delete_vault_item(vault_id)
 
             if not success:
-                await self._log_access(user_id, vault_id, VaultAction.DELETE, False,
-                                      ip_address, user_agent, "Delete failed")
+                await self._log_access(
+                    user_id,
+                    vault_id,
+                    VaultAction.DELETE,
+                    False,
+                    ip_address,
+                    user_agent,
+                    "Delete failed",
+                )
                 return False, "Failed to delete secret"
 
-            await self._log_access(user_id, vault_id, VaultAction.DELETE, True,
-                                  ip_address, user_agent)
+            await self._log_access(
+                user_id, vault_id, VaultAction.DELETE, True, ip_address, user_agent
+            )
+
+            # Publish vault.secret.deleted event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="vault.secret.deleted",
+                        source="vault_service",
+                        data={
+                            "vault_id": vault_id,
+                            "user_id": user_id,
+                            "secret_type": item.get("secret_type"),
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.deleted event: {e}")
 
             return True, "Secret deleted successfully"
 
@@ -336,7 +538,7 @@ class VaultService:
         secret_type: Optional[SecretType] = None,
         tags: Optional[List[str]] = None,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
     ) -> Tuple[bool, Optional[VaultListResponse], str]:
         """List user's secrets"""
         try:
@@ -348,7 +550,7 @@ class VaultService:
                 tags=tags,
                 active_only=True,
                 limit=page_size,
-                offset=offset
+                offset=offset,
             )
 
             # Get total count (simplified)
@@ -358,15 +560,12 @@ class VaultService:
                 tags=tags,
                 active_only=True,
                 limit=1000,
-                offset=0
+                offset=0,
             )
             total = len(all_items)
 
             response = VaultListResponse(
-                items=items,
-                total=total,
-                page=page,
-                page_size=page_size
+                items=items, total=total, page=page, page_size=page_size
             )
 
             return True, response, f"Found {len(items)} secrets"
@@ -383,13 +582,13 @@ class VaultService:
         owner_user_id: str,
         request: VaultShareRequest,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
     ) -> Tuple[bool, Optional[VaultShareResponse], str]:
         """Share a secret with another user or organization"""
         try:
             # Verify ownership
             item = await self.repository.get_vault_item(vault_id)
-            if not item or item.get('user_id') != owner_user_id:
+            if not item or item.get("user_id") != owner_user_id:
                 return False, None, "Access denied"
 
             share = VaultShare(
@@ -398,19 +597,54 @@ class VaultService:
                 shared_with_user_id=request.shared_with_user_id,
                 shared_with_org_id=request.shared_with_org_id,
                 permission_level=request.permission_level,
-                expires_at=request.expires_at
+                expires_at=request.expires_at,
             )
 
             result = await self.repository.create_share(share)
 
             if not result:
-                await self._log_access(owner_user_id, vault_id, VaultAction.SHARE, False,
-                                      ip_address, user_agent, "Share failed")
+                await self._log_access(
+                    owner_user_id,
+                    vault_id,
+                    VaultAction.SHARE,
+                    False,
+                    ip_address,
+                    user_agent,
+                    "Share failed",
+                )
                 return False, None, "Failed to create share"
 
-            await self._log_access(owner_user_id, vault_id, VaultAction.SHARE, True,
-                                  ip_address, user_agent,
-                                  metadata={'shared_with': request.shared_with_user_id or request.shared_with_org_id})
+            await self._log_access(
+                owner_user_id,
+                vault_id,
+                VaultAction.SHARE,
+                True,
+                ip_address,
+                user_agent,
+                metadata={
+                    "shared_with": request.shared_with_user_id
+                    or request.shared_with_org_id
+                },
+            )
+
+            # Publish vault.secret.shared event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="vault.secret.shared",
+                        source="vault_service",
+                        data={
+                            "vault_id": vault_id,
+                            "owner_user_id": owner_user_id,
+                            "shared_with_user_id": request.shared_with_user_id,
+                            "shared_with_org_id": request.shared_with_org_id,
+                            "permission_level": request.permission_level.value,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.shared event: {e}")
 
             return True, result, "Secret shared successfully"
 
@@ -418,7 +652,9 @@ class VaultService:
             logger.error(f"Error sharing secret: {e}")
             return False, None, f"Failed to share secret: {str(e)}"
 
-    async def get_shared_secrets(self, user_id: str) -> Tuple[bool, List[VaultShareResponse], str]:
+    async def get_shared_secrets(
+        self, user_id: str
+    ) -> Tuple[bool, List[VaultShareResponse], str]:
         """Get secrets shared with user"""
         try:
             shares = await self.repository.get_shares_for_user(user_id)
@@ -435,12 +671,14 @@ class VaultService:
         user_id: str,
         vault_id: Optional[str] = None,
         page: int = 1,
-        page_size: int = 100
+        page_size: int = 100,
     ) -> Tuple[bool, List[VaultAccessLogResponse], str]:
         """Get access logs"""
         try:
             offset = (page - 1) * page_size
-            logs = await self.repository.get_access_logs(vault_id, user_id, page_size, offset)
+            logs = await self.repository.get_access_logs(
+                vault_id, user_id, page_size, offset
+            )
             return True, logs, f"Found {len(logs)} log entries"
 
         except Exception as e:
@@ -464,29 +702,49 @@ class VaultService:
         user_id: str,
         new_secret_value: str,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
     ) -> Tuple[bool, Optional[VaultItemResponse], str]:
         """Rotate a secret (create new version)"""
         try:
             # This is essentially an update with version increment
             request = VaultUpdateRequest(secret_value=new_secret_value)
-            return await self.update_secret(vault_id, user_id, request, ip_address, user_agent)
+            success, response, message = await self.update_secret(
+                vault_id, user_id, request, ip_address, user_agent
+            )
+
+            # Publish vault.secret.rotated event if successful
+            if success and self.event_bus:
+                try:
+                    event = Event(
+                        event_type="vault.secret.rotated",
+                        source="vault_service",
+                        data={
+                            "vault_id": vault_id,
+                            "user_id": user_id,
+                            "new_version": response.version if response else None,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish vault.secret.rotated event: {e}")
+
+            return success, response, message
 
         except Exception as e:
             logger.error(f"Error rotating secret: {e}")
             return False, None, f"Failed to rotate secret: {str(e)}"
 
     async def test_credential(
-        self,
-        vault_id: str,
-        user_id: str,
-        test_endpoint: Optional[str] = None
+        self, vault_id: str, user_id: str, test_endpoint: Optional[str] = None
     ) -> Tuple[bool, VaultTestResponse, str]:
         """Test if a credential is valid"""
         # This is a placeholder - actual implementation would depend on the secret type
         # For now, we just verify we can decrypt it
         try:
-            success, secret, message = await self.get_secret(vault_id, user_id, decrypt=True)
+            success, secret, message = await self.get_secret(
+                vault_id, user_id, decrypt=True
+            )
 
             if not success:
                 return False, VaultTestResponse(success=False, message=message), message
@@ -497,14 +755,21 @@ class VaultService:
             response = VaultTestResponse(
                 success=True,
                 message="Credential is accessible and can be decrypted",
-                details={"secret_type": str(secret.secret_type), "provider": str(secret.provider)}
+                details={
+                    "secret_type": str(secret.secret_type),
+                    "provider": str(secret.provider),
+                },
             )
 
             return True, response, "Credential test completed"
 
         except Exception as e:
             logger.error(f"Error testing credential: {e}")
-            return False, VaultTestResponse(success=False, message=str(e)), f"Test failed: {str(e)}"
+            return (
+                False,
+                VaultTestResponse(success=False, message=str(e)),
+                f"Test failed: {str(e)}",
+            )
 
     # ============ Helper Methods ============
 
@@ -517,7 +782,7 @@ class VaultService:
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         error_message: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Log vault access"""
         try:
@@ -529,7 +794,7 @@ class VaultService:
                 user_agent=user_agent,
                 success=success,
                 error_message=error_message,
-                metadata=metadata or {}
+                metadata=metadata or {},
             )
             await self.repository.create_access_log(log)
         except Exception as e:
@@ -541,5 +806,5 @@ class VaultService:
             "status": "healthy",
             "encryption": "enabled",
             "blockchain": self.blockchain.get_integration_status(),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }

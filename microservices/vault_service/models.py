@@ -77,7 +77,7 @@ class VaultItem(BaseModel):
     provider: Optional[SecretProvider] = Field(None, description="Service provider")
     name: str = Field(..., description="User-friendly name", max_length=255)
     description: Optional[str] = Field(None, description="Secret description", max_length=500)
-    encrypted_value: Optional[bytes] = Field(None, description="Encrypted secret value")
+    encrypted_value: Optional[bytes] = Field(None, description="Encrypted secret value (raw bytes for creation, will be base64 string from DB)")
     encryption_method: EncryptionMethod = Field(default=EncryptionMethod.AES_256_GCM)
     encryption_key_id: Optional[str] = Field(None, description="ID of the encryption key used")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
@@ -95,6 +95,7 @@ class VaultItem(BaseModel):
 
     class Config:
         from_attributes = True
+        arbitrary_types_allowed = True
 
 
 class VaultAccessLog(BaseModel):

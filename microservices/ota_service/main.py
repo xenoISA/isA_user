@@ -15,10 +15,10 @@ import requests
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.service_discovery import get_service_discovery
+from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 from .models import (
     FirmwareUploadRequest, UpdateCampaignRequest, DeviceUpdateRequest, UpdateApprovalRequest,
     FirmwareResponse, UpdateCampaignResponse, DeviceUpdateResponse,
@@ -26,6 +26,9 @@ from .models import (
     UpdateType, UpdateStatus, DeploymentStrategy, Priority
 )
 from .ota_service import OTAService
+from .ota_repository import OTARepository
+from .events import get_event_handlers
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from datetime import datetime
 
 # Initialize configuration
@@ -36,16 +39,42 @@ config = config_manager.get_service_config()
 app_logger = setup_service_logger("ota_service")
 logger = app_logger  # for backward compatibility
 
+# Global client instances
+device_client = None
+storage_client = None
+notification_client = None
+
 # Service instance
 class OTAMicroservice:
     def __init__(self):
         self.service = None
-    
-    async def initialize(self):
-        self.service = OTAService()
+        self.event_bus = None
+
+    async def initialize(
+        self,
+        event_bus=None,
+        config=None,
+        device_client=None,
+        storage_client=None,
+        notification_client=None
+    ):
+        self.event_bus = event_bus
+        self.service = OTAService(
+            event_bus=event_bus,
+            config=config,
+            device_client=device_client,
+            storage_client=storage_client,
+            notification_client=notification_client
+        )
         logger.info("OTA service initialized")
-    
+
     async def shutdown(self):
+        if self.event_bus:
+            try:
+                await self.event_bus.close()
+                logger.info("Event bus connection closed")
+            except Exception as e:
+                logger.error(f"Error closing event bus: {e}")
         logger.info("OTA service shutting down")
 
 # Global instance
@@ -55,36 +84,131 @@ microservice = OTAMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    global device_client, storage_client, notification_client
+    consul_registry = None
+
+    # Initialize event bus
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("ota_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        event_bus = None
+
+    # Initialize service clients
+    try:
+        from .clients import DeviceClient, StorageClient, NotificationClient
+
+        device_client = DeviceClient(config=config_manager)
+        storage_client = StorageClient(config=config_manager)
+        notification_client = NotificationClient(config=config_manager)
+
+        logger.info("✅ Service clients initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize service clients: {e}")
+        device_client = None
+        storage_client = None
+        notification_client = None
+
     # Startup
-    await microservice.initialize()
-    
-    # Consul注册
+    await microservice.initialize(
+        event_bus=event_bus,
+        config=config_manager,
+        device_client=device_client,
+        storage_client=storage_client,
+        notification_client=notification_client
+    )
+
+    # Set up event subscriptions
+    if event_bus:
+        try:
+            ota_repo = OTARepository(config=config_manager)
+            handler_map = get_event_handlers(ota_repo)
+
+            for event_pattern, handler_func in handler_map.items():
+                await event_bus.subscribe_to_events(
+                    pattern=event_pattern, handler=handler_func
+                )
+                logger.info(f"Subscribed to {event_pattern} events")
+
+            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
+
+    # Consul service registration
     if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "iot", "ota", "firmware", "update", "api", "v1"]
-        )
-    
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+        try:
+            # Get route metadata
+            route_meta = get_routes_for_consul()
+
+            # Merge service metadata
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='ttl'  # Use TTL for reliable health checks
+            )
+            consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            consul_registry = None
+
+    logger.info(f"✅ OTA Service started on port {config.service_port}")
+
     yield
-    
+
     # Shutdown
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
-    
-    await microservice.shutdown()
+    try:
+        # Consul deregistration
+        if consul_registry:
+            try:
+                consul_registry.deregister()
+                logger.info("✅ OTA service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
+
+        # Close service clients
+        if device_client:
+            try:
+                await device_client.close()
+                logger.info("✅ Device client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close device client: {e}")
+
+        if storage_client:
+            try:
+                await storage_client.close()
+                logger.info("✅ Storage client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close storage client: {e}")
+
+        if notification_client:
+            try:
+                await notification_client.close()
+                logger.info("✅ Notification client closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close notification client: {e}")
+
+        if event_bus:
+            await event_bus.close()
+
+        await microservice.shutdown()
+        logger.info("OTA Service shutting down...")
+
+    except Exception as e:
+        logger.error(f"❌ Error during shutdown: {e}")
 
 # Create FastAPI application
 app = FastAPI(
@@ -98,6 +222,7 @@ app = FastAPI(
 # Health Check Endpoints
 # ======================
 
+@app.get("/api/v1/ota/health")
 @app.get("/health")
 async def health_check():
     """基础健康检查"""
@@ -134,23 +259,45 @@ async def detailed_health_check():
 # ======================
 # Dependencies
 # ======================
+#
+# NOTE: When deployed behind an API Gateway:
+# - External requests: Gateway validates JWT → Service trusts gateway headers
+# - Internal service calls: Can use get_user_context_optional() for no auth
+# - For production: Gateway should handle ALL authentication
+#
 
 async def get_user_context(
     authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None)
+    x_api_key: Optional[str] = Header(None),
+    x_internal_call: Optional[str] = Header(None)  # For internal service-to-service calls
 ) -> Dict[str, Any]:
-    """获取用户上下文信息"""
+    """
+    Get user context with authentication
+
+    For internal service calls, set header: X-Internal-Call: true
+    to bypass auth (use with caution - only for trusted services)
+    """
+    # Allow internal service-to-service calls without auth
+    if x_internal_call == "true":
+        return {
+            "user_id": "internal_service",
+            "organization_id": None,
+            "role": "service"
+        }
+
     if not authorization and not x_api_key:
         raise HTTPException(status_code=401, detail="Authentication required")
     
     try:
-        # Use Consul service discovery
-        if not hasattr(app.state, 'consul_registry') or not app.state.consul_registry:
-            raise HTTPException(status_code=503, detail="Service discovery not available")
-        
-        auth_service_url = app.state.consul_registry.get_service_endpoint("auth_service")
-        if not auth_service_url:
-            raise HTTPException(status_code=503, detail="Auth service not available")
+        # Use ConfigManager for service discovery
+        auth_host, auth_port = config_manager.discover_service(
+            service_name='auth_service',
+            default_host='localhost',
+            default_port=8201,
+            env_host_key='AUTH_SERVICE_HOST',
+            env_port_key='AUTH_SERVICE_PORT'
+        )
+        auth_service_url = f"http://{auth_host}:{auth_port}"
         
         if authorization:
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
@@ -201,7 +348,7 @@ async def get_user_context(
 # Firmware Management
 # ======================
 
-@app.post("/api/v1/firmware", response_model=FirmwareResponse)
+@app.post("/api/v1/ota/firmware", response_model=FirmwareResponse)
 async def upload_firmware(
     metadata: str = Body(..., description="Firmware metadata as JSON string"),
     file: UploadFile = File(..., description="Firmware binary file"),
@@ -235,7 +382,7 @@ async def upload_firmware(
         logger.error(f"Error uploading firmware: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/firmware/{firmware_id}", response_model=FirmwareResponse)
+@app.get("/api/v1/ota/firmware/{firmware_id}", response_model=FirmwareResponse)
 async def get_firmware(
     firmware_id: str = Path(..., description="Firmware ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -250,7 +397,7 @@ async def get_firmware(
         logger.error(f"Error getting firmware: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/firmware")
+@app.get("/api/v1/ota/firmware")
 async def list_firmware(
     device_model: Optional[str] = Query(None, description="Filter by device model"),
     manufacturer: Optional[str] = Query(None, description="Filter by manufacturer"),
@@ -261,21 +408,62 @@ async def list_firmware(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取固件列表"""
-    # 实现固件列表查询
-    return {
-        "firmware": [],
-        "count": 0,
-        "limit": limit,
-        "offset": offset,
-        "filters": {
-            "device_model": device_model,
-            "manufacturer": manufacturer,
-            "is_beta": is_beta,
-            "is_security_update": is_security_update
-        }
-    }
+    try:
+        # Query firmware from repository
+        firmware_list = await microservice.service.repository.list_firmware(
+            device_model=device_model,
+            manufacturer=manufacturer,
+            is_beta=is_beta,
+            is_security_update=is_security_update,
+            limit=limit,
+            offset=offset
+        )
 
-@app.get("/api/v1/firmware/{firmware_id}/download")
+        # Convert to response models
+        firmware_responses = []
+        for fw in firmware_list:
+            firmware_responses.append(FirmwareResponse(
+                firmware_id=fw['firmware_id'],
+                name=fw['name'],
+                version=fw['version'],
+                description=fw.get('description'),
+                device_model=fw['device_model'],
+                manufacturer=fw['manufacturer'],
+                min_hardware_version=fw.get('min_hardware_version'),
+                max_hardware_version=fw.get('max_hardware_version'),
+                file_size=fw['file_size'],
+                file_url=fw['file_url'],
+                checksum_md5=fw['checksum_md5'],
+                checksum_sha256=fw['checksum_sha256'],
+                tags=fw.get('tags') or [],
+                metadata=fw.get('metadata') or {},
+                is_beta=fw.get('is_beta', False),
+                is_security_update=fw.get('is_security_update', False),
+                changelog=fw.get('changelog'),
+                download_count=fw.get('download_count', 0),
+                success_rate=float(fw.get('success_rate', 0.0)),
+                created_at=datetime.fromisoformat(fw['created_at'].replace('Z', '+00:00')) if isinstance(fw['created_at'], str) else fw['created_at'],
+                updated_at=datetime.fromisoformat(fw['updated_at'].replace('Z', '+00:00')) if isinstance(fw['updated_at'], str) else fw['updated_at'],
+                created_by=fw['created_by']
+            ))
+
+        return {
+            "firmware": firmware_responses,
+            "count": len(firmware_responses),
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "device_model": device_model,
+                "manufacturer": manufacturer,
+                "is_beta": is_beta,
+                "is_security_update": is_security_update
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error listing firmware: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/ota/firmware/{firmware_id}/download")
 async def download_firmware(
     firmware_id: str = Path(..., description="Firmware ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -299,7 +487,7 @@ async def download_firmware(
         logger.error(f"Error downloading firmware: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/v1/firmware/{firmware_id}")
+@app.delete("/api/v1/ota/firmware/{firmware_id}")
 async def delete_firmware(
     firmware_id: str = Path(..., description="Firmware ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -317,7 +505,7 @@ async def delete_firmware(
 # Update Campaigns
 # ======================
 
-@app.post("/api/v1/campaigns", response_model=UpdateCampaignResponse)
+@app.post("/api/v1/ota/campaigns", response_model=UpdateCampaignResponse)
 async def create_campaign(
     request: UpdateCampaignRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -335,7 +523,7 @@ async def create_campaign(
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/campaigns/{campaign_id}", response_model=UpdateCampaignResponse)
+@app.get("/api/v1/ota/campaigns/{campaign_id}", response_model=UpdateCampaignResponse)
 async def get_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -350,7 +538,7 @@ async def get_campaign(
         logger.error(f"Error getting campaign: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/campaigns")
+@app.get("/api/v1/ota/campaigns")
 async def list_campaigns(
     status: Optional[UpdateStatus] = Query(None, description="Filter by status"),
     priority: Optional[Priority] = Query(None, description="Filter by priority"),
@@ -359,18 +547,76 @@ async def list_campaigns(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取活动列表"""
-    return {
-        "campaigns": [],
-        "count": 0,
-        "limit": limit,
-        "offset": offset,
-        "filters": {
-            "status": status,
-            "priority": priority
-        }
-    }
+    try:
+        # Query campaigns from repository
+        campaigns_list = await microservice.service.repository.list_campaigns(
+            status=status.value if status else None,
+            priority=priority.value if priority else None,
+            limit=limit,
+            offset=offset
+        )
 
-@app.post("/api/v1/campaigns/{campaign_id}/start")
+        # Convert to response models
+        campaign_responses = []
+        for camp in campaigns_list:
+            # Get firmware for each campaign
+            firmware = await microservice.service.get_firmware(camp['firmware_id'])
+            if not firmware:
+                logger.warning(f"Firmware not found for campaign {camp['campaign_id']}")
+                continue
+
+            campaign_responses.append(UpdateCampaignResponse(
+                campaign_id=camp['campaign_id'],
+                name=camp['name'],
+                description=camp.get('description'),
+                firmware=firmware,
+                status=UpdateStatus(camp['status']),
+                deployment_strategy=DeploymentStrategy(camp['deployment_strategy']),
+                priority=Priority(camp['priority']),
+                target_device_count=camp.get('target_device_count', 0),
+                targeted_devices=camp.get('targeted_devices') or [],
+                targeted_groups=camp.get('targeted_groups') or [],
+                rollout_percentage=camp.get('rollout_percentage', 100),
+                max_concurrent_updates=camp.get('max_concurrent_updates', 10),
+                batch_size=camp.get('batch_size', 50),
+                total_devices=camp.get('total_devices', 0),
+                pending_devices=camp.get('pending_devices', 0),
+                in_progress_devices=camp.get('in_progress_devices', 0),
+                completed_devices=camp.get('completed_devices', 0),
+                failed_devices=camp.get('failed_devices', 0),
+                cancelled_devices=camp.get('cancelled_devices', 0),
+                scheduled_start=datetime.fromisoformat(camp['scheduled_start'].replace('Z', '+00:00')) if camp.get('scheduled_start') and isinstance(camp['scheduled_start'], str) else camp.get('scheduled_start'),
+                scheduled_end=datetime.fromisoformat(camp['scheduled_end'].replace('Z', '+00:00')) if camp.get('scheduled_end') and isinstance(camp['scheduled_end'], str) else camp.get('scheduled_end'),
+                actual_start=datetime.fromisoformat(camp['actual_start'].replace('Z', '+00:00')) if camp.get('actual_start') and isinstance(camp['actual_start'], str) else camp.get('actual_start'),
+                actual_end=datetime.fromisoformat(camp['actual_end'].replace('Z', '+00:00')) if camp.get('actual_end') and isinstance(camp['actual_end'], str) else camp.get('actual_end'),
+                timeout_minutes=camp.get('timeout_minutes', 60),
+                auto_rollback=camp.get('auto_rollback', True),
+                failure_threshold_percent=camp.get('failure_threshold_percent', 20),
+                rollback_triggers=camp.get('rollback_triggers') or [],
+                requires_approval=camp.get('requires_approval', False),
+                approved=camp.get('approved'),
+                approved_by=camp.get('approved_by'),
+                approval_comment=camp.get('approval_comment'),
+                created_at=datetime.fromisoformat(camp['created_at'].replace('Z', '+00:00')) if isinstance(camp['created_at'], str) else camp['created_at'],
+                updated_at=datetime.fromisoformat(camp['updated_at'].replace('Z', '+00:00')) if isinstance(camp['updated_at'], str) else camp['updated_at'],
+                created_by=camp['created_by']
+            ))
+
+        return {
+            "campaigns": campaign_responses,
+            "count": len(campaign_responses),
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "status": status,
+                "priority": priority
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error listing campaigns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/ota/campaigns/{campaign_id}/start")
 async def start_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -385,7 +631,7 @@ async def start_campaign(
         logger.error(f"Error starting campaign: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/campaigns/{campaign_id}/pause")
+@app.post("/api/v1/ota/campaigns/{campaign_id}/pause")
 async def pause_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -393,7 +639,7 @@ async def pause_campaign(
     """暂停更新活动"""
     return {"message": f"Campaign {campaign_id} paused"}
 
-@app.post("/api/v1/campaigns/{campaign_id}/cancel")
+@app.post("/api/v1/ota/campaigns/{campaign_id}/cancel")
 async def cancel_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -401,7 +647,7 @@ async def cancel_campaign(
     """取消更新活动"""
     return {"message": f"Campaign {campaign_id} cancelled"}
 
-@app.post("/api/v1/campaigns/{campaign_id}/approve", response_model=UpdateCampaignResponse)
+@app.post("/api/v1/ota/campaigns/{campaign_id}/approve", response_model=UpdateCampaignResponse)
 async def approve_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     request: UpdateApprovalRequest = Body(...),
@@ -427,7 +673,7 @@ async def approve_campaign(
 # Device Updates
 # ======================
 
-@app.post("/api/v1/devices/{device_id}/update", response_model=DeviceUpdateResponse)
+@app.post("/api/v1/ota/devices/{device_id}/update", response_model=DeviceUpdateResponse)
 async def update_device(
     device_id: str = Path(..., description="Device ID"),
     request: DeviceUpdateRequest = Body(...),
@@ -442,11 +688,15 @@ async def update_device(
         if device_update:
             return device_update
         raise HTTPException(status_code=400, detail="Failed to start device update")
+    except ValueError as ve:
+        # Handle validation errors (device not found, firmware incompatible, etc.)
+        logger.warning(f"Validation error: {ve}")
+        raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
         logger.error(f"Error updating device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/updates/{update_id}", response_model=DeviceUpdateResponse)
+@app.get("/api/v1/ota/updates/{update_id}", response_model=DeviceUpdateResponse)
 async def get_update_progress(
     update_id: str = Path(..., description="Update ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -457,11 +707,13 @@ async def get_update_progress(
         if progress:
             return progress
         raise HTTPException(status_code=404, detail="Update not found")
+    except HTTPException:
+        raise  # Re-raise HTTPException without catching
     except Exception as e:
         logger.error(f"Error getting update progress: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/{device_id}/updates", response_model=UpdateHistoryResponse)
+@app.get("/api/v1/ota/devices/{device_id}/updates", response_model=UpdateHistoryResponse)
 async def get_device_update_history(
     device_id: str = Path(..., description="Device ID"),
     limit: int = Query(50, ge=1, le=200, description="Max updates to return"),
@@ -478,7 +730,7 @@ async def get_device_update_history(
         last_update=None
     )
 
-@app.post("/api/v1/updates/{update_id}/cancel")
+@app.post("/api/v1/ota/updates/{update_id}/cancel")
 async def cancel_update(
     update_id: str = Path(..., description="Update ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -493,7 +745,7 @@ async def cancel_update(
         logger.error(f"Error cancelling update: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/updates/{update_id}/retry")
+@app.post("/api/v1/ota/updates/{update_id}/retry")
 async def retry_update(
     update_id: str = Path(..., description="Update ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -505,7 +757,7 @@ async def retry_update(
 # Rollback Operations
 # ======================
 
-@app.post("/api/v1/devices/{device_id}/rollback", response_model=RollbackResponse)
+@app.post("/api/v1/ota/devices/{device_id}/rollback", response_model=RollbackResponse)
 async def rollback_device(
     device_id: str = Path(..., description="Device ID"),
     to_version: str = Body(..., embed=True),
@@ -522,7 +774,7 @@ async def rollback_device(
         logger.error(f"Error rolling back device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/campaigns/{campaign_id}/rollback")
+@app.post("/api/v1/ota/campaigns/{campaign_id}/rollback")
 async def rollback_campaign(
     campaign_id: str = Path(..., description="Campaign ID"),
     reason: str = Body("Campaign rollback", embed=True),
@@ -535,7 +787,7 @@ async def rollback_campaign(
 # Statistics & Analytics
 # ======================
 
-@app.get("/api/v1/stats", response_model=UpdateStatsResponse)
+@app.get("/api/v1/ota/stats", response_model=UpdateStatsResponse)
 async def get_update_stats(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
@@ -549,7 +801,7 @@ async def get_update_stats(
         logger.error(f"Error getting update stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/stats/campaigns/{campaign_id}")
+@app.get("/api/v1/ota/stats/campaigns/{campaign_id}")
 async def get_campaign_stats(
     campaign_id: str = Path(..., description="Campaign ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -569,7 +821,7 @@ async def get_campaign_stats(
 # Batch Operations
 # ======================
 
-@app.post("/api/v1/devices/bulk/update")
+@app.post("/api/v1/ota/devices/bulk/update")
 async def bulk_update_devices(
     device_ids: List[str] = Body(..., embed=True),
     firmware_id: str = Body(..., embed=True),
@@ -603,7 +855,7 @@ async def bulk_update_devices(
 # Service Statistics
 # ======================
 
-@app.get("/api/v1/service/stats")
+@app.get("/api/v1/ota/service/stats")
 async def get_service_stats():
     """获取服务统计信息"""
     return {

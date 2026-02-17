@@ -1,14 +1,20 @@
 """
 Wallet Service Business Logic
 
-Handles wallet operations, transaction management, and blockchain integration
+Handles wallet operations, transaction management, and blockchain integration.
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
+- Event publishers are lazily loaded
 """
 
-from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Optional, List, Dict, Any, Tuple
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import logging
 import uuid
+
+from core.nats_client import Event
 
 from .models import (
     WalletBalance, WalletTransaction, WalletCreate, WalletUpdate,
@@ -17,63 +23,93 @@ from .models import (
     WalletStatistics, WalletResponse, TransactionType, WalletType,
     BlockchainNetwork, BlockchainIntegration
 )
-from .wallet_repository import WalletRepository
-from core.consul_registry import ConsulRegistry
+
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import (
+    WalletRepositoryProtocol,
+    EventBusProtocol,
+    AccountClientProtocol,
+    WalletNotFoundError,
+    InsufficientBalanceError,
+    DuplicateWalletError,
+)
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
+    from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
 
+class WalletServiceError(Exception):
+    """Base exception for wallet service errors"""
+    pass
+
+
+class WalletValidationError(WalletServiceError):
+    """Validation error"""
+    pass
+
+
 class WalletService:
-    """Main wallet service for managing digital assets"""
+    """
+    Main wallet service for managing digital assets.
 
-    def __init__(self):
-        self.repository = WalletRepository()
-        self.consul = None
-        self._init_consul()
+    Handles all business operations while delegating
+    data access to the repository layer.
+    """
 
-    def _init_consul(self):
-        """Initialize Consul registry for service discovery"""
-        try:
-            from core.config_manager import ConfigManager
-            config_manager = ConfigManager("wallet_service")
-            config = config_manager.get_service_config()
+    def __init__(
+        self,
+        repository: Optional[WalletRepositoryProtocol] = None,
+        event_bus: Optional[EventBusProtocol] = None,
+        account_client: Optional[AccountClientProtocol] = None,
+    ):
+        """
+        Initialize service with injected dependencies.
 
-            if config.consul_enabled:
-                self.consul = ConsulRegistry(
-                    service_name=config.service_name,
-                    service_port=config.service_port,
-                    consul_host=config.consul_host,
-                    consul_port=config.consul_port
+        Args:
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            account_client: Account service client for user validation
+        """
+        self.repository = repository  # Will be set by factory if None
+        self.repo = repository  # Alias for backward compatibility
+        self.event_bus = event_bus
+        self.account_client = account_client
+        self._event_publishers_loaded = False
+
+    def _lazy_load_event_publishers(self):
+        """Lazy load event publishers to avoid import-time I/O"""
+        if not self._event_publishers_loaded:
+            try:
+                from .events.publishers import (
+                    publish_wallet_created,
+                    publish_deposit_completed,
+                    publish_tokens_deducted,
                 )
-                logger.info("Consul service discovery initialized for wallet service")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Consul: {e}, will use fallback URLs")
+                self._publish_wallet_created = publish_wallet_created
+                self._publish_deposit_completed = publish_deposit_completed
+                self._publish_tokens_deducted = publish_tokens_deducted
+            except ImportError:
+                self._publish_wallet_created = None
+                self._publish_deposit_completed = None
+                self._publish_tokens_deducted = None
+            self._event_publishers_loaded = True
 
     async def validate_user_exists(self, user_id: str) -> bool:
-        """Validate user exists via account service API using Consul discovery"""
+        """Validate user exists via account service"""
+        if not self.account_client:
+            logger.warning("Account client not configured, skipping user validation")
+            return True
+
         try:
-            import httpx
-
-            # Use Consul discovery with fallback
-            if self.consul:
-                account_service_url = self.consul.get_service_address(
-                    "account_service",
-                    fallback_url="http://localhost:8201"
-                )
-            else:
-                account_service_url = "http://localhost:8201"
-
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{account_service_url}/api/v1/accounts/profile/{user_id}",
-                    timeout=5.0
-                )
-                return response.status_code == 200
+            user = await self.account_client.get_account(user_id)
+            return user is not None
         except Exception as e:
-            logger.warning(f"Could not validate user {user_id}: {e}")
-            # In microservices, we often proceed even if validation fails
-            # This maintains service autonomy
-            return True  # Assume valid if service is down
+            logger.warning(f"Failed to validate user: {e}")
+            return True  # Allow operation to proceed if validation fails
     
     async def create_wallet(self, wallet_data: WalletCreate) -> WalletResponse:
         """Create a new wallet for user"""
@@ -94,10 +130,30 @@ class WalletService:
                 
             # Create wallet
             wallet = await self.repository.create_wallet(wallet_data)
-            
+
             if wallet:
+                # Publish wallet.created event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type="wallet.created",
+                            source="wallet_service",
+                            data={
+                                "wallet_id": wallet.wallet_id,
+                                "user_id": wallet.user_id,
+                                "wallet_type": wallet.wallet_type.value,
+                                "currency": wallet.currency,
+                                "balance": float(wallet.balance),
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published wallet.created event for wallet {wallet.wallet_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish wallet.created event: {e}")
+
                 # Future: blockchain wallet preparation
-                        
+
                 return WalletResponse(
                     success=True,
                     message="Wallet created successfully",
@@ -170,8 +226,31 @@ class WalletService:
                 reference_id=request.reference_id,
                 metadata=request.metadata
             )
-            
+
             if transaction:
+                # Publish wallet.deposited event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type="wallet.deposited",
+                            source="wallet_service",
+                            data={
+                                "wallet_id": wallet_id,
+                                "user_id": transaction.user_id,
+                                "transaction_id": transaction.transaction_id,
+                                "amount": float(request.amount),
+                                "balance_before": float(transaction.balance_before),
+                                "balance_after": float(transaction.balance_after),
+                                "description": request.description,
+                                "reference_id": request.reference_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published wallet.deposited event for wallet {wallet_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish wallet.deposited event: {e}")
+
                 return WalletResponse(
                     success=True,
                     message=f"Deposited {request.amount} successfully",
@@ -209,10 +288,33 @@ class WalletService:
                 destination=request.destination,
                 metadata=request.metadata
             )
-            
+
             if transaction:
+                # Publish wallet.withdrawn event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type="wallet.withdrawn",
+                            source="wallet_service",
+                            data={
+                                "wallet_id": wallet_id,
+                                "user_id": transaction.user_id,
+                                "transaction_id": transaction.transaction_id,
+                                "amount": float(request.amount),
+                                "balance_before": float(transaction.balance_before),
+                                "balance_after": float(transaction.balance_after),
+                                "destination": request.destination,
+                                "description": request.description,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published wallet.withdrawn event for wallet {wallet_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish wallet.withdrawn event: {e}")
+
                 # Future: blockchain transfer
-                        
+
                 return WalletResponse(
                     success=True,
                     message=f"Withdrew {request.amount} successfully",
@@ -251,8 +353,31 @@ class WalletService:
                 usage_record_id=request.usage_record_id,
                 metadata=request.metadata
             )
-            
+
             if transaction:
+                # Publish wallet.consumed event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type="wallet.consumed",
+                            source="wallet_service",
+                            data={
+                                "wallet_id": wallet_id,
+                                "user_id": transaction.user_id,
+                                "transaction_id": transaction.transaction_id,
+                                "amount": float(request.amount),
+                                "balance_before": float(transaction.balance_before),
+                                "balance_after": float(transaction.balance_after),
+                                "description": request.description,
+                                "usage_record_id": request.usage_record_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published wallet.consumed event for wallet {wallet_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish wallet.consumed event: {e}")
+
                 return WalletResponse(
                     success=True,
                     message=f"Consumed {request.amount} successfully",
@@ -314,8 +439,31 @@ class WalletService:
                 reason=request.reason,
                 metadata=request.metadata
             )
-            
+
             if transaction:
+                # Publish wallet.refunded event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type="wallet.refunded",
+                            source="wallet_service",
+                            data={
+                                "wallet_id": transaction.wallet_id,
+                                "user_id": transaction.user_id,
+                                "transaction_id": transaction.transaction_id,
+                                "original_transaction_id": original_transaction_id,
+                                "amount": float(transaction.amount),
+                                "balance_before": float(transaction.balance_before),
+                                "balance_after": float(transaction.balance_after),
+                                "reason": request.reason,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published wallet.refunded event for transaction {original_transaction_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish wallet.refunded event: {e}")
+
                 return WalletResponse(
                     success=True,
                     message=f"Refunded {transaction.amount} successfully",
@@ -347,9 +495,35 @@ class WalletService:
                 description=request.description,
                 metadata=request.metadata
             )
-            
+
             if result:
                 from_transaction, to_transaction = result
+
+                # Publish wallet.transferred event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type="wallet.transferred",
+                            source="wallet_service",
+                            data={
+                                "from_wallet_id": from_wallet_id,
+                                "to_wallet_id": request.to_wallet_id,
+                                "from_user_id": from_transaction.user_id,
+                                "to_user_id": to_transaction.user_id,
+                                "amount": float(request.amount),
+                                "from_transaction_id": from_transaction.transaction_id,
+                                "to_transaction_id": to_transaction.transaction_id,
+                                "from_balance_after": float(from_transaction.balance_after),
+                                "to_balance_after": float(to_transaction.balance_after),
+                                "description": request.description,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published wallet.transferred event: {from_wallet_id} → {request.to_wallet_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish wallet.transferred event: {e}")
+
                 return WalletResponse(
                     success=True,
                     message=f"Transferred {request.amount} successfully",

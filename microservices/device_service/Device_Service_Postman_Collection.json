@@ -1,0 +1,795 @@
+{
+	"info": {
+		"_postman_id": "device-service-collection",
+		"name": "Device Service API",
+		"description": "Complete API collection for Device Management Service - IoT device registration, authentication, lifecycle management, and smart frame operations",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8220",
+			"type": "string"
+		},
+		{
+			"key": "auth_url",
+			"value": "http://localhost:8201",
+			"type": "string"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "device_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "device_secret",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "0. Setup - Get Auth Token",
+			"item": [
+				{
+					"name": "Generate Dev Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"jwt_token\", jsonData.token);",
+									"    console.log(\"JWT Token saved:\", jsonData.token.substring(0, 50) + \"...\");",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"test_user_123\",\n  \"email\": \"test@example.com\",\n  \"organization_id\": \"org_test_123\",\n  \"role\": \"admin\",\n  \"expires_in\": 3600\n}"
+						},
+						"url": {
+							"raw": "{{auth_url}}/api/v1/auth/dev-token",
+							"host": [
+								"{{auth_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"dev-token"
+							]
+						},
+						"description": "Generate a development JWT token for testing"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "1. Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Basic health check"
+					},
+					"response": []
+				},
+				{
+					"name": "Detailed Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/detailed",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health",
+								"detailed"
+							]
+						},
+						"description": "Detailed health check with component status"
+					},
+					"response": []
+				},
+				{
+					"name": "Service Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/service/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service",
+								"stats"
+							]
+						},
+						"description": "Get service statistics and capabilities"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. Device CRUD",
+			"item": [
+				{
+					"name": "Register Device",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"device_id\", jsonData.device_id);",
+									"    console.log(\"Device ID saved:\", jsonData.device_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_name\": \"Test Smart Frame 001\",\n  \"device_type\": \"smart_frame\",\n  \"manufacturer\": \"SmartTech\",\n  \"model\": \"SF-2024-Pro\",\n  \"serial_number\": \"SN123456789\",\n  \"firmware_version\": \"1.0.0\",\n  \"hardware_version\": \"1.0\",\n  \"mac_address\": \"AA:BB:CC:DD:EE:FF\",\n  \"connectivity_type\": \"wifi\",\n  \"security_level\": \"standard\",\n  \"location\": {\n    \"latitude\": 40.7128,\n    \"longitude\": -74.0060,\n    \"address\": \"New York, NY\"\n  },\n  \"metadata\": {\n    \"screen_size\": \"10.1 inch\",\n    \"resolution\": \"1920x1080\"\n  },\n  \"tags\": [\"living-room\", \"family\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices"
+							]
+						},
+						"description": "Register a new device"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Device",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}"
+							]
+						},
+						"description": "Get device details by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Device",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_name\": \"Updated Smart Frame\",\n  \"firmware_version\": \"1.1.0\",\n  \"status\": \"active\",\n  \"location\": {\n    \"latitude\": 40.7589,\n    \"longitude\": -73.9851,\n    \"address\": \"Times Square, NY\"\n  },\n  \"tags\": [\"living-room\", \"family\", \"updated\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}"
+							]
+						},
+						"description": "Update device information"
+					},
+					"response": []
+				},
+				{
+					"name": "List Devices",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices?limit=100&offset=0",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "100"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "status",
+									"value": "active",
+									"disabled": true
+								},
+								{
+									"key": "device_type",
+									"value": "smart_frame",
+									"disabled": true
+								}
+							]
+						},
+						"description": "List devices with optional filters"
+					},
+					"response": []
+				},
+				{
+					"name": "Decommission Device",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}"
+							]
+						},
+						"description": "Decommission (delete) a device"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. Device Authentication",
+			"item": [
+				{
+					"name": "Register Device in Auth Service",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"device_secret\", jsonData.device_secret);",
+									"    console.log(\"Device secret saved (keep this secure!):\", jsonData.device_secret.substring(0, 20) + \"...\");",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_id\": \"{{device_id}}\",\n  \"organization_id\": \"org_test_123\",\n  \"device_name\": \"Test Smart Frame\",\n  \"device_type\": \"smart_frame\",\n  \"expires_days\": 365\n}"
+						},
+						"url": {
+							"raw": "{{auth_url}}/api/v1/auth/device/register",
+							"host": [
+								"{{auth_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"device",
+								"register"
+							]
+						},
+						"description": "Register device credentials in auth service"
+					},
+					"response": []
+				},
+				{
+					"name": "Authenticate Device",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_id\": \"{{device_id}}\",\n  \"device_secret\": \"{{device_secret}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/auth",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"auth"
+							]
+						},
+						"description": "Authenticate device and get access token"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4. Device Commands",
+			"item": [
+				{
+					"name": "Send Status Check Command",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"command\": \"status_check\",\n  \"parameters\": {\n    \"include_diagnostics\": true\n  },\n  \"timeout\": 30,\n  \"priority\": 5,\n  \"require_ack\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}/commands",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}",
+								"commands"
+							]
+						},
+						"description": "Send status check command to device"
+					},
+					"response": []
+				},
+				{
+					"name": "Send Reboot Command",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"command\": \"reboot\",\n  \"parameters\": {\n    \"delay_seconds\": 5,\n    \"reason\": \"Manual reboot via API\"\n  },\n  \"timeout\": 60,\n  \"priority\": 8,\n  \"require_ack\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}/commands",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}",
+								"commands"
+							]
+						},
+						"description": "Send reboot command to device"
+					},
+					"response": []
+				},
+				{
+					"name": "Send Firmware Update Command",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"command\": \"update_firmware\",\n  \"parameters\": {\n    \"version\": \"1.2.0\",\n    \"url\": \"https://example.com/firmware/v1.2.0.bin\",\n    \"checksum\": \"sha256:abc123...\",\n    \"auto_restart\": true\n  },\n  \"timeout\": 300,\n  \"priority\": 7,\n  \"require_ack\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}/commands",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}",
+								"commands"
+							]
+						},
+						"description": "Send firmware update command to device"
+					},
+					"response": []
+				},
+				{
+					"name": "Bulk Send Commands",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_ids\": [\"{{device_id}}\"],\n  \"command\": {\n    \"command\": \"status_check\",\n    \"parameters\": {},\n    \"timeout\": 30,\n    \"priority\": 5\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/bulk/commands",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"bulk",
+								"commands"
+							]
+						},
+						"description": "Send command to multiple devices"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "5. Device Monitoring",
+			"item": [
+				{
+					"name": "Get Device Health",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/{{device_id}}/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"{{device_id}}",
+								"health"
+							]
+						},
+						"description": "Get device health status and metrics"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Device Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"stats"
+							]
+						},
+						"description": "Get overall device statistics"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "6. Smart Frame Operations",
+			"item": [
+				{
+					"name": "List Smart Frames",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/frames",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"frames"
+							]
+						},
+						"description": "List all smart frames with family sharing permissions"
+					},
+					"response": []
+				},
+				{
+					"name": "Control Frame Display",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"display_photo\",\n  \"photo_id\": \"photo_12345\",\n  \"transition\": \"fade\",\n  \"duration\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/frames/{{device_id}}/display",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"frames",
+								"{{device_id}}",
+								"display"
+							]
+						},
+						"description": "Control smart frame display"
+					},
+					"response": []
+				},
+				{
+					"name": "Sync Frame Content",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"album_ids\": [\"album_001\", \"album_002\"],\n  \"sync_type\": \"incremental\",\n  \"force\": false,\n  \"timeout\": 300\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/frames/{{device_id}}/sync",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"frames",
+								"{{device_id}}",
+								"sync"
+							]
+						},
+						"description": "Sync content to smart frame"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Frame Config",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brightness\": 85,\n  \"auto_brightness\": true,\n  \"slideshow_interval\": 60,\n  \"display_mode\": \"photo_slideshow\",\n  \"orientation\": \"auto\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/devices/frames/{{device_id}}/config",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"devices",
+								"frames",
+								"{{device_id}}",
+								"config"
+							]
+						},
+						"description": "Update smart frame configuration"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "7. Device Groups",
+			"item": [
+				{
+					"name": "Create Device Group",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"group_name\": \"Living Room Devices\",\n  \"description\": \"All devices in the living room\",\n  \"tags\": [\"living-room\", \"residential\"],\n  \"metadata\": {\n    \"location\": \"Living Room\",\n    \"floor\": 1\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/groups",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"groups"
+							]
+						},
+						"description": "Create a new device group"
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

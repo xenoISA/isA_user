@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: invitation_service
+# Regenerate with: python -m agents.tools.generate_config --deployment invitation_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: invitation
+  namespace: isa-cloud-staging
+  labels:
+    app: invitation
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: invitation
+  template:
+    metadata:
+      labels:
+        app: invitation
+    spec:
+      containers:
+      - name: invitation
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8213
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "invitation_service"
+        - name: SERVICE_PORT
+          value: "8213"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.invitation_service.main:app", "--host", "0.0.0.0", "--port", "8213"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8213
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8213
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: invitation
+  namespace: isa-cloud-staging
+  labels:
+    app: invitation
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8213
+    targetPort: 8213
+    protocol: TCP
+    name: http
+  selector:
+    app: invitation

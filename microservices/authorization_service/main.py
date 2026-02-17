@@ -24,12 +24,14 @@ from fastapi.responses import JSONResponse
 
 # Add parent directory to path for consul_registry
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 # Import internal modules
-from .authorization_service import AuthorizationService
+from .factory import create_authorization_service
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     HealthResponse, ServiceInfo, ServiceStats,
     ResourceAccessRequest, ResourceAccessResponse,
@@ -47,38 +49,79 @@ logger = app_logger  # for backward compatibility
 
 # Global service instance
 authorization_service = None
+event_bus = None  # NATS event bus
+consul_registry = None  # Consul service registry
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
-    global authorization_service
-    
+    global authorization_service, event_bus, consul_registry
+
     # Startup
     logger.info("🚀 Authorization Service starting up...")
     try:
-        authorization_service = AuthorizationService()
-        
+        # Initialize NATS JetStream event bus
+        try:
+            event_bus = await get_event_bus("authorization_service")
+            logger.info("✅ Event bus initialized successfully")
+
+            # Initialize authorization service using factory pattern
+            authorization_service = create_authorization_service(config=config_manager, event_bus=event_bus)
+
+            # Subscribe to events
+            from .events import AuthorizationEventHandlers
+            event_handlers = AuthorizationEventHandlers(authorization_service)
+            handler_map = event_handlers.get_event_handler_map()
+
+            for event_type, handler_func in handler_map.items():
+                # Subscribe to each event type
+                await event_bus.subscribe_to_events(
+                    pattern=f"*.{event_type}",
+                    handler=handler_func
+                )
+                logger.info(f"✅ Subscribed to {event_type} events")
+
+            logger.info(f"✅ Subscribed to {len(handler_map)} event types")
+
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+            event_bus = None
+
+            # Initialize authorization service using factory pattern (without event bus)
+            authorization_service = create_authorization_service(config=config_manager, event_bus=None)
+
         # Initialize default permissions
         await authorization_service.initialize_default_permissions()
-        
-        # Register with Consul
+
+        # Consul service registration
         if config.consul_enabled:
-            consul_registry = ConsulRegistry(
-                service_name=config.service_name,
-                service_port=config.service_port,
-                consul_host=config.consul_host,
-                consul_port=config.consul_port,
-                service_host=config.service_host,
-                tags=["microservice", "authorization", "api"]
-            )
-            
-            if consul_registry.register():
-                consul_registry.start_maintenance()
-                app.state.consul_registry = consul_registry
-                logger.info(f"{config.service_name} registered with Consul")
-            else:
-                logger.warning("Failed to register with Consul, continuing without service discovery")
-        
+            try:
+                # Get route metadata
+                route_meta = get_routes_for_consul()
+
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='ttl'  # Use TTL for reliable health checks
+                )
+                consul_registry.register()
+                consul_registry.start_maintenance()  # Start TTL heartbeat
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                consul_registry = None
+
         logger.info("✅ Authorization Service started successfully")
         yield
         
@@ -88,12 +131,22 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("🛑 Authorization Service shutting down...")
-    
-    # Deregister from Consul
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-    
+
+    # Consul deregistration
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("✅ Service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"❌ Failed to deregister from Consul: {e}")
+
+    # Close event bus
+    if event_bus:
+        try:
+            await event_bus.close()
+            logger.info("Authorization event bus closed")
+        except Exception as e:
+            logger.error(f"Error closing event bus: {e}")
     if authorization_service:
         await authorization_service.cleanup()
     logger.info("✅ Authorization Service shutdown completed")
@@ -121,6 +174,7 @@ async def global_exception_handler(request, exc):
 # Health Check & Service Information
 # ==========================================
 
+@app.get("/api/v1/authorization/health")
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Basic health check"""

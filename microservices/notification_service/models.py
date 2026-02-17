@@ -72,7 +72,7 @@ class PushPlatform(str, Enum):
 
 class NotificationTemplate(BaseModel):
     """通知模板模型"""
-    id: Optional[str] = None
+    id: Optional[int] = None
     template_id: str = Field(..., description="模板ID")
     name: str = Field(..., description="模板名称")
     description: Optional[str] = None
@@ -99,7 +99,7 @@ class NotificationTemplate(BaseModel):
 
 class Notification(BaseModel):
     """通知模型"""
-    id: Optional[str] = None
+    id: Optional[int] = None
     notification_id: str = Field(..., description="通知ID")
     
     # 基本信息
@@ -147,7 +147,7 @@ class Notification(BaseModel):
 
 class InAppNotification(BaseModel):
     """应用内通知模型"""
-    id: Optional[str] = None
+    id: Optional[int] = None
     notification_id: str = Field(..., description="通知ID")
     user_id: str = Field(..., description="用户ID")
     
@@ -174,7 +174,7 @@ class InAppNotification(BaseModel):
 
 class NotificationBatch(BaseModel):
     """批量通知模型"""
-    id: Optional[str] = None
+    id: Optional[int] = None
     batch_id: str = Field(..., description="批次ID")
     name: Optional[str] = Field(None, description="批次名称")
     

@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: product_service
+# Regenerate with: python -m agents.tools.generate_config --deployment product_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product
+  namespace: isa-cloud-staging
+  labels:
+    app: product
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product
+  template:
+    metadata:
+      labels:
+        app: product
+    spec:
+      containers:
+      - name: product
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8215
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "product_service"
+        - name: SERVICE_PORT
+          value: "8215"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.product_service.main:app", "--host", "0.0.0.0", "--port", "8215"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8215
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8215
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product
+  namespace: isa-cloud-staging
+  labels:
+    app: product
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8215
+    targetPort: 8215
+    protocol: TCP
+    name: http
+  selector:
+    app: product

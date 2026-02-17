@@ -24,10 +24,15 @@ from .organization_service import (
     OrganizationValidationError
 )
 from .family_sharing_service import FamilySharingService
-from .family_sharing_repository import FamilySharingRepository
-from core.consul_registry import ConsulRegistry
+from .factory import create_organization_service, create_family_sharing_service
+# Note: AccountServiceClient and AuthServiceClient were removed as they were unused
+# If user validation is needed in the future, implement via auth_dependencies
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
+from core.nats_client import get_event_bus
+from core.auth_dependencies import require_auth_or_internal_service, is_internal_service_request
+from isa_common.consul_client import ConsulRegistry
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     OrganizationCreateRequest, OrganizationUpdateRequest,
     OrganizationMemberAddRequest, OrganizationMemberUpdateRequest,
@@ -60,13 +65,60 @@ class OrganizationMicroservice:
     def __init__(self):
         self.organization_service = None
         self.family_sharing_service = None
+        self.event_bus = None
+        self.consul_registry: Optional[ConsulRegistry] = None
 
     async def initialize(self):
         """初始化微服务"""
         try:
-            self.organization_service = OrganizationService()
-            sharing_repository = FamilySharingRepository()
-            self.family_sharing_service = FamilySharingService(repository=sharing_repository)
+            logger.info("Initializing organization microservice...")
+
+            # Consul 服务注册
+            if config.consul_enabled:
+                try:
+                    # 获取路由元数据
+                    route_meta = get_routes_for_consul()
+
+                    # 合并服务元数据
+                    consul_meta = {
+                        'version': SERVICE_METADATA['version'],
+                        'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                        **route_meta
+                    }
+
+                    self.consul_registry = ConsulRegistry(
+                        service_name=SERVICE_METADATA['service_name'],
+                        service_port=config.service_port,
+                        consul_host=config.consul_host,
+                        consul_port=config.consul_port,
+                        tags=SERVICE_METADATA['tags'],
+                        meta=consul_meta,
+                        health_check_type='ttl'  # Use TTL for reliable health checks
+                    )
+                    self.consul_registry.register()
+                    self.consul_registry.start_maintenance()  # Start TTL heartbeat
+                    logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+                except Exception as e:
+                    logger.warning(f"Failed to register with Consul: {e}")
+                    self.consul_registry = None
+
+            # Initialize event bus for event-driven communication
+            try:
+                self.event_bus = await get_event_bus("organization_service")
+                logger.info("Event bus initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+                self.event_bus = None
+
+            # Use factory functions for DI pattern
+            self.organization_service = create_organization_service(
+                config=config_manager,
+                event_bus=self.event_bus
+            )
+            self.family_sharing_service = create_family_sharing_service(
+                config=config_manager,
+                event_bus=self.event_bus
+            )
             logger.info("Organization microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize organization microservice: {e}")
@@ -75,6 +127,16 @@ class OrganizationMicroservice:
     async def shutdown(self):
         """关闭微服务"""
         try:
+            # Consul 注销
+            if self.consul_registry:
+                try:
+                    self.consul_registry.deregister()
+                    logger.info("Service deregistered from Consul")
+                except Exception as e:
+                    logger.error(f"Failed to deregister from Consul: {e}")
+
+            if self.event_bus:
+                await self.event_bus.close()
             logger.info("Organization microservice shutdown completed")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -89,24 +151,30 @@ async def lifespan(app: FastAPI):
     """Application lifespan management"""
     # Initialize microservice
     await organization_microservice.initialize()
-    
+
+    # Subscribe to events for cleanup and synchronization
+    if organization_microservice.event_bus:
+        try:
+            from .events.handlers import get_event_handlers
+
+            # Get event handlers (function-based, not class-based)
+            handler_map = get_event_handlers()
+
+            # Subscribe to events
+            for event_pattern, handler_func in handler_map.items():
+                # Subscribe to each event pattern (already includes service prefix)
+                await organization_microservice.event_bus.subscribe_to_events(
+                    pattern=event_pattern, handler=handler_func
+                )
+                logger.info(f"Subscribed to {event_pattern} events")
+
+            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+
+        except Exception as e:
+            logger.error(f"Failed to subscribe to events: {e}")
+
     # Register with Consul
-    if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "organization", "api"]
-        )
-        
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
+    logger.info("Service discovery via Consul agent sidecar")
     
     yield
     
@@ -150,29 +218,13 @@ def get_family_sharing_service() -> FamilySharingService:
     return organization_microservice.family_sharing_service
 
 
-def get_current_user_id(
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    authorization: Optional[str] = Header(None)
-) -> str:
-    """从请求头获取当前用户ID"""
-    # 优先使用X-User-Id头
-    if x_user_id:
-        return x_user_id
-    
-    # TODO: 从JWT token中提取user_id
-    if authorization:
-        # 这里应该验证JWT并提取user_id
-        # 暂时返回测试用户ID
-        return "test-user"
-    
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="User authentication required"
-    )
+# 使用统一的认证依赖（已导入）
+# get_current_user_id = require_auth_or_internal_service
 
 
 # ============ Health Check Endpoints ============
 
+@app.get("/api/v1/organization/health")
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """健康检查"""
@@ -184,13 +236,13 @@ async def health_check():
     )
 
 
-@app.get("/info", response_model=ServiceInfo)
+@app.get("/api/v1/organization/info", response_model=ServiceInfo)
 async def service_info():
     """服务信息"""
     return ServiceInfo()
 
 
-@app.get("/api/v1/organizations/stats", response_model=ServiceStats)
+@app.get("/api/v1/organization/stats", response_model=ServiceStats)
 async def get_service_stats(
     service: OrganizationService = Depends(get_organization_service)
 ):
@@ -201,10 +253,10 @@ async def get_service_stats(
 
 # ============ Organization Management Endpoints ============
 
-@app.post("/api/v1/organizations", response_model=OrganizationResponse)
+@app.post("/api/v1/organization/organizations", response_model=OrganizationResponse)
 async def create_organization(
     request: OrganizationCreateRequest,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """创建组织"""
@@ -216,10 +268,10 @@ async def create_organization(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/organizations/{organization_id}", response_model=OrganizationResponse)
+@app.get("/api/v1/organization/organizations/{organization_id}", response_model=OrganizationResponse)
 async def get_organization(
     organization_id: str = Path(..., description="组织ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取组织信息"""
@@ -233,11 +285,11 @@ async def get_organization(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.put("/api/v1/organizations/{organization_id}", response_model=OrganizationResponse)
+@app.put("/api/v1/organization/organizations/{organization_id}", response_model=OrganizationResponse)
 async def update_organization(
     organization_id: str = Path(..., description="组织ID"),
     request: OrganizationUpdateRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """更新组织信息"""
@@ -253,10 +305,10 @@ async def update_organization(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.delete("/api/v1/organizations/{organization_id}")
+@app.delete("/api/v1/organization/organizations/{organization_id}")
 async def delete_organization(
     organization_id: str = Path(..., description="组织ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """删除组织"""
@@ -274,12 +326,12 @@ async def delete_organization(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/users/organizations", response_model=OrganizationListResponse)
+@app.get("/api/v1/organization/organizations", response_model=OrganizationListResponse)
 async def get_user_organizations(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
-    """获取用户所属的所有组织"""
+    """获取用户所属的所有组织 (user_id from auth)"""
     try:
         return await service.get_user_organizations(user_id)
     except OrganizationServiceError as e:
@@ -288,11 +340,11 @@ async def get_user_organizations(
 
 # ============ Member Management Endpoints ============
 
-@app.post("/api/v1/organizations/{organization_id}/members", response_model=OrganizationMemberResponse)
+@app.post("/api/v1/organization/organizations/{organization_id}/members", response_model=OrganizationMemberResponse)
 async def add_organization_member(
     organization_id: str = Path(..., description="组织ID"),
     request: OrganizationMemberAddRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """添加组织成员"""
@@ -308,13 +360,13 @@ async def add_organization_member(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/organizations/{organization_id}/members", response_model=OrganizationMemberListResponse)
+@app.get("/api/v1/organization/organizations/{organization_id}/members", response_model=OrganizationMemberListResponse)
 async def get_organization_members(
     organization_id: str = Path(..., description="组织ID"),
     limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
     role: Optional[OrganizationRole] = Query(None, description="角色过滤"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取组织成员列表"""
@@ -328,12 +380,12 @@ async def get_organization_members(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.put("/api/v1/organizations/{organization_id}/members/{member_user_id}", response_model=OrganizationMemberResponse)
+@app.put("/api/v1/organization/organizations/{organization_id}/members/{member_user_id}", response_model=OrganizationMemberResponse)
 async def update_organization_member(
     organization_id: str = Path(..., description="组织ID"),
     member_user_id: str = Path(..., description="成员用户ID"),
     request: OrganizationMemberUpdateRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """更新组织成员"""
@@ -349,11 +401,11 @@ async def update_organization_member(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.delete("/api/v1/organizations/{organization_id}/members/{member_user_id}")
+@app.delete("/api/v1/organization/organizations/{organization_id}/members/{member_user_id}")
 async def remove_organization_member(
     organization_id: str = Path(..., description="组织ID"),
     member_user_id: str = Path(..., description="成员用户ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """移除组织成员"""
@@ -375,10 +427,10 @@ async def remove_organization_member(
 
 # ============ Context Switching Endpoints ============
 
-@app.post("/api/v1/organizations/context", response_model=OrganizationContextResponse)
+@app.post("/api/v1/organization/organizations/context", response_model=OrganizationContextResponse)
 async def switch_organization_context(
     request: OrganizationSwitchRequest,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """切换用户上下文（组织或个人）"""
@@ -394,10 +446,10 @@ async def switch_organization_context(
 
 # ============ Statistics and Analytics Endpoints ============
 
-@app.get("/api/v1/organizations/{organization_id}/stats", response_model=OrganizationStatsResponse)
+@app.get("/api/v1/organization/organizations/{organization_id}/stats", response_model=OrganizationStatsResponse)
 async def get_organization_stats(
     organization_id: str = Path(..., description="组织ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取组织统计信息"""
@@ -411,12 +463,12 @@ async def get_organization_stats(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/organizations/{organization_id}/usage", response_model=OrganizationUsageResponse)
+@app.get("/api/v1/organization/organizations/{organization_id}/usage", response_model=OrganizationUsageResponse)
 async def get_organization_usage(
     organization_id: str = Path(..., description="组织ID"),
     start_date: Optional[datetime] = Query(None, description="开始日期"),
     end_date: Optional[datetime] = Query(None, description="结束日期"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取组织使用量"""
@@ -432,14 +484,14 @@ async def get_organization_usage(
 
 # ============ Platform Admin Endpoints ============
 
-@app.get("/api/v1/admin/organizations", response_model=OrganizationListResponse)
+@app.get("/api/v1/organization/admin/organizations", response_model=OrganizationListResponse)
 async def list_all_organizations(
     limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     plan: Optional[str] = Query(None, description="计划过滤"),
     status: Optional[str] = Query(None, description="状态过滤"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: OrganizationService = Depends(get_organization_service)
 ):
     """获取所有组织列表（平台管理员）"""
@@ -452,11 +504,11 @@ async def list_all_organizations(
 
 # ============ Family Sharing Endpoints ============
 
-@app.post("/api/v1/organizations/{organization_id}/sharing", response_model=SharingResourceResponse)
+@app.post("/api/v1/organization/organizations/{organization_id}/sharing", response_model=SharingResourceResponse)
 async def create_sharing(
     organization_id: str = Path(..., description="组织ID"),
     request: CreateSharingRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """创建共享资源"""
@@ -470,11 +522,11 @@ async def create_sharing(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/organizations/{organization_id}/sharing/{sharing_id}", response_model=SharedResourceDetailResponse)
+@app.get("/api/v1/organization/organizations/{organization_id}/sharing/{sharing_id}", response_model=SharedResourceDetailResponse)
 async def get_sharing(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """获取共享资源详情"""
@@ -487,12 +539,12 @@ async def get_sharing(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.put("/api/v1/organizations/{organization_id}/sharing/{sharing_id}", response_model=SharingResourceResponse)
+@app.put("/api/v1/organization/organizations/{organization_id}/sharing/{sharing_id}", response_model=SharingResourceResponse)
 async def update_sharing(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
     request: UpdateSharingRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """更新共享资源"""
@@ -506,11 +558,11 @@ async def update_sharing(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.delete("/api/v1/organizations/{organization_id}/sharing/{sharing_id}")
+@app.delete("/api/v1/organization/organizations/{organization_id}/sharing/{sharing_id}")
 async def delete_sharing(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """删除共享资源"""
@@ -528,14 +580,14 @@ async def delete_sharing(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/organizations/{organization_id}/sharing", response_model=List[SharingResourceResponse])
+@app.get("/api/v1/organization/organizations/{organization_id}/sharing", response_model=List[SharingResourceResponse])
 async def list_organization_sharings(
     organization_id: str = Path(..., description="组织ID"),
     resource_type: Optional[SharingResourceType] = Query(None, description="资源类型过滤"),
     status_filter: Optional[SharingStatus] = Query(None, alias="status", description="状态过滤"),
     limit: int = Query(50, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """获取组织所有共享资源列表"""
@@ -546,12 +598,12 @@ async def list_organization_sharings(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.put("/api/v1/organizations/{organization_id}/sharing/{sharing_id}/members", response_model=MemberSharingPermissionResponse)
+@app.put("/api/v1/organization/organizations/{organization_id}/sharing/{sharing_id}/members", response_model=MemberSharingPermissionResponse)
 async def update_member_permission(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
     request: UpdateMemberSharingPermissionRequest = ...,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """更新成员共享权限"""
@@ -565,12 +617,12 @@ async def update_member_permission(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.delete("/api/v1/organizations/{organization_id}/sharing/{sharing_id}/members/{member_user_id}")
+@app.delete("/api/v1/organization/organizations/{organization_id}/sharing/{sharing_id}/members/{member_user_id}")
 async def revoke_member_access(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
     member_user_id: str = Path(..., description="成员用户ID"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """撤销成员共享权限"""
@@ -588,7 +640,7 @@ async def revoke_member_access(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/organizations/{organization_id}/members/{member_user_id}/shared-resources", response_model=MemberSharedResourcesResponse)
+@app.get("/api/v1/organization/organizations/{organization_id}/members/{member_user_id}/shared-resources", response_model=MemberSharedResourcesResponse)
 async def get_member_shared_resources(
     organization_id: str = Path(..., description="组织ID"),
     member_user_id: str = Path(..., description="成员用户ID"),
@@ -596,7 +648,7 @@ async def get_member_shared_resources(
     status_filter: Optional[SharingStatus] = Query(None, alias="status", description="状态过滤"),
     limit: int = Query(50, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """获取成员所有共享资源"""
@@ -614,13 +666,13 @@ async def get_member_shared_resources(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@app.get("/api/v1/organizations/{organization_id}/sharing/{sharing_id}/usage", response_model=SharingUsageStatsResponse)
+@app.get("/api/v1/organization/organizations/{organization_id}/sharing/{sharing_id}/usage", response_model=SharingUsageStatsResponse)
 async def get_sharing_usage_stats(
     organization_id: str = Path(..., description="组织ID"),
     sharing_id: str = Path(..., description="共享ID"),
     period_start: datetime = Query(..., description="统计开始时间"),
     period_end: datetime = Query(..., description="统计结束时间"),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_auth_or_internal_service),
     service: FamilySharingService = Depends(get_family_sharing_service)
 ):
     """获取共享资源使用统计"""

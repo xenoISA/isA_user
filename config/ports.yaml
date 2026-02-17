@@ -1,0 +1,419 @@
+# =============================================================================
+# Port Configuration - Single Point of Truth for All Port Assignments
+# =============================================================================
+# This file is the ONLY source of truth for port configuration across:
+# - .claude/settings.local.json (MCP servers)
+# - .claude/skills/environment-context/SKILL.md (documentation)
+# - deployment/k8s/*.yaml (Kubernetes manifests)
+# - agents/mcp_servers/*.py (MCP implementations)
+#
+# Architecture:
+#   External Traffic -> APISIX Gateway -> Consul -> Services
+# =============================================================================
+
+# Kubernetes Namespace Configuration
+kubernetes:
+  staging_namespace: "isa-cloud-staging"
+  production_namespace: "isa-cloud-prod"
+  default_namespace: "isa-cloud-staging"
+
+# Host Configuration (can be overridden by environment)
+hosts:
+  default: "localhost"
+  k8s_cluster: "kubernetes.default.svc"
+
+# =============================================================================
+# API Gateway (APISIX)
+# =============================================================================
+gateway:
+  apisix:
+    http: 80
+    https: 443
+    admin_api: 9180
+    prometheus: 9091
+    control: 9092
+    k8s_service: "apisix-gateway"
+    description: "API Gateway - dynamic routing via Consul"
+
+  apisix_dashboard:
+    port: 9000
+    k8s_service: "apisix-dashboard"
+    description: "APISIX Dashboard"
+
+  etcd:
+    client: 2379
+    peer: 2380
+    k8s_service: "etcd"
+    description: "APISIX configuration store"
+
+# =============================================================================
+# Service Discovery (Consul)
+# =============================================================================
+service_discovery:
+  consul:
+    http: 8500
+    dns: 8600
+    server_rpc: 8300
+    serf_lan: 8301
+    serf_wan: 8302
+    grpc: 8502
+    k8s_service: "consul"
+    description: "Service discovery and KV store"
+
+# =============================================================================
+# Infrastructure Services (Native Protocols)
+# =============================================================================
+infrastructure:
+  # Database
+  postgres:
+    port: 5432
+    k8s_service: "postgres"
+    description: "PostgreSQL database"
+
+  # Cache & Session
+  redis:
+    port: 6379
+    k8s_service: "redis"
+    description: "Redis cache"
+
+  # Graph Database
+  neo4j:
+    http: 7474
+    bolt: 7687
+    k8s_service: "neo4j"
+    description: "Neo4j graph database"
+
+  # Object Storage
+  minio:
+    api: 9000
+    console: 9001
+    k8s_service: "minio"
+    description: "MinIO S3-compatible storage"
+
+  # Message Queue
+  nats:
+    client: 4222
+    monitoring: 4223
+    cluster: 6222
+    k8s_service: "nats"
+    description: "NATS JetStream messaging"
+
+  # MQTT Broker
+  mosquitto:
+    mqtt: 1883
+    websocket: 9001
+    k8s_service: "mosquitto"
+    description: "MQTT broker for IoT"
+
+  # Vector Database
+  qdrant:
+    http: 6333
+    grpc: 6334
+    k8s_service: "qdrant"
+    description: "Qdrant vector database"
+
+  # Observability
+  loki:
+    port: 3100
+    k8s_service: "loki"
+    description: "Loki log aggregation"
+
+  grafana:
+    port: 3000
+    k8s_service: "grafana"
+    description: "Grafana dashboards"
+
+# =============================================================================
+# gRPC Gateway Services (50051-50070 range)
+# =============================================================================
+grpc_services:
+  minio_grpc:
+    port: 50051
+    k8s_service: "minio-grpc"
+    description: "MinIO gRPC gateway"
+
+  duckdb_grpc:
+    port: 50052
+    k8s_service: "duckdb-grpc"
+    description: "DuckDB gRPC gateway"
+
+  mqtt_grpc:
+    port: 50053
+    k8s_service: "mqtt-grpc"
+    description: "MQTT gRPC gateway"
+
+  loki_grpc:
+    port: 50054
+    k8s_service: "loki-grpc"
+    description: "Loki gRPC gateway"
+
+  redis_grpc:
+    port: 50055
+    k8s_service: "redis-grpc"
+    description: "Redis gRPC gateway"
+
+  nats_grpc:
+    port: 50056
+    k8s_service: "nats-grpc"
+    description: "NATS gRPC gateway"
+
+  postgres_grpc:
+    port: 50061
+    k8s_service: "isa-postgres-grpc"
+    description: "PostgreSQL gRPC gateway"
+
+  qdrant_grpc:
+    port: 50062
+    k8s_service: "qdrant-grpc"
+    description: "Qdrant gRPC gateway"
+
+  neo4j_grpc:
+    port: 50063
+    k8s_service: "neo4j-grpc"
+    description: "Neo4j gRPC gateway"
+
+# =============================================================================
+# Platform Applications (isa-cloud) - 8080-8090 range
+# =============================================================================
+platform:
+  agent:
+    port: 8080
+    k8s_service: "agent"
+    description: "isA Agent service"
+    repo: "isA_Agent"
+
+  mcp:
+    port: 8081
+    k8s_service: "mcp"
+    description: "MCP service"
+    repo: "isA_MCP"
+
+  model:
+    port: 8082
+    k8s_service: "model"
+    description: "Model service"
+    repo: "isA_Model"
+
+  web:
+    port: 8083
+    k8s_service: "web"
+    description: "Web frontend"
+    repo: "isa-cloud"
+
+  data:
+    port: 8084
+    k8s_service: "data"
+    description: "Data service"
+    repo: "isa-data"
+
+  python_repl:
+    port: 8086
+    k8s_service: "python-repl"
+    description: "Python REPL service"
+    repo: "isa-cloud"
+
+# =============================================================================
+# Business Microservices (isA_user) - 8201-8299 range
+# =============================================================================
+microservices:
+  # Identity & Access (8201-8210)
+  auth_service:
+    port: 8201
+    k8s_service: "auth"
+    description: "Authentication service"
+
+  account_service:
+    port: 8202
+    k8s_service: "account"
+    description: "User accounts"
+
+  session_service:
+    port: 8203
+    k8s_service: "session"
+    description: "Session management"
+
+  authorization_service:
+    port: 8204
+    k8s_service: "authorization"
+    description: "Authorization & RBAC"
+
+  audit_service:
+    port: 8205
+    k8s_service: "audit"
+    description: "Audit logging"
+
+  notification_service:
+    port: 8206
+    k8s_service: "notification"
+    description: "Notifications (push, email, SMS)"
+
+  payment_service:
+    port: 8207
+    k8s_service: "payment"
+    description: "Payment processing"
+
+  wallet_service:
+    port: 8208
+    k8s_service: "wallet"
+    description: "User wallets"
+
+  storage_service:
+    port: 8209
+    k8s_service: "storage"
+    description: "File storage"
+
+  order_service:
+    port: 8210
+    k8s_service: "order"
+    description: "Order management"
+
+  # Business Domain (8211-8230)
+  task_service:
+    port: 8211
+    k8s_service: "task"
+    description: "Task management"
+
+  organization_service:
+    port: 8212
+    k8s_service: "organization"
+    description: "Organizations & families"
+
+  invitation_service:
+    port: 8213
+    k8s_service: "invitation"
+    description: "Invitations"
+
+  vault_service:
+    port: 8214
+    k8s_service: "vault"
+    description: "Secrets vault"
+
+  product_service:
+    port: 8215
+    k8s_service: "product"
+    description: "Product catalog"
+
+  billing_service:
+    port: 8216
+    k8s_service: "billing"
+    description: "Billing"
+
+  calendar_service:
+    port: 8217
+    k8s_service: "calendar"
+    description: "Calendar"
+
+  weather_service:
+    port: 8218
+    k8s_service: "weather"
+    description: "Weather integration"
+
+  album_service:
+    port: 8219
+    k8s_service: "album"
+    description: "Photo albums"
+
+  device_service:
+    port: 8220
+    k8s_service: "device"
+    description: "Device management"
+
+  ota_service:
+    port: 8221
+    k8s_service: "ota"
+    description: "OTA updates"
+
+  media_service:
+    port: 8222
+    k8s_service: "media"
+    description: "Media processing"
+
+  memory_service:
+    port: 8223
+    k8s_service: "memory"
+    description: "Memory (semantic, episodic, etc.)"
+
+  location_service:
+    port: 8224
+    k8s_service: "location"
+    description: "Location tracking"
+
+  telemetry_service:
+    port: 8225
+    k8s_service: "telemetry"
+    description: "Device telemetry"
+
+  compliance_service:
+    port: 8226
+    k8s_service: "compliance"
+    description: "GDPR/PCI compliance"
+
+  document_service:
+    port: 8227
+    k8s_service: "document"
+    description: "Document management"
+
+  subscription_service:
+    port: 8228
+    k8s_service: "subscription"
+    description: "Subscription management"
+
+  credit_service:
+    port: 8229
+    k8s_service: "credit"
+    description: "Credit system"
+
+  event_service:
+    port: 8230
+    k8s_service: "event"
+    description: "Event sourcing"
+
+  # Extended Services (8250+)
+  membership_service:
+    port: 8250
+    k8s_service: "membership"
+    description: "Membership management"
+
+  campaign_service:
+    port: 8251
+    k8s_service: "campaign"
+    description: "Marketing campaigns and promotions"
+
+  inventory_service:
+    port: 8252
+    k8s_service: "inventory"
+    description: "Inventory reservations and stock"
+
+  tax_service:
+    port: 8253
+    k8s_service: "tax"
+    description: "Tax calculation"
+
+  fulfillment_service:
+    port: 8254
+    k8s_service: "fulfillment"
+    description: "Shipping and fulfillment"
+
+# =============================================================================
+# Port Ranges Summary
+# =============================================================================
+# Range        | Purpose
+# -------------|----------------------------------
+# 80, 443      | APISIX Gateway (HTTP/HTTPS)
+# 1883         | MQTT
+# 2379-2380    | etcd
+# 3000         | Grafana
+# 3100         | Loki
+# 4222         | NATS client
+# 5432         | PostgreSQL
+# 6333-6334    | Qdrant
+# 6379         | Redis
+# 7474, 7687   | Neo4j
+# 8080-8090    | Platform apps (agent, mcp, model, etc.)
+# 8201-8230    | Business microservices
+# 8250+        | Extended services
+# 8500         | Consul
+# 9000-9001    | MinIO
+# 9180         | APISIX Admin API
+# 50051-50070  | gRPC gateway services
+# =============================================================================

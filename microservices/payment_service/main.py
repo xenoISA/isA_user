@@ -14,12 +14,14 @@ from datetime import datetime
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger  # 使用新的日志模块
+from core.nats_client import get_event_bus
+from isa_common.consul_client import ConsulRegistry
 
 from .payment_repository import PaymentRepository
 from .payment_service import PaymentService
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     SubscriptionPlan, Subscription, Payment, Invoice, Refund,
     PaymentMethodInfo, SubscriptionTier, PaymentStatus,
@@ -31,6 +33,7 @@ from .models import (
     HealthResponse, ServiceInfo, ServiceStats
 )
 from .blockchain_integration import blockchain_router
+from .crypto_routes import router as crypto_router
 
 # 初始化配置管理器
 config_manager = ConfigManager("payment_service")
@@ -45,51 +48,149 @@ if config.debug:
 
 # 全局变量
 payment_service: Optional[PaymentService] = None
+consul_registry = None
+account_client = None
+wallet_client = None
+billing_client = None
+product_client = None
 SERVICE_PORT = config.service_port
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    global payment_service
-    
+    global payment_service, consul_registry, account_client, wallet_client, billing_client, product_client
+
+    # Initialize service clients
+    try:
+        from .clients import AccountClient, WalletClient, BillingClient, ProductClient
+        account_client = AccountClient(config=config_manager)
+        wallet_client = WalletClient(config=config_manager)
+        billing_client = BillingClient(config=config_manager)
+        product_client = ProductClient(config=config_manager)
+        logger.info("✅ Service clients initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize service clients: {e}")
+        account_client = None
+        wallet_client = None
+        billing_client = None
+        product_client = None
+
+    # Initialize event bus for event-driven communication
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("payment_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+
     # 初始化数据访问层
-    repository = PaymentRepository()
-    
+    repository = PaymentRepository(config=config_manager)
+
     # 初始化业务逻辑层
     # 获取 Stripe 配置
     stripe_key = config_manager.get("STRIPE_SECRET_KEY") or config_manager.get("PAYMENT_SERVICE_STRIPE_SECRET_KEY")
-    
+
     payment_service = PaymentService(
         repository=repository,
-        stripe_secret_key=stripe_key
+        stripe_secret_key=stripe_key,
+        event_bus=event_bus,
+        account_client=account_client,
+        wallet_client=wallet_client,
+        billing_client=billing_client,
+        product_client=product_client,
+        config=config_manager
     )
-    
-    # Register with Consul
-    consul_registry = ConsulRegistry(
-        service_name="payment",
-        service_port=SERVICE_PORT,
-        consul_host=config.consul_host,
-        consul_port=config.consul_port,
-        service_host=config.service_host,
-        tags=["microservice", "payment", "api"]
-    )
-    
-    if consul_registry.register():
-        consul_registry.start_maintenance()
-        app.state.consul_registry = consul_registry
-        logger.info("Payment service registered with Consul")
-    else:
-        logger.warning("Failed to register with Consul, continuing without service discovery")
 
-    logger.info(f"Payment Service started on port {SERVICE_PORT}")
+    # Register event handlers
+    if event_bus:
+        try:
+            from .events import get_event_handlers
+            handler_map = get_event_handlers(payment_service)
+
+            for event_pattern, handler_func in handler_map.items():
+                await event_bus.subscribe_to_events(
+                    pattern=event_pattern, handler=handler_func
+                )
+                logger.info(f"Subscribed to {event_pattern} events")
+
+            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+        except Exception as e:
+            logger.error(f"⚠️  Failed to register event handlers: {e}")
+
+    # Consul service registration
+    if config.consul_enabled:
+        try:
+            # Get route metadata
+            route_meta = get_routes_for_consul()
+
+            # Merge service metadata
+            consul_meta = {
+                'version': SERVICE_METADATA['version'],
+                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                **route_meta
+            }
+
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA['service_name'],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA['tags'],
+                meta=consul_meta,
+                health_check_type='ttl'  # Use TTL for reliable health checks
+            )
+            consul_registry.register()
+            consul_registry.start_maintenance()  # Start TTL heartbeat
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register with Consul: {e}")
+            consul_registry = None
+
+    logger.info(f"✅ Payment Service started on port {SERVICE_PORT}")
 
     yield
 
     # Cleanup
-    if hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
+    # Close service clients
+    if account_client:
+        try:
+            await account_client.close()
+            logger.info("Account client closed")
+        except Exception as e:
+            logger.error(f"Error closing account client: {e}")
+
+    if wallet_client:
+        try:
+            await wallet_client.close()
+            logger.info("Wallet client closed")
+        except Exception as e:
+            logger.error(f"Error closing wallet client: {e}")
+
+    if billing_client:
+        try:
+            await billing_client.close()
+            logger.info("Billing client closed")
+        except Exception as e:
+            logger.error(f"Error closing billing client: {e}")
+
+    if product_client:
+        try:
+            await product_client.close()
+            logger.info("Product client closed")
+        except Exception as e:
+            logger.error(f"Error closing product client: {e}")
+
+    # Consul deregistration
+    if consul_registry:
+        try:
+            consul_registry.deregister()
+            logger.info("✅ Payment service deregistered from Consul")
+        except Exception as e:
+            logger.error(f"❌ Failed to deregister from Consul: {e}")
+
+    if event_bus:
+        await event_bus.close()
 
     logger.info("Payment Service shutting down...")
 
@@ -107,13 +208,17 @@ app = FastAPI(
 # 配置CORS
 # CORS handled by Gateway
 
-# Include blockchain routes
-app.include_router(blockchain_router, prefix="/api/v1/payments")
+# Include blockchain routes (legacy)
+app.include_router(blockchain_router, prefix="/api/v1/payment")
+
+# Include crypto payment routes (new provider-based system)
+app.include_router(crypto_router, prefix="/api/v1/payment")
 
 # ====================
 # 健康检查和服务信息
 # ====================
 
+@app.get("/api/v1/payment/health")
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """健康检查端点"""
@@ -125,7 +230,7 @@ async def health_check():
     )
 
 
-@app.get("/info", response_model=ServiceInfo)
+@app.get("/api/v1/payment/info", response_model=ServiceInfo)
 async def service_info():
     """获取服务信息"""
     return ServiceInfo(
@@ -139,12 +244,13 @@ async def service_info():
             "invoice_generation": True,
             "refund_processing": True,
             "webhook_support": True,
-            "blockchain_integration": True
+            "blockchain_integration": True,
+            "crypto_payments": bool(config_manager.get("COINBASE_COMMERCE_API_KEY")),
         },
         endpoints={
             "health": "/health",
             "subscriptions": "/api/v1/subscriptions",
-            "payments": "/api/v1/payments",
+            "payments": "/api/v1/payment",
             "invoices": "/api/v1/invoices",
             "refunds": "/api/v1/refunds",
             "plans": "/api/v1/plans",
@@ -153,20 +259,20 @@ async def service_info():
     )
 
 
-@app.get("/api/v1/stats", response_model=ServiceStats)
+@app.get("/api/v1/payment/stats", response_model=ServiceStats)
 async def get_service_stats():
     """获取服务统计信息"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    
+
     revenue_stats = await payment_service.get_revenue_stats()
     subscription_stats = await payment_service.get_subscription_stats()
-    
+
     return ServiceStats(
-        total_payments=subscription_stats.get("total_payments", 0),
+        total_payments=revenue_stats.get("payment_count", 0),
         active_subscriptions=subscription_stats.get("active_subscriptions", 0),
-        revenue_today=revenue_stats.get("daily_revenue", 0),
-        revenue_month=revenue_stats.get("monthly_revenue", 0),
+        revenue_today=revenue_stats.get("total_revenue", 0),
+        revenue_month=revenue_stats.get("total_revenue", 0),
         failed_payments_today=0,  # TODO: 实现失败支付统计
         refunds_today=0  # TODO: 实现退款统计
     )
@@ -176,7 +282,7 @@ async def get_service_stats():
 # 订阅计划管理
 # ====================
 
-@app.post("/api/v1/plans", response_model=SubscriptionPlan)
+@app.post("/api/v1/payment/plans", response_model=SubscriptionPlan)
 async def create_plan(
     plan_id: str = Body(...),
     name: str = Body(...),
@@ -212,7 +318,7 @@ async def create_plan(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/api/v1/plans/{plan_id}", response_model=SubscriptionPlan)
+@app.get("/api/v1/payment/plans/{plan_id}", response_model=SubscriptionPlan)
 async def get_plan(plan_id: str):
     """获取订阅计划"""
     if not payment_service:
@@ -225,7 +331,7 @@ async def get_plan(plan_id: str):
     return plan
 
 
-@app.get("/api/v1/plans", response_model=List[SubscriptionPlan])
+@app.get("/api/v1/payment/plans", response_model=List[SubscriptionPlan])
 async def list_plans(
     tier: Optional[SubscriptionTier] = None,
     is_active: bool = True
@@ -242,7 +348,7 @@ async def list_plans(
 # 订阅管理
 # ====================
 
-@app.post("/api/v1/subscriptions", response_model=SubscriptionResponse)
+@app.post("/api/v1/payment/subscriptions", response_model=SubscriptionResponse)
 async def create_subscription(request: CreateSubscriptionRequest):
     """创建订阅"""
     if not payment_service:
@@ -258,7 +364,7 @@ async def create_subscription(request: CreateSubscriptionRequest):
         raise HTTPException(status_code=500, detail="Failed to create subscription")
 
 
-@app.get("/api/v1/subscriptions/user/{user_id}", response_model=SubscriptionResponse)
+@app.get("/api/v1/payment/subscriptions/user/{user_id}", response_model=SubscriptionResponse)
 async def get_user_subscription(user_id: str):
     """获取用户当前订阅"""
     if not payment_service:
@@ -271,7 +377,7 @@ async def get_user_subscription(user_id: str):
     return response
 
 
-@app.put("/api/v1/subscriptions/{subscription_id}", response_model=SubscriptionResponse)
+@app.put("/api/v1/payment/subscriptions/{subscription_id}", response_model=SubscriptionResponse)
 async def update_subscription(
     subscription_id: str,
     request: UpdateSubscriptionRequest
@@ -290,7 +396,7 @@ async def update_subscription(
         raise HTTPException(status_code=500, detail="Failed to update subscription")
 
 
-@app.post("/api/v1/subscriptions/{subscription_id}/cancel", response_model=Subscription)
+@app.post("/api/v1/payment/subscriptions/{subscription_id}/cancel", response_model=Subscription)
 async def cancel_subscription(
     subscription_id: str,
     request: CancelSubscriptionRequest
@@ -313,7 +419,7 @@ async def cancel_subscription(
 # 支付处理
 # ====================
 
-@app.post("/api/v1/payments/intent", response_model=PaymentIntentResponse)
+@app.post("/api/v1/payment/payments/intent", response_model=PaymentIntentResponse)
 async def create_payment_intent(request: CreatePaymentIntentRequest):
     """创建支付意图"""
     if not payment_service:
@@ -329,7 +435,7 @@ async def create_payment_intent(request: CreatePaymentIntentRequest):
         raise HTTPException(status_code=500, detail="Failed to create payment intent")
 
 
-@app.post("/api/v1/payments/{payment_id}/confirm", response_model=Payment)
+@app.post("/api/v1/payment/payments/{payment_id}/confirm", response_model=Payment)
 async def confirm_payment(
     payment_id: str,
     processor_response: Optional[Dict[str, Any]] = Body(default=None)
@@ -348,7 +454,7 @@ async def confirm_payment(
         raise HTTPException(status_code=500, detail="Failed to confirm payment")
 
 
-@app.post("/api/v1/payments/{payment_id}/fail", response_model=Payment)
+@app.post("/api/v1/payment/payments/{payment_id}/fail", response_model=Payment)
 async def fail_payment(
     payment_id: str,
     failure_reason: str = Body(...),
@@ -368,7 +474,7 @@ async def fail_payment(
         raise HTTPException(status_code=500, detail="Failed to mark payment as failed")
 
 
-@app.get("/api/v1/payments/user/{user_id}", response_model=PaymentHistoryResponse)
+@app.get("/api/v1/payment/payments/user/{user_id}", response_model=PaymentHistoryResponse)
 async def get_payment_history(
     user_id: str,
     status: Optional[PaymentStatus] = None,
@@ -390,7 +496,7 @@ async def get_payment_history(
 # 发票管理
 # ====================
 
-@app.post("/api/v1/invoices", response_model=Invoice)
+@app.post("/api/v1/payment/invoices", response_model=Invoice)
 async def create_invoice(
     user_id: str = Body(...),
     subscription_id: Optional[str] = Body(default=None),
@@ -412,7 +518,7 @@ async def create_invoice(
         raise HTTPException(status_code=500, detail="Failed to create invoice")
 
 
-@app.get("/api/v1/invoices/{invoice_id}", response_model=InvoiceResponse)
+@app.get("/api/v1/payment/invoices/{invoice_id}", response_model=InvoiceResponse)
 async def get_invoice(invoice_id: str):
     """获取发票"""
     if not payment_service:
@@ -425,7 +531,7 @@ async def get_invoice(invoice_id: str):
     return response
 
 
-@app.post("/api/v1/invoices/{invoice_id}/pay", response_model=Invoice)
+@app.post("/api/v1/payment/invoices/{invoice_id}/pay", response_model=Invoice)
 async def pay_invoice(
     invoice_id: str,
     payment_method_id: str = Body(...)
@@ -448,7 +554,7 @@ async def pay_invoice(
 # 退款处理
 # ====================
 
-@app.post("/api/v1/refunds", response_model=Refund)
+@app.post("/api/v1/payment/refunds", response_model=Refund)
 async def create_refund(request: CreateRefundRequest):
     """创建退款"""
     if not payment_service:
@@ -464,15 +570,15 @@ async def create_refund(request: CreateRefundRequest):
         raise HTTPException(status_code=500, detail="Failed to create refund")
 
 
-@app.post("/api/v1/refunds/{refund_id}/process", response_model=Refund)
+@app.post("/api/v1/payment/refunds/{refund_id}/process", response_model=Refund)
 async def process_refund(
     refund_id: str,
-    approved_by: Optional[str] = Body(default=None)
+    approved_by: Optional[str] = Body(default=None, embed=True)
 ):
     """处理退款"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    
+
     try:
         refund = await payment_service.process_refund(refund_id, approved_by)
         return refund
@@ -487,7 +593,7 @@ async def process_refund(
 # Webhook处理
 # ====================
 
-@app.post("/api/v1/webhooks/stripe")
+@app.post("/api/v1/payment/webhooks/stripe")
 async def handle_stripe_webhook(
     request: Request,
     stripe_signature: str = Header(None, alias="Stripe-Signature")
@@ -514,7 +620,7 @@ async def handle_stripe_webhook(
 # 使用量记录
 # ====================
 
-@app.post("/api/v1/usage")
+@app.post("/api/v1/payment/usage")
 async def record_usage(
     user_id: str = Body(...),
     subscription_id: str = Body(...),
@@ -540,7 +646,7 @@ async def record_usage(
 # 统计和报告
 # ====================
 
-@app.get("/api/v1/stats/revenue")
+@app.get("/api/v1/payment/stats/revenue")
 async def get_revenue_stats(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None
@@ -548,17 +654,17 @@ async def get_revenue_stats(
     """获取收入统计"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    
+
     stats = await payment_service.get_revenue_stats(start_date, end_date)
     return stats
 
 
-@app.get("/api/v1/stats/subscriptions")
+@app.get("/api/v1/payment/stats/subscriptions")
 async def get_subscription_stats():
     """获取订阅统计"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    
+
     stats = await payment_service.get_subscription_stats()
     return stats
 

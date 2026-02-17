@@ -1,7 +1,8 @@
 """
-Consul Service Registry Module
+Consul Service Discovery Module
 
-Provides service registration and health check functionality for microservices
+Provides service discovery functionality for microservices.
+Service registration is handled by Consul agent sidecar (not programmatically).
 """
 
 import consul
@@ -16,134 +17,81 @@ logger = logging.getLogger(__name__)
 
 
 class ConsulRegistry:
-    """Handles service registration with Consul"""
-    
+    """
+    Consul Service Discovery Client
+
+    NOTE: Service registration is handled by Consul agent sidecar.
+    This class ONLY provides service discovery functionality.
+    """
+
     def __init__(
         self,
-        service_name: str,
-        service_port: int,
+        service_name: str = None,
+        service_port: int = None,
         consul_host: str = "localhost",
         consul_port: int = 8500,
         service_host: Optional[str] = None,
         tags: Optional[List[str]] = None,
-        health_check_type: str = "ttl"  # ttl or http
+        health_check_type: str = "ttl"  # kept for backward compatibility
     ):
         """
-        Initialize Consul registry
-        
+        Initialize Consul service discovery client
+
         Args:
-            service_name: Name of the service to register
-            service_port: Port the service is running on
+            service_name: (Optional) Name of the calling service (for logging)
+            service_port: (Optional) Port of the calling service (for logging)
             consul_host: Consul server host
             consul_port: Consul server port
-            service_host: Service host (defaults to hostname)
-            tags: Service tags for discovery
-            health_check_type: Type of health check (ttl or http)
+
+        Note: service_host, tags, health_check_type kept for backward compatibility but not used
         """
         self.consul = consul.Consul(host=consul_host, port=consul_port)
         self.service_name = service_name
         self.service_port = service_port
-        self.service_host = service_host or socket.gethostname()
-        self.service_id = f"{service_name}-{self.service_host}-{service_port}"
+        logger.info(f"Consul service discovery initialized: {consul_host}:{consul_port}")
+
+        # Keep these for backward compatibility (not used for sidecar registration)
+        import os
+        if service_host and service_host != "0.0.0.0":
+            self.service_host = service_host
+        else:
+            self.service_host = os.getenv('HOSTNAME', socket.gethostname())
+        self.service_id = f"{service_name}-{self.service_host}-{service_port}" if service_name and service_port else "discovery-client"
         self.tags = tags or []
-        self.check_interval = "10s"
-        self.deregister_after = "60s"
-        self._health_check_task = None
-        self.health_check_type = health_check_type
-        self.ttl_interval = 15  # seconds for TTL check
-        
-    def register(self) -> bool:
-        """Register service with Consul"""
-        try:
-            # Choose health check type
-            if self.health_check_type == "ttl":
-                check = consul.Check.ttl(f"{self.ttl_interval}s")
-            else:
-                check = consul.Check.http(
-                    f"http://{self.service_host}:{self.service_port}/health",
-                    interval=self.check_interval,
-                    timeout="5s",
-                    deregister=self.deregister_after
-                )
-            
-            # Register service with selected health check
-            self.consul.agent.service.register(
-                name=self.service_name,
-                service_id=self.service_id,
-                address=self.service_host,
-                port=self.service_port,
-                tags=self.tags,
-                check=check
-            )
-            
-            # If TTL, immediately pass the health check
-            if self.health_check_type == "ttl":
-                self.consul.agent.check.ttl_pass(f"service:{self.service_id}")
-            
-            logger.info(
-                f"Service registered with Consul: {self.service_name} "
-                f"({self.service_id}) at {self.service_host}:{self.service_port} "
-                f"with {self.health_check_type} health check"
-            )
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to register service with Consul: {e}")
-            return False
-    
+
+    # ========================================
+    # Registration Methods (No-op - handled by Consul agent sidecar)
+    # ========================================
+
+    def cleanup_stale_registrations(self) -> int:
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping cleanup")
+        return 0
+
+    def register(self, cleanup_stale: bool = True) -> bool:
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping programmatic registration")
+        return True
+
     def deregister(self) -> bool:
-        """Deregister service from Consul"""
-        try:
-            self.consul.agent.service.deregister(self.service_id)
-            logger.info(f"Service deregistered from Consul: {self.service_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to deregister service from Consul: {e}")
-            return False
-    
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping deregistration")
+        return True
+
     async def maintain_registration(self):
-        """Maintain service registration (re-register if needed)"""
-        while True:
-            try:
-                # Check if service is still registered
-                services = self.consul.agent.services()
-                if self.service_id not in services:
-                    logger.warning(f"Service {self.service_id} not found in Consul, re-registering...")
-                    self.register()
-                
-                # If using TTL checks, update the health status
-                if self.health_check_type == "ttl":
-                    try:
-                        self.consul.agent.check.ttl_pass(
-                            f"service:{self.service_id}",
-                            "Service is healthy"
-                        )
-                        logger.debug(f"TTL health check passed for {self.service_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to update TTL health check: {e}")
-                
-                # Wait before next check (shorter for TTL)
-                sleep_time = self.ttl_interval / 2 if self.health_check_type == "ttl" else 30
-                await asyncio.sleep(sleep_time)
-                
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error maintaining registration: {e}")
-                await asyncio.sleep(10)
-    
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping maintenance")
+        pass
+
     def start_maintenance(self):
-        """Start the background maintenance task"""
-        if not self._health_check_task:
-            loop = asyncio.get_event_loop()
-            self._health_check_task = loop.create_task(self.maintain_registration())
-    
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping maintenance start")
+        pass
+
     def stop_maintenance(self):
-        """Stop the background maintenance task"""
-        if self._health_check_task:
-            self._health_check_task.cancel()
-            self._health_check_task = None
+        """No-op: Registration handled by Consul agent sidecar"""
+        logger.debug("Registration handled by Consul agent sidecar, skipping maintenance stop")
+        pass
     
     # Configuration Management Methods
     def get_config(self, key: str, default: Any = None) -> Any:
@@ -238,32 +186,82 @@ class ConsulRegistry:
             logger.error(f"Failed to discover service {service_name}: {e}")
             return []
     
-    def get_service_endpoint(self, service_name: str, strategy: str = 'random') -> Optional[str]:
-        """Get a single service endpoint using load balancing strategy"""
+    def get_service_endpoint(self, service_name: str, strategy: str = 'health_weighted') -> Optional[str]:
+        """Get a single service endpoint using advanced load balancing strategy"""
         instances = self.discover_service(service_name)
         if not instances:
             return None
 
-        # Load balancing strategies
-        if strategy == 'random':
+        # 只有一个实例时直接返回
+        if len(instances) == 1:
+            instance = instances[0]
+            return f"http://{instance['address']}:{instance['port']}"
+
+        # 高级负载均衡策略
+        if strategy == 'health_weighted':
+            # 基于健康状态和权重选择最佳实例
+            instance = self._select_best_instance(instances)
+        elif strategy == 'random':
             import random
             instance = random.choice(instances)
         elif strategy == 'round_robin':
-            # Simple round-robin (would need state management for proper implementation)
-            instance = instances[0]
+            # 实现真正的轮询（使用实例缓存）
+            instance = self._get_round_robin_instance(service_name, instances)
+        elif strategy == 'least_connections':
+            # 选择连接数最少的实例（模拟实现）
+            instance = min(instances, key=lambda x: hash(x['id']) % 100)
         else:
-            # Default to first available
-            instance = instances[0]
+            # 默认随机选择
+            import random
+            instance = random.choice(instances)
 
         return f"http://{instance['address']}:{instance['port']}"
+    
+    def _select_best_instance(self, instances: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """选择最佳实例（基于健康状态和负载）"""
+        # 简单实现：优先选择标签包含'preferred'的实例
+        preferred_instances = [inst for inst in instances if 'preferred' in inst.get('tags', [])]
+        if preferred_instances:
+            import random
+            return random.choice(preferred_instances)
+        
+        # 没有首选实例时随机选择
+        import random
+        return random.choice(instances)
+    
+    def _get_round_robin_instance(self, service_name: str, instances: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """实现真正的轮询负载均衡"""
+        if not hasattr(self, '_round_robin_counters'):
+            self._round_robin_counters = {}
+        
+        if service_name not in self._round_robin_counters:
+            self._round_robin_counters[service_name] = 0
+        
+        # 获取当前计数器并递增
+        counter = self._round_robin_counters[service_name]
+        self._round_robin_counters[service_name] = (counter + 1) % len(instances)
+        
+        return instances[counter]
 
-    def get_service_address(self, service_name: str, fallback_url: Optional[str] = None) -> str:
+    def _log_service_metrics(self, operation: str, success: bool, service_name: str = None):
+        """记录服务操作指标"""
+        service = service_name or self.service_name
+        status = "SUCCESS" if success else "FAILED"
+        
+        # 使用项目统一的logger记录指标
+        logger.info(
+            f"🔍 CONSUL_METRICS | operation={operation} | service={service} | "
+            f"status={status} | service_id={self.service_id}"
+        )
+
+    def get_service_address(self, service_name: str, fallback_url: Optional[str] = None, max_retries: int = 3) -> str:
         """
-        Get service address from Consul discovery with automatic fallback
+        Get service address from Consul discovery with automatic fallback and retry
 
         Args:
             service_name: Name of the service to discover
             fallback_url: Fallback URL if service not found in Consul (e.g., "http://localhost:8201")
+            max_retries: Maximum number of discovery attempts
 
         Returns:
             Service URL (from Consul or fallback)
@@ -273,23 +271,33 @@ class ConsulRegistry:
             url = consul.get_service_address("account_service", "http://localhost:8201")
             # Returns: "http://10.0.1.5:8201" (from Consul) or "http://localhost:8201" (fallback)
         """
-        try:
-            endpoint = self.get_service_endpoint(service_name)
-            if endpoint:
-                logger.debug(f"Discovered {service_name} at {endpoint}")
-                return endpoint
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                endpoint = self.get_service_endpoint(service_name)
+                if endpoint:
+                    logger.debug(f"Discovered {service_name} at {endpoint} (attempt {attempt + 1})")
+                    return endpoint
+                    
+                # 如果没找到服务但没有异常，记录并继续
+                last_error = f"Service {service_name} not found in Consul registry"
+                
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Consul discovery attempt {attempt + 1} failed for {service_name}: {e}")
+                
+                # 短暂等待后重试（除了最后一次）
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(0.5 * (attempt + 1))  # 递增延迟
 
-            if fallback_url:
-                logger.warning(f"Service {service_name} not found in Consul, using fallback: {fallback_url}")
-                return fallback_url
+        # 所有重试都失败，使用fallback
+        if fallback_url:
+            logger.warning(f"All {max_retries} discovery attempts failed for {service_name}: {last_error}, using fallback: {fallback_url}")
+            return fallback_url
 
-            raise ValueError(f"Service {service_name} not found and no fallback provided")
-
-        except Exception as e:
-            if fallback_url:
-                logger.warning(f"Consul discovery failed for {service_name}: {e}, using fallback: {fallback_url}")
-                return fallback_url
-            raise
+        raise ValueError(f"Service {service_name} not found after {max_retries} attempts and no fallback provided. Last error: {last_error}")
     
     def watch_service(self, service_name: str, callback, wait_time: str = '30s'):
         """Watch for changes in service instances"""

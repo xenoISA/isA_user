@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: billing_service
+# Regenerate with: python -m agents.tools.generate_config --deployment billing_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing
+  namespace: isa-cloud-staging
+  labels:
+    app: billing
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: billing
+  template:
+    metadata:
+      labels:
+        app: billing
+    spec:
+      containers:
+      - name: billing
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8216
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "billing_service"
+        - name: SERVICE_PORT
+          value: "8216"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.billing_service.main:app", "--host", "0.0.0.0", "--port", "8216"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8216
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8216
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing
+  namespace: isa-cloud-staging
+  labels:
+    app: billing
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8216
+    targetPort: 8216
+    protocol: TCP
+    name: http
+  selector:
+    app: billing

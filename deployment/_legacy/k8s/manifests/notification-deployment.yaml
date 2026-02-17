@@ -1,0 +1,74 @@
+# Auto-generated from config/ports.yaml
+# Service: notification_service
+# Regenerate with: python -m agents.tools.generate_config --deployment notification_service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification
+  namespace: isa-cloud-staging
+  labels:
+    app: notification
+    tier: applications
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification
+  template:
+    metadata:
+      labels:
+        app: notification
+    spec:
+      containers:
+      - name: notification
+        image: isa-user-base:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8206
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-config
+        env:
+        - name: SERVICE_NAME
+          value: "notification_service"
+        - name: SERVICE_PORT
+          value: "8206"
+        command: ["python", "-m", "uvicorn"]
+        args: ["microservices.notification_service.main:app", "--host", "0.0.0.0", "--port", "8206"]
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8206
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8206
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification
+  namespace: isa-cloud-staging
+  labels:
+    app: notification
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8206
+    targetPort: 8206
+    protocol: TCP
+    name: http
+  selector:
+    app: notification

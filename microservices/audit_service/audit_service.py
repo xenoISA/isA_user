@@ -2,30 +2,49 @@
 Audit Service Business Logic
 
 审计服务业务逻辑层，处理审计事件记录、查询、分析、告警和合规报告
+
+Uses dependency injection for testability:
+- Repository is injected, not created at import time
 """
 
 import logging
 import asyncio
-from typing import Optional, List, Dict, Any
+import uuid
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
+
 from datetime import datetime, timedelta
 
-from .audit_repository import AuditRepository
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import AuditRepositoryProtocol
 from .models import (
     AuditEvent, UserActivity, SecurityEvent, ComplianceReport,
     AuditEventCreateRequest, AuditEventResponse, AuditQueryRequest, AuditQueryResponse,
-    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest,
-    EventType, EventSeverity, EventStatus, AuditCategory
+    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest,  EventSeverity, EventStatus, AuditCategory
 )
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
 
 class AuditService:
-    """审计服务核心业务逻辑"""
-    
-    def __init__(self):
-        self.repository = AuditRepository()
-        
+    """审计服务核心业务逻辑
+
+    Uses dependency injection for testability - repository is injected,
+    not created internally.
+    """
+
+    def __init__(self, repository: Optional[AuditRepositoryProtocol] = None):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+        """
+        self.repository = repository  # Will be set by factory if None
+
         # 风险评分配置
         self.risk_thresholds = {
             "low": 30,
@@ -39,17 +58,17 @@ class AuditService:
             "GDPR": {
                 "retention_days": 2555,  # 7 years
                 "required_fields": ["user_id", "action", "timestamp", "ip_address"],
-                "sensitive_events": [EventType.USER_DELETE, EventType.PERMISSION_GRANT]
+                "sensitive_events": ["user.deleted", "authorization.permission.granted"]
             },
             "SOX": {
                 "retention_days": 2555,  # 7 years
                 "required_fields": ["user_id", "action", "timestamp"],
-                "sensitive_events": [EventType.RESOURCE_UPDATE, EventType.PERMISSION_UPDATE]
+                "sensitive_events": ["audit.resource.update", "authorization.permission.updated"]
             },
             "HIPAA": {
                 "retention_days": 2190,  # 6 years
                 "required_fields": ["user_id", "action", "timestamp", "resource_type"],
-                "sensitive_events": [EventType.RESOURCE_ACCESS, EventType.USER_UPDATE]
+                "sensitive_events": ["audit.resource.access", "user.updated"]
             }
         }
     
@@ -64,33 +83,34 @@ class AuditService:
             
             # 创建审计事件对象
             audit_event = AuditEvent(
+                id=str(uuid.uuid4()),
                 event_type=request.event_type,
                 category=request.category,
                 severity=request.severity,
                 status=EventStatus.SUCCESS if request.success else EventStatus.FAILURE,
                 action=request.action,
                 description=request.description,
-                
+
                 user_id=request.user_id,
                 session_id=request.session_id,
                 organization_id=request.organization_id,
-                
+
                 resource_type=request.resource_type,
                 resource_id=request.resource_id,
                 resource_name=request.resource_name,
-                
+
                 ip_address=request.ip_address,
                 user_agent=request.user_agent,
                 api_endpoint=request.api_endpoint,
                 http_method=request.http_method,
-                
+
                 success=request.success,
                 error_code=request.error_code,
                 error_message=request.error_message,
-                
+
                 metadata=request.metadata,
                 tags=request.tags,
-                
+
                 timestamp=datetime.utcnow()
             )
             
@@ -250,27 +270,29 @@ class AuditService:
             logger.warning(f"创建安全告警: {alert.threat_type} - {alert.severity.value}")
             
             security_event = SecurityEvent(
-                event_type=EventType.SECURITY_ALERT,
+                id=str(uuid.uuid4()),
+                event_type="audit.security.alert",
                 severity=alert.severity,
                 threat_level=self._calculate_threat_level(alert.severity),
-                
+
                 source_ip=alert.source_ip,
                 target_resource=alert.target_resource,
-                
+
                 detection_method="manual_report",
                 confidence_score=0.8,
-                
+
                 response_action="investigation_required",
                 investigation_status="open",
-                
+
                 detected_at=datetime.utcnow(),
                 metadata=alert.metadata
             )
             
             created_event = await self.repository.create_security_event(security_event)
             if created_event:
-                # 触发安全响应流程
-                await self._trigger_security_response(created_event)
+                # 触发安全响应流程（未来实现）
+                # await self._trigger_security_response(created_event)
+                logger.info(f"安全告警已创建: {created_event.id}")
             
             return created_event
             
@@ -305,7 +327,7 @@ class AuditService:
             query = AuditQueryRequest(
                 start_time=request.period_start,
                 end_time=request.period_end,
-                limit=10000  # 合规报告需要完整数据
+                limit=1000  # Maximum allowed by model validation
             )
             
             if request.filters:
@@ -349,7 +371,7 @@ class AuditService:
             return report
             
         except Exception as e:
-            logger.error(f"生成合规报告失败: {e}")
+            logger.error(f"生成合规报告失败: {e}", exc_info=True)
             return None
     
     # ====================
@@ -417,11 +439,11 @@ class AuditService:
             compliance_flags = []
             
             # GDPR相关事件
-            if event.user_id and event.event_type in [EventType.USER_DELETE, EventType.USER_UPDATE]:
+            if event.user_id and event.event_type in ["user.deleted", "user.updated"]:
                 compliance_flags.append("GDPR")
             
             # SOX相关事件
-            if event.resource_type and event.event_type in [EventType.RESOURCE_UPDATE, EventType.PERMISSION_UPDATE]:
+            if event.resource_type and event.event_type in ["audit.resource.update", "authorization.permission.updated"]:
                 compliance_flags.append("SOX")
             
             # HIPAA相关事件
@@ -445,7 +467,7 @@ class AuditService:
                 logger.warning(f"认证失败事件: 用户={event.user_id}, IP={event.ip_address}")
             
             # 检查权限变更
-            if event.event_type in [EventType.PERMISSION_GRANT, EventType.PERMISSION_REVOKE]:
+            if event.event_type in ["authorization.permission.granted", "authorization.permission.revoked"]:
                 logger.info(f"权限变更事件: {event.action}")
             
         except Exception as e:

@@ -2,245 +2,326 @@
 Storage Service
 
 业务逻辑层，处理文件存储的核心业务逻辑
+职责：文件上传、下载、删除、分享、配额管理
 集成MinIO作为S3兼容的对象存储后端
+
+重构说明：
+- 移除了照片版本管理（现由 Media Service 负责）
+- 移除了相册管理（现由 Album Service 负责）
+- 移除了播放列表和轮播计划（现由 Media Service 负责）
+- 移除了智能照片选择和缓存（现由 Media Service 负责）
+- 移除了AI分析功能（现由 Media Service 负责）
+- 专注于核心存储功能：文件CRUD、分享、配额
 """
 
-import os
-import uuid
-import mimetypes
 import hashlib
 import logging
+import mimetypes
+import os
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, BinaryIO, Any
-from datetime import datetime, timedelta
-from io import BytesIO
+from typing import Any, Dict, List, Optional, Tuple
 
-from minio import Minio
-from minio.error import S3Error
-from fastapi import UploadFile, HTTPException
+from core.config_manager import ConfigManager
+from core.nats_client import Event
+from fastapi import HTTPException, UploadFile
 
-from .storage_repository import StorageRepository
+# Use isa-common's AsyncMinIOClient for async gRPC
+from isa_common import AsyncMinIOClient
+
+from .clients import StorageOrganizationClient
 from .models import (
-    StoredFile, FileShare, StorageQuota,
-    FileStatus, StorageProvider, FileAccessLevel,
-    FileUploadRequest, FileUploadResponse,
-    FileListRequest, FileInfoResponse,
-    FileShareRequest, FileShareResponse,
+    FileAccessLevel,
+    FileInfoResponse,
+    FileListRequest,
+    FileShare,
+    FileShareRequest,
+    FileShareResponse,
+    FileStatus,
+    FileUploadRequest,
+    FileUploadResponse,
+    StorageProvider,
+    StorageQuota,
     StorageStatsResponse,
-    PhotoVersionType, PhotoVersion, PhotoWithVersions,
-    SavePhotoVersionRequest, SavePhotoVersionResponse,
-    SwitchPhotoVersionRequest, GetPhotoVersionsRequest
+    StoredFile,
 )
-from core.consul_registry import ConsulRegistry
+from .storage_repository import StorageRepository
 
 logger = logging.getLogger(__name__)
 
 
 class StorageService:
-    """存储服务业务逻辑层"""
+    """存储服务业务逻辑层 - 专注于文件存储核心功能"""
 
-    def __init__(self, config):
+    def __init__(
+        self,
+        config,
+        event_bus=None,
+        config_manager: Optional[ConfigManager] = None,
+        event_publisher=None,
+    ):
         """
         初始化存储服务
 
         Args:
             config: 配置对象
+            event_bus: 事件总线（可选，保留向后兼容）
+            config_manager: ConfigManager 实例（可选）
+            event_publisher: Event publisher from events/ (可选)
         """
-        self.repository = StorageRepository()
+        self.repository = StorageRepository(config=config_manager)
         self.config = config
-        self.consul = None
-        self._init_consul()
+        self.config_manager = config_manager
+        self.event_bus = event_bus  # 保留向后兼容
+        self.event_publisher = event_publisher  # 使用新的 publisher
+        self.org_client = StorageOrganizationClient()  # 初始化 org client
 
-        # MinIO配置
-        self.minio_client = Minio(
-            endpoint=getattr(config, 'minio_endpoint', 'localhost:9000'),
-            access_key=getattr(config, 'minio_access_key', 'minioadmin'),
-            secret_key=getattr(config, 'minio_secret_key', 'minioadmin'),
-            secure=getattr(config, 'minio_secure', False)
+        # Discover MinIO S3 service using config_manager
+        # Priority: Environment variables (MINIO_HOST/PORT) → Consul → fallback
+        # Note: Now using native S3 protocol via aioboto3 (not gRPC gateway)
+        minio_host, minio_port = config_manager.discover_service(
+            service_name="minio",
+            default_host="minio",
+            default_port=9000,  # S3 API port (not gRPC 50051)
+            env_host_key="MINIO_HOST",
+            env_port_key="MINIO_PORT",
         )
-        
-        self.bucket_name = getattr(config, 'minio_bucket_name', 'isA-storage')
-        
+
+        # Get MinIO credentials from environment
+        import os
+        minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+        minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+
+        logger.info(f"Connecting to MinIO S3 API at {minio_host}:{minio_port}")
+        # Initialize AsyncMinIOClient with native S3 protocol (aioboto3)
+        self.minio_client = AsyncMinIOClient(
+            user_id="storage_service",
+            host=minio_host,
+            port=minio_port,
+            access_key=minio_access_key,
+            secret_key=minio_secret_key,
+        )
+        self._bucket_initialized = False  # Lazy init flag
+
+        self.bucket_name = getattr(config, "minio_bucket_name", "isa-storage")
+
         # 文件配置
         self.allowed_types = [
-            'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-            'application/pdf',
-            'text/plain', 'text/csv', 'text/html', 'text/css', 'text/javascript',
-            'application/json', 'application/xml',
-            'application/vnd.ms-excel',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'application/vnd.ms-powerpoint',
-            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed',
-            'video/mp4', 'video/mpeg', 'video/quicktime',
-            'audio/mpeg', 'audio/wav', 'audio/ogg'
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp",
+            "image/svg+xml",
+            "application/pdf",
+            "text/plain",
+            "text/csv",
+            "text/html",
+            "text/css",
+            "text/javascript",
+            "application/json",
+            "application/xml",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/zip",
+            "application/x-rar-compressed",
+            "application/x-7z-compressed",
+            "video/mp4",
+            "video/mpeg",
+            "video/quicktime",
+            "audio/mpeg",
+            "audio/wav",
+            "audio/ogg",
         ]
-        
+
         # 默认配额设置
         self.default_quota_bytes = 10 * 1024 * 1024 * 1024  # 10GB
         self.max_file_size = 500 * 1024 * 1024  # 500MB
+        # Note: Bucket init is now lazy - called in async methods
 
-        # 确保bucket存在
-        self._ensure_bucket_exists()
+    async def _ensure_bucket_exists(self):
+        """确保MinIO bucket存在 - ASYNC version with lazy init"""
+        if self._bucket_initialized:
+            return
 
-    def _init_consul(self):
-        """Initialize Consul registry for service discovery"""
         try:
-            from core.config_manager import ConfigManager
-            config_manager = ConfigManager("storage_service")
-            config = config_manager.get_service_config()
+            async with self.minio_client:
+                exists = await self.minio_client.bucket_exists(self.bucket_name)
+                if not exists:
+                    result = await self.minio_client.create_bucket(self.bucket_name)
+                    if result and result.get("success"):
+                        logger.info(f"Created MinIO bucket: {self.bucket_name}")
+                    else:
+                        logger.error(f"Failed to create bucket: {self.bucket_name}")
+                        raise Exception(f"Failed to create bucket: {self.bucket_name}")
+                else:
+                    logger.info(f"MinIO bucket exists: {self.bucket_name}")
 
-            if config.consul_enabled:
-                self.consul = ConsulRegistry(
-                    service_name=config.service_name,
-                    service_port=config.service_port,
-                    consul_host=config.consul_host,
-                    consul_port=config.consul_port
-                )
-                logger.info("Consul service discovery initialized for storage service")
+            self._bucket_initialized = True
+
         except Exception as e:
-            logger.warning(f"Failed to initialize Consul: {e}, will use fallback URLs")
-
-    def _get_service_url(self, service_name: str, fallback_port: int) -> str:
-        """Get service URL via Consul discovery with fallback"""
-        fallback_url = f"http://localhost:{fallback_port}"
-        if self.consul:
-            return self.consul.get_service_address(service_name, fallback_url=fallback_url)
-        return fallback_url
-    
-    def _ensure_bucket_exists(self):
-        """确保MinIO bucket存在"""
-        try:
-            if not self.minio_client.bucket_exists(self.bucket_name):
-                self.minio_client.make_bucket(self.bucket_name)
-                logger.info(f"Created MinIO bucket: {self.bucket_name}")
-                
-                # 设置bucket策略允许公共读取（可选）
-                # self._set_bucket_policy()
-            else:
-                logger.info(f"MinIO bucket exists: {self.bucket_name}")
-        except S3Error as e:
             logger.error(f"Error ensuring bucket exists: {e}")
             raise
-    
+
     def _generate_object_name(self, user_id: str, filename: str) -> str:
         """生成对象存储路径"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         year = now.strftime("%Y")
         month = now.strftime("%m")
         day = now.strftime("%d")
-        
+
         # 清理用户ID中的特殊字符
         safe_user_id = user_id.replace("|", "_").replace("/", "_")
-        
+
         # 生成唯一文件名
         file_ext = Path(filename).suffix
-        unique_filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{file_ext}"
-        
+        unique_filename = (
+            f"{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{file_ext}"
+        )
+
         return f"users/{safe_user_id}/{year}/{month}/{day}/{unique_filename}"
-    
+
     def _calculate_checksum(self, file_content: bytes) -> str:
         """计算文件校验和"""
         return hashlib.sha256(file_content).hexdigest()
-    
+
     async def _check_quota(self, user_id: str, file_size: int) -> bool:
         """检查用户配额"""
-        quota = await self.repository.get_storage_quota(user_id=user_id)
-        
+        logger.info(f"_check_quota called: user_id={user_id}, file_size={file_size}")
+        quota = await self.repository.get_storage_quota(
+            quota_type="user", entity_id=user_id
+        )
+        logger.info(f"Retrieved quota: {quota}")
+
         if not quota:
             # 如果没有配额记录，创建默认配额
+            logger.debug("No quota found, using defaults")
             quota = StorageQuota(
                 user_id=user_id,
                 total_quota_bytes=self.default_quota_bytes,
                 used_bytes=0,
                 file_count=0,
-                max_file_size=self.max_file_size
+                max_file_size=self.max_file_size,
             )
             # 这里应该创建配额记录，但简化处理
             return True
-        
-        # 检查配额
-        if quota.used_bytes + file_size > quota.total_quota_bytes:
+
+        # 检查配额（处理 None 值）
+        used_bytes = quota.used_bytes if quota.used_bytes is not None else 0
+        logger.info(
+            f"Quota check: used_bytes={used_bytes}, total_quota={quota.total_quota_bytes}, max_file_size={quota.max_file_size}"
+        )
+
+        if used_bytes + file_size > quota.total_quota_bytes:
+            logger.debug(
+                f"Quota exceeded: {used_bytes + file_size} > {quota.total_quota_bytes}"
+            )
             return False
-        
+
         if quota.max_file_size and file_size > quota.max_file_size:
+            logger.debug(f"File too large: {file_size} > {quota.max_file_size}")
             return False
-        
+
+        logger.debug("Quota check passed")
         return True
-    
+
+    # ==================== 核心文件操作 ====================
+
     async def upload_file(
-        self,
-        file: UploadFile,
-        request: FileUploadRequest
+        self, file: UploadFile, request: FileUploadRequest
     ) -> FileUploadResponse:
         """
-        上传文件到MinIO
-        
+        上传文件到MinIO - ASYNC version
+
         Args:
             file: 上传的文件对象
             request: 上传请求参数
-            
+
         Returns:
             FileUploadResponse: 上传响应
         """
         try:
+            # Ensure bucket exists (lazy init)
+            await self._ensure_bucket_exists()
+
             # 读取文件内容
             file_content = await file.read()
             file_size = len(file_content)
-            
+
             # 验证文件类型
             content_type = file.content_type or mimetypes.guess_type(file.filename)[0]
             if content_type not in self.allowed_types:
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"File type not allowed: {content_type}"
+                    status_code=400, detail=f"File type not allowed: {content_type}"
                 )
-            
+
             # 验证文件大小
+            logger.info(f"Checking file size: {file_size} vs max {self.max_file_size}")
             if file_size > self.max_file_size:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"File too large. Maximum size: {self.max_file_size / (1024*1024):.1f}MB"
+                    detail=f"File too large. Maximum size: {self.max_file_size / (1024 * 1024):.1f}MB",
                 )
-            
+
             # 检查配额
-            if not await self._check_quota(request.user_id, file_size):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Storage quota exceeded"
-                )
-            
+            logger.info(
+                f"Checking quota for user {request.user_id}, file_size={file_size}"
+            )
+            try:
+                quota_ok = await self._check_quota(request.user_id, file_size)
+                logger.debug(f"Quota check result: {quota_ok}")
+                if not quota_ok:
+                    raise HTTPException(
+                        status_code=400, detail="Storage quota exceeded"
+                    )
+            except Exception as e:
+                logger.error(f"Error in quota check: {e}", exc_info=True)
+                raise
+
             # 生成文件信息
             file_id = f"file_{uuid.uuid4().hex}"
             object_name = self._generate_object_name(request.user_id, file.filename)
             checksum = self._calculate_checksum(file_content)
-            
-            # 上传到MinIO
-            file_stream = BytesIO(file_content)
-            result = self.minio_client.put_object(
-                bucket_name=self.bucket_name,
-                object_name=object_name,
-                data=file_stream,
-                length=file_size,
-                content_type=content_type,
-                metadata={
-                    "file-id": file_id,
-                    "user-id": request.user_id,
-                    "original-name": file.filename,
-                    "checksum": checksum,
-                    **(request.metadata or {})
-                }
-            )
-            
-            # 生成预签名下载URL（1小时有效）
-            download_url = self.minio_client.presigned_get_object(
-                bucket_name=self.bucket_name,
-                object_name=object_name,
-                expires=timedelta(hours=1)
-            )
-            
+
+            # 上传到MinIO (使用isa-common AsyncMinIOClient)
+            upload_metadata = {
+                "file-id": file_id,
+                "user-id": request.user_id,
+                "original-name": file.filename,
+                "checksum": checksum,
+            }
+
+            # Add request metadata (convert all values to strings for MinIO)
+            if request.metadata:
+                for key, value in request.metadata.items():
+                    upload_metadata[key] = str(value) if value is not None else ""
+
+            # ASYNC upload to MinIO (positional args: bucket, key, data)
+            async with self.minio_client:
+                result = await self.minio_client.upload_object(
+                    self.bucket_name,
+                    object_name,
+                    file_content,
+                    content_type=content_type,
+                    metadata=upload_metadata,
+                )
+
+                if not result or not result.get("success"):
+                    raise HTTPException(
+                        status_code=500, detail="Failed to upload file to storage"
+                    )
+
+                # ASYNC generate presigned URL (24小时有效 = 86400秒，用于AI处理和异步事件)
+                download_url = await self.minio_client.get_presigned_url(
+                    self.bucket_name,
+                    object_name,
+                    expiry_seconds=86400,  # 24 hours for AI processing
+                )
+
             # 保存文件记录到数据库
             stored_file = StoredFile(
                 file_id=file_id,
@@ -257,77 +338,103 @@ class StorageService:
                 status=FileStatus.AVAILABLE,
                 access_level=request.access_level,
                 checksum=checksum,
-                etag=result.etag,
-                version_id=result.version_id,
+                etag=None,  # isa-common MinIOClient handles etag internally
+                version_id=None,  # Version ID not needed for basic uploads
                 metadata=request.metadata,
                 tags=request.tags,
                 download_url=download_url,
-                download_url_expires_at=datetime.utcnow() + timedelta(hours=1),
-                uploaded_at=datetime.utcnow()
+                download_url_expires_at=datetime.now(timezone.utc)
+                + timedelta(hours=24),
+                uploaded_at=datetime.now(timezone.utc),
             )
-            
+
             await self.repository.create_file_record(stored_file)
-            
+
             # 更新用户配额使用量
             await self.repository.update_storage_usage(
-                user_id=request.user_id,
+                quota_type="user",
+                entity_id=request.user_id,
                 bytes_delta=file_size,
-                file_count_delta=1
+                file_count_delta=1,
             )
-            
+
             # 如果设置了自动删除
             if request.auto_delete_after_days:
                 # 这里应该创建一个定时任务来删除文件
                 pass
-            
+
+            # 发布文件上传事件
+            # Note: AI处理现在由Media Service订阅file.uploaded事件后处理
+            if self.event_publisher:
+                try:
+                    # Construct full MinIO bucket name (with user prefix)
+                    # MinIO gRPC client adds prefix: user-{user_id}-{bucket_name}
+                    full_bucket_name = f"user-storage_service-{self.bucket_name}"
+
+                    await self.event_publisher.publish_file_uploaded(
+                        file_id=file_id,
+                        file_name=file.filename,
+                        file_size=file_size,
+                        content_type=content_type,
+                        user_id=request.user_id,
+                        organization_id=request.organization_id,
+                        access_level=request.access_level,
+                        download_url=download_url,
+                        bucket_name=full_bucket_name,
+                        object_name=object_name,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to publish file upload event: {e}", exc_info=True
+                    )
+
             return FileUploadResponse(
                 file_id=file_id,
                 file_path=object_name,
                 download_url=download_url,
                 file_size=file_size,
                 content_type=content_type,
-                uploaded_at=datetime.utcnow()
+                uploaded_at=datetime.now(timezone.utc),
             )
-            
-        except S3Error as e:
-            logger.error(f"MinIO error uploading file: {e}")
-            raise HTTPException(status_code=500, detail=f"Storage error: {str(e)}")
+
         except Exception as e:
             logger.error(f"Error uploading file: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-    
-    async def get_file_info(
-        self,
-        file_id: str,
-        user_id: str
-    ) -> FileInfoResponse:
+
+    async def get_file_info(self, file_id: str, user_id: str) -> FileInfoResponse:
         """
         获取文件信息
-        
+
         Args:
             file_id: 文件ID
             user_id: 用户ID
-            
+
         Returns:
             FileInfoResponse: 文件信息
         """
         file = await self.repository.get_file_by_id(file_id, user_id)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
-        
+
         # 检查下载URL是否过期，如果过期则重新生成
-        if not file.download_url or file.download_url_expires_at < datetime.utcnow():
+        if not file.download_url or file.download_url_expires_at < datetime.now(
+            timezone.utc
+        ):
             try:
-                download_url = self.minio_client.presigned_get_object(
-                    bucket_name=file.bucket_name,
-                    object_name=file.object_name,
-                    expires=timedelta(hours=1)
-                )
+                # ASYNC presigned URL generation (positional: bucket, key)
+                async with self.minio_client:
+                    download_url = await self.minio_client.get_presigned_url(
+                        file.bucket_name,
+                        file.object_name,
+                        expiry_seconds=86400,  # 24 hours
+                    )
                 file.download_url = download_url
-                file.download_url_expires_at = datetime.utcnow() + timedelta(hours=1)
-            except S3Error:
+                file.download_url_expires_at = datetime.now(timezone.utc) + timedelta(
+                    hours=24
+                )
+            except Exception:
                 file.download_url = None
-        
+
         return FileInfoResponse(
             file_id=file.file_id,
             file_name=file.file_name,
@@ -340,19 +447,16 @@ class StorageService:
             metadata=file.metadata,
             tags=file.tags,
             uploaded_at=file.uploaded_at,
-            updated_at=file.updated_at
+            updated_at=file.updated_at,
         )
-    
-    async def list_files(
-        self,
-        request: FileListRequest
-    ) -> List[FileInfoResponse]:
+
+    async def list_files(self, request: FileListRequest) -> List[FileInfoResponse]:
         """
         列出用户文件
-        
+
         Args:
             request: 列表请求参数
-            
+
         Returns:
             List[FileInfoResponse]: 文件列表
         """
@@ -362,54 +466,60 @@ class StorageService:
             status=request.status,
             prefix=request.prefix,
             limit=request.limit,
-            offset=request.offset
+            offset=request.offset,
         )
-        
+
         response = []
+
+        # Batch generate presigned URLs for expired ones
+        files_needing_urls = [
+            f for f in files
+            if not f.download_url or f.download_url_expires_at < datetime.now(timezone.utc)
+        ]
+
+        if files_needing_urls:
+            async with self.minio_client:
+                for file in files_needing_urls:
+                    try:
+                        file.download_url = await self.minio_client.get_presigned_url(
+                            file.bucket_name,
+                            file.object_name,
+                            expiry_seconds=86400,  # 24 hours
+                        )
+                    except Exception:
+                        file.download_url = None
+
         for file in files:
-            # 检查并更新下载URL
-            if not file.download_url or file.download_url_expires_at < datetime.utcnow():
-                try:
-                    download_url = self.minio_client.presigned_get_object(
-                        bucket_name=file.bucket_name,
-                        object_name=file.object_name,
-                        expires=timedelta(hours=1)
-                    )
-                    file.download_url = download_url
-                except S3Error:
-                    file.download_url = None
-            
-            response.append(FileInfoResponse(
-                file_id=file.file_id,
-                file_name=file.file_name,
-                file_path=file.file_path,
-                file_size=file.file_size,
-                content_type=file.content_type,
-                status=file.status,
-                access_level=file.access_level,
-                download_url=file.download_url,
-                metadata=file.metadata,
-                tags=file.tags,
-                uploaded_at=file.uploaded_at,
-                updated_at=file.updated_at
-            ))
-        
+            response.append(
+                FileInfoResponse(
+                    file_id=file.file_id,
+                    file_name=file.file_name,
+                    file_path=file.file_path,
+                    file_size=file.file_size,
+                    content_type=file.content_type,
+                    status=file.status,
+                    access_level=file.access_level,
+                    download_url=file.download_url,
+                    metadata=file.metadata,
+                    tags=file.tags,
+                    uploaded_at=file.uploaded_at,
+                    updated_at=file.updated_at,
+                )
+            )
+
         return response
-    
+
     async def delete_file(
-        self,
-        file_id: str,
-        user_id: str,
-        permanent: bool = False
+        self, file_id: str, user_id: str, permanent: bool = False
     ) -> bool:
         """
         删除文件
-        
+
         Args:
             file_id: 文件ID
             user_id: 用户ID
             permanent: 是否永久删除
-            
+
         Returns:
             bool: 删除成功
         """
@@ -417,41 +527,56 @@ class StorageService:
         file = await self.repository.get_file_by_id(file_id, user_id)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
-        
+
         if permanent:
-            # 从MinIO删除
+            # ASYNC delete from MinIO (positional: bucket, key)
             try:
-                self.minio_client.remove_object(
-                    bucket_name=file.bucket_name,
-                    object_name=file.object_name
-                )
-            except S3Error as e:
+                async with self.minio_client:
+                    await self.minio_client.delete_object(
+                        file.bucket_name,
+                        file.object_name
+                    )
+            except Exception as e:
                 logger.error(f"Error deleting file from MinIO: {e}")
                 # 继续处理，即使MinIO删除失败
-        
+
         # 更新数据库状态
         success = await self.repository.delete_file(file_id, user_id)
-        
+
         if success:
             # 更新配额使用量
             await self.repository.update_storage_usage(
-                user_id=user_id,
+                quota_type="user",
+                entity_id=user_id,
                 bytes_delta=-file.file_size,
-                file_count_delta=-1
+                file_count_delta=-1,
             )
-        
+
+            # 发布文件删除事件
+            # Note: Media Service和Album Service会订阅此事件，清理相关数据
+            if self.event_publisher:
+                try:
+                    await self.event_publisher.publish_file_deleted(
+                        file_id=file_id,
+                        file_name=file.file_name,
+                        file_size=file.file_size,
+                        user_id=user_id,
+                        permanent=permanent,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to publish file.deleted event: {e}")
+
         return success
-    
-    async def share_file(
-        self,
-        request: FileShareRequest
-    ) -> FileShareResponse:
+
+    # ==================== 文件分享功能 ====================
+
+    async def share_file(self, request: FileShareRequest) -> FileShareResponse:
         """
         分享文件
-        
+
         Args:
             request: 分享请求参数
-            
+
         Returns:
             FileShareResponse: 分享响应
         """
@@ -459,10 +584,10 @@ class StorageService:
         file = await self.repository.get_file_by_id(request.file_id, request.shared_by)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
-        
+
         # 生成访问令牌
         access_token = uuid.uuid4().hex
-        
+
         # 创建分享记录
         share = FileShare(
             share_id=f"share_{uuid.uuid4().hex[:12]}",
@@ -474,37 +599,64 @@ class StorageService:
             password=request.password,
             permissions=request.permissions,
             max_downloads=request.max_downloads,
-            expires_at=datetime.utcnow() + timedelta(hours=request.expires_hours)
+            download_count=0,
+            is_active=True,
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(hours=request.expires_hours),
         )
-        
+
+        logger.info(f"About to create file share: {share.share_id}")
         created_share = await self.repository.create_file_share(share)
-        
-        # 生成分享URL
-        base_url = self._get_service_url('wallet_service', 8209) if hasattr(self, '_get_service_url') else 'http://localhost:8209'
-        share_url = f"{base_url}/api/shares/{created_share.share_id}?token={access_token}"
-        
+        logger.info(f"Created share result: {created_share}")
+
+        # 生成分享URL - 使用服务发现获取 storage_service 的地址
+        storage_host, storage_port = self.config_manager.discover_service(
+            service_name="storage_service",
+            default_host="localhost",
+            default_port=8209,
+            env_host_key="STORAGE_SERVICE_HOST",
+            env_port_key="STORAGE_SERVICE_PORT",
+        )
+        base_url = f"http://{storage_host}:{storage_port}"
+        share_url = f"{base_url}/api/v1/storage/shares/{created_share.share_id}?token={access_token}"
+
+        # 发布文件分享事件
+        if self.event_publisher:
+            try:
+                await self.event_publisher.publish_file_shared(
+                    share_id=created_share.share_id,
+                    file_id=request.file_id,
+                    file_name=file.file_name,
+                    shared_by=request.shared_by,
+                    shared_with=request.shared_with,
+                    shared_with_email=request.shared_with_email,
+                    expires_at=created_share.expires_at.isoformat(),
+                )
+            except Exception as e:
+                logger.error(f"Failed to publish file.shared event: {e}")
+
         return FileShareResponse(
             share_id=created_share.share_id,
             share_url=share_url,
             access_token=access_token if not request.password else None,
             expires_at=created_share.expires_at,
-            permissions=created_share.permissions
+            permissions=created_share.permissions,
         )
-    
+
     async def get_shared_file(
         self,
         share_id: str,
         access_token: Optional[str] = None,
-        password: Optional[str] = None
+        password: Optional[str] = None,
     ) -> FileInfoResponse:
         """
         获取分享的文件
-        
+
         Args:
             share_id: 分享ID
             access_token: 访问令牌
             password: 访问密码
-            
+
         Returns:
             FileInfoResponse: 文件信息
         """
@@ -512,36 +664,37 @@ class StorageService:
         share = await self.repository.get_file_share(share_id, access_token)
         if not share:
             raise HTTPException(status_code=404, detail="Share not found or expired")
-        
+
         # 验证密码
         if share.password and share.password != password:
             raise HTTPException(status_code=401, detail="Invalid password")
-        
+
         # 检查下载次数限制
         if share.max_downloads and share.download_count >= share.max_downloads:
             raise HTTPException(status_code=403, detail="Download limit exceeded")
-        
+
         # 获取文件信息
         file = await self.repository.get_file_by_id(share.file_id)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
-        
+
         # 更新访问记录
         if share.permissions.get("download"):
             await self.repository.increment_share_download(share_id)
-        
-        # 生成下载URL
+
+        # ASYNC generate download URL (positional: bucket, key)
         download_url = None
         if share.permissions.get("view") or share.permissions.get("download"):
             try:
-                download_url = self.minio_client.presigned_get_object(
-                    bucket_name=file.bucket_name,
-                    object_name=file.object_name,
-                    expires=timedelta(minutes=15)  # 分享的URL有效期短一些
-                )
-            except S3Error:
+                async with self.minio_client:
+                    download_url = await self.minio_client.get_presigned_url(
+                        file.bucket_name,
+                        file.object_name,
+                        expiry_seconds=900,  # 15 minutes
+                    )
+            except Exception:
                 pass
-        
+
         return FileInfoResponse(
             file_id=file.file_id,
             file_name=file.file_name,
@@ -554,26 +707,34 @@ class StorageService:
             metadata=file.metadata,
             tags=file.tags,
             uploaded_at=file.uploaded_at,
-            updated_at=file.updated_at
+            updated_at=file.updated_at,
         )
-    
+
+    # ==================== 存储配额与统计 ====================
+
     async def get_storage_stats(
-        self,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None
+        self, user_id: Optional[str] = None, organization_id: Optional[str] = None
     ) -> StorageStatsResponse:
         """
         获取存储统计信息
-        
+
         Args:
             user_id: 用户ID
             organization_id: 组织ID
-            
+
         Returns:
             StorageStatsResponse: 存储统计
         """
         # 获取配额信息
-        quota = await self.repository.get_storage_quota(user_id, organization_id)
+        if organization_id:
+            quota = await self.repository.get_storage_quota(
+                quota_type="organization", entity_id=organization_id
+            )
+        else:
+            quota = await self.repository.get_storage_quota(
+                quota_type="user", entity_id=user_id
+            )
+
         if not quota:
             # 使用默认配额
             quota = StorageQuota(
@@ -581,267 +742,33 @@ class StorageService:
                 organization_id=organization_id,
                 total_quota_bytes=self.default_quota_bytes,
                 used_bytes=0,
-                file_count=0
+                file_count=0,
             )
-        
+
         # 获取统计信息
         stats = await self.repository.get_storage_stats(user_id, organization_id)
-        
+
+        # 处理 None 值
+        used_bytes = quota.used_bytes if quota.used_bytes is not None else 0
+        total_quota_bytes = (
+            quota.total_quota_bytes
+            if quota.total_quota_bytes is not None
+            else self.default_quota_bytes
+        )
+
         # 计算使用百分比
-        usage_percentage = (quota.used_bytes / quota.total_quota_bytes * 100) if quota.total_quota_bytes > 0 else 0
-        
+        usage_percentage = (
+            (used_bytes / total_quota_bytes * 100) if total_quota_bytes > 0 else 0
+        )
+
         return StorageStatsResponse(
             user_id=user_id,
             organization_id=organization_id,
-            total_quota_bytes=quota.total_quota_bytes,
-            used_bytes=quota.used_bytes,
-            available_bytes=quota.total_quota_bytes - quota.used_bytes,
+            total_quota_bytes=total_quota_bytes,
+            used_bytes=used_bytes,
+            available_bytes=total_quota_bytes - used_bytes,
             usage_percentage=usage_percentage,
             file_count=stats.get("file_count", 0),
             by_type=stats.get("by_type", {}),
-            by_status=stats.get("by_status", {})
+            by_status=stats.get("by_status", {}),
         )
-    
-    # ==================== Photo Version Management Methods ====================
-    
-    async def save_photo_version(
-        self,
-        request: SavePhotoVersionRequest
-    ) -> SavePhotoVersionResponse:
-        """
-        保存照片的AI处理版本
-        1. 从AI生成的URL下载图片
-        2. 上传到云存储
-        3. 如果是相框端，保存到本地
-        4. 记录版本信息
-        """
-        import uuid
-        from io import BytesIO
-        import os
-        
-        version_id = f"ver_{uuid.uuid4().hex[:12]}"
-        timestamp = datetime.utcnow()
-        
-        try:
-            # 1. 下载AI生成的图片 (使用requests库，同步方式)
-            import requests
-            
-            response = requests.get(request.source_url, timeout=30)
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Failed to download image from source: {response.status_code}"
-                )
-            
-            image_data = response.content
-            content_type = response.headers.get('Content-Type', 'image/jpeg')
-            
-            # 2. 准备文件名和路径
-            file_extension = '.jpg' if 'jpeg' in content_type else '.png'
-            file_name = f"{request.photo_id}_{version_id}{file_extension}"
-            object_name = f"photo_versions/{request.user_id}/{request.photo_id}/{file_name}"
-            
-            # 3. 上传到MinIO云存储
-            bucket_name = "emoframe-photos"
-            
-            # 确保bucket存在
-            if not self.minio_client.bucket_exists(bucket_name):
-                self.minio_client.make_bucket(bucket_name)
-            
-            # 上传文件
-            self.minio_client.put_object(
-                bucket_name=bucket_name,
-                object_name=object_name,
-                data=BytesIO(image_data),
-                length=len(image_data),
-                content_type=content_type,
-                metadata={
-                    'photo_id': request.photo_id,
-                    'version_id': version_id,
-                    'version_type': request.version_type.value,
-                    'processing_mode': request.processing_mode or '',
-                    'created_at': timestamp.isoformat()
-                }
-            )
-            
-            # 生成云端访问URL
-            cloud_url = self.minio_client.presigned_get_object(
-                bucket_name=bucket_name,
-                object_name=object_name,
-                expires=timedelta(days=7)  # 7天有效期（最大允许值）
-            )
-            
-            # 4. 如果需要保存到本地（相框端）
-            local_path = None
-            if request.save_local:
-                # 创建本地目录
-                local_dir = f"/data/emoframe/photos/{request.user_id}/{request.photo_id}"
-                os.makedirs(local_dir, exist_ok=True)
-                
-                # 保存到本地
-                local_path = f"{local_dir}/{file_name}"
-                with open(local_path, 'wb') as f:
-                    f.write(image_data)
-            
-            # 5. 创建版本记录
-            photo_version = PhotoVersion(
-                version_id=version_id,
-                photo_id=request.photo_id,
-                user_id=request.user_id,
-                version_name=request.version_name,
-                version_type=request.version_type,
-                processing_mode=request.processing_mode,
-                file_id=f"file_{version_id}",
-                cloud_url=cloud_url,
-                local_path=local_path,
-                file_size=len(image_data),
-                processing_params=request.processing_params,
-                metadata=request.metadata or {},
-                is_current=request.set_as_current,
-                created_at=timestamp,
-                updated_at=timestamp
-            )
-            
-            # 6. 保存到数据库（这里简化处理，实际需要持久化）
-            await self.repository.save_photo_version(photo_version)
-            
-            # 7. 如果设为当前版本，更新照片的当前版本
-            if request.set_as_current:
-                await self.repository.update_photo_current_version(
-                    photo_id=request.photo_id,
-                    version_id=version_id
-                )
-            
-            return SavePhotoVersionResponse(
-                version_id=version_id,
-                photo_id=request.photo_id,
-                cloud_url=cloud_url,
-                local_path=local_path,
-                version_name=request.version_name,
-                created_at=timestamp,
-                message="Photo version saved successfully"
-            )
-            
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to save photo version: {str(e)}"
-            )
-    
-    async def get_photo_versions(
-        self,
-        request: GetPhotoVersionsRequest
-    ) -> PhotoWithVersions:
-        """获取照片的所有版本"""
-        
-        # 从数据库获取版本列表
-        versions = await self.repository.get_photo_versions(
-            photo_id=request.photo_id,
-            user_id=request.user_id
-        )
-        
-        # 获取照片基本信息
-        photo_info = await self.repository.get_photo_info(request.photo_id)
-        
-        return PhotoWithVersions(
-            photo_id=request.photo_id,
-            title=photo_info.get("title", "Untitled"),
-            original_file_id=photo_info.get("original_file_id"),
-            current_version_id=photo_info.get("current_version_id"),
-            versions=versions,
-            version_count=len(versions),
-            created_at=photo_info.get("created_at"),
-            updated_at=photo_info.get("updated_at")
-        )
-    
-    async def switch_photo_version(
-        self,
-        request: SwitchPhotoVersionRequest
-    ) -> Dict[str, Any]:
-        """切换照片的当前显示版本"""
-        
-        # 验证版本存在
-        version = await self.repository.get_photo_version(
-            version_id=request.version_id,
-            user_id=request.user_id
-        )
-        
-        if not version or version.photo_id != request.photo_id:
-            raise HTTPException(
-                status_code=404,
-                detail="Photo version not found"
-            )
-        
-        # 更新当前版本
-        await self.repository.update_photo_current_version(
-            photo_id=request.photo_id,
-            version_id=request.version_id
-        )
-        
-        # 更新所有版本的is_current标志
-        await self.repository.update_version_current_flags(
-            photo_id=request.photo_id,
-            current_version_id=request.version_id
-        )
-        
-        return {
-            "success": True,
-            "photo_id": request.photo_id,
-            "current_version_id": request.version_id,
-            "message": "Photo version switched successfully"
-        }
-    
-    async def delete_photo_version(
-        self,
-        version_id: str,
-        user_id: str
-    ) -> Dict[str, Any]:
-        """删除照片版本（不能删除原始版本）"""
-        
-        # 获取版本信息
-        version = await self.repository.get_photo_version(version_id, user_id)
-        
-        if not version:
-            raise HTTPException(
-                status_code=404,
-                detail="Photo version not found"
-            )
-        
-        if version.version_type == PhotoVersionType.ORIGINAL:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot delete original version"
-            )
-        
-        # 如果是当前版本，切换回原始版本
-        if version.is_current:
-            original_version = await self.repository.get_original_version(version.photo_id)
-            if original_version:
-                await self.repository.update_photo_current_version(
-                    photo_id=version.photo_id,
-                    version_id=original_version.version_id
-                )
-        
-        # 删除云存储中的文件
-        try:
-            bucket_name = "emoframe-photos"
-            object_name = version.cloud_url.split(bucket_name + "/")[-1].split("?")[0]
-            self.minio_client.remove_object(bucket_name, object_name)
-        except Exception as e:
-            logger.warning(f"Failed to delete cloud file: {e}")
-        
-        # 删除本地文件（如果存在）
-        if version.local_path and os.path.exists(version.local_path):
-            try:
-                os.remove(version.local_path)
-            except Exception as e:
-                logger.warning(f"Failed to delete local file: {e}")
-        
-        # 从数据库删除版本记录
-        await self.repository.delete_photo_version(version_id)
-        
-        return {
-            "success": True,
-            "version_id": version_id,
-            "message": "Photo version deleted successfully"
-        }

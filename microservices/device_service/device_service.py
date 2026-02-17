@@ -1,97 +1,220 @@
 """
 Device Management Service - Business Logic
 
-设备管理服务业务逻辑
+Uses dependency injection for testability.
+- Repository is injected, not created at import time
+- Event publishers and MQTT clients are lazily loaded
 """
 
 import hashlib
 import secrets
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 import logging
 import asyncio
+
+# Import protocols (no I/O dependencies) - NOT the concrete repository!
+from .protocols import DeviceRepositoryProtocol
 from .models import (
     DeviceStatus, DeviceType, SecurityLevel,
     DeviceResponse, DeviceAuthResponse, DeviceStatsResponse,
     DeviceHealthResponse, DeviceGroupResponse
 )
+# Import event bus components
+from core.nats_client import Event
 
 logger = logging.getLogger("device_service")
 
-# Import MQTT client from core
+# Import async MQTT client from core
 try:
-    from core.mqtt_client import create_command_client
+    from core.mqtt_client import DeviceCommandClient, MQTTEventBus
+    MQTT_AVAILABLE = True
 except ImportError:
-    create_command_client = None
+    DeviceCommandClient = None
+    MQTTEventBus = None
+    MQTT_AVAILABLE = False
     logger.warning("MQTT client not available - commands will be simulated")
 
 
 class DeviceService:
-    """设备管理服务"""
-    
-    def __init__(self):
+    """设备管理服务 - 带数据库持久化
+
+    Uses dependency injection for testability.
+    """
+
+    def __init__(
+        self,
+        repository: Optional[DeviceRepositoryProtocol] = None,
+        event_bus=None,
+        mqtt_client=None,
+    ):
+        """
+        Initialize service with injected dependencies.
+
+        Args:
+            repository: Repository (inject mock for testing)
+            event_bus: Event bus for publishing events
+            mqtt_client: MQTT client for device commands (optional)
+        """
         self.secret_key = "device_service_secret_key_2024"  # 实际应从环境变量读取
         self.token_expiry = 86400  # 24小时
-        
-        # Initialize MQTT command client
-        self.mqtt_command_client = None
-        self._init_mqtt_command_client()
-        
+        self.event_bus = event_bus
+        self.device_repo = repository  # Will be set by factory if None
+
+        # Initialize MQTT command client (async, lazy init)
+        self.mqtt_command_client = mqtt_client
+        self._mqtt_initialized = mqtt_client is not None
+
     async def register_device(self, user_id: str, device_data: Dict[str, Any]) -> Optional[DeviceResponse]:
         """注册新设备"""
         try:
             # 生成设备ID
             device_id = self._generate_device_id(
                 device_data["serial_number"],
-                device_data["mac_address"] if "mac_address" in device_data else ""
+                device_data.get("mac_address", "")
             )
-            
-            # 创建设备记录
-            device = DeviceResponse(
-                device_id=device_id,
-                device_name=device_data["device_name"],
-                device_type=device_data["device_type"],
-                manufacturer=device_data["manufacturer"],
-                model=device_data["model"],
-                serial_number=device_data["serial_number"],
-                firmware_version=device_data["firmware_version"],
-                hardware_version=device_data.get("hardware_version"),
-                mac_address=device_data.get("mac_address"),
-                connectivity_type=device_data["connectivity_type"],
-                security_level=device_data.get("security_level", SecurityLevel.STANDARD),
-                status=DeviceStatus.PENDING,
-                location=device_data.get("location"),
-                metadata=device_data.get("metadata", {}),
-                group_id=device_data.get("group_id"),
-                tags=device_data.get("tags", []),
-                last_seen=None,
-                registered_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                user_id=user_id,
-                organization_id=None,
-                total_commands=0,
-                total_telemetry_points=0,
-                uptime_percentage=0.0
-            )
-            
-            logger.info(f"Device registered: {device_id}")
+
+            # 准备设备数据
+            device_dict = {
+                "device_id": device_id,
+                "user_id": user_id,
+                "organization_id": device_data.get("organization_id"),
+                "device_name": device_data["device_name"],
+                "device_type": device_data["device_type"],
+                "manufacturer": device_data["manufacturer"],
+                "model": device_data["model"],
+                "serial_number": device_data["serial_number"],
+                "firmware_version": device_data["firmware_version"],
+                "hardware_version": device_data.get("hardware_version"),
+                "mac_address": device_data.get("mac_address"),
+                "connectivity_type": device_data["connectivity_type"],
+                "security_level": device_data.get("security_level", "standard"),
+                "status": "pending",
+                "location": device_data.get("location"),
+                "metadata": device_data.get("metadata", {}),
+                "group_id": device_data.get("group_id"),
+                "tags": device_data.get("tags", [])
+            }
+
+            # 保存到数据库
+            device = await self.device_repo.create_device(device_dict)
+
+            if not device:
+                raise Exception("Failed to create device in database")
+
+            logger.info(f"Device registered: {device_id} for user {user_id}")
+
+            # Publish device.registered event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="device.registered",
+                        source="device_service",
+                        data={
+                            "device_id": device_id,
+                            "device_name": device.device_name,
+                            "device_type": device.device_type,
+                            "user_id": user_id,
+                            "manufacturer": device.manufacturer,
+                            "model": device.model,
+                            "serial_number": device.serial_number,
+                            "connectivity_type": device.connectivity_type,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    await self.event_bus.publish_event(event)
+                    logger.info(f"Published device.registered event for device {device_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish device.registered event: {e}")
+
             return device
-            
+
         except Exception as e:
             logger.error(f"Error registering device: {e}")
+            raise
+
+    async def get_device(self, device_id: str) -> Optional[DeviceResponse]:
+        """获取设备信息"""
+        try:
+            device = await self.device_repo.get_device_by_id(device_id)
+
+            if not device:
+                logger.warning(f"Device not found: {device_id}")
+                return None
+
+            return device
+
+        except Exception as e:
+            logger.error(f"Error getting device: {e}")
             return None
-    
+
+    async def list_user_devices(
+        self,
+        user_id: str,
+        device_type: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[DeviceResponse]:
+        """获取用户设备列表"""
+        try:
+            devices = await self.device_repo.list_user_devices(
+                user_id=user_id,
+                device_type=device_type,
+                status=status,
+                limit=limit,
+                offset=offset
+            )
+
+            logger.info(f"Listed {len(devices)} devices for user {user_id}")
+            return devices
+
+        except Exception as e:
+            logger.error(f"Error listing devices: {e}")
+            return []
+
+    async def update_device(
+        self,
+        device_id: str,
+        update_data: Dict[str, Any]
+    ) -> Optional[DeviceResponse]:
+        """更新设备信息"""
+        try:
+            # 更新数据库
+            success = await self.device_repo.update_device(device_id, update_data)
+
+            if not success:
+                logger.warning(f"Failed to update device: {device_id}")
+                return None
+
+            # 返回更新后的设备
+            device = await self.device_repo.get_device_by_id(device_id)
+
+            logger.info(f"Device updated: {device_id}")
+            return device
+
+        except Exception as e:
+            logger.error(f"Error updating device: {e}")
+            return None
+
     async def authenticate_device(self, device_id: str, auth_data: Dict[str, Any]) -> Optional[DeviceAuthResponse]:
         """设备认证"""
         try:
-            # 验证设备凭证（简化版本）
-            # 实际应该验证密钥、证书等
-            
+            # 验证设备存在
+            device = await self.device_repo.get_device_by_id(device_id)
+
+            if not device:
+                logger.warning(f"Device not found for authentication: {device_id}")
+                return None
+
+            # TODO: 验证设备凭证（device_secret, certificate等）
+            # 实际应该从 auth_service 验证
+
             # 生成访问令牌
             access_token = self._generate_access_token(device_id)
             refresh_token = secrets.token_urlsafe(32)
-            
+
             auth_response = DeviceAuthResponse(
                 device_id=device_id,
                 access_token=access_token,
@@ -102,33 +225,92 @@ class DeviceService:
                 mqtt_broker="mqtt://localhost:1883",
                 mqtt_topic=f"devices/{device_id}/"
             )
-            
+
             # 更新设备状态为活跃
-            await self.update_device_status(device_id, DeviceStatus.ACTIVE)
-            
+            await self.update_device_status(device_id, DeviceStatus.ACTIVE, datetime.now(timezone.utc))
+
             logger.info(f"Device authenticated: {device_id}")
             return auth_response
-            
+
         except Exception as e:
             logger.error(f"Error authenticating device: {e}")
             return None
-    
-    async def update_device_status(self, device_id: str, status: DeviceStatus) -> bool:
+
+    async def update_device_status(
+        self,
+        device_id: str,
+        status: DeviceStatus,
+        last_seen: Optional[datetime] = None
+    ) -> bool:
         """更新设备状态"""
         try:
-            # 更新设备状态和最后上线时间
-            logger.info(f"Device {device_id} status updated to {status}")
-            return True
+            success = await self.device_repo.update_device_status(
+                device_id,
+                status,
+                last_seen or datetime.now(timezone.utc)
+            )
+
+            if success:
+                logger.info(f"Device {device_id} status updated to {status}")
+
+                # Publish device.online or device.offline event based on status
+                if self.event_bus and status in [DeviceStatus.ACTIVE, DeviceStatus.INACTIVE]:
+                    try:
+                        # Get device details for event
+                        device = await self.device_repo.get_device_by_id(device_id)
+
+                        if device:
+                            event_type = "device.online" if status == DeviceStatus.ACTIVE else "device.offline"
+
+                            event = Event(
+                                event_type=event_type,
+                                source="device_service",
+                                data={
+                                    "device_id": device_id,
+                                    "device_name": device.device_name,
+                                    "device_type": device.device_type,
+                                    "status": status.value if hasattr(status, 'value') else str(status),
+                                    "last_seen": last_seen.isoformat() if last_seen else datetime.now(timezone.utc).isoformat(),
+                                    "timestamp": datetime.now(timezone.utc).isoformat()
+                                }
+                            )
+                            await self.event_bus.publish_event(event)
+                            logger.info(f"Published {event_type.value} event for device {device_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish device status event: {e}")
+
+            return success
+
         except Exception as e:
             logger.error(f"Error updating device status: {e}")
             return False
-    
-    async def send_command(self, device_id: str, command: Dict[str, Any]) -> Dict[str, Any]:
+
+    async def send_command(self, device_id: str, user_id: str, command: Dict[str, Any]) -> Dict[str, Any]:
         """向设备发送命令"""
         try:
+            command_id = secrets.token_hex(16)
+
+            # 保存命令到数据库
+            command_data = {
+                "command_id": command_id,
+                "device_id": device_id,
+                "user_id": user_id,
+                "command": command["command"],
+                "parameters": command.get("parameters", {}),
+                "timeout": command.get("timeout", 30),
+                "priority": command.get("priority", 1),
+                "require_ack": command.get("require_ack", True)
+            }
+
+            await self.device_repo.create_device_command(command_data)
+
+            # Ensure MQTT client is initialized
+            await self._ensure_mqtt_connected()
+
+            # 通过 MQTT 发送命令 (async)
             if self.mqtt_command_client and self.mqtt_command_client.is_connected():
-                # 使用 MQTT client 发送命令
-                command_id = self.mqtt_command_client.send_device_command(
+                # 使用 async MQTT client 发送命令
+                mqtt_command_id = await self.mqtt_command_client.send_device_command(
                     device_id=device_id,
                     command=command["command"],
                     parameters=command.get("parameters", {}),
@@ -136,181 +318,410 @@ class DeviceService:
                     priority=command.get("priority", 1),
                     require_ack=command.get("require_ack", True)
                 )
-                
-                if command_id:
+
+                if mqtt_command_id:
+                    await self.device_repo.update_command_status(command_id, "sent")
                     logger.info(f"Command sent via MQTT to device {device_id}: {command['command']}")
+
+                    # Publish device.command_sent event
+                    if self.event_bus:
+                        try:
+                            event = Event(
+                                event_type="device.command_sent",
+                                source="device_service",
+                                data={
+                                    "command_id": command_id,
+                                    "device_id": device_id,
+                                    "user_id": user_id,
+                                    "command": command["command"],
+                                    "parameters": command.get("parameters", {}),
+                                    "priority": command.get("priority", 1),
+                                    "timestamp": datetime.now(timezone.utc).isoformat()
+                                }
+                            )
+                            await self.event_bus.publish_event(event)
+                            logger.info(f"Published device.command_sent event for command {command_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to publish device.command_sent event: {e}")
+
                     return {
                         "success": True,
                         "command_id": command_id,
-                        "status": "published",
-                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                        "status": "sent",
+                        "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
                     }
                 else:
-                    logger.error(f"Failed to send command via MQTT to device {device_id}")
+                    await self.device_repo.update_command_status(command_id, "failed", error_message="MQTT send failed")
                     return {
                         "success": False,
+                        "command_id": command_id,
                         "error": "Failed to publish command via MQTT"
                     }
             else:
-                # 回退到模拟模式
+                # 模拟发送
                 logger.warning("MQTT client not connected, simulating command send")
-                command_id = secrets.token_hex(16)
                 await asyncio.sleep(0.1)  # 模拟网络延迟
-                
+                await self.device_repo.update_command_status(command_id, "sent")
+
                 logger.info(f"Command simulated for device {device_id}: {command['command']}")
+
+                # Publish device.command_sent event
+                if self.event_bus:
+                    try:
+                        event = Event(
+                            event_type="device.command_sent",
+                            source="device_service",
+                            data={
+                                "command_id": command_id,
+                                "device_id": device_id,
+                                "user_id": user_id,
+                                "command": command["command"],
+                                "parameters": command.get("parameters", {}),
+                                "priority": command.get("priority", 1),
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        await self.event_bus.publish_event(event)
+                        logger.info(f"Published device.command_sent event for command {command_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to publish device.command_sent event: {e}")
+
                 return {
                     "success": True,
                     "command_id": command_id,
                     "status": "simulated",
-                    "timestamp": datetime.utcnow().isoformat() + "Z"
+                    "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
                 }
-            
+
         except Exception as e:
             logger.error(f"Error sending command to device: {e}")
             return {
                 "success": False,
                 "error": str(e)
             }
-    
+
     async def get_device_health(self, device_id: str) -> Optional[DeviceHealthResponse]:
-        """获取设备健康状态"""
+        """获取设备健康状态 - 从 telemetry_service 获取实际数据"""
         try:
-            # 模拟健康检查数据
+            # 验证设备存在
+            device = await self.device_repo.get_device_by_id(device_id)
+
+            if not device:
+                return None
+
+            # 从 telemetry_service 获取实际健康数据
+            try:
+                from microservices.telemetry_service.clients import TelemetryServiceClient
+
+                async with TelemetryServiceClient() as telemetry_client:
+                    # 获取设备统计数据
+                    device_stats = await telemetry_client.get_device_stats(device_id)
+
+                    if device_stats:
+                        # 从实际遥测数据构建健康响应
+                        metrics = device_stats.get("metrics", {})
+
+                        health = DeviceHealthResponse(
+                            device_id=device_id,
+                            status=device.status,
+                            health_score=metrics.get("health_score", 95.5),
+                            cpu_usage=metrics.get("cpu_usage", 0.0),
+                            memory_usage=metrics.get("memory_usage", 0.0),
+                            disk_usage=metrics.get("disk_usage", 0.0),
+                            temperature=metrics.get("temperature", 0.0),
+                            battery_level=metrics.get("battery_level", None),
+                            signal_strength=metrics.get("signal_strength", None),
+                            error_count=device_stats.get("error_count", 0),
+                            warning_count=device_stats.get("warning_count", 0),
+                            last_error=device_stats.get("last_error"),
+                            last_check=datetime.now(timezone.utc),
+                            diagnostics=device_stats.get("diagnostics", {})
+                        )
+
+                        return health
+            except Exception as telemetry_error:
+                logger.warning(f"Failed to get telemetry data for device {device_id}: {telemetry_error}")
+                # 如果 telemetry service 不可用，返回基于设备状态的简化健康信息
+
+            # 降级返回基于设备状态的简化健康数据
             health = DeviceHealthResponse(
                 device_id=device_id,
-                status=DeviceStatus.ACTIVE,
-                health_score=95.5,
-                cpu_usage=23.4,
-                memory_usage=45.6,
-                disk_usage=67.8,
-                temperature=35.2,
-                battery_level=87.0,
-                signal_strength=-65.0,  # dBm
+                status=device.status,
+                health_score=90.0 if device.status == "active" else 50.0,
+                cpu_usage=0.0,
+                memory_usage=0.0,
+                disk_usage=0.0,
+                temperature=0.0,
+                battery_level=None,
+                signal_strength=None,
                 error_count=0,
-                warning_count=2,
+                warning_count=0,
                 last_error=None,
-                last_check=datetime.utcnow(),
-                diagnostics={
-                    "network_latency": 12.5,
-                    "packet_loss": 0.1,
-                    "uptime_hours": 168.5
-                }
+                last_check=datetime.now(timezone.utc),
+                diagnostics={"note": "Telemetry data unavailable"}
             )
-            
+
             return health
-            
+
         except Exception as e:
             logger.error(f"Error getting device health: {e}")
             return None
-    
+
     async def get_device_stats(self, user_id: str) -> Optional[DeviceStatsResponse]:
         """获取设备统计信息"""
         try:
-            # 模拟统计数据
+            # 获取用户所有设备
+            devices = await self.device_repo.list_user_devices(user_id, limit=1000)
+
+            # 统计数据
+            total_devices = len(devices)
+            active_devices = len([d for d in devices if d.status == DeviceStatus.ACTIVE])
+            inactive_devices = len([d for d in devices if d.status == DeviceStatus.INACTIVE])
+            error_devices = len([d for d in devices if d.status == DeviceStatus.ERROR])
+
+            devices_by_type = {}
+            for device in devices:
+                device_type = device.device_type
+                devices_by_type[device_type] = devices_by_type.get(device_type, 0) + 1
+
+            devices_by_status = {}
+            for device in devices:
+                status = device.status
+                devices_by_status[status] = devices_by_status.get(status, 0) + 1
+
+            devices_by_connectivity = {}
+            for device in devices:
+                connectivity = device.connectivity_type
+                devices_by_connectivity[connectivity] = devices_by_connectivity.get(connectivity, 0) + 1
+
+            # 计算平均正常运行时间
+            avg_uptime = sum([d.uptime_percentage for d in devices]) / max(total_devices, 1)
+
             stats = DeviceStatsResponse(
-                total_devices=156,
-                active_devices=142,
-                inactive_devices=10,
-                error_devices=4,
-                devices_by_type={
-                    DeviceType.SENSOR: 68,
-                    DeviceType.ACTUATOR: 32,
-                    DeviceType.GATEWAY: 12,
-                    DeviceType.SMART_HOME: 28,
-                    DeviceType.CAMERA: 16
-                },
-                devices_by_status={
-                    DeviceStatus.ACTIVE: 142,
-                    DeviceStatus.INACTIVE: 10,
-                    DeviceStatus.ERROR: 4
-                },
-                devices_by_connectivity={
-                    "wifi": 98,
-                    "ethernet": 24,
-                    "4g": 18,
-                    "zigbee": 16
-                },
-                avg_uptime=98.5,
-                total_data_points=1567890,
+                total_devices=total_devices,
+                active_devices=active_devices,
+                inactive_devices=inactive_devices,
+                error_devices=error_devices,
+                devices_by_type=devices_by_type,
+                devices_by_status=devices_by_status,
+                devices_by_connectivity=devices_by_connectivity,
+                avg_uptime=round(avg_uptime, 2),
+                total_data_points=sum([d.total_telemetry_points for d in devices]),
                 last_24h_activity={
-                    "commands_sent": 342,
-                    "telemetry_received": 89456,
-                    "alerts_triggered": 12,
-                    "firmware_updates": 3
+                    "commands_sent": sum([d.total_commands for d in devices]),
+                    "telemetry_received": sum([d.total_telemetry_points for d in devices]),
+                    "alerts_triggered": 0,  # TODO: 从 alerts 表获取
+                    "firmware_updates": 0   # TODO: 从 OTA 服务获取
                 }
             )
-            
+
             return stats
-            
+
         except Exception as e:
             logger.error(f"Error getting device stats: {e}")
             return None
-    
+
     async def create_device_group(self, user_id: str, group_data: Dict[str, Any]) -> Optional[DeviceGroupResponse]:
         """创建设备组"""
         try:
             group_id = secrets.token_hex(16)
-            
-            group = DeviceGroupResponse(
-                group_id=group_id,
-                group_name=group_data["group_name"],
-                description=group_data.get("description"),
-                parent_group_id=group_data.get("parent_group_id"),
-                device_count=0,
-                tags=group_data.get("tags", []),
-                metadata=group_data.get("metadata", {}),
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
-            
-            logger.info(f"Device group created: {group_id}")
+
+            group_dict = {
+                "group_id": group_id,
+                "user_id": user_id,
+                "group_name": group_data["group_name"],
+                "description": group_data.get("description"),
+                "parent_group_id": group_data.get("parent_group_id"),
+                "tags": group_data.get("tags", []),
+                "metadata": group_data.get("metadata", {})
+            }
+
+            group = await self.device_repo.create_device_group(group_dict)
+
+            if not group:
+                raise Exception("Failed to create device group")
+
+            logger.info(f"Device group created: {group_id} for user {user_id}")
             return group
-            
+
         except Exception as e:
             logger.error(f"Error creating device group: {e}")
+            raise
+
+    async def get_device_group(self, group_id: str) -> Optional[DeviceGroupResponse]:
+        """获取设备组信息"""
+        try:
+            group = await self.device_repo.get_device_group_by_id(group_id)
+
+            if not group:
+                logger.warning(f"Device group not found: {group_id}")
+                return None
+
+            return group
+
+        except Exception as e:
+            logger.error(f"Error getting device group: {e}")
             return None
-    
+
     async def decommission_device(self, device_id: str) -> bool:
         """停用设备"""
         try:
-            # 更新设备状态为已停用
-            await self.update_device_status(device_id, DeviceStatus.DECOMMISSIONED)
-            
-            # 撤销设备的所有令牌
-            # 清理设备相关的资源
-            
-            logger.info(f"Device decommissioned: {device_id}")
-            return True
-            
+            # 软删除 - 设置状态为 decommissioned
+            success = await self.device_repo.delete_device(device_id)
+
+            if success:
+                # TODO: 撤销设备的所有令牌（调用 auth_service）
+                # TODO: 清理设备相关的资源
+                logger.info(f"Device decommissioned: {device_id}")
+
+            return success
+
         except Exception as e:
             logger.error(f"Error decommissioning device: {e}")
             return False
-    
+
     def _generate_device_id(self, serial_number: str, mac_address: str = "") -> str:
         """生成设备ID"""
-        unique_string = f"{serial_number}:{mac_address}:{datetime.utcnow().isoformat()}"
+        unique_string = f"{serial_number}:{mac_address}:{datetime.now(timezone.utc).isoformat()}"
         return hashlib.sha256(unique_string.encode()).hexdigest()[:32]
-    
+
     def _generate_access_token(self, device_id: str) -> str:
         """生成访问令牌"""
         payload = {
             "device_id": device_id,
-            "exp": datetime.utcnow() + timedelta(seconds=self.token_expiry),
-            "iat": datetime.utcnow(),
+            "exp": datetime.now(timezone.utc) + timedelta(seconds=self.token_expiry),
+            "iat": datetime.now(timezone.utc),
             "scope": "device:all"
         }
         return jwt.encode(payload, self.secret_key, algorithm="HS256")
-    
-    def _init_mqtt_command_client(self):
-        """初始化MQTT命令客户端"""
+
+    async def _ensure_mqtt_connected(self):
+        """Ensure MQTT command client is initialized and connected (lazy async init)"""
+        if self._mqtt_initialized and self.mqtt_command_client:
+            return
+
         try:
-            if create_command_client:
-                self.mqtt_command_client = create_command_client()
-                self.mqtt_command_client.connect_async()
+            if MQTT_AVAILABLE and DeviceCommandClient:
+                self.mqtt_command_client = DeviceCommandClient(
+                    host="localhost",
+                    port=50053,
+                    user_id="device_service"
+                )
+                await self.mqtt_command_client.connect()
+                self._mqtt_initialized = True
                 logger.info("MQTT command client initialized for device service")
             else:
                 logger.warning("MQTT client not available - commands will be simulated")
-                
+
         except Exception as e:
             logger.error(f"Failed to initialize MQTT command client: {e}")
             self.mqtt_command_client = None
+            self._mqtt_initialized = False
+
+    async def close_mqtt_client(self):
+        """Close MQTT command client"""
+        if self.mqtt_command_client:
+            await self.mqtt_command_client.disconnect()
+            self.mqtt_command_client = None
+            self._mqtt_initialized = False
+            logger.info("MQTT command client closed")
+
+    async def check_connection(self) -> bool:
+        """检查数据库连接"""
+        try:
+            return await self.device_repo.check_connection()
+        except Exception as e:
+            logger.error(f"Connection check failed: {e}")
+            return False
+
+    # ============================================================================
+    # Device Pairing Methods
+    # ============================================================================
+
+    async def pair_device(
+        self,
+        device_id: str,
+        pairing_token: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        Pair a device with a user using pairing token
+        
+        Args:
+            device_id: Device ID
+            pairing_token: Pairing token from QR code
+            user_id: User ID attempting to pair
+            
+        Returns:
+            Dict with pairing result:
+            {
+                "success": bool,
+                "device": DeviceInfo (if successful),
+                "error": str (if failed)
+            }
+        """
+        try:
+            # 1. Verify pairing token with auth_service
+            from clients import get_auth_client
+            auth_client = get_auth_client()
+            
+            verification = await auth_client.verify_pairing_token(
+                device_id=device_id,
+                pairing_token=pairing_token,
+                user_id=user_id
+            )
+            
+            if not verification.get("valid"):
+                return {
+                    "success": False,
+                    "error": verification.get("error", "Invalid pairing token")
+                }
+            
+            # 2. Get device
+            device = await self.device_repo.get_device(device_id)
+            if not device:
+                return {
+                    "success": False,
+                    "error": "Device not found"
+                }
+            
+            # 3. Update device with owner and status
+            old_status = device.status
+            await self.device_repo.update_device(
+                device_id,
+                {
+                    "owner_id": user_id,
+                    "status": "active"
+                }
+            )
+            
+            # 4. Publish device.paired event
+            if self.event_bus:
+                from events.publishers import publish_device_paired
+                await publish_device_paired(
+                    event_bus=self.event_bus,
+                    device_id=device_id,
+                    user_id=user_id,
+                    device_name=device.device_name,
+                    device_type=device.device_type
+                )
+            
+            # 5. Get updated device
+            updated_device = await self.device_repo.get_device(device_id)
+            
+            logger.info(
+                f"Device {device_id} paired with user {user_id}, "
+                f"status: {old_status} -> active"
+            )
+            
+            return {
+                "success": True,
+                "device": updated_device
+            }
+            
+        except Exception as e:
+            logger.error(f"Error pairing device: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }

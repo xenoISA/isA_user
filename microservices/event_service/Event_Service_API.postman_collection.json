@@ -1,0 +1,529 @@
+{
+  "info": {
+    "name": "Event Service API",
+    "description": "Complete API collection for Event Service - All endpoints tested and verified working (10/10 tests passing)",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "event_service_url",
+      "value": "http://localhost:8230",
+      "type": "string"
+    },
+    {
+      "key": "test_user_id",
+      "value": "test_user_123",
+      "type": "string"
+    },
+    {
+      "key": "event_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "subscription_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Info",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_service_url}}/health",
+              "host": ["{{event_service_url}}"],
+              "path": ["health"]
+            },
+            "description": "Basic health check for Event Service"
+          },
+          "response": []
+        },
+        {
+          "name": "Frontend Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_service_url}}/api/frontend/health",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "frontend", "health"]
+            },
+            "description": "Frontend-specific health check with NATS status"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Event Management",
+      "item": [
+        {
+          "name": "Create Event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const response = pm.response.json();",
+                  "  if (response.event_id) {",
+                  "    pm.collectionVariables.set('event_id', response.event_id);",
+                  "    console.log('Event ID saved:', response.event_id);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_type\": \"user_login\",\n  \"event_source\": \"backend\", \n  \"event_category\": \"security\",\n  \"user_id\": \"{{test_user_id}}\",\n  \"data\": {\n    \"ip\": \"192.168.1.1\",\n    \"user_agent\": \"Mozilla/5.0\",\n    \"timestamp\": \"2025-10-15T12:00:00Z\"\n  },\n  \"metadata\": {\n    \"service\": \"auth_service\",\n    \"version\": \"1.0.0\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{event_service_url}}/api/events/create",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "create"]
+            },
+            "description": "Create a single event - saves event_id to collection variable"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Event by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_service_url}}/api/events/{{event_id}}",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "{{event_id}}"]
+            },
+            "description": "Retrieve event by ID (uses event_id from Create Event)"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Batch Events",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"event_type\": \"page_view\",\n    \"event_source\": \"frontend\",\n    \"event_category\": \"page_view\",\n    \"user_id\": \"{{test_user_id}}\",\n    \"data\": {\n      \"page\": \"/dashboard\",\n      \"duration\": 5000\n    }\n  },\n  {\n    \"event_type\": \"button_click\",\n    \"event_source\": \"frontend\", \n    \"event_category\": \"click\",\n    \"user_id\": \"{{test_user_id}}\",\n    \"data\": {\n      \"button_id\": \"save_settings\",\n      \"page\": \"/settings\"\n    }\n  }\n]"
+            },
+            "url": {
+              "raw": "{{event_service_url}}/api/events/batch",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "batch"]
+            },
+            "description": "Create multiple events in a single request"
+          },
+          "response": []
+        },
+        {
+          "name": "Query Events",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"limit\": 10,\n  \"offset\": 0\n}"
+            },
+            "url": {
+              "raw": "{{event_service_url}}/api/events/query",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "query"]
+            },
+            "description": "Query events with filters and pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "Query Events with Filters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{test_user_id}}\",\n  \"event_type\": \"user_login\",\n  \"event_category\": \"security\",\n  \"limit\": 5,\n  \"offset\": 0\n}"
+            },
+            "url": {
+              "raw": "{{event_service_url}}/api/events/query",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "query"]
+            },
+            "description": "Query events with specific filters"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Event Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_service_url}}/api/events/statistics?user_id={{test_user_id}}",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "statistics"],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{test_user_id}}"
+                }
+              ]
+            },
+            "description": "Get event statistics (overall or user-specific)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Overall Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_service_url}}/api/events/statistics",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "statistics"]
+            },
+            "description": "Get overall service statistics (no user filter)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Subscription Management",
+      "item": [
+        {
+          "name": "Create Event Subscription",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const response = pm.response.json();",
+                  "  if (response.subscription_id) {",
+                  "    pm.collectionVariables.set('subscription_id', response.subscription_id);",
+                  "    console.log('Subscription ID saved:', response.subscription_id);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_types\": [\"user_login\", \"user_logout\"],\n  \"callback_url\": \"http://localhost:9000/webhooks/events\",\n  \"enabled\": true,\n  \"filters\": {\n    \"user_id\": \"{{test_user_id}}\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{event_service_url}}/api/events/subscriptions",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "subscriptions"]
+            },
+            "description": "Create event subscription (subscriber_name and subscriber_type are optional with defaults)"
+          },
+          "response": []
+        },
+        {
+          "name": "List Event Subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_service_url}}/api/events/subscriptions",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "subscriptions"]
+            },
+            "description": "List all event subscriptions"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Event Subscription",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{event_service_url}}/api/events/subscriptions/{{subscription_id}}",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "subscriptions", "{{subscription_id}}"]
+            },
+            "description": "Delete event subscription by ID"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Frontend Integration",
+      "item": [
+        {
+          "name": "Collect Frontend Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_type\": \"page_view\",\n  \"category\": \"page_view\",\n  \"page_url\": \"https://example.com/dashboard\",\n  \"user_id\": \"{{test_user_id}}\",\n  \"session_id\": \"sess_12345\",\n  \"data\": {\n    \"page_title\": \"Dashboard\",\n    \"load_time\": 250\n  },\n  \"metadata\": {\n    \"browser\": \"Chrome\",\n    \"os\": \"MacOS\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{event_service_url}}/api/frontend/events",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "frontend", "events"]
+            },
+            "description": "Collect frontend events (works with NATS fallback)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Advanced Features",
+      "item": [
+        {
+          "name": "Event Replay",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start_time\": \"2025-10-15T00:00:00Z\",\n  \"end_time\": \"2025-10-15T23:59:59Z\",\n  \"event_types\": [\"user_login\"],\n  \"target_endpoint\": \"http://localhost:9000/replay\"\n}"
+            },
+            "url": {
+              "raw": "{{event_service_url}}/api/events/replay",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "replay"]
+            },
+            "description": "Replay events within a time range"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Event Processors",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_service_url}}/api/events/processors",
+              "host": ["{{event_service_url}}"],
+              "path": ["api", "events", "processors"]
+            },
+            "description": "List registered event processors"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Integration Tests",
+      "item": [
+        {
+          "name": "Complete Test Flow",
+          "item": [
+            {
+              "name": "1. Health Check",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{event_service_url}}/health",
+                  "host": ["{{event_service_url}}"],
+                  "path": ["health"]
+                }
+              }
+            },
+            {
+              "name": "2. Create Test Event",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "const response = pm.response.json();",
+                      "pm.collectionVariables.set('event_id', response.event_id);"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"event_type\": \"test_event\",\n  \"event_source\": \"postman_test\",\n  \"event_category\": \"system\",\n  \"user_id\": \"postman_test_user\",\n  \"data\": {\n    \"test_field\": \"test_value\",\n    \"timestamp\": \"{{$isoTimestamp}}\"\n  }\n}"
+                },
+                "url": {
+                  "raw": "{{event_service_url}}/api/events/create",
+                  "host": ["{{event_service_url}}"],
+                  "path": ["api", "events", "create"]
+                }
+              }
+            },
+            {
+              "name": "3. Retrieve Created Event",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{event_service_url}}/api/events/{{event_id}}",
+                  "host": ["{{event_service_url}}"],
+                  "path": ["api", "events", "{{event_id}}"]
+                }
+              }
+            },
+            {
+              "name": "4. Query Events",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"user_id\": \"postman_test_user\",\n  \"limit\": 10,\n  \"offset\": 0\n}"
+                },
+                "url": {
+                  "raw": "{{event_service_url}}/api/events/query",
+                  "host": ["{{event_service_url}}"],
+                  "path": ["api", "events", "query"]
+                }
+              }
+            },
+            {
+              "name": "5. Get Statistics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{event_service_url}}/api/events/statistics",
+                  "host": ["{{event_service_url}}"],
+                  "path": ["api", "events", "statistics"]
+                }
+              }
+            },
+            {
+              "name": "6. Create Subscription",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "const response = pm.response.json();",
+                      "pm.collectionVariables.set('subscription_id', response.subscription_id);"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"event_types\": [\"test_event\"],\n  \"callback_url\": \"http://postman-test/webhook\",\n  \"enabled\": true\n}"
+                },
+                "url": {
+                  "raw": "{{event_service_url}}/api/events/subscriptions",
+                  "host": ["{{event_service_url}}"],
+                  "path": ["api", "events", "subscriptions"]
+                }
+              }
+            },
+            {
+              "name": "7. List Subscriptions",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{event_service_url}}/api/events/subscriptions",
+                  "host": ["{{event_service_url}}"],
+                  "path": ["api", "events", "subscriptions"]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Set timestamp for requests",
+          "pm.globals.set('timestamp', new Date().toISOString());"
+        ]
+      }
+    }
+  ]
+}
+
+

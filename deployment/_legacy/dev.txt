@@ -1,0 +1,55 @@
+# ==========================================
+# isA User Platform - Development & Test Dependencies
+# ==========================================
+# Auto-generated from config/dependencies.yaml on 2025-12-22 15:33
+# Regenerate with: python -m agents.tools.generate_config --requirements
+#
+# DO NOT EDIT MANUALLY - edit config/dependencies.yaml instead
+
+# Include runtime dependencies
+-r base.txt
+
+# ==========================================
+# Testing
+# ==========================================
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+pytest-xdist>=3.5.0
+pytest-timeout>=2.2.0
+pytest-mock>=3.12.0
+
+# ==========================================
+# Snapshot
+# ==========================================
+syrupy>=4.6.0
+
+# ==========================================
+# Coverage
+# ==========================================
+coverage>=7.3.0
+
+# ==========================================
+# Fixtures
+# ==========================================
+factory-boy>=3.3.0
+faker>=22.0.0
+
+# ==========================================
+# Linting
+# ==========================================
+black>=23.12.0
+isort>=5.12.0
+flake8>=6.1.0
+mypy>=1.8.0
+
+# ==========================================
+# Documentation
+# ==========================================
+mkdocs>=1.5.0
+mkdocs-material>=9.4.0
+
+# ==========================================
+# Templates
+# ==========================================
+jinja2>=3.1.0

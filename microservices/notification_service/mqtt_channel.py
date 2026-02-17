@@ -38,7 +38,7 @@ class MQTTChannel:
         """
         self.gateway_url = gateway_url
         self.mqtt_endpoint = f"{gateway_url}/api/v1/mqtt/publish/notification"
-        self.client = httpx.Client(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=30.0)
         logger.info(f"MQTT Channel initialized with gateway: {gateway_url}")
 
     async def send_notification(
@@ -78,7 +78,7 @@ class MQTTChannel:
 
         try:
             logger.debug(f"Sending {notification_type} notification via gateway")
-            response = self.client.post(
+            response = await self.client.post(
                 self.mqtt_endpoint,
                 json=payload,
                 headers=headers
@@ -178,9 +178,9 @@ class MQTTChannel:
             auth_token=auth_token
         )
 
-    def close(self):
+    async def close(self):
         """Close the HTTP client connection"""
-        self.client.close()
+        await self.client.aclose()
         logger.info("MQTT Channel closed")
 
 
@@ -204,9 +204,9 @@ def get_mqtt_channel(gateway_url: Optional[str] = None) -> MQTTChannel:
     return _mqtt_channel
 
 
-def close_mqtt_channel():
+async def close_mqtt_channel():
     """Close and cleanup global MQTT channel instance"""
     global _mqtt_channel
     if _mqtt_channel is not None:
-        _mqtt_channel.close()
+        await _mqtt_channel.close()
         _mqtt_channel = None

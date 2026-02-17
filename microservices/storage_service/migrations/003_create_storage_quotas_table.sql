@@ -2,10 +2,10 @@
 -- Version: 003 
 -- Date: 2025-01-20
 
-CREATE TABLE IF NOT EXISTS dev.storage_quotas (
+CREATE TABLE IF NOT EXISTS storage.storage_quotas (
     id SERIAL PRIMARY KEY,
-    user_id VARCHAR(255),
-    organization_id VARCHAR(255),
+    quota_type VARCHAR(20) NOT NULL CHECK (quota_type IN ('user', 'organization')),
+    entity_id VARCHAR(255) NOT NULL, -- user_id or organization_id
     total_quota_bytes BIGINT NOT NULL DEFAULT 10737418240, -- 10GB default
     used_bytes BIGINT DEFAULT 0,
     file_count INTEGER DEFAULT 0,
@@ -14,39 +14,37 @@ CREATE TABLE IF NOT EXISTS dev.storage_quotas (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT storage_quotas_entity_check CHECK (
-        (user_id IS NOT NULL AND organization_id IS NULL) OR 
-        (user_id IS NULL AND organization_id IS NOT NULL)
-    ),
-    UNIQUE(user_id),
-    UNIQUE(organization_id)
+
+    -- Unique constraint per quota type
+    CONSTRAINT storage_quotas_unique_entity UNIQUE(quota_type, entity_id)
 );
 
 -- Indexes
-CREATE INDEX idx_storage_quotas_user_id ON dev.storage_quotas(user_id);
-CREATE INDEX idx_storage_quotas_organization_id ON dev.storage_quotas(organization_id);
-CREATE INDEX idx_storage_quotas_is_active ON dev.storage_quotas(is_active);
-CREATE INDEX idx_storage_quotas_used_bytes ON dev.storage_quotas(used_bytes);
-CREATE INDEX idx_storage_quotas_file_count ON dev.storage_quotas(file_count);
-CREATE INDEX idx_storage_quotas_updated_at ON dev.storage_quotas(updated_at);
+CREATE INDEX idx_storage_quotas_quota_type ON storage.storage_quotas(quota_type);
+CREATE INDEX idx_storage_quotas_entity_id ON storage.storage_quotas(entity_id);
+CREATE INDEX idx_storage_quotas_type_entity ON storage.storage_quotas(quota_type, entity_id);
+CREATE INDEX idx_storage_quotas_is_active ON storage.storage_quotas(is_active);
+CREATE INDEX idx_storage_quotas_used_bytes ON storage.storage_quotas(used_bytes);
+CREATE INDEX idx_storage_quotas_file_count ON storage.storage_quotas(file_count);
+CREATE INDEX idx_storage_quotas_updated_at ON storage.storage_quotas(updated_at);
 
 -- Trigger
 CREATE TRIGGER trigger_update_storage_quotas_updated_at
-    BEFORE UPDATE ON dev.storage_quotas
+    BEFORE UPDATE ON storage.storage_quotas
     FOR EACH ROW
-    EXECUTE FUNCTION dev.update_updated_at();
+    EXECUTE FUNCTION storage.update_updated_at();
 
 -- Permissions  
-GRANT ALL ON dev.storage_quotas TO postgres;
-GRANT SELECT, INSERT, UPDATE, DELETE ON dev.storage_quotas TO authenticated;
+GRANT ALL ON storage.storage_quotas TO postgres;
+GRANT SELECT, INSERT, UPDATE, DELETE ON storage.storage_quotas TO authenticated;
 
 -- Comments
-COMMENT ON TABLE dev.storage_quotas IS 'Storage quota limits and usage tracking for users and organizations';
-COMMENT ON COLUMN dev.storage_quotas.user_id IS 'User ID for individual user quotas';
-COMMENT ON COLUMN dev.storage_quotas.organization_id IS 'Organization ID for organization quotas';
-COMMENT ON COLUMN dev.storage_quotas.total_quota_bytes IS 'Total storage quota in bytes';
-COMMENT ON COLUMN dev.storage_quotas.used_bytes IS 'Currently used storage in bytes';
-COMMENT ON COLUMN dev.storage_quotas.file_count IS 'Current number of files';
-COMMENT ON COLUMN dev.storage_quotas.max_file_size IS 'Maximum allowed file size in bytes';
-COMMENT ON COLUMN dev.storage_quotas.max_file_count IS 'Maximum allowed number of files';
-COMMENT ON COLUMN dev.storage_quotas.is_active IS 'Whether quota is currently active';
+COMMENT ON TABLE storage.storage_quotas IS 'Storage quota limits and usage tracking for users and organizations';
+COMMENT ON COLUMN storage.storage_quotas.quota_type IS 'Type of quota: user or organization';
+COMMENT ON COLUMN storage.storage_quotas.entity_id IS 'User ID or Organization ID (depends on quota_type)';
+COMMENT ON COLUMN storage.storage_quotas.total_quota_bytes IS 'Total storage quota in bytes';
+COMMENT ON COLUMN storage.storage_quotas.used_bytes IS 'Currently used storage in bytes';
+COMMENT ON COLUMN storage.storage_quotas.file_count IS 'Current number of files';
+COMMENT ON COLUMN storage.storage_quotas.max_file_size IS 'Maximum allowed file size in bytes';
+COMMENT ON COLUMN storage.storage_quotas.max_file_count IS 'Maximum allowed number of files';
+COMMENT ON COLUMN storage.storage_quotas.is_active IS 'Whether quota is currently active';

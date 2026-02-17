@@ -13,15 +13,15 @@ import sys
 import os
 import json
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.consul_registry import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.service_discovery import get_service_discovery
+from core.nats_client import get_event_bus, Event
+from isa_common.consul_client import ConsulRegistry
 from .models import (
     TelemetryDataPoint, TelemetryBatchRequest, MetricDefinitionRequest,
     AlertRuleRequest, QueryRequest, RealTimeSubscriptionRequest,
@@ -31,6 +31,9 @@ from .models import (
     DataType, MetricType, AlertLevel, AlertStatus, AggregationType, TimeRange
 )
 from .telemetry_service import TelemetryService
+from .telemetry_repository import TelemetryRepository
+from .events.handlers import TelemetryEventHandler
+from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 # Initialize configuration
 config_manager = ConfigManager("telemetry_service")
@@ -44,12 +47,58 @@ logger = app_logger  # for backward compatibility
 class TelemetryMicroservice:
     def __init__(self):
         self.service = None
-    
-    async def initialize(self):
-        self.service = TelemetryService()
+        self.event_bus = None
+        self.consul_registry = None
+
+    async def initialize(self, event_bus=None):
+        self.event_bus = event_bus
+        self.service = TelemetryService(event_bus=event_bus, config=config_manager)
         logger.info("Telemetry service initialized")
-    
+
+        # Consul service registration
+        if config.consul_enabled:
+            try:
+                # Get route metadata
+                route_meta = get_routes_for_consul()
+
+                # Merge service metadata
+                consul_meta = {
+                    'version': SERVICE_METADATA['version'],
+                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
+                    **route_meta
+                }
+
+                self.consul_registry = ConsulRegistry(
+                    service_name=SERVICE_METADATA['service_name'],
+                    service_port=config.service_port,
+                    consul_host=config.consul_host,
+                    consul_port=config.consul_port,
+                    tags=SERVICE_METADATA['tags'],
+                    meta=consul_meta,
+                    health_check_type='ttl'  # Use TTL for reliable health checks
+                )
+                self.consul_registry.register()
+                self.consul_registry.start_maintenance()  # Start TTL heartbeat
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to register with Consul: {e}")
+                self.consul_registry = None
+
     async def shutdown(self):
+        # Consul deregistration
+        if self.consul_registry:
+            try:
+                self.consul_registry.deregister()
+                logger.info("✅ Service deregistered from Consul")
+            except Exception as e:
+                logger.error(f"❌ Failed to deregister from Consul: {e}")
+
+        if self.event_bus:
+            try:
+                await self.event_bus.close()
+                logger.info("Event bus connection closed")
+            except Exception as e:
+                logger.error(f"Error closing event bus: {e}")
         logger.info("Telemetry service shutting down")
 
 # Global instance
@@ -60,34 +109,44 @@ microservice = TelemetryMicroservice()
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # Startup
-    await microservice.initialize()
-    
-    # Consul注册
-    if config.consul_enabled:
-        consul_registry = ConsulRegistry(
-            service_name=config.service_name,
-            service_port=config.service_port,
-            consul_host=config.consul_host,
-            consul_port=config.consul_port,
-            service_host=config.service_host,
-            tags=["microservice", "iot", "telemetry", "monitoring", "timeseries", "api", "v1"]
-        )
-    
-        if consul_registry.register():
-            consul_registry.start_maintenance()
-            app.state.consul_registry = consul_registry
-            logger.info(f"{config.service_name} registered with Consul")
-        else:
-            logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+    # Initialize NATS event bus
+    event_bus = None
+    try:
+        event_bus = await get_event_bus("telemetry_service")
+        logger.info("✅ Event bus initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}")
+        event_bus = None
+
+    await microservice.initialize(event_bus=event_bus)
+
+    # Set up event subscriptions
+    if event_bus:
+        try:
+            telemetry_repo = TelemetryRepository()
+            event_handler = TelemetryEventHandler(telemetry_repo)
+
+            # Subscribe to device.deleted events
+            await event_bus.subscribe_to_events(
+                pattern="device_service.device.deleted",
+                handler=event_handler.handle_event,
+                durable="telemetry_device_deleted"
+            )
+
+            # Subscribe to user.deleted events for cleanup
+            await event_bus.subscribe_to_events(
+                pattern="account_service.user.deleted",
+                handler=event_handler.handle_event,
+                durable="telemetry_user_deleted"
+            )
+
+            logger.info("✅ Event subscriptions set up successfully (device.deleted, user.deleted)")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
+
     yield
-    
+
     # Shutdown
-    if config.consul_enabled and hasattr(app.state, 'consul_registry'):
-        app.state.consul_registry.stop_maintenance()
-        app.state.consul_registry.deregister()
-        logger.info("Deregistered from Consul")
-    
     await microservice.shutdown()
 
 # Create FastAPI application
@@ -102,6 +161,7 @@ app = FastAPI(
 # Health Check Endpoints
 # ======================
 
+@app.get("/api/v1/telemetry/health")
 @app.get("/health")
 async def health_check():
     """基础健康检查"""
@@ -139,42 +199,58 @@ async def detailed_health_check():
 
 async def get_user_context(
     authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None)
+    x_api_key: Optional[str] = Header(None),
+    x_internal_call: Optional[str] = Header(None)
 ) -> Dict[str, Any]:
-    """获取用户上下文信息"""
+    """
+    Get user context with authentication
+
+    For internal service calls, set header: X-Internal-Call: true
+    to bypass auth (use with caution - only for trusted services)
+    """
+    # Allow internal service-to-service calls without auth
+    if x_internal_call == "true":
+        return {
+            "user_id": "internal_service",
+            "organization_id": None,
+            "role": "service"
+        }
+
     if not authorization and not x_api_key:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     try:
-        # Use Consul service discovery
-        if not hasattr(app.state, 'consul_registry') or not app.state.consul_registry:
-            raise HTTPException(status_code=503, detail="Service discovery not available")
-        
-        auth_service_url = app.state.consul_registry.get_service_endpoint("auth_service")
-        if not auth_service_url:
-            raise HTTPException(status_code=503, detail="Auth service not available")
-        
+        # Use ConfigManager for service discovery
+        auth_host, auth_port = config_manager.discover_service(
+            service_name='auth_service',
+            default_host='localhost',
+            default_port=8201,
+            env_host_key='AUTH_SERVICE_HOST',
+            env_port_key='AUTH_SERVICE_PORT'
+        )
+        auth_service_url = f"http://{auth_host}:{auth_port}"
+
         if authorization:
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             logger.info(f"Verifying token with auth service")
-            
+
             response = requests.post(
                 f"{auth_service_url}/api/v1/auth/verify-token",
                 json={"token": token}
             )
             if response.status_code != 200:
                 raise HTTPException(status_code=401, detail="Invalid token")
-            
+
             auth_data = response.json()
             if not auth_data.get("valid"):
                 raise HTTPException(status_code=401, detail="Token verification failed")
-            
+
             return {
                 "user_id": auth_data.get("user_id", "unknown"),
                 "organization_id": auth_data.get("organization_id"),
                 "role": auth_data.get("role", "user")
             }
-        
+
         elif x_api_key:
             response = requests.post(
                 f"{auth_service_url}/api/v1/auth/verify-api-key",
@@ -182,28 +258,28 @@ async def get_user_context(
             )
             if response.status_code != 200:
                 raise HTTPException(status_code=401, detail="Invalid API key")
-            
+
             auth_data = response.json()
             if not auth_data.get("valid"):
                 raise HTTPException(status_code=401, detail="API key verification failed")
-            
+
             return {
                 "user_id": auth_data.get("user_id", "unknown"),
                 "organization_id": auth_data.get("organization_id"),
                 "role": auth_data.get("role", "user")
             }
-    
+
     except requests.RequestException as e:
         logger.error(f"Auth service communication error: {e}")
         raise HTTPException(status_code=503, detail="Authentication service unavailable")
-    
+
     raise HTTPException(status_code=401, detail="Authentication required")
 
 # ======================
 # Data Ingestion Endpoints
 # ======================
 
-@app.post("/api/v1/devices/{device_id}/telemetry")
+@app.post("/api/v1/telemetry/devices/{device_id}/telemetry")
 async def ingest_single_data_point(
     device_id: str = Path(..., description="Device ID"),
     data_point: TelemetryDataPoint = Body(...),
@@ -225,7 +301,7 @@ async def ingest_single_data_point(
         logger.error(f"Error ingesting single data point: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/devices/{device_id}/telemetry/batch")
+@app.post("/api/v1/telemetry/devices/{device_id}/telemetry/batch")
 async def ingest_batch_data(
     device_id: str = Path(..., description="Device ID"),
     request: TelemetryBatchRequest = Body(...),
@@ -264,7 +340,7 @@ async def ingest_bulk_data(
 # Metric Management
 # ======================
 
-@app.post("/api/v1/metrics", response_model=MetricDefinitionResponse)
+@app.post("/api/v1/telemetry/metrics", response_model=MetricDefinitionResponse)
 async def create_metric_definition(
     request: MetricDefinitionRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -282,7 +358,7 @@ async def create_metric_definition(
         logger.error(f"Error creating metric definition: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/metrics")
+@app.get("/api/v1/telemetry/metrics")
 async def list_metric_definitions(
     data_type: Optional[DataType] = Query(None, description="Filter by data type"),
     metric_type: Optional[MetricType] = Query(None, description="Filter by metric type"),
@@ -291,41 +367,129 @@ async def list_metric_definitions(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取指标定义列表"""
-    return {
-        "metrics": list(microservice.service.metric_definitions.values())[offset:offset+limit],
-        "count": len(microservice.service.metric_definitions),
-        "limit": limit,
-        "offset": offset,
-        "filters": {
-            "data_type": data_type,
-            "metric_type": metric_type
-        }
-    }
+    try:
+        # Get metrics from repository
+        metrics = await microservice.service.repository.list_metric_definitions(
+            data_type=data_type.value if data_type else None,
+            metric_type=metric_type.value if metric_type else None,
+            limit=limit,
+            offset=offset
+        )
 
-@app.get("/api/v1/metrics/{metric_name}", response_model=MetricDefinitionResponse)
+        return {
+            "metrics": metrics,
+            "count": len(metrics),
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "data_type": data_type,
+                "metric_type": metric_type
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error listing metric definitions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/telemetry/metrics/{metric_name}", response_model=MetricDefinitionResponse)
 async def get_metric_definition(
     metric_name: str = Path(..., description="Metric name"),
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取指标定义"""
     try:
-        if metric_name in microservice.service.metric_definitions:
-            return microservice.service.metric_definitions[metric_name]
+        metric_def = await microservice.service.repository.get_metric_definition_by_name(metric_name)
+        if metric_def:
+            # Convert to MetricDefinitionResponse
+            return MetricDefinitionResponse(
+                metric_id=metric_def["metric_id"],
+                name=metric_def["name"],
+                description=metric_def.get("description"),
+                data_type=DataType(metric_def["data_type"]),
+                metric_type=MetricType(metric_def["metric_type"]),
+                unit=metric_def.get("unit"),
+                min_value=metric_def.get("min_value"),
+                max_value=metric_def.get("max_value"),
+                retention_days=metric_def["retention_days"],
+                aggregation_interval=metric_def["aggregation_interval"],
+                tags=metric_def.get("tags", []),
+                metadata=metric_def.get("metadata", {}),
+                created_at=metric_def["created_at"],
+                updated_at=metric_def["updated_at"],
+                created_by=metric_def["created_by"]
+            )
         raise HTTPException(status_code=404, detail="Metric definition not found")
     except Exception as e:
         logger.error(f"Error getting metric definition: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/v1/metrics/{metric_name}")
+@app.put("/api/v1/telemetry/metrics/{metric_name}", response_model=MetricDefinitionResponse)
+async def update_metric_definition(
+    metric_name: str = Path(..., description="Metric name"),
+    request: MetricDefinitionRequest = Body(...),
+    user_context: Dict[str, Any] = Depends(get_user_context)
+):
+    """更新指标定义 (data_type不可更改)"""
+    try:
+        # First check if it exists
+        metric_def = await microservice.service.repository.get_metric_definition_by_name(metric_name)
+        if not metric_def:
+            raise HTTPException(status_code=404, detail="Metric definition not found")
+
+        # Prepare update data (excluding immutable fields)
+        update_data = {
+            "description": request.description,
+            "metric_type": request.metric_type.value if hasattr(request.metric_type, 'value') else request.metric_type,
+            "unit": request.unit,
+            "min_value": request.min_value,
+            "max_value": request.max_value,
+            "retention_days": request.retention_days,
+            "aggregation_interval": request.aggregation_interval,
+            "tags": request.tags,
+            "metadata": request.metadata
+        }
+
+        result = await microservice.service.repository.update_metric_definition(
+            metric_def["metric_id"], update_data
+        )
+
+        if result:
+            return MetricDefinitionResponse(
+                metric_id=result["metric_id"],
+                name=result["name"],
+                description=result.get("description"),
+                data_type=DataType(result["data_type"]),
+                metric_type=MetricType(result["metric_type"]),
+                unit=result.get("unit"),
+                min_value=result.get("min_value"),
+                max_value=result.get("max_value"),
+                retention_days=result["retention_days"],
+                aggregation_interval=result["aggregation_interval"],
+                tags=result.get("tags", []),
+                metadata=result.get("metadata", {}),
+                created_at=result["created_at"],
+                updated_at=result["updated_at"],
+                created_by=result["created_by"]
+            )
+        raise HTTPException(status_code=500, detail="Failed to update metric definition")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating metric definition: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/v1/telemetry/metrics/{metric_name}")
 async def delete_metric_definition(
     metric_name: str = Path(..., description="Metric name"),
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """删除指标定义"""
     try:
-        if metric_name in microservice.service.metric_definitions:
-            del microservice.service.metric_definitions[metric_name]
-            return {"message": "Metric definition deleted successfully"}
+        # First check if it exists
+        metric_def = await microservice.service.repository.get_metric_definition_by_name(metric_name)
+        if metric_def:
+            success = await microservice.service.repository.delete_metric_definition(metric_def["metric_id"])
+            if success:
+                return {"message": "Metric definition deleted successfully"}
         raise HTTPException(status_code=404, detail="Metric definition not found")
     except Exception as e:
         logger.error(f"Error deleting metric definition: {e}")
@@ -335,7 +499,7 @@ async def delete_metric_definition(
 # Data Query Endpoints
 # ======================
 
-@app.post("/api/v1/query", response_model=TelemetryDataResponse)
+@app.post("/api/v1/telemetry/query", response_model=TelemetryDataResponse)
 async def query_telemetry_data(
     request: QueryRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -350,7 +514,7 @@ async def query_telemetry_data(
         logger.error(f"Error querying telemetry data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/{device_id}/metrics/{metric_name}/latest")
+@app.get("/api/v1/telemetry/devices/{device_id}/metrics/{metric_name}/latest")
 async def get_latest_value(
     device_id: str = Path(..., description="Device ID"),
     metric_name: str = Path(..., description="Metric name"),
@@ -358,20 +522,40 @@ async def get_latest_value(
 ):
     """获取最新值"""
     try:
-        key = f"{device_id}:{metric_name}"
-        data_points = microservice.service.data_store.get(key, [])
-        
+        # Query the most recent data point
+        now = datetime.now(timezone.utc)
+        start_time = now - timedelta(days=1)  # Look back 1 day for latest value
+
+        data_points = await microservice.service.repository.query_telemetry_data(
+            device_id=device_id,
+            metric_names=[metric_name],
+            start_time=start_time,
+            end_time=now,
+            limit=1  # Only get the most recent one
+        )
+
         if not data_points:
             raise HTTPException(status_code=404, detail="No data found")
-        
-        latest = max(data_points, key=lambda x: x["timestamp"])
-        
+
+        latest = data_points[0]
+
+        # Determine which value field is populated
+        value = None
+        if latest.get("value_numeric") is not None:
+            value = latest["value_numeric"]
+        elif latest.get("value_string") is not None:
+            value = latest["value_string"]
+        elif latest.get("value_boolean") is not None:
+            value = latest["value_boolean"]
+        elif latest.get("value_json") is not None:
+            value = latest["value_json"]
+
         return {
             "device_id": device_id,
             "metric_name": metric_name,
-            "value": latest["value"],
+            "value": value,
             "unit": latest.get("unit"),
-            "timestamp": latest["timestamp"],
+            "timestamp": latest["time"],
             "tags": latest.get("tags", {}),
             "metadata": latest.get("metadata", {})
         }
@@ -379,26 +563,25 @@ async def get_latest_value(
         logger.error(f"Error getting latest value: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/{device_id}/metrics", response_model=List[str])
+@app.get("/api/v1/telemetry/devices/{device_id}/metrics", response_model=List[str])
 async def get_device_metrics(
     device_id: str = Path(..., description="Device ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取设备的所有指标名称"""
     try:
-        metrics = []
-        for key in microservice.service.data_store.keys():
-            if key.startswith(f"{device_id}:"):
-                metric_name = key.split(":", 1)[1]
-                if metric_name not in metrics:
-                    metrics.append(metric_name)
-        
-        return metrics
+        # Get device stats which includes metric names
+        stats = await microservice.service.repository.get_device_stats(device_id)
+
+        if stats and stats.get("metrics"):
+            return stats["metrics"]
+
+        return []
     except Exception as e:
         logger.error(f"Error getting device metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/devices/{device_id}/metrics/{metric_name}/range")
+@app.get("/api/v1/telemetry/devices/{device_id}/metrics/{metric_name}/range")
 async def get_metric_range(
     device_id: str = Path(..., description="Device ID"),
     metric_name: str = Path(..., description="Metric name"),
@@ -410,7 +593,7 @@ async def get_metric_range(
     """获取指定时间范围的指标数据"""
     try:
         # 解析时间范围
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if time_range == TimeRange.LAST_HOUR:
             start_time = now - timedelta(hours=1)
         elif time_range == TimeRange.LAST_6_HOURS:
@@ -446,7 +629,7 @@ async def get_metric_range(
 # Aggregation Endpoints
 # ======================
 
-@app.get("/api/v1/aggregated", response_model=AggregatedDataResponse)
+@app.get("/api/v1/telemetry/aggregated", response_model=AggregatedDataResponse)
 async def get_aggregated_data(
     metric_name: str = Query(..., description="Metric name"),
     aggregation_type: AggregationType = Query(..., description="Aggregation type"),
@@ -479,7 +662,7 @@ async def get_aggregated_data(
 # Alert Management
 # ======================
 
-@app.post("/api/v1/alerts/rules", response_model=AlertRuleResponse)
+@app.post("/api/v1/telemetry/alerts/rules", response_model=AlertRuleResponse)
 async def create_alert_rule(
     request: AlertRuleRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -497,7 +680,7 @@ async def create_alert_rule(
         logger.error(f"Error creating alert rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/alerts/rules")
+@app.get("/api/v1/telemetry/alerts/rules")
 async def list_alert_rules(
     enabled: Optional[bool] = Query(None, description="Filter by enabled status"),
     level: Optional[AlertLevel] = Query(None, description="Filter by alert level"),
@@ -507,47 +690,78 @@ async def list_alert_rules(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取警报规则列表"""
-    rules = list(microservice.service.alert_rules.values())
-    
-    # 应用过滤器
-    if enabled is not None:
-        rules = [rule for rule in rules if rule.enabled == enabled]
-    if level:
-        rules = [rule for rule in rules if rule.level == level]
-    if metric_name:
-        rules = [rule for rule in rules if rule.metric_name == metric_name]
-    
-    # 分页
-    paginated_rules = rules[offset:offset+limit]
-    
-    return {
-        "rules": paginated_rules,
-        "count": len(paginated_rules),
-        "total": len(rules),
-        "limit": limit,
-        "offset": offset,
-        "filters": {
-            "enabled": enabled,
-            "level": level,
-            "metric_name": metric_name
-        }
-    }
+    try:
+        # Get rules from repository
+        rules = await microservice.service.repository.get_alert_rules(
+            metric_name=metric_name,
+            enabled_only=enabled if enabled is not None else None
+        )
 
-@app.get("/api/v1/alerts/rules/{rule_id}", response_model=AlertRuleResponse)
+        # Apply level filter
+        if level:
+            rules = [rule for rule in rules if rule.get("level") == level.value]
+
+        # Apply pagination
+        total = len(rules)
+        paginated_rules = rules[offset:offset+limit]
+
+        return {
+            "rules": paginated_rules,
+            "count": len(paginated_rules),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "enabled": enabled,
+                "level": level,
+                "metric_name": metric_name
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error listing alert rules: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/telemetry/alerts/rules/{rule_id}", response_model=AlertRuleResponse)
 async def get_alert_rule(
     rule_id: str = Path(..., description="Alert rule ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取警报规则详情"""
     try:
-        if rule_id in microservice.service.alert_rules:
-            return microservice.service.alert_rules[rule_id]
+        rule = await microservice.service.repository.get_alert_rule(rule_id)
+        if rule:
+            # Convert to AlertRuleResponse
+            return AlertRuleResponse(
+                rule_id=rule["rule_id"],
+                name=rule["name"],
+                description=rule.get("description"),
+                metric_name=rule["metric_name"],
+                condition=rule["condition"],
+                threshold_value=rule["threshold_value"],
+                evaluation_window=rule["evaluation_window"],
+                trigger_count=rule["trigger_count"],
+                level=AlertLevel(rule["level"]),
+                device_ids=rule.get("device_ids", []),
+                device_groups=rule.get("device_groups", []),
+                device_filters=rule.get("device_filters", {}),
+                notification_channels=rule.get("notification_channels", []),
+                cooldown_minutes=rule["cooldown_minutes"],
+                auto_resolve=rule["auto_resolve"],
+                auto_resolve_timeout=rule["auto_resolve_timeout"],
+                enabled=rule["enabled"],
+                tags=rule.get("tags", []),
+                total_triggers=rule["total_triggers"],
+                last_triggered=rule.get("last_triggered"),
+                created_at=rule["created_at"],
+                updated_at=rule["updated_at"],
+                created_by=rule["created_by"]
+            )
         raise HTTPException(status_code=404, detail="Alert rule not found")
     except Exception as e:
         logger.error(f"Error getting alert rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/v1/alerts/rules/{rule_id}/enable")
+@app.put("/api/v1/telemetry/alerts/rules/{rule_id}/enable")
 async def enable_alert_rule(
     rule_id: str = Path(..., description="Alert rule ID"),
     enabled: bool = Body(..., embed=True),
@@ -555,16 +769,45 @@ async def enable_alert_rule(
 ):
     """启用/禁用警报规则"""
     try:
-        if rule_id in microservice.service.alert_rules:
-            microservice.service.alert_rules[rule_id].enabled = enabled
+        # Update rule in repository
+        success = await microservice.service.repository.update_alert_rule(
+            rule_id,
+            {"enabled": enabled}
+        )
+
+        if success:
             action = "enabled" if enabled else "disabled"
             return {"message": f"Alert rule {action} successfully"}
+
         raise HTTPException(status_code=404, detail="Alert rule not found")
     except Exception as e:
         logger.error(f"Error enabling/disabling alert rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/alerts", response_model=AlertListResponse)
+@app.delete("/api/v1/telemetry/alerts/rules/{rule_id}")
+async def delete_alert_rule(
+    rule_id: str = Path(..., description="Alert rule ID"),
+    user_context: Dict[str, Any] = Depends(get_user_context)
+):
+    """删除警报规则"""
+    try:
+        # First check if it exists
+        rule = await microservice.service.repository.get_alert_rule(rule_id)
+        if not rule:
+            raise HTTPException(status_code=404, detail="Alert rule not found")
+
+        success = await microservice.service.repository.delete_alert_rule(rule_id)
+        if success:
+            return {"message": "Alert rule deleted successfully"}
+
+        raise HTTPException(status_code=500, detail="Failed to delete alert rule")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting alert rule: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/telemetry/alerts", response_model=AlertListResponse)
 async def list_alerts(
     status: Optional[AlertStatus] = Query(None, description="Filter by status"),
     level: Optional[AlertLevel] = Query(None, description="Filter by level"),
@@ -576,41 +819,45 @@ async def list_alerts(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取警报列表"""
-    alerts = list(microservice.service.active_alerts.values())
-    
-    # 应用过滤器
-    if status:
-        alerts = [alert for alert in alerts if alert.status == status]
-    if level:
-        alerts = [alert for alert in alerts if alert.level == level]
-    if device_id:
-        alerts = [alert for alert in alerts if alert.device_id == device_id]
-    if start_time and end_time:
-        alerts = [alert for alert in alerts if start_time <= alert.triggered_at <= end_time]
-    
-    # 分页
-    paginated_alerts = alerts[offset:offset+limit]
-    
-    active_count = len([a for a in alerts if a.status == AlertStatus.ACTIVE])
-    critical_count = len([a for a in alerts if a.level == AlertLevel.CRITICAL])
-    
-    return AlertListResponse(
-        alerts=paginated_alerts,
-        count=len(paginated_alerts),
-        active_count=active_count,
-        critical_count=critical_count,
-        filters={
-            "status": status,
-            "level": level,
-            "device_id": device_id,
-            "start_time": start_time,
-            "end_time": end_time
-        },
-        limit=limit,
-        offset=offset
-    )
+    try:
+        # Get alerts from repository
+        alerts = await microservice.service.repository.get_alerts(
+            device_id=device_id,
+            status=status.value if status else None,
+            level=level.value if level else None,
+            start_time=start_time,
+            end_time=end_time
+        )
 
-@app.put("/api/v1/alerts/{alert_id}/acknowledge")
+        # Apply pagination
+        total = len(alerts)
+        paginated_alerts = alerts[offset:offset+limit]
+
+        # Calculate stats
+        active_count = len([a for a in alerts if a.get("status") == AlertStatus.ACTIVE.value])
+        critical_count = len([a for a in alerts if a.get("level") == AlertLevel.CRITICAL.value])
+
+        return AlertListResponse(
+            alerts=paginated_alerts,
+            count=len(paginated_alerts),
+            total=total,
+            active_count=active_count,
+            critical_count=critical_count,
+            filters={
+                "status": status,
+                "level": level,
+                "device_id": device_id,
+                "start_time": start_time,
+                "end_time": end_time
+            },
+            limit=limit,
+            offset=offset
+        )
+    except Exception as e:
+        logger.error(f"Error listing alerts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/v1/telemetry/alerts/{alert_id}/acknowledge")
 async def acknowledge_alert(
     alert_id: str = Path(..., description="Alert ID"),
     note: Optional[str] = Body(None, embed=True),
@@ -618,20 +865,25 @@ async def acknowledge_alert(
 ):
     """确认警报"""
     try:
-        if alert_id in microservice.service.active_alerts:
-            alert = microservice.service.active_alerts[alert_id]
-            alert.status = AlertStatus.ACKNOWLEDGED
-            alert.acknowledged_at = datetime.utcnow()
-            alert.acknowledged_by = user_context["user_id"]
-            if note:
-                alert.resolution_note = note
+        now = datetime.now(timezone.utc)
+        update_data = {
+            "status": AlertStatus.ACKNOWLEDGED.value,
+            "acknowledged_at": now,
+            "acknowledged_by": user_context["user_id"]
+        }
+        if note:
+            update_data["resolution_note"] = note
+
+        success = await microservice.service.repository.update_alert(alert_id, update_data)
+        if success:
             return {"message": "Alert acknowledged successfully"}
+
         raise HTTPException(status_code=404, detail="Alert not found")
     except Exception as e:
         logger.error(f"Error acknowledging alert: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/v1/alerts/{alert_id}/resolve")
+@app.put("/api/v1/telemetry/alerts/{alert_id}/resolve")
 async def resolve_alert(
     alert_id: str = Path(..., description="Alert ID"),
     note: Optional[str] = Body(None, embed=True),
@@ -639,15 +891,19 @@ async def resolve_alert(
 ):
     """解决警报"""
     try:
-        if alert_id in microservice.service.active_alerts:
-            alert = microservice.service.active_alerts[alert_id]
-            alert.status = AlertStatus.RESOLVED
-            alert.resolved_at = datetime.utcnow()
-            alert.resolved_by = user_context["user_id"]
-            if note:
-                alert.resolution_note = note
+        # Use service method to resolve alert (handles event publishing)
+        success = await microservice.service.resolve_alert(
+            alert_id=alert_id,
+            resolved_by=user_context["user_id"],
+            resolution_note=note
+        )
+
+        if success:
             return {"message": "Alert resolved successfully"}
+
         raise HTTPException(status_code=404, detail="Alert not found")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
         logger.error(f"Error resolving alert: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -656,7 +912,7 @@ async def resolve_alert(
 # Statistics Endpoints
 # ======================
 
-@app.get("/api/v1/devices/{device_id}/stats", response_model=DeviceTelemetryStatsResponse)
+@app.get("/api/v1/telemetry/devices/{device_id}/stats", response_model=DeviceTelemetryStatsResponse)
 async def get_device_telemetry_stats(
     device_id: str = Path(..., description="Device ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -664,23 +920,27 @@ async def get_device_telemetry_stats(
     """获取设备遥测统计"""
     try:
         stats = await microservice.service.get_device_stats(device_id)
-        if stats:
-            return stats
-        raise HTTPException(status_code=404, detail="Device not found or no telemetry data")
+        if stats is None:
+            raise HTTPException(status_code=404, detail="Device not found or no telemetry data")
+        return stats
+    except HTTPException:
+        raise  # Re-raise HTTPException without wrapping
     except Exception as e:
         logger.error(f"Error getting device stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/stats", response_model=TelemetryStatsResponse)
+@app.get("/api/v1/telemetry/stats", response_model=TelemetryStatsResponse)
 async def get_telemetry_stats(
     user_context: Dict[str, Any] = Depends(get_user_context)
 ):
     """获取遥测服务统计"""
     try:
         stats = await microservice.service.get_service_stats()
-        if stats:
-            return stats
-        raise HTTPException(status_code=404, detail="No stats available")
+        if stats is None:
+            raise HTTPException(status_code=404, detail="No stats available")
+        return stats
+    except HTTPException:
+        raise  # Re-raise HTTPException without wrapping
     except Exception as e:
         logger.error(f"Error getting service stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -689,7 +949,7 @@ async def get_telemetry_stats(
 # Real-time Data Streaming
 # ======================
 
-@app.post("/api/v1/subscribe")
+@app.post("/api/v1/telemetry/subscribe")
 async def subscribe_real_time_data(
     request: RealTimeSubscriptionRequest = Body(...),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -708,7 +968,7 @@ async def subscribe_real_time_data(
         logger.error(f"Error creating subscription: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/v1/subscribe/{subscription_id}")
+@app.delete("/api/v1/telemetry/subscribe/{subscription_id}")
 async def unsubscribe_real_time_data(
     subscription_id: str = Path(..., description="Subscription ID"),
     user_context: Dict[str, Any] = Depends(get_user_context)
@@ -738,7 +998,7 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
             await websocket.send_json({
                 "subscription_id": subscription_id,
                 "data": "real-time data would be sent here",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             })
             
             # 等待一段时间，避免过于频繁的推送
@@ -752,7 +1012,7 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
 # Data Export
 # ======================
 
-@app.get("/api/v1/export/csv")
+@app.get("/api/v1/telemetry/export/csv")
 async def export_csv(
     device_ids: List[str] = Query(..., description="Device IDs"),
     metric_names: List[str] = Query(..., description="Metric names"),
@@ -811,7 +1071,7 @@ async def export_csv(
 # Service Statistics
 # ======================
 
-@app.get("/api/v1/service/stats")
+@app.get("/api/v1/telemetry/service/stats")
 async def get_service_stats():
     """获取服务统计信息"""
     return {
