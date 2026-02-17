@@ -66,8 +66,6 @@ async def _extract_user_id_from_api_key(api_key: str) -> Optional[str]:
 
 async def require_auth_or_internal_service(
     request: Request,
-    user_id: Optional[str] = Header(None, alias="user-id"),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
     x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
     authorization: Optional[str] = Header(None),
@@ -80,7 +78,6 @@ async def require_auth_or_internal_service(
     1. 内部服务认证（X-Internal-Service + X-Internal-Service-Secret）
     2. Bearer JWT 认证（Authorization: Bearer <jwt>）
     3. API Key 认证（X-API-Key）
-    4. 用户ID认证（user-id 或 X-User-Id）
 
     Returns:
         user_id: 用户ID 或 "internal-service"
@@ -108,12 +105,7 @@ async def require_auth_or_internal_service(
         if api_key_user_id:
             return api_key_user_id
 
-    # 4. 检查用户ID认证
-    user_id_value = user_id or x_user_id
-    if user_id_value:
-        return user_id_value
-
-    # 5. 认证失败
+    # 4. 认证失败 - no longer trusting raw user-id headers
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="User authentication required"
@@ -121,8 +113,6 @@ async def require_auth_or_internal_service(
 
 
 async def optional_auth_or_internal_service(
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    user_id: Optional[str] = Header(None, alias="user-id"),
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
     x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
     authorization: Optional[str] = Header(None),
@@ -150,8 +140,8 @@ async def optional_auth_or_internal_service(
         if api_key_user_id:
             return api_key_user_id
 
-    # 返回用户ID（可能为None）
-    return user_id or x_user_id
+    # No valid credentials provided
+    return None
 
 
 def is_internal_service_request(user_id: str) -> bool:

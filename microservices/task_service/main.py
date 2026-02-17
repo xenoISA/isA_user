@@ -234,20 +234,19 @@ async def detailed_health_check():
 async def get_user_context(
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="x-api-key"),
-    x_internal_call: Optional[str] = Header(None, alias="x-internal-call"),
-    x_user_id: Optional[str] = Header(None, alias="x-user-id"),
+    x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
+    x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
 ) -> Dict[str, Any]:
     """获取用户上下文信息"""
-    logger.debug(f"Auth headers: authorization={authorization}, x_api_key={x_api_key}, x_internal_call={x_internal_call}")
+    logger.debug("Processing authentication request")
 
-    # Allow internal service-to-service calls (e.g., from MCP server)
-    # In production, this should be secured with mTLS or service mesh
-    if x_internal_call == "true":
-        user_id = x_user_id or "mcp_internal"
-        logger.debug(f"Internal call from MCP, user_id={user_id}")
+    # Allow internal service-to-service calls with verified secret
+    internal_secret = os.getenv("INTERNAL_SERVICE_SECRET", "dev-internal-secret-change-in-production")
+    if x_internal_service == "true" and x_internal_service_secret == internal_secret:
+        logger.debug("Verified internal service call")
         return {
-            "user_id": user_id,
-            "subscription_level": "pro",  # Internal calls get pro access
+            "user_id": "internal-service",
+            "subscription_level": "pro",
             "internal_call": True
         }
 
