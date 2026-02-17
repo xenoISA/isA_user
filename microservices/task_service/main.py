@@ -10,7 +10,7 @@ import sys
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
-import requests
+import httpx
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Path, Query
 
 # Add parent directory to path
@@ -266,65 +266,67 @@ async def get_user_context(
     auth_service_url = f"http://{auth_host}:{auth_port}"
 
     try:
-        if authorization:
-            # Verify JWT token
-            token = (
-                authorization.replace("Bearer ", "")
-                if authorization.startswith("Bearer ")
-                else authorization
-            )
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+            if authorization:
+                # Verify JWT token
+                token = (
+                    authorization.replace("Bearer ", "")
+                    if authorization.startswith("Bearer ")
+                    else authorization
+                )
 
-            response = requests.post(
-                f"{auth_service_url}/api/v1/auth/verify-token",
-                json={"token": token, "token_type": "jwt"},
-            )
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-token",
+                    json={"token": token, "token_type": "jwt"},
+                )
 
-            if response.status_code != 200:
-                logger.warning(f"Token verification failed: {response.status_code}")
-                raise HTTPException(status_code=401, detail="Invalid token")
+                if response.status_code != 200:
+                    logger.warning(f"Token verification failed: {response.status_code}")
+                    raise HTTPException(status_code=401, detail="Invalid token")
 
-            result = response.json()
-            if not result.get("valid", False):
-                logger.warning("Token verification returned invalid")
-                raise HTTPException(status_code=401, detail="Invalid token")
+                result = response.json()
+                if not result.get("valid", False):
+                    logger.warning("Token verification returned invalid")
+                    raise HTTPException(status_code=401, detail="Invalid token")
 
-            # Auth service returns user_id at top level, not in user_info
-            return {
-                "user_id": result.get("user_id", "unknown"),
-                "email": result.get("email"),
-                "subscription_level": result.get("subscription_level", "free"),
-                "organization_id": result.get("organization_id"),
-            }
+                return {
+                    "user_id": result.get("user_id", "unknown"),
+                    "email": result.get("email"),
+                    "subscription_level": result.get("subscription_level", "free"),
+                    "organization_id": result.get("organization_id"),
+                }
 
-        elif x_api_key:
-            # Verify API key
-            response = requests.post(
-                f"{auth_service_url}/api/v1/auth/verify-api-key",
-                json={"api_key": x_api_key},
-            )
+            elif x_api_key:
+                # Verify API key
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-api-key",
+                    json={"api_key": x_api_key},
+                )
 
-            if response.status_code != 200:
-                logger.warning(f"API key verification failed: {response.status_code}")
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                if response.status_code != 200:
+                    logger.warning(f"API key verification failed: {response.status_code}")
+                    raise HTTPException(status_code=401, detail="Invalid API key")
 
-            result = response.json()
-            if not result.get("valid", False):
-                logger.warning("API key verification returned invalid")
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                result = response.json()
+                if not result.get("valid", False):
+                    logger.warning("API key verification returned invalid")
+                    raise HTTPException(status_code=401, detail="Invalid API key")
 
-            user_info = result.get("user_info", {})
-            return {
-                "user_id": user_info.get("user_id", "unknown"),
-                "email": user_info.get("email"),
-                "subscription_level": user_info.get("subscription_level", "free"),
-                "organization_id": user_info.get("organization_id"),
-            }
+                user_info = result.get("user_info", {})
+                return {
+                    "user_id": user_info.get("user_id", "unknown"),
+                    "email": user_info.get("email"),
+                    "subscription_level": user_info.get("subscription_level", "free"),
+                    "organization_id": user_info.get("organization_id"),
+                }
 
-    except requests.RequestException as e:
+    except httpx.RequestError as e:
         logger.error(f"Auth service request failed: {e}")
         raise HTTPException(
             status_code=503, detail="Authentication service unavailable"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Authentication error: {e}")
         raise HTTPException(status_code=500, detail="Authentication error")
@@ -350,7 +352,7 @@ async def create_task(
         raise HTTPException(status_code=400, detail="Failed to create task")
     except Exception as e:
         logger.error(f"Error creating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/tasks/{task_id}", response_model=TaskResponse)
@@ -366,7 +368,7 @@ async def get_task(
         raise HTTPException(status_code=404, detail="Task not found")
     except Exception as e:
         logger.error(f"Error getting task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.put("/api/v1/tasks/{task_id}", response_model=TaskResponse)
@@ -385,7 +387,7 @@ async def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
     except Exception as e:
         logger.error(f"Error updating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.delete("/api/v1/tasks/{task_id}")
@@ -403,7 +405,7 @@ async def delete_task(
         raise HTTPException(status_code=404, detail="Task not found")
     except Exception as e:
         logger.error(f"Error deleting task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/tasks", response_model=TaskListResponse)
@@ -428,7 +430,7 @@ async def list_tasks(
         return task_list_response
     except Exception as e:
         logger.error(f"Error listing tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ======================
@@ -452,7 +454,7 @@ async def execute_task(
         raise HTTPException(status_code=400, detail="Failed to execute task")
     except Exception as e:
         logger.error(f"Error executing task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get(
@@ -478,7 +480,7 @@ async def get_task_executions(
         raise
     except Exception as e:
         logger.error(f"Error getting task executions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ======================
@@ -496,7 +498,7 @@ async def get_task_templates(user_context: Dict[str, Any] = Depends(get_user_con
         return templates
     except Exception as e:
         logger.error(f"Error getting task templates: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/v1/tasks/from-template", response_model=TaskResponse)
@@ -570,7 +572,7 @@ async def create_task_from_template(
         raise
     except Exception as e:
         logger.error(f"Error creating task from template: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ======================
@@ -596,7 +598,7 @@ async def get_task_analytics(
         raise
     except Exception as e:
         logger.error(f"Error getting task analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ======================
@@ -619,7 +621,7 @@ async def get_pending_tasks(
         return tasks
     except Exception as e:
         logger.error(f"Error getting pending tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/v1/scheduler/execute/{task_id}")
@@ -650,7 +652,7 @@ async def scheduler_execute_task(
         raise
     except Exception as e:
         logger.error(f"Error in scheduler execute: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ======================
