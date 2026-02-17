@@ -942,14 +942,19 @@ async def refresh_token(
         )
 
 
-@app.get("/api/v1/auth/user-info")
+class UserInfoRequest(BaseModel):
+    """Request model for user info extraction"""
+    token: str = Field(..., description="JWT token to extract user info from")
+
+
+@app.post("/api/v1/auth/user-info")
 async def get_user_info_from_token(
-    token: str = Query(..., description="JWT token to extract user info from"),
+    request: UserInfoRequest,
     auth_service: AuthenticationService = Depends(get_auth_service),
 ):
-    """Extract user information from token"""
+    """Extract user information from token (POST to avoid token in URL/query params)"""
     try:
-        result = await auth_service.get_user_info_from_token(token)
+        result = await auth_service.get_user_info_from_token(request.token)
 
         if not result.get("success"):
             raise HTTPException(
@@ -1305,9 +1310,8 @@ async def list_devices(
 # Admin Bootstrap Endpoint
 # ============================================================================
 
-ADMIN_BOOTSTRAP_SECRET = os.getenv(
-    "ADMIN_BOOTSTRAP_SECRET", "dev-bootstrap-secret-change-in-production"
-)
+ADMIN_BOOTSTRAP_SECRET = os.getenv("ADMIN_BOOTSTRAP_SECRET")
+_ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 
 class AdminBootstrapRequest(BaseModel):
@@ -1324,7 +1328,20 @@ async def admin_bootstrap(
     """Bootstrap the first admin user.
 
     Protected by ADMIN_BOOTSTRAP_SECRET env var. Generates admin-scoped JWT tokens.
+    Disabled in non-dev environments unless ADMIN_BOOTSTRAP_SECRET is explicitly set.
     """
+    if not ADMIN_BOOTSTRAP_SECRET:
+        if _ENVIRONMENT not in ("development", "dev", "test"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin bootstrap is disabled. Set ADMIN_BOOTSTRAP_SECRET env var.",
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="ADMIN_BOOTSTRAP_SECRET env var is not set",
+            )
+
     if request.bootstrap_secret != ADMIN_BOOTSTRAP_SECRET:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
