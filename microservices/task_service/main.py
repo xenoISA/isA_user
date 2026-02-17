@@ -238,7 +238,7 @@ async def get_user_context(
     x_user_id: Optional[str] = Header(None, alias="x-user-id"),
 ) -> Dict[str, Any]:
     """获取用户上下文信息"""
-    logger.debug(f"Auth headers: authorization={authorization}, x_api_key={x_api_key}, x_internal_call={x_internal_call}")
+    logger.debug("Processing authentication request")
 
     # Allow internal service-to-service calls (e.g., from MCP server)
     # In production, this should be secured with mTLS or service mesh

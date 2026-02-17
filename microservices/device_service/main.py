@@ -219,7 +219,7 @@ async def get_user_context(
             if authorization:
                 # Verify JWT token
                 token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-                logger.info(f"Verifying token with AuthServiceClient (first 50 chars): {token[:50]}...")
+                logger.info("Verifying token with AuthServiceClient")
 
                 result = await auth_client.verify_token(token)
 

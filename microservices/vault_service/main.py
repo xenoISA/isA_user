@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import List, Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, status
 
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -462,10 +462,10 @@ async def delete_secret(
 async def rotate_secret(
     vault_id: str,
     request: Request,
-    new_secret_value: str = Query(..., description="New secret value"),
+    new_secret_value: str = Body(..., embed=True, description="New secret value"),
     vault_service: VaultService = Depends(get_vault_service),
 ):
-    """Rotate a secret (create new version)"""
+    """Rotate a secret (create new version). Secret passed in request body, not query params."""
     try:
         user_id = get_user_id(request)
         ip_address, user_agent = get_client_info(request)
