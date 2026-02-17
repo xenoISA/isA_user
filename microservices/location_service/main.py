@@ -268,7 +268,7 @@ async def report_location(request: LocationReportRequest, user_id: str = Depends
 
     except Exception as e:
         logger.error(f"Error reporting location: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/v1/locations/batch")
@@ -280,7 +280,7 @@ async def batch_report_locations(request: LocationBatchRequest, user_id: str = D
 
     except Exception as e:
         logger.error(f"Error in batch location report: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/locations/device/{device_id}")
@@ -298,7 +298,7 @@ async def get_device_latest_location(device_id: str, user_id: str = Depends(get_
         raise
     except Exception as e:
         logger.error(f"Error getting device location: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/locations/device/{device_id}/latest")
@@ -331,7 +331,7 @@ async def get_device_location_history(
 
     except Exception as e:
         logger.error(f"Error getting location history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/locations/user/{target_user_id}")
@@ -349,7 +349,7 @@ async def get_user_devices_locations(target_user_id: str, user_id: str = Depends
         raise
     except Exception as e:
         logger.error(f"Error getting user devices locations: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.delete("/api/v1/locations/{location_id}")
@@ -361,7 +361,7 @@ async def delete_location(location_id: str):
 
     except Exception as e:
         logger.error(f"Error deleting location: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ==================== Geofence Management ====================
@@ -380,7 +380,7 @@ async def create_geofence(request: GeofenceCreateRequest, user_id: str = Depends
 
     except Exception as e:
         logger.error(f"Error creating geofence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/geofences")
@@ -400,7 +400,7 @@ async def list_geofences(
 
     except Exception as e:
         logger.error(f"Error listing geofences: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/geofences/{geofence_id}")
@@ -418,7 +418,7 @@ async def get_geofence(geofence_id: str, user_id: str = Depends(get_authenticate
         raise
     except Exception as e:
         logger.error(f"Error getting geofence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.put("/api/v1/geofences/{geofence_id}")
@@ -434,7 +434,7 @@ async def update_geofence(geofence_id: str, request: GeofenceUpdateRequest, user
 
     except Exception as e:
         logger.error(f"Error updating geofence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.delete("/api/v1/geofences/{geofence_id}")
@@ -450,7 +450,7 @@ async def delete_geofence(geofence_id: str, user_id: str = Depends(get_authentic
 
     except Exception as e:
         logger.error(f"Error deleting geofence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/v1/geofences/{geofence_id}/activate")
@@ -466,7 +466,7 @@ async def activate_geofence(geofence_id: str, user_id: str = Depends(get_authent
 
     except Exception as e:
         logger.error(f"Error activating geofence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/v1/geofences/{geofence_id}/deactivate")
@@ -482,7 +482,7 @@ async def deactivate_geofence(geofence_id: str, user_id: str = Depends(get_authe
 
     except Exception as e:
         logger.error(f"Error deactivating geofence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/geofences/{geofence_id}/events")
@@ -498,7 +498,7 @@ async def get_geofence_events(
 
     except Exception as e:
         logger.error(f"Error getting geofence events: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/geofences/device/{device_id}/check")
@@ -510,7 +510,7 @@ async def check_device_in_geofences(device_id: str):
 
     except Exception as e:
         logger.error(f"Error checking device geofences: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ==================== Place Management ====================
@@ -529,7 +529,7 @@ async def create_place(request: PlaceCreateRequest, user_id: str = Depends(get_a
 
     except Exception as e:
         logger.error(f"Error creating place: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/places/user/{target_user_id}")
@@ -547,7 +547,7 @@ async def list_user_places(target_user_id: str, user_id: str = Depends(get_authe
         raise
     except Exception as e:
         logger.error(f"Error listing user places: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/places/{place_id}")
@@ -565,7 +565,7 @@ async def get_place(place_id: str, user_id: str = Depends(get_authenticated_user
         raise
     except Exception as e:
         logger.error(f"Error getting place: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.put("/api/v1/places/{place_id}")
@@ -581,7 +581,7 @@ async def update_place(place_id: str, request: PlaceUpdateRequest, user_id: str 
 
     except Exception as e:
         logger.error(f"Error updating place: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.delete("/api/v1/places/{place_id}")
@@ -597,7 +597,7 @@ async def delete_place(place_id: str, user_id: str = Depends(get_authenticated_u
 
     except Exception as e:
         logger.error(f"Error deleting place: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ==================== Location Search ====================
@@ -632,7 +632,7 @@ async def find_nearby_devices(
 
     except Exception as e:
         logger.error(f"Error finding nearby devices: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/v1/locations/search/radius")
@@ -644,7 +644,7 @@ async def search_radius(request: RadiusSearchRequest, user_id: str = Depends(get
 
     except Exception as e:
         logger.error(f"Error searching radius: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/v1/locations/search/polygon")
@@ -656,7 +656,7 @@ async def search_polygon(request: PolygonSearchRequest):
 
     except Exception as e:
         logger.error(f"Error searching polygon: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/locations/distance")
@@ -682,7 +682,7 @@ async def calculate_distance(
 
     except Exception as e:
         logger.error(f"Error calculating distance: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/distance")
@@ -714,7 +714,7 @@ async def get_user_stats(target_user_id: str, user_id: str = Depends(get_authent
         raise
     except Exception as e:
         logger.error(f"Error getting user stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ==================== Server Entry Point ====================

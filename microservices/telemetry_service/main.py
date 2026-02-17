@@ -12,7 +12,7 @@ import logging
 import sys
 import os
 import json
-import requests
+import httpx
 from datetime import datetime, timedelta, timezone
 
 # Add parent directory to path
@@ -231,48 +231,51 @@ async def get_user_context(
         )
         auth_service_url = f"http://{auth_host}:{auth_port}"
 
-        if authorization:
-            token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-            logger.info(f"Verifying token with auth service")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+            if authorization:
+                token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+                logger.info("Verifying token with auth service")
 
-            response = requests.post(
-                f"{auth_service_url}/api/v1/auth/verify-token",
-                json={"token": token}
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid token")
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-token",
+                    json={"token": token}
+                )
+                if response.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid token")
 
-            auth_data = response.json()
-            if not auth_data.get("valid"):
-                raise HTTPException(status_code=401, detail="Token verification failed")
+                auth_data = response.json()
+                if not auth_data.get("valid"):
+                    raise HTTPException(status_code=401, detail="Token verification failed")
 
-            return {
-                "user_id": auth_data.get("user_id", "unknown"),
-                "organization_id": auth_data.get("organization_id"),
-                "role": auth_data.get("role", "user")
-            }
+                return {
+                    "user_id": auth_data.get("user_id", "unknown"),
+                    "organization_id": auth_data.get("organization_id"),
+                    "role": auth_data.get("role", "user")
+                }
 
-        elif x_api_key:
-            response = requests.post(
-                f"{auth_service_url}/api/v1/auth/verify-api-key",
-                json={"api_key": x_api_key}
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid API key")
+            elif x_api_key:
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-api-key",
+                    json={"api_key": x_api_key}
+                )
+                if response.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
 
-            auth_data = response.json()
-            if not auth_data.get("valid"):
-                raise HTTPException(status_code=401, detail="API key verification failed")
+                auth_data = response.json()
+                if not auth_data.get("valid"):
+                    raise HTTPException(status_code=401, detail="API key verification failed")
 
-            return {
-                "user_id": auth_data.get("user_id", "unknown"),
-                "organization_id": auth_data.get("organization_id"),
-                "role": auth_data.get("role", "user")
-            }
+                return {
+                    "user_id": auth_data.get("user_id", "unknown"),
+                    "organization_id": auth_data.get("organization_id"),
+                    "role": auth_data.get("role", "user")
+                }
 
-    except requests.RequestException as e:
+    except httpx.RequestError as e:
         logger.error(f"Auth service communication error: {e}")
         raise HTTPException(status_code=503, detail="Authentication service unavailable")
+    except HTTPException:
+        raise
 
     raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -300,7 +303,7 @@ async def ingest_single_data_point(
             raise HTTPException(status_code=400, detail=result.get("error", "Failed to ingest data"))
     except Exception as e:
         logger.error(f"Error ingesting single data point: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/api/v1/telemetry/devices/{device_id}/telemetry/batch")
 async def ingest_batch_data(
@@ -314,7 +317,7 @@ async def ingest_batch_data(
         return result
     except Exception as e:
         logger.error(f"Error ingesting batch data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/api/v1/telemetry/bulk")
 async def ingest_bulk_data(
@@ -357,7 +360,7 @@ async def create_metric_definition(
         raise HTTPException(status_code=400, detail="Failed to create metric definition")
     except Exception as e:
         logger.error(f"Error creating metric definition: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/metrics")
 async def list_metric_definitions(
@@ -389,7 +392,7 @@ async def list_metric_definitions(
         }
     except Exception as e:
         logger.error(f"Error listing metric definitions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/metrics/{metric_name}", response_model=MetricDefinitionResponse)
 async def get_metric_definition(
@@ -421,7 +424,7 @@ async def get_metric_definition(
         raise HTTPException(status_code=404, detail="Metric definition not found")
     except Exception as e:
         logger.error(f"Error getting metric definition: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.put("/api/v1/telemetry/metrics/{metric_name}", response_model=MetricDefinitionResponse)
 async def update_metric_definition(
@@ -476,7 +479,7 @@ async def update_metric_definition(
         raise
     except Exception as e:
         logger.error(f"Error updating metric definition: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/api/v1/telemetry/metrics/{metric_name}")
 async def delete_metric_definition(
@@ -494,7 +497,7 @@ async def delete_metric_definition(
         raise HTTPException(status_code=404, detail="Metric definition not found")
     except Exception as e:
         logger.error(f"Error deleting metric definition: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Data Query Endpoints
@@ -513,7 +516,7 @@ async def query_telemetry_data(
         raise HTTPException(status_code=404, detail="No data found")
     except Exception as e:
         logger.error(f"Error querying telemetry data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/devices/{device_id}/metrics/{metric_name}/latest")
 async def get_latest_value(
@@ -562,7 +565,7 @@ async def get_latest_value(
         }
     except Exception as e:
         logger.error(f"Error getting latest value: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/devices/{device_id}/metrics", response_model=List[str])
 async def get_device_metrics(
@@ -580,7 +583,7 @@ async def get_device_metrics(
         return []
     except Exception as e:
         logger.error(f"Error getting device metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/devices/{device_id}/metrics/{metric_name}/range")
 async def get_metric_range(
@@ -624,7 +627,7 @@ async def get_metric_range(
         
     except Exception as e:
         logger.error(f"Error getting metric range: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Aggregation Endpoints
@@ -657,7 +660,7 @@ async def get_aggregated_data(
         raise HTTPException(status_code=404, detail="No data found")
     except Exception as e:
         logger.error(f"Error getting aggregated data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Alert Management
@@ -679,7 +682,7 @@ async def create_alert_rule(
         raise HTTPException(status_code=400, detail="Failed to create alert rule")
     except Exception as e:
         logger.error(f"Error creating alert rule: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/alerts/rules")
 async def list_alert_rules(
@@ -720,7 +723,7 @@ async def list_alert_rules(
         }
     except Exception as e:
         logger.error(f"Error listing alert rules: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/alerts/rules/{rule_id}", response_model=AlertRuleResponse)
 async def get_alert_rule(
@@ -760,7 +763,7 @@ async def get_alert_rule(
         raise HTTPException(status_code=404, detail="Alert rule not found")
     except Exception as e:
         logger.error(f"Error getting alert rule: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.put("/api/v1/telemetry/alerts/rules/{rule_id}/enable")
 async def enable_alert_rule(
@@ -783,7 +786,7 @@ async def enable_alert_rule(
         raise HTTPException(status_code=404, detail="Alert rule not found")
     except Exception as e:
         logger.error(f"Error enabling/disabling alert rule: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/api/v1/telemetry/alerts/rules/{rule_id}")
 async def delete_alert_rule(
@@ -806,7 +809,7 @@ async def delete_alert_rule(
         raise
     except Exception as e:
         logger.error(f"Error deleting alert rule: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/alerts", response_model=AlertListResponse)
 async def list_alerts(
@@ -856,7 +859,7 @@ async def list_alerts(
         )
     except Exception as e:
         logger.error(f"Error listing alerts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.put("/api/v1/telemetry/alerts/{alert_id}/acknowledge")
 async def acknowledge_alert(
@@ -882,7 +885,7 @@ async def acknowledge_alert(
         raise HTTPException(status_code=404, detail="Alert not found")
     except Exception as e:
         logger.error(f"Error acknowledging alert: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.put("/api/v1/telemetry/alerts/{alert_id}/resolve")
 async def resolve_alert(
@@ -907,7 +910,7 @@ async def resolve_alert(
         raise  # Re-raise HTTP exceptions
     except Exception as e:
         logger.error(f"Error resolving alert: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Statistics Endpoints
@@ -928,7 +931,7 @@ async def get_device_telemetry_stats(
         raise  # Re-raise HTTPException without wrapping
     except Exception as e:
         logger.error(f"Error getting device stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/telemetry/stats", response_model=TelemetryStatsResponse)
 async def get_telemetry_stats(
@@ -944,7 +947,7 @@ async def get_telemetry_stats(
         raise  # Re-raise HTTPException without wrapping
     except Exception as e:
         logger.error(f"Error getting service stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Real-time Data Streaming
@@ -967,7 +970,7 @@ async def subscribe_real_time_data(
         raise HTTPException(status_code=400, detail="Failed to create subscription")
     except Exception as e:
         logger.error(f"Error creating subscription: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/api/v1/telemetry/subscribe/{subscription_id}")
 async def unsubscribe_real_time_data(
@@ -982,7 +985,7 @@ async def unsubscribe_real_time_data(
         raise HTTPException(status_code=404, detail="Subscription not found")
     except Exception as e:
         logger.error(f"Error cancelling subscription: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.websocket("/ws/telemetry/{subscription_id}")
 async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str):
@@ -1066,7 +1069,7 @@ async def export_csv(
         
     except Exception as e:
         logger.error(f"Error exporting CSV: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Service Statistics

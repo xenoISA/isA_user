@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, List
 import logging
 import sys
 import os
-import requests
+import httpx
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -299,50 +299,53 @@ async def get_user_context(
             env_port_key='AUTH_SERVICE_PORT'
         )
         auth_service_url = f"http://{auth_host}:{auth_port}"
-        
-        if authorization:
-            token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-            logger.info(f"Verifying token with auth service")
-            
-            response = requests.post(
-                f"{auth_service_url}/api/v1/auth/verify-token",
-                json={"token": token}
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid token")
-            
-            auth_data = response.json()
-            if not auth_data.get("valid"):
-                raise HTTPException(status_code=401, detail="Token verification failed")
-            
-            return {
-                "user_id": auth_data.get("user_id", "unknown"),
-                "organization_id": auth_data.get("organization_id"),
-                "role": auth_data.get("role", "user")
-            }
-        
-        elif x_api_key:
-            response = requests.post(
-                f"{auth_service_url}/api/v1/auth/verify-api-key",
-                json={"api_key": x_api_key}
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid API key")
-            
-            auth_data = response.json()
-            if not auth_data.get("valid"):
-                raise HTTPException(status_code=401, detail="API key verification failed")
-            
-            return {
-                "user_id": auth_data.get("user_id", "unknown"),
-                "organization_id": auth_data.get("organization_id"),
-                "role": auth_data.get("role", "user")
-            }
-    
-    except requests.RequestException as e:
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+            if authorization:
+                token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+                logger.info("Verifying token with auth service")
+
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-token",
+                    json={"token": token}
+                )
+                if response.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid token")
+
+                auth_data = response.json()
+                if not auth_data.get("valid"):
+                    raise HTTPException(status_code=401, detail="Token verification failed")
+
+                return {
+                    "user_id": auth_data.get("user_id", "unknown"),
+                    "organization_id": auth_data.get("organization_id"),
+                    "role": auth_data.get("role", "user")
+                }
+
+            elif x_api_key:
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-api-key",
+                    json={"api_key": x_api_key}
+                )
+                if response.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
+
+                auth_data = response.json()
+                if not auth_data.get("valid"):
+                    raise HTTPException(status_code=401, detail="API key verification failed")
+
+                return {
+                    "user_id": auth_data.get("user_id", "unknown"),
+                    "organization_id": auth_data.get("organization_id"),
+                    "role": auth_data.get("role", "user")
+                }
+
+    except httpx.RequestError as e:
         logger.error(f"Auth service communication error: {e}")
         raise HTTPException(status_code=503, detail="Authentication service unavailable")
-    
+    except HTTPException:
+        raise
+
     raise HTTPException(status_code=401, detail="Authentication required")
 
 # ======================
@@ -381,7 +384,7 @@ async def upload_firmware(
         raise HTTPException(status_code=400, detail="Invalid metadata JSON")
     except Exception as e:
         logger.error(f"Error uploading firmware: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/ota/firmware/{firmware_id}", response_model=FirmwareResponse)
 async def get_firmware(
@@ -396,7 +399,7 @@ async def get_firmware(
         raise HTTPException(status_code=404, detail="Firmware not found")
     except Exception as e:
         logger.error(f"Error getting firmware: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/ota/firmware")
 async def list_firmware(
@@ -462,7 +465,7 @@ async def list_firmware(
         }
     except Exception as e:
         logger.error(f"Error listing firmware: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/ota/firmware/{firmware_id}/download")
 async def download_firmware(
@@ -486,7 +489,7 @@ async def download_firmware(
         
     except Exception as e:
         logger.error(f"Error downloading firmware: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/api/v1/ota/firmware/{firmware_id}")
 async def delete_firmware(
@@ -500,7 +503,7 @@ async def delete_firmware(
         return {"message": "Firmware deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting firmware: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Update Campaigns
@@ -522,7 +525,7 @@ async def create_campaign(
         raise HTTPException(status_code=400, detail="Failed to create campaign")
     except Exception as e:
         logger.error(f"Error creating campaign: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/ota/campaigns/{campaign_id}", response_model=UpdateCampaignResponse)
 async def get_campaign(
@@ -537,7 +540,7 @@ async def get_campaign(
         raise HTTPException(status_code=404, detail="Campaign not found")
     except Exception as e:
         logger.error(f"Error getting campaign: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/ota/campaigns")
 async def list_campaigns(
@@ -615,7 +618,7 @@ async def list_campaigns(
         }
     except Exception as e:
         logger.error(f"Error listing campaigns: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/api/v1/ota/campaigns/{campaign_id}/start")
 async def start_campaign(
@@ -630,7 +633,7 @@ async def start_campaign(
         raise HTTPException(status_code=400, detail="Failed to start campaign")
     except Exception as e:
         logger.error(f"Error starting campaign: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/api/v1/ota/campaigns/{campaign_id}/pause")
 async def pause_campaign(
@@ -668,7 +671,7 @@ async def approve_campaign(
         return campaign
     except Exception as e:
         logger.error(f"Error approving campaign: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Device Updates
@@ -695,7 +698,7 @@ async def update_device(
         raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
         logger.error(f"Error updating device: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/ota/updates/{update_id}", response_model=DeviceUpdateResponse)
 async def get_update_progress(
@@ -712,7 +715,7 @@ async def get_update_progress(
         raise  # Re-raise HTTPException without catching
     except Exception as e:
         logger.error(f"Error getting update progress: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/ota/devices/{device_id}/updates", response_model=UpdateHistoryResponse)
 async def get_device_update_history(
@@ -744,7 +747,7 @@ async def cancel_update(
         raise HTTPException(status_code=400, detail="Failed to cancel update")
     except Exception as e:
         logger.error(f"Error cancelling update: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/api/v1/ota/updates/{update_id}/retry")
 async def retry_update(
@@ -773,7 +776,7 @@ async def rollback_device(
         raise HTTPException(status_code=400, detail="Failed to start rollback")
     except Exception as e:
         logger.error(f"Error rolling back device: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/api/v1/ota/campaigns/{campaign_id}/rollback")
 async def rollback_campaign(
@@ -800,7 +803,7 @@ async def get_update_stats(
         raise HTTPException(status_code=404, detail="No stats available")
     except Exception as e:
         logger.error(f"Error getting update stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/ota/stats/campaigns/{campaign_id}")
 async def get_campaign_stats(

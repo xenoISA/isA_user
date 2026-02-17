@@ -274,7 +274,7 @@ async def register_device(
         raise HTTPException(status_code=400, detail="Failed to register device")
     except Exception as e:
         logger.error(f"Error registering device: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/devices/stats", response_model=DeviceStatsResponse)
 async def get_device_stats(
@@ -288,7 +288,7 @@ async def get_device_stats(
         raise HTTPException(status_code=404, detail="No stats available")
     except Exception as e:
         logger.error(f"Error getting device stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/devices/frames")
 async def list_smart_frames(
@@ -333,7 +333,7 @@ async def list_smart_frames(
         }
     except Exception as e:
         logger.error(f"Error listing smart frames: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/devices/{device_id}", response_model=DeviceResponse)
 async def get_device(
@@ -350,7 +350,7 @@ async def get_device(
         raise
     except Exception as e:
         logger.error(f"Error getting device {device_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.put("/api/v1/devices/{device_id}", response_model=DeviceResponse)
 async def update_device(
@@ -388,7 +388,7 @@ async def update_device(
         raise
     except Exception as e:
         logger.error(f"Error updating device {device_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/api/v1/devices/{device_id}")
 async def decommission_device(
@@ -403,7 +403,7 @@ async def decommission_device(
         raise HTTPException(status_code=400, detail="Failed to decommission device")
     except Exception as e:
         logger.error(f"Error decommissioning device: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/devices", response_model=DeviceListResponse)
 async def list_devices(
@@ -447,7 +447,7 @@ async def list_devices(
         )
     except Exception as e:
         logger.error(f"Error listing devices: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Device Authentication
@@ -517,7 +517,7 @@ async def send_command(
         raise
     except Exception as e:
         logger.error(f"Error sending command: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Device Health & Monitoring
@@ -535,7 +535,7 @@ async def get_device_health(
         raise HTTPException(status_code=404, detail="Device not found")
     except Exception as e:
         logger.error(f"Error getting device health: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ======================
 # Device Groups
@@ -557,7 +557,7 @@ async def create_device_group(
         raise HTTPException(status_code=400, detail="Failed to create device group")
     except Exception as e:
         logger.error(f"Error creating device group: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/v1/groups/{group_id}", response_model=DeviceGroupResponse)
 async def get_device_group(
@@ -668,7 +668,7 @@ async def control_frame_display(
         raise
     except Exception as e:
         logger.error(f"Error controlling frame display: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/v1/devices/frames/{frame_id}/sync")
@@ -706,7 +706,7 @@ async def sync_frame_content(
         raise
     except Exception as e:
         logger.error(f"Error syncing frame content: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.put("/api/v1/devices/frames/{frame_id}/config")
@@ -748,7 +748,7 @@ async def update_frame_config(
         raise
     except Exception as e:
         logger.error(f"Error updating frame config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ======================
@@ -879,5 +879,5 @@ async def pair_device(
         logger.error(f"Error in pair_device endpoint: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to pair device: {str(e)}"
+            detail="Failed to pair device"
         )
