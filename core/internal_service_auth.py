@@ -80,8 +80,8 @@ async def require_auth_or_internal_service(request: Request) -> Optional[str]:
     认证中间件依赖函数
 
     允许两种认证方式：
-    1. 常规用户认证（user-id header）
-    2. 内部服务认证（X-Internal-Service headers）
+    1. 内部服务认证（X-Internal-Service headers with secret）
+    2. Bearer JWT 认证（Authorization header verified via auth service）
 
     Args:
         request: FastAPI Request 对象
@@ -91,26 +91,35 @@ async def require_auth_or_internal_service(request: Request) -> Optional[str]:
 
     Raises:
         HTTPException: 401 如果认证失败
-
-    用法:
-        @app.get("/api/v1/resource")
-        async def get_resource(user_id: str = Depends(require_auth_or_internal_service)):
-            # user_id 可能是实际用户 ID 或 "internal-service"
-            ...
     """
     # 首先检查是否是内部服务请求
     if InternalServiceAuth.is_internal_service_request(request):
         return InternalServiceAuth.get_service_user_id()
 
-    # 否则检查常规用户认证
-    user_id = request.headers.get("user-id")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User authentication required"
-        )
+    # 检查 Authorization: Bearer <jwt> 认证
+    authorization = request.headers.get("authorization")
+    if authorization and authorization.startswith("Bearer "):
+        import httpx
+        token = authorization[7:]
+        auth_service_url = os.getenv("AUTH_SERVICE_URL", "http://localhost:8201")
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-token",
+                    json={"token": token},
+                    timeout=5.0,
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("valid"):
+                        return result.get("user_id")
+        except Exception as e:
+            logger.warning(f"Failed to verify Bearer token: {e}")
 
-    return user_id
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="User authentication required"
+    )
 
 
 def create_internal_service_bypass_dependency():
@@ -135,8 +144,27 @@ def create_internal_service_bypass_dependency():
         if InternalServiceAuth.is_internal_service_request(request):
             return InternalServiceAuth.get_service_user_id()
 
-        # 否则返回用户ID（可能为 None）
-        return request.headers.get("user-id")
+        # 检查 Authorization: Bearer <jwt> 认证
+        authorization = request.headers.get("authorization")
+        if authorization and authorization.startswith("Bearer "):
+            import httpx
+            token = authorization[7:]
+            auth_service_url = os.getenv("AUTH_SERVICE_URL", "http://localhost:8201")
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{auth_service_url}/api/v1/auth/verify-token",
+                        json={"token": token},
+                        timeout=5.0,
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get("valid"):
+                            return result.get("user_id")
+            except Exception as e:
+                logger.warning(f"Failed to verify Bearer token: {e}")
+
+        return None
 
     return optional_auth
 

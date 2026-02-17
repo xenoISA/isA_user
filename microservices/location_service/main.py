@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -149,19 +149,62 @@ app.add_middleware(
 )
 
 
-# ==================== Helper Functions ====================
+# ==================== Authentication ====================
 
 
-def get_user_id_from_request() -> str:
+async def get_authenticated_user_id(
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
+    x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
+) -> str:
     """
-    Extract user ID from authentication context
-    TODO: Implement proper authentication
-
-    For testing, this returns a placeholder that matches test expectations
+    Extract user ID from verified authentication credentials.
+    Supports Bearer JWT, API Key, and internal service auth.
     """
-    # Return a placeholder that works with test users
-    # In real implementation, extract from JWT token or session
-    return "test_user_sf"  # Default placeholder for testing
+    import httpx
+
+    # Internal service auth
+    internal_secret = os.getenv("INTERNAL_SERVICE_SECRET", "dev-internal-secret-change-in-production")
+    if x_internal_service == "true" and x_internal_service_secret == internal_secret:
+        return "internal-service"
+
+    auth_service_url = os.getenv("AUTH_SERVICE_URL", "http://localhost:8201")
+
+    # Bearer JWT auth
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-token",
+                    json={"token": token},
+                    timeout=5.0,
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("valid") and result.get("user_id"):
+                        return result["user_id"]
+        except Exception as e:
+            logger.warning(f"Failed to verify Bearer token: {e}")
+
+    # API Key auth
+    if x_api_key:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{auth_service_url}/api/v1/auth/verify-api-key",
+                    json={"api_key": x_api_key},
+                    timeout=5.0,
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("valid") and result.get("organization_id"):
+                        return result["organization_id"]
+        except Exception as e:
+            logger.warning(f"Failed to verify API key: {e}")
+
+    raise HTTPException(status_code=401, detail="Authentication required")
 
 
 # ==================== Health Check ====================
@@ -213,10 +256,9 @@ async def health_check():
 
 
 @app.post("/api/v1/locations")
-async def report_location(request: LocationReportRequest):
+async def report_location(request: LocationReportRequest, user_id: str = Depends(get_authenticated_user_id)):
     """Report device location"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.report_location(request, user_id)
 
         if result.success:
@@ -230,10 +272,9 @@ async def report_location(request: LocationReportRequest):
 
 
 @app.post("/api/v1/locations/batch")
-async def batch_report_locations(request: LocationBatchRequest):
+async def batch_report_locations(request: LocationBatchRequest, user_id: str = Depends(get_authenticated_user_id)):
     """Report multiple locations in batch"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.batch_report_locations(request, user_id)
         return result.model_dump()
 
@@ -243,10 +284,9 @@ async def batch_report_locations(request: LocationBatchRequest):
 
 
 @app.get("/api/v1/locations/device/{device_id}")
-async def get_device_latest_location(device_id: str):
+async def get_device_latest_location(device_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Get device's latest location"""
     try:
-        user_id = get_user_id_from_request()
         location = await location_service.get_device_latest_location(device_id, user_id)
 
         if location:
@@ -262,9 +302,9 @@ async def get_device_latest_location(device_id: str):
 
 
 @app.get("/api/v1/locations/device/{device_id}/latest")
-async def get_device_latest_location_alt(device_id: str):
+async def get_device_latest_location_alt(device_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Get device's latest location (alternative route)"""
-    return await get_device_latest_location(device_id)
+    return await get_device_latest_location(device_id, user_id)
 
 
 @app.get("/api/v1/locations/device/{device_id}/history")
@@ -274,10 +314,10 @@ async def get_device_location_history(
     end_time: Optional[datetime] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    user_id: str = Depends(get_authenticated_user_id),
 ):
     """Get device location history"""
     try:
-        user_id = get_user_id_from_request()
         locations = await location_service.get_device_location_history(
             device_id=device_id,
             user_id=user_id,
@@ -294,17 +334,15 @@ async def get_device_location_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/locations/user/{user_id}")
-async def get_user_devices_locations(user_id: str):
+@app.get("/api/v1/locations/user/{target_user_id}")
+async def get_user_devices_locations(target_user_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Get latest locations for all user's devices"""
     try:
-        requesting_user_id = get_user_id_from_request()
-
         # Verify user has permission
-        if user_id != requesting_user_id:
+        if target_user_id != user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        locations = await location_service.get_user_devices_locations(user_id)
+        locations = await location_service.get_user_devices_locations(target_user_id)
         return {"locations": locations, "count": len(locations)}
 
     except HTTPException:
@@ -330,10 +368,9 @@ async def delete_location(location_id: str):
 
 
 @app.post("/api/v1/geofences")
-async def create_geofence(request: GeofenceCreateRequest):
+async def create_geofence(request: GeofenceCreateRequest, user_id: str = Depends(get_authenticated_user_id)):
     """Create a new geofence"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.create_geofence(request, user_id)
 
         if result.success:
@@ -351,10 +388,10 @@ async def list_geofences(
     active_only: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    user_id: str = Depends(get_authenticated_user_id),
 ):
     """List geofences"""
     try:
-        user_id = get_user_id_from_request()
         geofences = await location_service.list_geofences(
             user_id=user_id, active_only=active_only, limit=limit, offset=offset
         )
@@ -367,10 +404,9 @@ async def list_geofences(
 
 
 @app.get("/api/v1/geofences/{geofence_id}")
-async def get_geofence(geofence_id: str):
+async def get_geofence(geofence_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Get geofence details"""
     try:
-        user_id = get_user_id_from_request()
         geofence = await location_service.get_geofence(geofence_id, user_id)
 
         if geofence:
@@ -386,10 +422,9 @@ async def get_geofence(geofence_id: str):
 
 
 @app.put("/api/v1/geofences/{geofence_id}")
-async def update_geofence(geofence_id: str, request: GeofenceUpdateRequest):
+async def update_geofence(geofence_id: str, request: GeofenceUpdateRequest, user_id: str = Depends(get_authenticated_user_id)):
     """Update a geofence"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.update_geofence(geofence_id, request, user_id)
 
         if result.success:
@@ -403,10 +438,9 @@ async def update_geofence(geofence_id: str, request: GeofenceUpdateRequest):
 
 
 @app.delete("/api/v1/geofences/{geofence_id}")
-async def delete_geofence(geofence_id: str):
+async def delete_geofence(geofence_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Delete a geofence"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.delete_geofence(geofence_id, user_id)
 
         if result.success:
@@ -420,10 +454,9 @@ async def delete_geofence(geofence_id: str):
 
 
 @app.post("/api/v1/geofences/{geofence_id}/activate")
-async def activate_geofence(geofence_id: str):
+async def activate_geofence(geofence_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Activate a geofence"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.activate_geofence(geofence_id, user_id)
 
         if result.success:
@@ -437,10 +470,9 @@ async def activate_geofence(geofence_id: str):
 
 
 @app.post("/api/v1/geofences/{geofence_id}/deactivate")
-async def deactivate_geofence(geofence_id: str):
+async def deactivate_geofence(geofence_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Deactivate a geofence"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.deactivate_geofence(geofence_id, user_id)
 
         if result.success:
@@ -485,10 +517,9 @@ async def check_device_in_geofences(device_id: str):
 
 
 @app.post("/api/v1/places")
-async def create_place(request: PlaceCreateRequest):
+async def create_place(request: PlaceCreateRequest, user_id: str = Depends(get_authenticated_user_id)):
     """Create a new place"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.create_place(request, user_id)
 
         if result.success:
@@ -501,17 +532,15 @@ async def create_place(request: PlaceCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/places/user/{user_id}")
-async def list_user_places(user_id: str):
+@app.get("/api/v1/places/user/{target_user_id}")
+async def list_user_places(target_user_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """List places for a user"""
     try:
-        requesting_user_id = get_user_id_from_request()
-
         # Verify permission
-        if user_id != requesting_user_id:
+        if target_user_id != user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        places = await location_service.list_user_places(user_id)
+        places = await location_service.list_user_places(target_user_id)
         return {"success": True, "data": {"places": places, "count": len(places)}}
 
     except HTTPException:
@@ -522,10 +551,9 @@ async def list_user_places(user_id: str):
 
 
 @app.get("/api/v1/places/{place_id}")
-async def get_place(place_id: str):
+async def get_place(place_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Get place by ID"""
     try:
-        user_id = get_user_id_from_request()
         place = await location_service.get_place(place_id, user_id)
 
         if place:
@@ -541,10 +569,9 @@ async def get_place(place_id: str):
 
 
 @app.put("/api/v1/places/{place_id}")
-async def update_place(place_id: str, request: PlaceUpdateRequest):
+async def update_place(place_id: str, request: PlaceUpdateRequest, user_id: str = Depends(get_authenticated_user_id)):
     """Update a place"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.update_place(place_id, request, user_id)
 
         if result.success:
@@ -558,10 +585,9 @@ async def update_place(place_id: str, request: PlaceUpdateRequest):
 
 
 @app.delete("/api/v1/places/{place_id}")
-async def delete_place(place_id: str):
+async def delete_place(place_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Delete a place"""
     try:
-        user_id = get_user_id_from_request()
         result = await location_service.delete_place(place_id, user_id)
 
         if result.success:
@@ -585,10 +611,10 @@ async def find_nearby_devices(
     device_types: Optional[str] = Query(None),
     time_window_minutes: int = Query(30, ge=1, le=1440),
     limit: int = Query(50, ge=1, le=500),
+    user_id: str = Depends(get_authenticated_user_id),
 ):
     """Find devices near a location"""
     try:
-        user_id = get_user_id_from_request()
 
         device_types_list = device_types.split(",") if device_types else None
 
@@ -610,10 +636,9 @@ async def find_nearby_devices(
 
 
 @app.post("/api/v1/locations/search/radius")
-async def search_radius(request: RadiusSearchRequest):
+async def search_radius(request: RadiusSearchRequest, user_id: str = Depends(get_authenticated_user_id)):
     """Search locations within a circular area"""
     try:
-        user_id = get_user_id_from_request()
         locations = await location_service.search_radius(request, user_id)
         return {"locations": locations, "count": len(locations)}
 
@@ -674,17 +699,15 @@ async def calculate_distance_alt(
 # ==================== Statistics ====================
 
 
-@app.get("/api/v1/stats/user/{user_id}")
-async def get_user_stats(user_id: str):
+@app.get("/api/v1/stats/user/{target_user_id}")
+async def get_user_stats(target_user_id: str, user_id: str = Depends(get_authenticated_user_id)):
     """Get location statistics for a user"""
     try:
-        requesting_user_id = get_user_id_from_request()
-
         # Verify permission
-        if user_id != requesting_user_id:
+        if target_user_id != user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        stats = await location_service.get_location_statistics(user_id)
+        stats = await location_service.get_location_statistics(target_user_id)
         return stats
 
     except HTTPException:

@@ -194,16 +194,17 @@ async def detailed_health_check():
 async def get_user_context(
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None),
-    x_internal_call: Optional[str] = Header(None)
+    x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
+    x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
 ) -> Dict[str, Any]:
     """
     Get user context with authentication using AuthServiceClient
 
-    For internal service calls, set header: X-Internal-Call: true
-    to bypass auth (use with caution - only for trusted services)
+    For internal service calls, use X-Internal-Service + X-Internal-Service-Secret headers
     """
-    # Allow internal service-to-service calls without auth
-    if x_internal_call == "true":
+    # Allow internal service-to-service calls with verified secret
+    internal_secret = os.getenv("INTERNAL_SERVICE_SECRET", "dev-internal-secret-change-in-production")
+    if x_internal_service == "true" and x_internal_service_secret == internal_secret:
         return {
             "user_id": "internal_service",
             "organization_id": None,
