@@ -183,7 +183,7 @@ app = FastAPI(
 # CORS配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1034,7 +1034,7 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=SERVICE_PORT,
-        reload=True,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
         log_level="info"
     )
 

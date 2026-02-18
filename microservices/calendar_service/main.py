@@ -425,4 +425,4 @@ if __name__ == "__main__":
 
     port = config.service_port if hasattr(config, "service_port") else 8217
 
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=os.getenv("DEBUG", "false").lower() == "true")

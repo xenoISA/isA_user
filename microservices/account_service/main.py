@@ -15,11 +15,11 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -249,7 +249,7 @@ async def health_check():
         "service": config.service_name,
         "port": config.service_port,
         "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
     }
 
 
@@ -273,6 +273,40 @@ async def detailed_health_check(
         )
 
 
+# ==================== Auth Dependency ====================
+
+
+async def get_authenticated_caller(request: Request) -> str:
+    """Extract caller ID from verified authentication credentials."""
+    from core.auth_dependencies import (
+        INTERNAL_SERVICE_SECRET,
+        _extract_user_id_from_bearer,
+        _extract_user_id_from_api_key,
+    )
+
+    x_internal_service = request.headers.get("X-Internal-Service")
+    x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
+    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+        return "internal-service"
+
+    authorization = request.headers.get("authorization")
+    if authorization:
+        uid = await _extract_user_id_from_bearer(authorization)
+        if uid:
+            return uid
+
+    x_api_key = request.headers.get("X-API-Key")
+    if x_api_key:
+        uid = await _extract_user_id_from_api_key(x_api_key)
+        if uid:
+            return uid
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="User authentication required",
+    )
+
+
 # Core account management endpoints
 
 
@@ -280,6 +314,7 @@ async def detailed_health_check(
 async def ensure_account(
     request: AccountEnsureRequest,
     account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """Ensure user account exists, create if needed"""
     try:
@@ -295,7 +330,8 @@ async def ensure_account(
 
 @app.get("/api/v1/accounts/profile/{user_id}", response_model=AccountProfileResponse)
 async def get_account_profile(
-    user_id: str, account_service: AccountService = Depends(get_account_service)
+    user_id: str, account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """
     Get detailed account profile (identity data only).
@@ -317,6 +353,7 @@ async def update_account_profile(
     user_id: str,
     request: AccountUpdateRequest,
     account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """Update account profile"""
     try:
@@ -336,6 +373,7 @@ async def update_account_preferences(
     user_id: str,
     request: AccountPreferencesRequest,
     account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """Update account preferences"""
     try:
@@ -358,6 +396,7 @@ async def delete_account(
     user_id: str,
     reason: Optional[str] = Query(None, description="Deletion reason"),
     account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """Delete account (soft delete)"""
     try:
@@ -385,6 +424,7 @@ async def list_accounts(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     search: Optional[str] = Query(None, description="Search in name/email"),
     account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """
     List accounts with filtering and pagination.
@@ -412,6 +452,7 @@ async def search_accounts(
     limit: int = Query(50, ge=1, le=100, description="Maximum results"),
     include_inactive: bool = Query(False, description="Include inactive accounts"),
     account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """Search accounts by query"""
     try:
@@ -427,7 +468,8 @@ async def search_accounts(
 
 @app.get("/api/v1/accounts/by-email/{email}", response_model=AccountProfileResponse)
 async def get_account_by_email(
-    email: str, account_service: AccountService = Depends(get_account_service)
+    email: str, account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """Get account by email address"""
     try:
@@ -452,6 +494,7 @@ async def change_account_status(
     user_id: str,
     request: AccountStatusChangeRequest,
     account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
 ):
     """Change account status (admin operation)"""
     try:

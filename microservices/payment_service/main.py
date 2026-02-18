@@ -4,7 +4,7 @@ Payment Microservice API
 提供支付、订阅、发票和退款管理的REST API服务
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Header, Body
+from fastapi import FastAPI, HTTPException, Depends, Request, Header, Body, status
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 import logging
@@ -54,6 +54,40 @@ wallet_client = None
 billing_client = None
 product_client = None
 SERVICE_PORT = config.service_port
+
+
+async def get_authenticated_user_id(request: Request) -> str:
+    """Extract user ID from verified authentication credentials (JWT, API Key, or internal service)."""
+    from core.auth_dependencies import (
+        INTERNAL_SERVICE_SECRET,
+        _extract_user_id_from_bearer,
+        _extract_user_id_from_api_key,
+    )
+
+    # 1. Internal service auth
+    x_internal_service = request.headers.get("X-Internal-Service")
+    x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
+    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+        return "internal-service"
+
+    # 2. Bearer JWT auth
+    authorization = request.headers.get("authorization")
+    if authorization:
+        uid = await _extract_user_id_from_bearer(authorization)
+        if uid:
+            return uid
+
+    # 3. API Key auth
+    x_api_key = request.headers.get("X-API-Key")
+    if x_api_key:
+        uid = await _extract_user_id_from_api_key(x_api_key)
+        if uid:
+            return uid
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="User authentication required",
+    )
 
 
 @asynccontextmanager
@@ -349,7 +383,7 @@ async def list_plans(
 # ====================
 
 @app.post("/api/v1/payment/subscriptions", response_model=SubscriptionResponse)
-async def create_subscription(request: CreateSubscriptionRequest):
+async def create_subscription(request: CreateSubscriptionRequest, caller_id: str = Depends(get_authenticated_user_id)):
     """创建订阅"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
@@ -365,7 +399,7 @@ async def create_subscription(request: CreateSubscriptionRequest):
 
 
 @app.get("/api/v1/payment/subscriptions/user/{user_id}", response_model=SubscriptionResponse)
-async def get_user_subscription(user_id: str):
+async def get_user_subscription(user_id: str, caller_id: str = Depends(get_authenticated_user_id)):
     """获取用户当前订阅"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
@@ -380,7 +414,8 @@ async def get_user_subscription(user_id: str):
 @app.put("/api/v1/payment/subscriptions/{subscription_id}", response_model=SubscriptionResponse)
 async def update_subscription(
     subscription_id: str,
-    request: UpdateSubscriptionRequest
+    request: UpdateSubscriptionRequest,
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """更新订阅"""
     if not payment_service:
@@ -399,7 +434,8 @@ async def update_subscription(
 @app.post("/api/v1/payment/subscriptions/{subscription_id}/cancel", response_model=Subscription)
 async def cancel_subscription(
     subscription_id: str,
-    request: CancelSubscriptionRequest
+    request: CancelSubscriptionRequest,
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """取消订阅"""
     if not payment_service:
@@ -420,7 +456,7 @@ async def cancel_subscription(
 # ====================
 
 @app.post("/api/v1/payment/payments/intent", response_model=PaymentIntentResponse)
-async def create_payment_intent(request: CreatePaymentIntentRequest):
+async def create_payment_intent(request: CreatePaymentIntentRequest, caller_id: str = Depends(get_authenticated_user_id)):
     """创建支付意图"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
@@ -438,7 +474,8 @@ async def create_payment_intent(request: CreatePaymentIntentRequest):
 @app.post("/api/v1/payment/payments/{payment_id}/confirm", response_model=Payment)
 async def confirm_payment(
     payment_id: str,
-    processor_response: Optional[Dict[str, Any]] = Body(default=None)
+    processor_response: Optional[Dict[str, Any]] = Body(default=None),
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """确认支付"""
     if not payment_service:
@@ -458,7 +495,8 @@ async def confirm_payment(
 async def fail_payment(
     payment_id: str,
     failure_reason: str = Body(...),
-    failure_code: Optional[str] = Body(default=None)
+    failure_code: Optional[str] = Body(default=None),
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """标记支付失败"""
     if not payment_service:
@@ -480,7 +518,8 @@ async def get_payment_history(
     status: Optional[PaymentStatus] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    limit: int = 100
+    limit: int = 100,
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """获取用户支付历史"""
     if not payment_service:
@@ -502,7 +541,8 @@ async def create_invoice(
     subscription_id: Optional[str] = Body(default=None),
     amount_due: float = Body(...),
     due_date: Optional[datetime] = Body(default=None),
-    line_items: List[Dict[str, Any]] = Body(...)
+    line_items: List[Dict[str, Any]] = Body(...),
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """创建发票"""
     if not payment_service:
@@ -519,7 +559,7 @@ async def create_invoice(
 
 
 @app.get("/api/v1/payment/invoices/{invoice_id}", response_model=InvoiceResponse)
-async def get_invoice(invoice_id: str):
+async def get_invoice(invoice_id: str, caller_id: str = Depends(get_authenticated_user_id)):
     """获取发票"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
@@ -534,7 +574,8 @@ async def get_invoice(invoice_id: str):
 @app.post("/api/v1/payment/invoices/{invoice_id}/pay", response_model=Invoice)
 async def pay_invoice(
     invoice_id: str,
-    payment_method_id: str = Body(...)
+    payment_method_id: str = Body(...),
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """支付发票"""
     if not payment_service:
@@ -555,7 +596,7 @@ async def pay_invoice(
 # ====================
 
 @app.post("/api/v1/payment/refunds", response_model=Refund)
-async def create_refund(request: CreateRefundRequest):
+async def create_refund(request: CreateRefundRequest, caller_id: str = Depends(get_authenticated_user_id)):
     """创建退款"""
     if not payment_service:
         raise HTTPException(status_code=503, detail="Service not initialized")
@@ -573,7 +614,8 @@ async def create_refund(request: CreateRefundRequest):
 @app.post("/api/v1/payment/refunds/{refund_id}/process", response_model=Refund)
 async def process_refund(
     refund_id: str,
-    approved_by: Optional[str] = Body(default=None, embed=True)
+    approved_by: Optional[str] = Body(default=None, embed=True),
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """处理退款"""
     if not payment_service:
@@ -626,7 +668,8 @@ async def record_usage(
     subscription_id: str = Body(...),
     metric_name: str = Body(...),
     quantity: int = Body(...),
-    metadata: Optional[Dict[str, Any]] = Body(default=None)
+    metadata: Optional[Dict[str, Any]] = Body(default=None),
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """记录使用量"""
     if not payment_service:

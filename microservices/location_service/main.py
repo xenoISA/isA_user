@@ -142,7 +142,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -165,7 +165,7 @@ async def get_authenticated_user_id(
     import httpx
 
     # Internal service auth
-    internal_secret = os.getenv("INTERNAL_SERVICE_SECRET", "dev-internal-secret-change-in-production")
+    from core.auth_dependencies import INTERNAL_SERVICE_SECRET as internal_secret
     if x_internal_service == "true" and x_internal_service_secret == internal_secret:
         return "internal-service"
 

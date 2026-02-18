@@ -203,7 +203,7 @@ async def get_user_context(
     For internal service calls, use X-Internal-Service + X-Internal-Service-Secret headers
     """
     # Allow internal service-to-service calls with verified secret
-    internal_secret = os.getenv("INTERNAL_SERVICE_SECRET", "dev-internal-secret-change-in-production")
+    from core.auth_dependencies import INTERNAL_SERVICE_SECRET as internal_secret
     if x_internal_service == "true" and x_internal_service_secret == internal_secret:
         return {
             "user_id": "internal_service",
@@ -785,23 +785,7 @@ async def get_service_stats():
         ]
     }
 
-@app.get("/api/v1/debug/consul")
-async def debug_consul():
-    """Debug consul registry state"""
-    consul_available = hasattr(app.state, 'consul_registry') and app.state.consul_registry is not None
-    consul_info = {}
-    if consul_available:
-        consul_info = {
-            "service_name": app.state.consul_registry.service_name,
-            "service_host": app.state.consul_registry.service_host,
-            "service_port": app.state.consul_registry.service_port
-        }
-    
-    return {
-        "consul_available": consul_available,
-        "consul_info": consul_info,
-        "app_state_keys": list(vars(app.state).keys()) if hasattr(app, 'state') else []
-    }
+# Debug endpoint removed — was exposing service topology without authentication
 
 # 导入datetime
 from datetime import datetime
