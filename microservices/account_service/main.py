@@ -15,7 +15,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import uvicorn
@@ -249,7 +249,7 @@ async def health_check():
         "service": config.service_name,
         "port": config.service_port,
         "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
     }
 
 

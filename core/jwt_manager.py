@@ -320,7 +320,7 @@ class JWTManager:
             "expires_in": self.access_token_expiry
         }
 
-    def decode_without_verification(self, token: str) -> Dict[str, Any]:
+    def _decode_without_verification(self, token: str) -> Dict[str, Any]:
         """
         Decode token without verification (for debugging/inspection)
 
@@ -346,7 +346,7 @@ class JWTManager:
         Returns:
             Token fingerprint (hash)
         """
-        payload = self.decode_without_verification(token)
+        payload = self._decode_without_verification(token)
         jti = payload.get("jti", "")
         user_id = payload.get("sub", "")
 

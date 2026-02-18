@@ -82,8 +82,11 @@ class InternalServiceAuth:
         return "internal-service"
 
 
-async def require_auth_or_internal_service(request: Request) -> Optional[str]:
+async def require_auth_or_internal_service(request: Request) -> Optional[str]:  # noqa: F811
     """
+    DEPRECATED: Use core.auth_dependencies.require_auth_or_internal_service instead.
+    This version does not support API Key auth.
+
     认证中间件依赖函数
 
     允许两种认证方式：

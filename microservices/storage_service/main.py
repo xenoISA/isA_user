@@ -199,7 +199,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "storage_service",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(tz=__import__('datetime').timezone.utc).isoformat(),
     }
 
 
