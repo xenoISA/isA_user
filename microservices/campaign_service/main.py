@@ -807,7 +807,7 @@ def main():
         "microservices.campaign_service.main:app",
         host="0.0.0.0",
         port=SERVICE_PORT,
-        reload=True,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
         log_level="info",
     )
 

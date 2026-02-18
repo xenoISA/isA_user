@@ -502,40 +502,40 @@ async def get_shared_file(
     return await storage_service.get_shared_file(share_id, token, password)
 
 
-# ==================== 测试端点 ====================
+# ==================== 测试端点 (development only) ====================
 
+_DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+_ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
-@app.post("/api/v1/storage/test/upload")
-async def test_upload(user_id: str = "test_user"):
-    """测试文件上传（用于开发调试）"""
-    from io import BytesIO
+if _DEBUG and _ENVIRONMENT == "development":
+    @app.post("/api/v1/storage/test/upload")
+    async def test_upload(user_id: str = "test_user"):
+        """测试文件上传（仅在开发环境可用）"""
+        from io import BytesIO
 
-    # 创建测试文件
-    test_content = b"This is a test file for storage service"
-    test_file = UploadFile(filename="test.txt", file=BytesIO(test_content))
+        test_content = b"This is a test file for storage service"
+        test_file = UploadFile(filename="test.txt", file=BytesIO(test_content))
 
-    request = FileUploadRequest(
-        user_id=user_id, access_level="private", enable_indexing=False
-    )
-
-    return await storage_service.upload_file(test_file, request)
-
-
-@app.get("/api/v1/storage/test/minio-status")
-async def check_minio_status():
-    """检查 MinIO 连接状态"""
-    try:
-        bucket_exists = storage_service.minio_client.bucket_exists(
-            storage_service.bucket_name
+        request = FileUploadRequest(
+            user_id=user_id, access_level="private", enable_indexing=False
         )
-        return {
-            "status": "connected",
-            "bucket": storage_service.bucket_name,
-            "bucket_exists": bucket_exists,
-        }
-    except Exception as e:
-        logger.error(f"MinIO connection error: {e}")
-        return {"status": "error", "error": str(e)}
+
+        return await storage_service.upload_file(test_file, request)
+
+    @app.get("/api/v1/storage/test/minio-status")
+    async def check_minio_status():
+        """检查 MinIO 连接状态（仅在开发环境可用）"""
+        try:
+            bucket_exists = storage_service.minio_client.bucket_exists(
+                storage_service.bucket_name
+            )
+            return {
+                "status": "connected",
+                "bucket_exists": bucket_exists,
+            }
+        except Exception as e:
+            logger.error(f"MinIO connection error: {e}")
+            return {"status": "error"}
 
 
 # ==================== 运行服务 ====================
@@ -544,5 +544,6 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "main:app", host="0.0.0.0", port=service_config.service_port, reload=True
+        "main:app", host="0.0.0.0", port=service_config.service_port,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
     )

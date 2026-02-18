@@ -507,46 +507,48 @@ async def get_notification_stats(
 
 
 # ====================
-# 测试端点（开发环境）
+# 测试端点（仅开发环境）
 # ====================
 
+_DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+_ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
-@app.post("/api/v1/notifications/test/email", tags=["Test"])
-async def test_email(
-    to: str, subject: str = "Test Email", user_id: str = "test_user_email"
-):
-    """测试邮件发送"""
-    try:
-        request = SendNotificationRequest(
-            type=NotificationType.EMAIL,
-            recipient_id=user_id,
-            recipient_email=to,
-            subject=subject,
-            content="This is a test email from Notification Service.",
-            html_content="<h1>Test Email</h1><p>This is a test email from <b>Notification Service</b>.</p>",
-            priority=NotificationPriority.HIGH,
-        )
-        return await service.send_notification(request)
-    except Exception as e:
-        logger.error(f"Failed to send test email: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+if _DEBUG and _ENVIRONMENT == "development":
+    @app.post("/api/v1/notifications/test/email", tags=["Test"])
+    async def test_email(
+        to: str, subject: str = "Test Email", user_id: str = "test_user_email"
+    ):
+        """测试邮件发送（仅在开发环境可用）"""
+        try:
+            request = SendNotificationRequest(
+                type=NotificationType.EMAIL,
+                recipient_id=user_id,
+                recipient_email=to,
+                subject=subject,
+                content="This is a test email from Notification Service.",
+                html_content="<h1>Test Email</h1><p>This is a test email from <b>Notification Service</b>.</p>",
+                priority=NotificationPriority.HIGH,
+            )
+            return await service.send_notification(request)
+        except Exception as e:
+            logger.error(f"Failed to send test email: {e}")
+            raise HTTPException(status_code=500, detail="Failed to send test email")
 
-
-@app.post("/api/v1/notifications/test/in-app", tags=["Test"])
-async def test_in_app_notification(user_id: str, title: str = "Test Notification"):
-    """测试应用内通知"""
-    try:
-        request = SendNotificationRequest(
-            type=NotificationType.IN_APP,
-            recipient_id=user_id,
-            subject=title,
-            content="This is a test in-app notification.",
-            priority=NotificationPriority.NORMAL,
-        )
-        return await service.send_notification(request)
-    except Exception as e:
-        logger.error(f"Failed to send test in-app notification: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    @app.post("/api/v1/notifications/test/in-app", tags=["Test"])
+    async def test_in_app_notification(user_id: str, title: str = "Test Notification"):
+        """测试应用内通知（仅在开发环境可用）"""
+        try:
+            request = SendNotificationRequest(
+                type=NotificationType.IN_APP,
+                recipient_id=user_id,
+                subject=title,
+                content="This is a test in-app notification.",
+                priority=NotificationPriority.NORMAL,
+            )
+            return await service.send_notification(request)
+        except Exception as e:
+            logger.error(f"Failed to send test in-app notification: {e}")
+            raise HTTPException(status_code=500, detail="Failed to send test notification")
 
 
 if __name__ == "__main__":

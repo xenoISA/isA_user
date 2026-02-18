@@ -184,7 +184,11 @@ class VaultShareRequest(BaseModel):
 
 class VaultTestRequest(BaseModel):
     """Request to test a credential"""
-    test_endpoint: Optional[str] = Field(None, description="Optional endpoint to test against")
+    test_endpoint: Optional[str] = Field(
+        None,
+        description="Optional endpoint to test against. Must be HTTPS and not target private IPs.",
+        pattern=r"^https://[^/].*$",
+    )
 
 
 # ============ Response Models ============

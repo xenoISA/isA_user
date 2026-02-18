@@ -611,4 +611,4 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("ALBUM_SERVICE_PORT", "8219"))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True, log_level="info")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=os.getenv("DEBUG", "false").lower() == "true", log_level="info")

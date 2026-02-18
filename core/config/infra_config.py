@@ -28,7 +28,7 @@ class InfraConfig:
     postgres_port: int = 5432
     postgres_db: str = "postgres"
     postgres_user: str = "postgres"
-    postgres_password: str = "postgres"
+    postgres_password: str = ""  # Must be set via environment variable
 
     # ===========================================
     # Redis (native - port 6379)
@@ -50,8 +50,8 @@ class InfraConfig:
     # ===========================================
     minio_host: str = "localhost"
     minio_port: int = 9000
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin"
+    minio_access_key: str = ""  # Must be set via environment variable
+    minio_secret_key: str = ""  # Must be set via environment variable
     minio_secure: bool = False
 
     # ===========================================
@@ -60,7 +60,7 @@ class InfraConfig:
     neo4j_host: str = "localhost"
     neo4j_port: int = 7687
     neo4j_user: str = "neo4j"
-    neo4j_password: str = "neo4j"
+    neo4j_password: str = ""  # Must be set via environment variable
 
     # ===========================================
     # NATS (native - port 4222)
