@@ -82,19 +82,21 @@ class JWTManager:
         """
         import os
 
-        # Get secret from environment or generate one
-        self.secret_key = secret_key or os.getenv("JWT_SECRET") or self._generate_secret()
+        # Get secret from environment — fail in production if not set
+        _environment = os.getenv("ENVIRONMENT", "development")
+        self.secret_key = secret_key or os.getenv("JWT_SECRET")
+        if not self.secret_key:
+            if _environment in ("production", "staging"):
+                raise RuntimeError("JWT_SECRET must be set in production/staging environments")
+            self.secret_key = self._generate_secret()
+            logger.warning(
+                "No JWT_SECRET provided - using ephemeral generated secret. "
+                "Tokens will be invalidated on restart. Set JWT_SECRET for persistence."
+            )
         self.algorithm = algorithm
         self.issuer = issuer
         self.access_token_expiry = access_token_expiry
         self.refresh_token_expiry = refresh_token_expiry
-
-        # Warn if using default secret
-        if not secret_key and not os.getenv("JWT_SECRET"):
-            logger.warning(
-                "No JWT_SECRET provided - using generated secret. "
-                "This should ONLY be used in development!"
-            )
 
     def _generate_secret(self) -> str:
         """Generate a secure random secret"""

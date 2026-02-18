@@ -1404,55 +1404,45 @@ async def get_auth_stats():
     }
 
 
-# Development/Testing Endpoints
+# Development/Testing Endpoints — only registered in debug mode
+_ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+if config.debug and _ENVIRONMENT == "development":
+    @app.get("/api/v1/auth/dev/pending-registration/{pending_id}")
+    async def get_pending_registration(
+        pending_id: str, auth_service: AuthenticationService = Depends(get_auth_service)
+    ):
+        """Development endpoint: Get pending registration info (including verification code)
 
+        WARNING: Only available when DEBUG=true AND ENVIRONMENT=development.
+        """
+        if hasattr(auth_service, "_pending_registrations"):
+            record = auth_service._pending_registrations.get(pending_id)
+            if not record:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Pending registration not found",
+                )
 
-@app.get("/api/v1/auth/dev/pending-registration/{pending_id}")
-async def get_pending_registration(
-    pending_id: str, auth_service: AuthenticationService = Depends(get_auth_service)
-):
-    """Development endpoint: Get pending registration info (including verification code)
+            if record["expires_at"] < datetime.now(timezone.utc):
+                return {
+                    "found": True,
+                    "expired": True,
+                    "expires_at": record["expires_at"].isoformat(),
+                }
 
-    WARNING: This endpoint should only be enabled in development/test environments.
-    It exposes the verification code which should be kept secret in production.
-    """
-    # Check if we're in development mode
-    if not config.debug:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint is only available in debug mode",
-        )
-
-    # Access the internal pending registrations (for testing only)
-    if hasattr(auth_service, "_pending_registrations"):
-        record = auth_service._pending_registrations.get(pending_id)
-        if not record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Pending registration not found",
-            )
-
-        # Check if expired
-        if record["expires_at"] < datetime.now(timezone.utc):
             return {
                 "found": True,
-                "expired": True,
+                "expired": False,
+                "email": record["email"],
+                "verification_code": record["code"],
                 "expires_at": record["expires_at"].isoformat(),
+                "verified": record.get("verified", False),
             }
-
-        return {
-            "found": True,
-            "expired": False,
-            "email": record["email"],
-            "verification_code": record["code"],
-            "expires_at": record["expires_at"].isoformat(),
-            "verified": record.get("verified", False),
-        }
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Pending registrations store not available",
-        )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Pending registrations store not available",
+            )
 
 
 # Startup Configuration

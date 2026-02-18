@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 
 # 添加父目录到路径
@@ -220,11 +220,46 @@ async def service_info():
     }
 
 
+# ==================== Auth Dependency ====================
+
+
+async def get_authenticated_user_id(request: Request) -> str:
+    """Extract user ID from verified authentication credentials."""
+    from core.auth_dependencies import (
+        INTERNAL_SERVICE_SECRET,
+        _extract_user_id_from_bearer,
+        _extract_user_id_from_api_key,
+    )
+
+    x_internal_service = request.headers.get("X-Internal-Service")
+    x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
+    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+        return "internal-service"
+
+    authorization = request.headers.get("authorization")
+    if authorization:
+        uid = await _extract_user_id_from_bearer(authorization)
+        if uid:
+            return uid
+
+    x_api_key = request.headers.get("X-API-Key")
+    if x_api_key:
+        uid = await _extract_user_id_from_api_key(x_api_key)
+        if uid:
+            return uid
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="User authentication required",
+    )
+
+
 # ==================== 核心文件操作路由 ====================
 
 
 @app.post("/api/v1/storage/files/upload", response_model=FileUploadResponse)
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     user_id: str = Form(...),
     organization_id: Optional[str] = Form(None),
@@ -232,6 +267,7 @@ async def upload_file(
     tags: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
     enable_indexing: bool = Form(True),
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """
     上传文件到存储服务
@@ -279,11 +315,13 @@ async def upload_file(
 
 @app.get("/api/v1/storage/files", response_model=List[FileInfoResponse])
 async def list_files(
+    request: Request,
     user_id: str = Query(..., description="用户ID"),
     organization_id: Optional[str] = Query(None, description="组织ID"),
     prefix: Optional[str] = Query(None, description="路径前缀"),
     status: Optional[FileStatus] = Query(None, description="文件状态"),
     limit: int = Query(100, ge=1, le=1000, description="返回数量"),
+    caller_id: str = Depends(get_authenticated_user_id),
     offset: int = Query(0, ge=0, description="偏移量"),
 ):
     """
@@ -357,7 +395,7 @@ async def get_file_info(file_id: str, user_id: str = Query(..., description="用
 
 
 @app.get("/api/v1/storage/files/{file_id}/download")
-async def download_file(file_id: str, user_id: str = Query(..., description="用户ID")):
+async def download_file(file_id: str, user_id: str = Query(..., description="用户ID"), caller_id: str = Depends(get_authenticated_user_id)):
     """
     获取文件下载URL
 
@@ -377,8 +415,10 @@ async def download_file(file_id: str, user_id: str = Query(..., description="用
 @app.delete("/api/v1/storage/files/{file_id}")
 async def delete_file(
     file_id: str,
+    request: Request,
     user_id: str = Query(..., description="用户ID"),
     permanent: bool = Query(False, description="是否永久删除"),
+    caller_id: str = Depends(get_authenticated_user_id),
 ):
     """
     删除文件
@@ -404,10 +444,12 @@ async def delete_file(
 @app.post("/api/v1/storage/files/{file_id}/share", response_model=FileShareResponse)
 async def share_file(
     file_id: str,
+    request: Request,
     shared_by: str = Form(...),
     shared_with: Optional[str] = Form(None),
     shared_with_email: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
+    caller_id: str = Depends(get_authenticated_user_id),
     expires_hours: int = Form(24),
     max_downloads: Optional[int] = Form(None),
     view: bool = Form(True),
