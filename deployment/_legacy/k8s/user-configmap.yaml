@@ -11,7 +11,7 @@ metadata:
 data:
   # Environment
   ENVIRONMENT: "staging"
-  DEBUG: "true"
+  DEBUG: "false"
   LOG_LEVEL: "INFO"
 
   # Consul
@@ -45,7 +45,7 @@ data:
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "postgres"
   POSTGRES_USER: "postgres"
-  POSTGRES_PASSWORD: "staging_postgres_2024"
+  # POSTGRES_PASSWORD: Set via Kubernetes Secret, not ConfigMap
 
   # NATS
   NATS_HOST: "nats.isa-cloud-staging.svc.cluster.local"
@@ -59,8 +59,8 @@ data:
   # MinIO - Native S3 Connection (aioboto3)
   MINIO_HOST: "minio.isa-cloud-staging.svc.cluster.local"
   MINIO_PORT: "9000"
-  MINIO_ACCESS_KEY: "minioadmin"
-  MINIO_SECRET_KEY: "minioadmin"
+  # MINIO_ACCESS_KEY: Set via Kubernetes Secret, not ConfigMap
+  # MINIO_SECRET_KEY: Set via Kubernetes Secret, not ConfigMap
   MINIO_BUCKET_NAME: "isa-storage"
 
   # Platform Services

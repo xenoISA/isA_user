@@ -16,8 +16,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 内部服务认证密钥（从环境变量读取，生产环境必须设置）
-INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "dev-internal-secret-change-in-production")
+# 内部服务认证密钥 — no default; must be set via environment variable
+_ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET")
+if not INTERNAL_SERVICE_SECRET:
+    if _ENVIRONMENT in ("production", "staging"):
+        raise RuntimeError("INTERNAL_SERVICE_SECRET must be set in production/staging environments")
+    else:
+        INTERNAL_SERVICE_SECRET = "dev-internal-secret-change-in-production"
+        logger.warning("INTERNAL_SERVICE_SECRET not set — using insecure dev default. Do NOT use in production.")
 INTERNAL_SERVICE_HEADER = "X-Internal-Service"
 INTERNAL_SERVICE_SECRET_HEADER = "X-Internal-Service-Secret"
 

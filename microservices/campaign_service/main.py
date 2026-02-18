@@ -183,11 +183,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {exc}\n{error_traceback}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": str(exc),
-            "type": type(exc).__name__,
-            "traceback": error_traceback.split("\n")[-5:-1]  # Last few lines of traceback
-        },
+        content={"detail": "Internal server error"},
     )
 
 
@@ -206,12 +202,44 @@ def get_service():
     return factory.service
 
 
-def get_auth_context(request: Request) -> dict:
-    """Extract auth context from request headers"""
+async def get_auth_context(request: Request) -> dict:
+    """Extract auth context from verified authentication credentials."""
+    from core.auth_dependencies import (
+        INTERNAL_SERVICE_SECRET,
+        _extract_user_id_from_bearer,
+        _extract_user_id_from_api_key,
+    )
+
+    user_id = None
+
+    # 1. Internal service auth
+    x_internal_service = request.headers.get("X-Internal-Service")
+    x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
+    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+        user_id = "internal-service"
+
+    # 2. Bearer JWT auth
+    if not user_id:
+        authorization = request.headers.get("authorization")
+        if authorization:
+            user_id = await _extract_user_id_from_bearer(authorization)
+
+    # 3. API Key auth
+    if not user_id:
+        x_api_key = request.headers.get("X-API-Key")
+        if x_api_key:
+            user_id = await _extract_user_id_from_api_key(x_api_key)
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User authentication required",
+        )
+
     return {
-        "user_id": request.headers.get("X-User-ID", "system"),
+        "user_id": user_id,
         "organization_id": request.headers.get("X-Organization-ID"),
-        "role": request.headers.get("X-User-Role", "user"),
+        "role": "service" if user_id == "internal-service" else "user",
     }
 
 

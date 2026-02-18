@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import List, Optional
 
 import uvicorn
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status
 
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -67,15 +67,38 @@ event_bus = None  # NATS event bus
 consul_registry = None  # Consul registry
 
 
-def get_user_id(request: Request) -> str:
-    """Extract user ID from request headers"""
-    x_user_id = request.headers.get("X-User-Id")
-    if not x_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User authentication required",
-        )
-    return x_user_id
+async def get_user_id(request: Request) -> str:
+    """Extract user ID from verified authentication credentials (JWT, API Key, or internal service)."""
+    from core.auth_dependencies import (
+        INTERNAL_SERVICE_SECRET,
+        _extract_user_id_from_bearer,
+        _extract_user_id_from_api_key,
+    )
+
+    # 1. Internal service auth
+    x_internal_service = request.headers.get("X-Internal-Service")
+    x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
+    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+        return "internal-service"
+
+    # 2. Bearer JWT auth
+    authorization = request.headers.get("authorization")
+    if authorization:
+        user_id = await _extract_user_id_from_bearer(authorization)
+        if user_id:
+            return user_id
+
+    # 3. API Key auth
+    x_api_key = request.headers.get("X-API-Key")
+    if x_api_key:
+        user_id = await _extract_user_id_from_api_key(x_api_key)
+        if user_id:
+            return user_id
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="User authentication required",
+    )
 
 
 def get_client_info(request: Request) -> tuple:
@@ -283,7 +306,7 @@ async def create_secret(
     """Create a new secret"""
     try:
         logger.info(f"[main.py] create_secret endpoint called for user header")
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         logger.info(f"[main.py] User ID: {user_id}")
         ip_address, user_agent = get_client_info(request)
 
@@ -321,7 +344,7 @@ async def get_secret(
 ):
     """Get a secret by ID (optionally decrypted)"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         ip_address, user_agent = get_client_info(request)
 
         success, result, message = await vault_service.get_secret(
@@ -362,7 +385,7 @@ async def list_secrets(
 ):
     """List user's secrets"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
 
         tag_list = tags.split(",") if tags else None
 
@@ -395,7 +418,7 @@ async def update_secret(
 ):
     """Update a secret"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         ip_address, user_agent = get_client_info(request)
 
         success, result, message = await vault_service.update_secret(
@@ -431,7 +454,7 @@ async def delete_secret(
 ):
     """Delete a secret"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         ip_address, user_agent = get_client_info(request)
 
         success, message = await vault_service.delete_secret(
@@ -467,7 +490,7 @@ async def rotate_secret(
 ):
     """Rotate a secret (create new version). Secret passed in request body, not query params."""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         ip_address, user_agent = get_client_info(request)
 
         success, result, message = await vault_service.rotate_secret(
@@ -505,7 +528,7 @@ async def share_secret(
 ):
     """Share a secret with another user or organization"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         ip_address, user_agent = get_client_info(request)
 
         success, result, message = await vault_service.share_secret(
@@ -537,7 +560,7 @@ async def get_shared_secrets(
 ):
     """Get secrets shared with the user"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
 
         success, result, message = await vault_service.get_shared_secrets(
             user_id=user_id
@@ -568,7 +591,7 @@ async def get_audit_logs(
 ):
     """Get access audit logs"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
 
         success, result, message = await vault_service.get_access_logs(
             user_id=user_id, vault_id=vault_id, page=page, page_size=page_size
@@ -592,7 +615,7 @@ async def get_vault_stats(
 ):
     """Get vault statistics"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
 
         success, result, message = await vault_service.get_stats(user_id=user_id)
 
@@ -617,7 +640,7 @@ async def test_credential(
 ):
     """Test if a credential is valid"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
 
         test_endpoint = test_request.test_endpoint if test_request else None
 

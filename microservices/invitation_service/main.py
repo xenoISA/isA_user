@@ -41,15 +41,38 @@ logger = app_logger  # for backward compatibility
 # 全局服务实例
 invitation_service = None
 consul_registry: Optional[ConsulRegistry] = None
-def get_user_id(request: Request) -> str:
-    """从请求头获取用户ID"""
-    x_user_id = request.headers.get("X-User-Id")
-    if not x_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User authentication required"
-        )
-    return x_user_id
+async def get_user_id(request: Request) -> str:
+    """Extract user ID from verified authentication credentials (JWT, API Key, or internal service)."""
+    from core.auth_dependencies import (
+        INTERNAL_SERVICE_SECRET,
+        _extract_user_id_from_bearer,
+        _extract_user_id_from_api_key,
+    )
+
+    # 1. Internal service auth
+    x_internal_service = request.headers.get("X-Internal-Service")
+    x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
+    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+        return "internal-service"
+
+    # 2. Bearer JWT auth
+    authorization = request.headers.get("authorization")
+    if authorization:
+        user_id = await _extract_user_id_from_bearer(authorization)
+        if user_id:
+            return user_id
+
+    # 3. API Key auth
+    x_api_key = request.headers.get("X-API-Key")
+    if x_api_key:
+        user_id = await _extract_user_id_from_api_key(x_api_key)
+        if user_id:
+            return user_id
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="User authentication required",
+    )
 
 
 def get_invitation_service() -> InvitationService:
@@ -201,7 +224,7 @@ async def create_invitation(
 ):
     """创建邀请"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         success, invitation, message = await invitation_service.create_invitation(
             organization_id=organization_id,
             inviter_user_id=user_id,
@@ -262,7 +285,7 @@ async def accept_invitation(
 ):
     """接受邀请"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         # 如果请求中有user_id，使用它，否则使用header中的
         actual_user_id = request_data.user_id if request_data.user_id else user_id
         
@@ -296,7 +319,7 @@ async def get_organization_invitations(
 ):
     """获取组织邀请列表"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         success, invitation_list, message = await invitation_service.get_organization_invitations(
             organization_id=organization_id,
             user_id=user_id,
@@ -327,7 +350,7 @@ async def cancel_invitation(
 ):
     """取消邀请"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         success, message = await invitation_service.cancel_invitation(
             invitation_id=invitation_id,
             user_id=user_id
@@ -358,7 +381,7 @@ async def resend_invitation(
 ):
     """重发邀请"""
     try:
-        user_id = get_user_id(request)
+        user_id = await get_user_id(request)
         success, message = await invitation_service.resend_invitation(
             invitation_id=invitation_id,
             user_id=user_id

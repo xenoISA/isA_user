@@ -209,7 +209,7 @@ async def get_user_context(
     For internal service calls, use X-Internal-Service + X-Internal-Service-Secret headers
     """
     # Allow internal service-to-service calls with verified secret
-    internal_secret = os.getenv("INTERNAL_SERVICE_SECRET", "dev-internal-secret-change-in-production")
+    from core.auth_dependencies import INTERNAL_SERVICE_SECRET as internal_secret
     if x_internal_service == "true" and x_internal_service_secret == internal_secret:
         return {
             "user_id": "internal_service",
