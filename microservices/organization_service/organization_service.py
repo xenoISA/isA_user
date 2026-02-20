@@ -501,7 +501,41 @@ class OrganizationService:
             raise OrganizationServiceError(f"Failed to get organization members: {str(e)}")
     
     # ============ Context Switching ============
-    
+
+    async def get_user_context(
+        self,
+        user_id: str
+    ) -> OrganizationContextResponse:
+        """Get the user's current organization context (first org they belong to, or individual)."""
+        try:
+            organizations_data = await self.repository.get_user_organizations(user_id)
+            if organizations_data:
+                org = organizations_data[0]
+                org_id = org.get('organization_id') or org.get('id')
+                role_data = await self.repository.get_user_organization_role(org_id, user_id)
+                return OrganizationContextResponse(
+                    context_type="organization",
+                    organization_id=org_id,
+                    organization_name=org.get('name'),
+                    user_role=OrganizationRole(role_data['role']) if role_data else None,
+                    permissions=role_data.get('permissions', []) if role_data else [],
+                    credits_available=org.get('credits_pool')
+                )
+            else:
+                return OrganizationContextResponse(
+                    context_type="individual",
+                    organization_id=None,
+                    organization_name=None,
+                    user_role=None,
+                    permissions=[],
+                    credits_available=None
+                )
+        except Exception as e:
+            logger.error(f"Error getting context for user {user_id}: {e}")
+            if isinstance(e, OrganizationServiceError):
+                raise
+            raise OrganizationServiceError(f"Failed to get user context: {str(e)}")
+
     async def switch_user_context(
         self,
         user_id: str,

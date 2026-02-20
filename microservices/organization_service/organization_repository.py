@@ -258,11 +258,29 @@ class OrganizationRepository:
             if not org_result:
                 return []
 
+            # Batch-fetch member counts in a single query instead of N+1
+            count_placeholders = ', '.join([f'${i+1}' for i in range(len(org_ids))])
+            count_query = f"""
+                SELECT organization_id, COUNT(*) as count
+                FROM {self.schema}.{self.org_members_table}
+                WHERE organization_id IN ({count_placeholders}) AND status = ${len(org_ids) + 1}
+                GROUP BY organization_id
+            """
+
+            async with self.db:
+                count_result = await self.db.query(
+                    count_query,
+                    org_ids + [MemberStatus.ACTIVE.value],
+                    schema=self.schema
+                )
+
+            count_map = {r['organization_id']: r['count'] for r in (count_result or [])}
+
             # 组合数据
             organizations = []
             for org in org_result:
                 org['user_role'] = role_map.get(org['organization_id'])
-                org['member_count'] = await self.get_organization_member_count(org['organization_id'])
+                org['member_count'] = count_map.get(org['organization_id'], 0)
                 organizations.append(org)
 
             return organizations
