@@ -288,8 +288,14 @@ class BillingService:
 
             # Parse nested pricing structure from product service
             # The response has: pricing_model.base_unit_price and effective_pricing.base_unit_price
-            pricing_model = pricing_info.get("pricing_model", {})
-            effective_pricing = pricing_info.get("effective_pricing", {})
+            pricing_model = pricing_info.get("pricing_model") or {}
+            effective_pricing = pricing_info.get("effective_pricing") or {}
+            tiers = pricing_info.get("tiers") or []
+            tier_unit_price = None
+            if isinstance(tiers, list) and tiers:
+                first_tier = tiers[0] or {}
+                if isinstance(first_tier, dict):
+                    tier_unit_price = first_tier.get("price_per_unit")
 
             # Try to get unit price from various locations
             unit_price = Decimal(
@@ -297,6 +303,8 @@ class BillingService:
                     pricing_info.get("unit_price")
                     or effective_pricing.get("base_unit_price")
                     or pricing_model.get("base_unit_price")
+                    or pricing_info.get("base_price")
+                    or tier_unit_price
                     or 0
                 )
             )
@@ -552,6 +560,79 @@ class BillingService:
                         message=f"Wallet deduction failed: {error}",
                         billing_record_id=billing_record.billing_id,
                     )
+
+            elif request.billing_method == BillingMethod.SUBSCRIPTION_INCLUDED:
+                credits_to_consume = self._convert_to_credits(
+                    calculation.total_cost, calculation.currency
+                )
+                success, transaction_id, error = await self._process_subscription_credit_consumption(
+                    user_id=billing_record.user_id,
+                    organization_id=billing_record.organization_id,
+                    credits_amount=credits_to_consume,
+                    service_type=billing_record.service_type.value,
+                    reference_id=billing_record.billing_id,
+                )
+
+                if success:
+                    await self.repository.update_billing_record_status(
+                        billing_record.billing_id,
+                        BillingStatus.COMPLETED,
+                        payment_transaction_id=transaction_id,
+                    )
+                    return ProcessBillingResponse(
+                        success=True,
+                        message="Billing processed successfully via subscription credits",
+                        billing_record_id=billing_record.billing_id,
+                        amount_charged=calculation.total_cost,
+                        billing_method_used=BillingMethod.SUBSCRIPTION_INCLUDED,
+                    )
+
+                await self.repository.update_billing_record_status(
+                    billing_record.billing_id,
+                    BillingStatus.FAILED,
+                    failure_reason=error or "Subscription credit consumption failed",
+                )
+                return ProcessBillingResponse(
+                    success=False,
+                    message=f"Subscription credit consumption failed: {error}",
+                    billing_record_id=billing_record.billing_id,
+                )
+
+            elif request.billing_method == BillingMethod.CREDIT_CONSUMPTION:
+                credits_to_consume = self._convert_to_credits(
+                    calculation.total_cost, calculation.currency
+                )
+                success, transaction_id, error = await self._process_purchased_credit_consumption(
+                    user_id=billing_record.user_id,
+                    credits_amount=credits_to_consume,
+                    service_type=billing_record.service_type.value,
+                    reference_id=billing_record.billing_id,
+                )
+
+                if success:
+                    await self.repository.update_billing_record_status(
+                        billing_record.billing_id,
+                        BillingStatus.COMPLETED,
+                        payment_transaction_id=transaction_id,
+                    )
+                    return ProcessBillingResponse(
+                        success=True,
+                        message="Billing processed successfully via purchased credits",
+                        billing_record_id=billing_record.billing_id,
+                        amount_charged=calculation.total_cost,
+                        billing_method_used=BillingMethod.CREDIT_CONSUMPTION,
+                    )
+
+                await self.repository.update_billing_record_status(
+                    billing_record.billing_id,
+                    BillingStatus.FAILED,
+                    failure_reason=error or "Purchased credit consumption failed",
+                )
+                return ProcessBillingResponse(
+                    success=False,
+                    message=f"Purchased credit consumption failed: {error}",
+                    billing_record_id=billing_record.billing_id,
+                )
 
             elif request.billing_method == BillingMethod.PAYMENT_CHARGE:
                 # 这里需要调用 Payment Service 创建支付意图
@@ -897,6 +978,21 @@ class BillingService:
 
         # Priority 4: External payment required
         return BillingMethod.PAYMENT_CHARGE
+
+    def _convert_to_credits(self, amount: Decimal, currency: Currency) -> int:
+        """
+        Convert billing amount to platform credits.
+
+        Rules:
+        - CREDIT currency is already credits.
+        - USD converts with 1 USD = 100,000 credits.
+        - Always charge at least 1 credit for non-zero billable usage.
+        """
+        if currency == Currency.CREDIT:
+            credits = int(amount)
+        else:
+            credits = int(amount * Decimal("100000"))
+        return max(1, credits)
 
     async def _process_wallet_deduction(
         self, user_id: str, amount: Decimal, reference_id: str

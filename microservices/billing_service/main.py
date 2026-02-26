@@ -96,18 +96,30 @@ async def lifespan(app: FastAPI):
 
                 # Get event handlers
                 handler_map = get_event_handlers(billing_service, event_bus)
+                consumer_suffix = os.getenv("BILLING_CONSUMER_SUFFIX", "").strip()
+                delivery_policy = os.getenv(
+                    "BILLING_CONSUMER_DELIVERY_POLICY", "all"
+                ).strip().lower() or "all"
 
                 # Subscribe to events
                 for pattern, handler_func in handler_map.items():
+                    durable_name = (
+                        f"billing-{pattern.replace('.', '-').replace('*', 'all')}"
+                        f"-consumer"
+                    )
+                    if consumer_suffix:
+                        durable_name = f"{durable_name}-{consumer_suffix}"
                     await event_bus.subscribe_to_events(
                         pattern=pattern,
                         handler=handler_func,
-                        durable=f"billing-{pattern.replace('.', '-').replace('*', 'all')}-consumer",
+                        durable=durable_name,
+                        delivery_policy=delivery_policy,
                     )
                     logger.info(f"✅ Subscribed to {pattern}")
 
                 logger.info(
-                    f"✅ Billing event subscriber started ({len(handler_map)} event patterns)"
+                    f"✅ Billing event subscriber started ({len(handler_map)} event patterns, "
+                    f"delivery_policy={delivery_policy}, suffix={consumer_suffix or 'default'})"
                 )
 
             except Exception as e:
