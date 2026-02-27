@@ -227,16 +227,21 @@ class SubscriptionClient:
             Tier info dict or None if not found
         """
         try:
-            # This would call the product service for tier definitions
-            # For now, return basic tier info from subscription service
+            # Note: /api/v1/tiers/{tier_code} does not exist on the
+            # subscription service.  Query the subscriptions list instead.
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
-                    f"{self.base_url}/api/v1/tiers/{tier_code}"
+                    f"{self.base_url}/api/v1/subscriptions",
+                    params={"tier_code": tier_code}
                 )
 
                 if response.status_code == 200:
                     return response.json()
                 else:
+                    logger.warning(
+                        f"Failed to get tier info for {tier_code}: "
+                        f"{response.status_code}"
+                    )
                     return None
 
         except Exception as e:
