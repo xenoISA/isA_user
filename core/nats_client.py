@@ -415,7 +415,10 @@ class NATSEventBus:
             except Exception as e:
                 logger.debug(f"Consumer creation note: {e}")
 
-            # Pull loop
+            # Pull loop with exponential backoff on errors
+            _backoff_delay = 1.0
+            _MAX_BACKOFF = 30.0
+            _pull_count = 0
             while self._subscriptions.get(pattern, False):
                 try:
                     messages = await self._client.pull_messages(
@@ -425,6 +428,8 @@ class NATSEventBus:
                     )
 
                     if messages:
+                        _backoff_delay = 1.0  # Reset on success
+                        _pull_count += len(messages)
                         for msg in messages:
                             try:
                                 # Parse envelope
@@ -453,8 +458,12 @@ class NATSEventBus:
                         await asyncio.sleep(1)
 
                 except Exception as pull_e:
-                    logger.warning(f"Pull error (will retry): {pull_e}")
-                    await asyncio.sleep(5)
+                    logger.warning(
+                        f"Pull error (retry in {_backoff_delay:.0f}s, "
+                        f"total_processed={_pull_count}): {pull_e}"
+                    )
+                    await asyncio.sleep(_backoff_delay)
+                    _backoff_delay = min(_backoff_delay * 2, _MAX_BACKOFF)
 
         except Exception as e:
             logger.error(f"Consumer loop error for {pattern}: {e}")
