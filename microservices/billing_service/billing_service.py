@@ -297,17 +297,29 @@ class BillingService:
                 if isinstance(first_tier, dict):
                     tier_unit_price = first_tier.get("price_per_unit")
 
-            # Try to get unit price from various locations
-            unit_price = Decimal(
-                str(
-                    pricing_info.get("unit_price")
-                    or effective_pricing.get("base_unit_price")
-                    or pricing_model.get("base_unit_price")
-                    or pricing_info.get("base_price")
-                    or tier_unit_price
-                    or 0
+            # Try to get unit price from various locations (priority order).
+            # Use `is not None` so that a legitimate price of 0 (free-tier)
+            # is not skipped in favour of a downstream fallback field.
+            candidates = [
+                pricing_info.get("unit_price"),
+                pricing_info.get("base_price"),
+                effective_pricing.get("base_unit_price"),
+                pricing_model.get("base_unit_price"),
+                tier_unit_price,
+            ]
+            raw_price = next((c for c in candidates if c is not None), None)
+
+            if raw_price is None:
+                logger.warning(
+                    f"Pricing for product {request.product_id} resolved to None — "
+                    f"no price field found in response. "
+                    f"pricing_info keys: {list(pricing_info.keys())}, "
+                    f"pricing_model keys: {list(pricing_model.keys())}, "
+                    f"effective_pricing keys: {list(effective_pricing.keys())}, "
+                    f"tiers count: {len(tiers)}"
                 )
-            )
+
+            unit_price = Decimal(str(raw_price or 0))
 
             total_cost = request.usage_amount * unit_price
 
@@ -831,17 +843,14 @@ class BillingService:
         except Exception as e:
             logger.error(f"Error getting product pricing: {e}")
 
-        # All attempts failed - return default fallback pricing
-        logger.warning(
-            f"Product pricing unavailable for {product_id}, using default fallback (zero-cost)"
+        # All attempts failed - return None so the caller can distinguish
+        # "product has zero price" from "pricing lookup failed entirely"
+        logger.error(
+            f"Product pricing unavailable for {product_id} — "
+            "all lookup attempts failed.  Returning None to prevent "
+            "zero-cost billing records.  Check product_service connectivity."
         )
-        return {
-            "product_id": product_id,
-            "unit_price": 0,
-            "currency": "CREDIT",
-            "pricing_model": {"pricing_type": "default_fallback", "base_unit_price": 0},
-            "effective_pricing": {"base_unit_price": 0},
-        }
+        return None
 
     async def _get_subscription_info(
         self, subscription_id: str
