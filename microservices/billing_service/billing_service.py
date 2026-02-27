@@ -297,18 +297,22 @@ class BillingService:
                 if isinstance(first_tier, dict):
                     tier_unit_price = first_tier.get("price_per_unit")
 
-            # Try to get unit price from various locations (priority order)
-            raw_price = (
-                pricing_info.get("unit_price")
-                or pricing_info.get("base_price")
-                or effective_pricing.get("base_unit_price")
-                or pricing_model.get("base_unit_price")
-                or tier_unit_price
-            )
+            # Try to get unit price from various locations (priority order).
+            # Use `is not None` so that a legitimate price of 0 (free-tier)
+            # is not skipped in favour of a downstream fallback field.
+            candidates = [
+                pricing_info.get("unit_price"),
+                pricing_info.get("base_price"),
+                effective_pricing.get("base_unit_price"),
+                pricing_model.get("base_unit_price"),
+                tier_unit_price,
+            ]
+            raw_price = next((c for c in candidates if c is not None), None)
 
-            if raw_price is None or raw_price == 0:
+            if raw_price is None:
                 logger.warning(
-                    f"Pricing for product {request.product_id} resolved to zero — "
+                    f"Pricing for product {request.product_id} resolved to None — "
+                    f"no price field found in response. "
                     f"pricing_info keys: {list(pricing_info.keys())}, "
                     f"pricing_model keys: {list(pricing_model.keys())}, "
                     f"effective_pricing keys: {list(effective_pricing.keys())}, "
