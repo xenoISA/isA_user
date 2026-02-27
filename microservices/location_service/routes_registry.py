@@ -189,7 +189,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
             location_routes += 1
     return {
         "route_count": str(len(SERVICE_ROUTES)),
-        "base_path": "/api/v1",
+        "base_path": "/api/v1/locations",
         "health": str(health_routes),
         "locations": str(location_routes),
         "geofences": str(geofence_routes),
