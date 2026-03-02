@@ -183,9 +183,9 @@ fi
 # Test 6: Get User Info from Token
 if [ -n "$JWT_TOKEN" ] && [ "$JWT_TOKEN" != "null" ]; then
     print_section "Test 6: Get User Info from Token"
-    echo "GET ${API_BASE}/user-info?token=..."
+    echo "POST ${API_BASE}/user-info"
 
-    USER_INFO_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/user-info?token=${JWT_TOKEN}")
+    USER_INFO_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/user-info" -H "Content-Type: application/json" -d "{\"token\": \"${JWT_TOKEN}\"}")
     HTTP_CODE=$(echo "$USER_INFO_RESPONSE" | tail -n1)
     RESPONSE_BODY=$(echo "$USER_INFO_RESPONSE" | sed '$d')
 
@@ -415,9 +415,9 @@ fi
 # Test 12: Get User Info from Custom JWT Token
 if [ -n "$ACCESS_TOKEN" ] && [ "$ACCESS_TOKEN" != "null" ]; then
     print_section "Test 12: Get User Info from Custom JWT Token"
-    echo "GET ${API_BASE}/user-info?token=..."
+    echo "POST ${API_BASE}/user-info"
 
-    CUSTOM_USER_INFO_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_BASE}/user-info?token=${ACCESS_TOKEN}")
+    CUSTOM_USER_INFO_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_BASE}/user-info" -H "Content-Type: application/json" -d "{\"token\": \"${ACCESS_TOKEN}\"}")
     HTTP_CODE=$(echo "$CUSTOM_USER_INFO_RESPONSE" | tail -n1)
     RESPONSE_BODY=$(echo "$CUSTOM_USER_INFO_RESPONSE" | sed '$d')
 

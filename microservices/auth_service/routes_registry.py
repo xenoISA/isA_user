@@ -70,7 +70,7 @@ AUTH_SERVICE_ROUTES = [
     },
     {
         "path": "/api/v1/auth/user-info",
-        "methods": ["GET"],
+        "methods": ["POST"],
         "auth_required": False,
         "description": "Extract user info from token"
     },

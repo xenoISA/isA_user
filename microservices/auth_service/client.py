@@ -254,9 +254,9 @@ class AuthServiceClient:
             >>> print(f"User: {user_info['email']}")
         """
         try:
-            response = await self.client.get(
+            response = await self.client.post(
                 f"{self.base_url}/api/v1/auth/user-info",
-                headers={"Authorization": f"Bearer {token}"}
+                json={"token": token}
             )
             response.raise_for_status()
             return response.json()

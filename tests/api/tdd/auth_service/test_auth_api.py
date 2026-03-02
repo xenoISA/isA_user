@@ -213,9 +213,9 @@ class TestAuthRefreshEndpoint:
 
 class TestAuthUserInfoEndpoint:
     """
-    GET /api/v1/auth/user-info
+    POST /api/v1/auth/user-info
 
-    Extract user info from token.
+    Extract user info from token (POST to avoid token in URL/query params).
     """
 
     async def test_get_user_info_from_token(self, auth_api, api_assert):
@@ -228,7 +228,7 @@ class TestAuthUserInfoEndpoint:
         token = token_response.json().get("token")
 
         # Get user info
-        response = await auth_api.get("/user-info", params={"token": token})
+        response = await auth_api.post("/user-info", json={"token": token})
 
         api_assert.assert_success(response)
         data = response.json()
@@ -238,7 +238,7 @@ class TestAuthUserInfoEndpoint:
 
     async def test_user_info_invalid_token_returns_401(self, auth_api, api_assert):
         """RED: Invalid token should return 401"""
-        response = await auth_api.get("/user-info", params={"token": "invalid"})
+        response = await auth_api.post("/user-info", json={"token": "invalid"})
 
         api_assert.assert_unauthorized(response)
 

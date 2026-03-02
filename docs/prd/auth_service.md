@@ -888,12 +888,16 @@ curl -X POST http://localhost:8003/api/v1/auth/refresh \
 ---
 
 #### 5. Get User Info from Token
-**Endpoint**: `GET /api/v1/auth/user-info`
+**Endpoint**: `POST /api/v1/auth/user-info`
 
-**Description**: Extract user information from token
+**Description**: Extract user information from token. Uses POST to avoid exposing tokens in URLs/query params (security best practice).
 
-**Query Parameters**:
-- `token` (required): JWT token to extract info from
+**Request Body**:
+```json
+{
+  "token": "eyJ..."
+}
+```
 
 **Response 200**:
 ```json
@@ -915,11 +919,13 @@ curl -X POST http://localhost:8003/api/v1/auth/refresh \
 **Error Cases**:
 - Token expired
 - Token invalid
-- Missing token parameter
+- Missing token in request body
 
 **Example**:
 ```bash
-curl -X GET "http://localhost:8003/api/v1/auth/user-info?token=eyJ..."
+curl -X POST "http://localhost:8003/api/v1/auth/user-info" \
+  -H "Content-Type: application/json" \
+  -d '{"token": "eyJ..."}'
 ```
 
 ---
