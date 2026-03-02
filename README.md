@@ -1,12 +1,12 @@
 # isA User Platform
 
-A comprehensive microservices-based user management platform built with FastAPI, featuring 27 specialized services for authentication, payments, storage, IoT device management, AI-powered intelligence, and more.
+A comprehensive microservices-based user management platform built with FastAPI, featuring 35 specialized services for authentication, payments, storage, IoT device management, AI-powered intelligence, and more.
 
 ## 🏗️ Architecture Overview
 
 The isA User Platform follows a modern microservices architecture with:
 
-- **27 Microservices**: Specialized services handling different aspects of user management and business logic
+- **35 Microservices**: Specialized services handling different aspects of user management and business logic
 - **gRPC Infrastructure Layer**: All infrastructure services accessed via gRPC for performance and type safety
 - **Service Discovery**: Consul-based service registration and discovery
 - **Event-Driven**: NATS-based event streaming for inter-service communication
@@ -42,6 +42,10 @@ The isA User Platform follows a modern microservices architecture with:
 | **invitation_service** | 8213 | User invitation system |
 | **task_service** | 8211 | Asynchronous task management |
 | **vault_service** | 8214 | Secure data vault with encryption |
+| **credit_service** | 8229 | Credit system and credit transactions |
+| **subscription_service** | 8228 | Subscription lifecycle management |
+| **membership_service** | 8250 | Membership tiers and management |
+| **document_service** | 8227 | Document management and processing |
 
 ### Media & Content Services
 
@@ -66,6 +70,15 @@ The isA User Platform follows a modern microservices architecture with:
 |---------|------|-------------|
 | **notification_service** | 8206 | Multi-channel notification delivery |
 | **event_service** | 8230 | Event sourcing and NATS integration |
+
+### Commerce Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **campaign_service** | 8251 | Marketing campaigns and promotions |
+| **inventory_service** | 8252 | Stock reservations and inventory management |
+| **tax_service** | 8253 | Tax calculation and compliance |
+| **fulfillment_service** | 8254 | Shipping, shipment tracking, and fulfillment |
 
 ### IoT Services
 
@@ -476,7 +489,7 @@ pytest tests/ --cov=microservices
 ./microservices/order_service/tests/integration/test_event_subscriptions.sh
 ```
 
-**Test Status**: 25/27 services passing integration tests
+**Test Status**: 25/35 services passing integration tests
 
 ## 📁 Project Structure
 
@@ -502,7 +515,7 @@ isA_user/
 │   │   ├── loki_client.py     # Loki gRPC client
 │   │   └── consul_client.py   # Consul client
 │   └── proto/                 # Protocol buffer definitions
-├── microservices/             # Individual microservices (27 services)
+├── microservices/             # Individual microservices (35 services)
 │   ├── auth_service/
 │   ├── account_service/
 │   ├── session_service/
@@ -529,7 +542,15 @@ isA_user/
 │   ├── weather_service/
 │   ├── device_service/
 │   ├── ota_service/
-│   └── telemetry_service/
+│   ├── telemetry_service/
+│   ├── credit_service/
+│   ├── subscription_service/
+│   ├── document_service/
+│   ├── membership_service/
+│   ├── campaign_service/
+│   ├── inventory_service/
+│   ├── tax_service/
+│   └── fulfillment_service/
 ├── deployment/                # Deployment configurations
 │   ├── dev/                   # Development environment
 │   │   ├── .env
@@ -563,7 +584,7 @@ isA_user/
     └────────────┬─────────────────────────┘
                  │
     ┌────────────▼─────────────────────────┐
-    │  27 Microservices                    │
+    │  35 Microservices                    │
     │  - Core: Auth, Account, Session...   │
     │  - Business: Payment, Order, Wallet  │
     │  - Media: Storage, Album, Memory     │
@@ -709,7 +730,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 **Status**: ✅ Production Ready with gRPC Infrastructure
 
 **Key Features**:
-- ✅ 27 Microservices (expanded from 17)
+- ✅ 35 Microservices (expanded from 27)
 - ✅ gRPC Infrastructure Layer
 - ✅ Multi-Database Architecture (PostgreSQL, Redis, Neo4j, Qdrant, DuckDB)
 - ✅ Centralized Loki Logging
@@ -720,7 +741,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 - ✅ IoT Support (MQTT, Device Management)
 - ✅ Memory System (Multi-layered cognitive architecture)
 - ✅ Unified Management Scripts
-- ✅ 25/27 Services Passing Integration Tests
+- ✅ 25/35 Services Passing Integration Tests
 
 **Recent Updates**:
 - Added 10 new microservices (album, billing, calendar, compliance, location, media, memory, product, vault, weather)
