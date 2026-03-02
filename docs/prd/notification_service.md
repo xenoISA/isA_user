@@ -413,37 +413,42 @@ Create a unified, scalable notification platform that delivers the right message
 #### 1. Notification API
 ```
 POST /api/v1/notifications/send
-GET /api/v1/notifications/{notification_id}
-GET /api/v1/notifications/user/{user_id}
-DELETE /api/v1/notifications/{notification_id}
+GET  /api/v1/notifications                        # List (filter by user_id, type, status, priority)
+GET  /api/v1/notifications/{notification_id}       # Get single notification
+DELETE /api/v1/notifications/{notification_id}      # Delete notification
 
-POST /api/v1/notifications/batch
-GET /api/v1/notifications/batch/{batch_id}
+POST /api/v1/notifications/batch                   # Send batch
+GET  /api/v1/notifications/batch/{batch_id}        # Get batch status
 ```
 
 #### 2. Template API
 ```
-POST /api/v1/templates
-GET /api/v1/templates/{template_id}
-PUT /api/v1/templates/{template_id}
-DELETE /api/v1/templates/{template_id}
-POST /api/v1/templates/{template_id}/render
+POST /api/v1/notifications/templates
+GET  /api/v1/notifications/templates               # List templates
+GET  /api/v1/notifications/templates/{template_id}
+PUT  /api/v1/notifications/templates/{template_id}
+DELETE /api/v1/notifications/templates/{template_id}
+POST /api/v1/notifications/templates/{template_id}/render
 ```
 
-#### 3. Subscription API
+#### 3. In-App Notification API
 ```
-POST /api/v1/subscriptions/push
-GET /api/v1/subscriptions/user/{user_id}
-PUT /api/v1/subscriptions/{subscription_id}
-DELETE /api/v1/subscriptions/{subscription_id}
+GET  /api/v1/notifications/in-app/{user_id}                  # List user in-app notifications
+POST /api/v1/notifications/in-app/{notification_id}/read     # Mark as read
+POST /api/v1/notifications/in-app/{notification_id}/archive  # Archive notification
+GET  /api/v1/notifications/in-app/{user_id}/unread-count     # Get unread count
 ```
 
-#### 4. Analytics API
+#### 4. Push Subscription API
 ```
-GET /api/v1/analytics/delivery
-GET /api/v1/analytics/engagement
-GET /api/v1/analytics/campaigns
-POST /api/v1/analytics/export
+POST   /api/v1/notifications/push/subscribe              # Register push subscription
+GET    /api/v1/notifications/push/subscriptions/{user_id} # List user subscriptions
+DELETE /api/v1/notifications/push/unsubscribe             # Unsubscribe push
+```
+
+#### 5. Analytics API
+```
+GET  /api/v1/notifications/stats                   # Get notification statistics
 ```
 
 ### Integration Requirements

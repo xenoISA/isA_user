@@ -20,11 +20,16 @@ NOTIFICATION_SERVICE_ROUTES = [
     {"path": "/api/v1/notifications/templates/{template_id}", "methods": ["GET"], "auth_required": True, "description": "Get template"},
     {"path": "/api/v1/notifications/templates", "methods": ["GET"], "auth_required": True, "description": "List templates"},
     {"path": "/api/v1/notifications/templates/{template_id}", "methods": ["PUT"], "auth_required": True, "description": "Update template"},
+    {"path": "/api/v1/notifications/templates/{template_id}", "methods": ["DELETE"], "auth_required": True, "description": "Delete template"},
+    {"path": "/api/v1/notifications/templates/{template_id}/render", "methods": ["POST"], "auth_required": True, "description": "Render template"},
 
     # Notification Operations
     {"path": "/api/v1/notifications/send", "methods": ["POST"], "auth_required": True, "description": "Send notification"},
     {"path": "/api/v1/notifications/batch", "methods": ["POST"], "auth_required": True, "description": "Send batch notifications"},
+    {"path": "/api/v1/notifications/batch/{batch_id}", "methods": ["GET"], "auth_required": True, "description": "Get batch status"},
     {"path": "/api/v1/notifications", "methods": ["GET"], "auth_required": True, "description": "List notifications"},
+    {"path": "/api/v1/notifications/{notification_id}", "methods": ["GET"], "auth_required": True, "description": "Get notification"},
+    {"path": "/api/v1/notifications/{notification_id}", "methods": ["DELETE"], "auth_required": True, "description": "Delete notification"},
 
     # In-App Notifications
     {"path": "/api/v1/notifications/in-app/{user_id}", "methods": ["GET"], "auth_required": True, "description": "Get in-app notifications"},
