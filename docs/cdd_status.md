@@ -1,7 +1,7 @@
 # isA_user - CDD/TDD Status
 
 **Updated**: 2026-03-02
-**Components**: 33
+**Components**: 35
 
 ---
 
@@ -11,26 +11,26 @@
 
 | Layer | Complete | Missing | % |
 |-------|----------|---------|---|
-| Domain | 33 | 0 | 100% |
-| Prd | 33 | 0 | 100% |
-| Design | 33 | 0 | 100% |
-| Data Contract | 33 | 0 | 100% |
-| Logic Contract | 33 | 0 | 100% |
-| System Contract | 12 | 21 | 36% |
+| Domain | 35 | 0 | 100% |
+| Prd | 35 | 0 | 100% |
+| Design | 35 | 0 | 100% |
+| Data Contract | 35 | 0 | 100% |
+| Logic Contract | 35 | 0 | 100% |
+| System Contract | 12 | 23 | 34% |
 
-**Docs Complete (L1-3)**: 33/33
-**Contracts Complete (L4-6)**: 12/33 (full set), 33/33 (data+logic)
-**Fully Complete**: 12/33
+**Docs Complete (L1-3)**: 35/35
+**Contracts Complete (L4-6)**: 12/35 (full set), 35/35 (data+logic)
+**Fully Complete**: 12/35
 
 ### TDD (Test-Driven Development)
 
 | Layer | Has Tests | Missing | % |
 |-------|-----------|---------|---|
-| Unit | 32 | 1 | 97% |
-| Component | 31 | 2 | 94% |
-| Integration | 30 | 3 | 91% |
-| Api | 24 | 9 | 73% |
-| Smoke | 25 | 8 | 76% |
+| Unit | 34 | 1 | 97% |
+| Component | 33 | 2 | 94% |
+| Integration | 32 | 3 | 91% |
+| Api | 26 | 9 | 74% |
+| Smoke | 27 | 8 | 77% |
 
 ---
 
@@ -78,5 +78,5 @@
 
 ## Missing Items
 
-**Missing System Contracts**: account, album, auth, authorization, billing, device, document, fulfillment, inventory, media, memory, notification, order, organization, payment, product, session, storage, subscription, task, tax, vault, wallet (21 services)
+**Missing System Contracts**: account, album, auth, authorization, billing, device, document, fulfillment, inventory, media, memory, notification, order, organization, payment, product, session, storage, subscription, task, tax, vault, wallet (23 services)
 **Missing Tests**: membership_service (has contracts but no test files)

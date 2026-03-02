@@ -63,7 +63,7 @@ All tests MUST verify these specifications. This is the SINGLE SOURCE OF TRUTH f
 - `inventory.released` event is published
 
 **Edge Cases**:
-- No active reservation → 404 Not Found
+- No active reservation → 200 OK with `{"order_id": ..., "status": "released", "message": "No active reservation found"}`
 - Already released → still processes
 
 ---
@@ -147,6 +147,7 @@ EXPIRED (timeout, 30 min default)
 | Missing order_id or items | 400 | `{"detail": "order_id and items are required"}` |
 | Missing order_id | 400 | `{"detail": "order_id is required"}` |
 | Reservation not found | 404 | `{"detail": "Reservation not found"}` |
-| No active reservation | 404 | `{"detail": "No active reservation found"}` |
+| No active reservation (commit) | 404 | `{"detail": "No active reservation found"}` |
+| No active reservation (release) | 200 | `{"order_id": ..., "status": "released", "message": "No active reservation found"}` |
 | Repository unavailable | 503 | `{"detail": "Repository not available"}` |
 | Internal error | 500 | `{"detail": "<error message>"}` |

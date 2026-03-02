@@ -135,7 +135,7 @@ Event publishing is best-effort (failures logged, not thrown).
 
 | Condition | HTTP Status | Response |
 |-----------|-------------|----------|
-| Missing required fields | 400 | `{"detail": "order_id, items, address required"}` |
+| Missing required fields | 400 | `{"detail": "order_id, items, and address are required"}` |
 | Shipment not found | 404 | `{"detail": "Shipment not found"}` |
 | Repository unavailable | 503 | `{"detail": "Repository not available"}` |
 | Internal error | 500 | `{"detail": "<error message>"}` |

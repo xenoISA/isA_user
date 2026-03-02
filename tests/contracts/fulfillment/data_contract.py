@@ -35,7 +35,7 @@ class ShipmentStatus(str, Enum):
 class Parcel(BaseModel):
     """Parcel dimensions and weight"""
     weight_grams: int = Field(..., gt=0)
-    dimensions_cm: Dict[str, Any] = Field(default_factory=dict)
+    dimensions_cm: Dict[str, Any]
 
 
 class Shipment(BaseModel):
@@ -69,7 +69,7 @@ class FulfillmentFactory:
 
     @staticmethod
     def tracking_number() -> str:
-        return f"TRK{random.randint(100000000, 999999999)}"
+        return f"trk_{uuid.uuid4().hex[:10]}"
 
     @staticmethod
     def shipping_address() -> Dict[str, Any]:
