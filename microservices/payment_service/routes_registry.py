@@ -156,7 +156,25 @@ SERVICE_ROUTES = [
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get subscription statistics"
-    }
+    },
+    # Crypto Payments
+    {"path": "/crypto/info", "methods": ["GET"], "auth_required": False, "description": "Crypto service info"},
+    {"path": "/crypto/providers", "methods": ["GET"], "auth_required": False, "description": "List crypto providers"},
+    {"path": "/crypto/chains", "methods": ["GET"], "auth_required": False, "description": "List supported chains"},
+    {"path": "/crypto/tokens", "methods": ["GET"], "auth_required": False, "description": "List supported tokens"},
+    {"path": "/crypto/payments", "methods": ["POST"], "auth_required": True, "description": "Create crypto payment"},
+    {"path": "/crypto/payments/{payment_id}", "methods": ["GET"], "auth_required": True, "description": "Get crypto payment"},
+    {"path": "/crypto/payments/{payment_id}/status", "methods": ["GET"], "auth_required": True, "description": "Check crypto payment status"},
+    {"path": "/crypto/payments/{payment_id}/cancel", "methods": ["POST"], "auth_required": True, "description": "Cancel crypto payment"},
+    {"path": "/crypto/users/{user_id}/payments", "methods": ["GET"], "auth_required": True, "description": "Get user crypto payments"},
+    {"path": "/crypto/refunds", "methods": ["POST"], "auth_required": True, "description": "Create crypto refund"},
+    {"path": "/crypto/webhooks/coinbase", "methods": ["POST"], "auth_required": False, "description": "Coinbase webhook"},
+    {"path": "/crypto/health", "methods": ["GET"], "auth_required": False, "description": "Crypto health check"},
+    # Blockchain Integration
+    {"path": "/blockchain/payment", "methods": ["POST"], "auth_required": True, "description": "Blockchain payment"},
+    {"path": "/blockchain/payment/{tx_hash}/verify", "methods": ["GET"], "auth_required": True, "description": "Verify blockchain tx"},
+    {"path": "/blockchain/refund", "methods": ["POST"], "auth_required": True, "description": "Blockchain refund"},
+    {"path": "/blockchain/subscription/{user_address}/{service_id}", "methods": ["GET"], "auth_required": True, "description": "Blockchain subscription status"},
 ]
 def get_routes_for_consul() -> Dict[str, Any]:
     """
@@ -172,12 +190,18 @@ def get_routes_for_consul() -> Dict[str, Any]:
     refund_routes = []
     webhook_routes = []
     stats_routes = []
+    crypto_routes = []
+    blockchain_routes = []
     for route in SERVICE_ROUTES:
         path = route["path"]
         # Use compact representation
         compact_path = path.replace("/api/v1/payment/", "").replace("/api/v1/", "")
         if path.startswith("/health"):
             health_routes.append(compact_path)
+        elif path.startswith("/crypto"):
+            crypto_routes.append(compact_path)
+        elif path.startswith("/blockchain"):
+            blockchain_routes.append(compact_path)
         elif "/plans" in path:
             plan_routes.append(compact_path)
         elif "/subscriptions" in path:
@@ -203,7 +227,9 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "refund": ",".join(refund_routes),
         "webhook": ",".join(webhook_routes),
         "stats": ",".join(stats_routes),
-        "methods": "GET,POST,PUT",
+        "crypto": ",".join(crypto_routes[:6]),  # Limit to avoid 512 char limit
+        "blockchain": ",".join(blockchain_routes[:4]),
+        "methods": "GET,POST,PUT,DELETE",
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
@@ -220,6 +246,8 @@ SERVICE_METADATA = {
         "stripe_integration",
         "webhook_handling",
         "usage_tracking",
-        "revenue_analytics"
+        "revenue_analytics",
+        "crypto_payments",
+        "blockchain_integration"
     ]
 }
