@@ -427,6 +427,22 @@ async def remove_organization_member(
 
 # ============ Context Switching Endpoints ============
 
+@app.get("/api/v1/organization/organizations/context", response_model=OrganizationContextResponse)
+async def get_organization_context(
+    user_id: str = Depends(require_auth_or_internal_service),
+    service: OrganizationService = Depends(get_organization_service)
+):
+    """Get the current organization context for the authenticated user."""
+    try:
+        return await service.get_user_context(user_id)
+    except OrganizationNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except OrganizationAccessDeniedError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except OrganizationServiceError as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @app.post("/api/v1/organization/organizations/context", response_model=OrganizationContextResponse)
 async def switch_organization_context(
     request: OrganizationSwitchRequest,

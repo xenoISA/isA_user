@@ -66,6 +66,12 @@ ORGANIZATION_SERVICE_ROUTES = [
     # Context Switching
     {
         "path": "/api/v1/organization/organizations/context",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get current organization context"
+    },
+    {
+        "path": "/api/v1/organization/organizations/context",
         "methods": ["POST"],
         "auth_required": True,
         "description": "Switch organization context"
