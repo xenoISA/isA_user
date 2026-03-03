@@ -288,18 +288,38 @@ class BillingService:
 
             # Parse nested pricing structure from product service
             # The response has: pricing_model.base_unit_price and effective_pricing.base_unit_price
-            pricing_model = pricing_info.get("pricing_model", {})
-            effective_pricing = pricing_info.get("effective_pricing", {})
+            pricing_model = pricing_info.get("pricing_model") or {}
+            effective_pricing = pricing_info.get("effective_pricing") or {}
+            tiers = pricing_info.get("tiers") or []
+            tier_unit_price = None
+            if isinstance(tiers, list) and tiers:
+                first_tier = tiers[0] or {}
+                if isinstance(first_tier, dict):
+                    tier_unit_price = first_tier.get("price_per_unit")
 
-            # Try to get unit price from various locations
-            unit_price = Decimal(
-                str(
-                    pricing_info.get("unit_price")
-                    or effective_pricing.get("base_unit_price")
-                    or pricing_model.get("base_unit_price")
-                    or 0
+            # Try to get unit price from various locations (priority order).
+            # Use `is not None` so that a legitimate price of 0 (free-tier)
+            # is not skipped in favour of a downstream fallback field.
+            candidates = [
+                pricing_info.get("unit_price"),
+                pricing_info.get("base_price"),
+                effective_pricing.get("base_unit_price"),
+                pricing_model.get("base_unit_price"),
+                tier_unit_price,
+            ]
+            raw_price = next((c for c in candidates if c is not None), None)
+
+            if raw_price is None:
+                logger.warning(
+                    f"Pricing for product {request.product_id} resolved to None — "
+                    f"no price field found in response. "
+                    f"pricing_info keys: {list(pricing_info.keys())}, "
+                    f"pricing_model keys: {list(pricing_model.keys())}, "
+                    f"effective_pricing keys: {list(effective_pricing.keys())}, "
+                    f"tiers count: {len(tiers)}"
                 )
-            )
+
+            unit_price = Decimal(str(raw_price or 0))
 
             total_cost = request.usage_amount * unit_price
 
@@ -553,6 +573,79 @@ class BillingService:
                         billing_record_id=billing_record.billing_id,
                     )
 
+            elif request.billing_method == BillingMethod.SUBSCRIPTION_INCLUDED:
+                credits_to_consume = self._convert_to_credits(
+                    calculation.total_cost, calculation.currency
+                )
+                success, transaction_id, error = await self._process_subscription_credit_consumption(
+                    user_id=billing_record.user_id,
+                    organization_id=billing_record.organization_id,
+                    credits_amount=credits_to_consume,
+                    service_type=billing_record.service_type.value,
+                    reference_id=billing_record.billing_id,
+                )
+
+                if success:
+                    await self.repository.update_billing_record_status(
+                        billing_record.billing_id,
+                        BillingStatus.COMPLETED,
+                        payment_transaction_id=transaction_id,
+                    )
+                    return ProcessBillingResponse(
+                        success=True,
+                        message="Billing processed successfully via subscription credits",
+                        billing_record_id=billing_record.billing_id,
+                        amount_charged=calculation.total_cost,
+                        billing_method_used=BillingMethod.SUBSCRIPTION_INCLUDED,
+                    )
+
+                await self.repository.update_billing_record_status(
+                    billing_record.billing_id,
+                    BillingStatus.FAILED,
+                    failure_reason=error or "Subscription credit consumption failed",
+                )
+                return ProcessBillingResponse(
+                    success=False,
+                    message=f"Subscription credit consumption failed: {error}",
+                    billing_record_id=billing_record.billing_id,
+                )
+
+            elif request.billing_method == BillingMethod.CREDIT_CONSUMPTION:
+                credits_to_consume = self._convert_to_credits(
+                    calculation.total_cost, calculation.currency
+                )
+                success, transaction_id, error = await self._process_purchased_credit_consumption(
+                    user_id=billing_record.user_id,
+                    credits_amount=credits_to_consume,
+                    service_type=billing_record.service_type.value,
+                    reference_id=billing_record.billing_id,
+                )
+
+                if success:
+                    await self.repository.update_billing_record_status(
+                        billing_record.billing_id,
+                        BillingStatus.COMPLETED,
+                        payment_transaction_id=transaction_id,
+                    )
+                    return ProcessBillingResponse(
+                        success=True,
+                        message="Billing processed successfully via purchased credits",
+                        billing_record_id=billing_record.billing_id,
+                        amount_charged=calculation.total_cost,
+                        billing_method_used=BillingMethod.CREDIT_CONSUMPTION,
+                    )
+
+                await self.repository.update_billing_record_status(
+                    billing_record.billing_id,
+                    BillingStatus.FAILED,
+                    failure_reason=error or "Purchased credit consumption failed",
+                )
+                return ProcessBillingResponse(
+                    success=False,
+                    message=f"Purchased credit consumption failed: {error}",
+                    billing_record_id=billing_record.billing_id,
+                )
+
             elif request.billing_method == BillingMethod.PAYMENT_CHARGE:
                 # 这里需要调用 Payment Service 创建支付意图
                 # 简化处理，标记为待处理
@@ -750,17 +843,14 @@ class BillingService:
         except Exception as e:
             logger.error(f"Error getting product pricing: {e}")
 
-        # All attempts failed - return default fallback pricing
-        logger.warning(
-            f"Product pricing unavailable for {product_id}, using default fallback (zero-cost)"
+        # All attempts failed - return None so the caller can distinguish
+        # "product has zero price" from "pricing lookup failed entirely"
+        logger.error(
+            f"Product pricing unavailable for {product_id} — "
+            "all lookup attempts failed.  Returning None to prevent "
+            "zero-cost billing records.  Check product_service connectivity."
         )
-        return {
-            "product_id": product_id,
-            "unit_price": 0,
-            "currency": "CREDIT",
-            "pricing_model": {"pricing_type": "default_fallback", "base_unit_price": 0},
-            "effective_pricing": {"base_unit_price": 0},
-        }
+        return None
 
     async def _get_subscription_info(
         self, subscription_id: str
@@ -897,6 +987,21 @@ class BillingService:
 
         # Priority 4: External payment required
         return BillingMethod.PAYMENT_CHARGE
+
+    def _convert_to_credits(self, amount: Decimal, currency: Currency) -> int:
+        """
+        Convert billing amount to platform credits.
+
+        Rules:
+        - CREDIT currency is already credits.
+        - USD converts with 1 USD = 100,000 credits.
+        - Always charge at least 1 credit for non-zero billable usage.
+        """
+        if currency == Currency.CREDIT:
+            credits = int(amount)
+        else:
+            credits = int(amount * Decimal("100000"))
+        return max(1, credits)
 
     async def _process_wallet_deduction(
         self, user_id: str, amount: Decimal, reference_id: str

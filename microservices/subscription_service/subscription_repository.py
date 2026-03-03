@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import uuid
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -449,6 +450,22 @@ class SubscriptionRepository:
     # Helper Methods
     # ====================
 
+    @staticmethod
+    def _coerce_json_dict(value: Any) -> Dict[str, Any]:
+        """Normalize DB JSON/text fields to dict for Pydantic models."""
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return {}
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
     def _row_to_subscription(self, row: Dict[str, Any]) -> UserSubscription:
         """Convert database row to UserSubscription model"""
         return UserSubscription(
@@ -481,7 +498,7 @@ class SubscriptionRepository:
             auto_renew=row.get("auto_renew", True),
             next_billing_date=row.get("next_billing_date"),
             last_billing_date=row.get("last_billing_date"),
-            metadata=row.get("metadata", {}),
+            metadata=self._coerce_json_dict(row.get("metadata")),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")
         )
@@ -506,7 +523,7 @@ class SubscriptionRepository:
             period_end=row.get("period_end"),
             reason=row.get("reason"),
             initiated_by=InitiatedBy(row.get("initiated_by", "system")),
-            metadata=row.get("metadata", {}),
+            metadata=self._coerce_json_dict(row.get("metadata")),
             created_at=row.get("created_at")
         )
 

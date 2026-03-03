@@ -25,8 +25,16 @@ class ProductClient:
 
             from microservices.product_service.client import ProductServiceClient
 
-            self.client = ProductServiceClient()
-            logger.info("✅ ProductClient initialized with ProductServiceClient")
+            base_url = os.getenv("PRODUCT_SERVICE_URL")
+            if not base_url:
+                host = os.getenv("PRODUCT_SERVICE_HOST", "localhost")
+                port = os.getenv("PRODUCT_SERVICE_PORT", "8215")
+                base_url = f"http://{host}:{port}"
+
+            self.client = ProductServiceClient(base_url=base_url)
+            logger.info(
+                f"✅ ProductClient initialized with ProductServiceClient ({base_url})"
+            )
         except Exception as e:
             logger.warning(f"⚠️ Failed to initialize ProductServiceClient: {e}")
             self.client = None

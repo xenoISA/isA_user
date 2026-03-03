@@ -5,8 +5,8 @@ Handles subscription-related operations: credit balance, credit consumption, tie
 """
 
 import logging
+import os
 import httpx
-from decimal import Decimal
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -15,16 +15,26 @@ logger = logging.getLogger(__name__)
 class SubscriptionClient:
     """Client for communicating with Subscription Service"""
 
-    def __init__(self, base_url: str = "http://subscription:8228"):
+    def __init__(self, base_url: Optional[str] = None):
         """
         Initialize Subscription Service client
 
         Args:
             base_url: Subscription service base URL
         """
-        self.base_url = base_url
+        if base_url:
+            self.base_url = base_url.rstrip("/")
+        else:
+            explicit_url = os.getenv("SUBSCRIPTION_SERVICE_URL")
+            if explicit_url:
+                self.base_url = explicit_url.rstrip("/")
+            else:
+                host = os.getenv("SUBSCRIPTION_SERVICE_HOST", "localhost")
+                port = os.getenv("SUBSCRIPTION_SERVICE_PORT", "8228")
+                self.base_url = f"http://{host}:{port}"
+
         self.timeout = 10.0
-        logger.info(f"✅ SubscriptionClient initialized with base URL: {base_url}")
+        logger.info(f"✅ SubscriptionClient initialized with base URL: {self.base_url}")
 
     async def get_credit_balance(
         self,
@@ -48,7 +58,7 @@ class SubscriptionClient:
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
-                    f"{self.base_url}/api/v1/credits/balance",
+                    f"{self.base_url}/api/v1/subscriptions/credits/balance",
                     params=params
                 )
 
@@ -134,7 +144,7 @@ class SubscriptionClient:
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
-                    f"{self.base_url}/api/v1/credits/consume",
+                    f"{self.base_url}/api/v1/subscriptions/credits/consume",
                     json=payload
                 )
 
@@ -182,12 +192,15 @@ class SubscriptionClient:
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
-                    f"{self.base_url}/api/v1/users/{user_id}/subscription",
+                    f"{self.base_url}/api/v1/subscriptions/user/{user_id}",
                     params=params if params else None
                 )
 
                 if response.status_code == 200:
-                    return response.json()
+                    payload = response.json()
+                    if payload.get("success"):
+                        return payload.get("subscription")
+                    return None
                 elif response.status_code == 404:
                     return None
                 else:
@@ -214,16 +227,21 @@ class SubscriptionClient:
             Tier info dict or None if not found
         """
         try:
-            # This would call the product service for tier definitions
-            # For now, return basic tier info from subscription service
+            # Note: /api/v1/tiers/{tier_code} does not exist on the
+            # subscription service.  Query the subscriptions list instead.
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
-                    f"{self.base_url}/api/v1/tiers/{tier_code}"
+                    f"{self.base_url}/api/v1/subscriptions",
+                    params={"tier_code": tier_code}
                 )
 
                 if response.status_code == 200:
                     return response.json()
                 else:
+                    logger.warning(
+                        f"Failed to get tier info for {tier_code}: "
+                        f"{response.status_code}"
+                    )
                     return None
 
         except Exception as e:

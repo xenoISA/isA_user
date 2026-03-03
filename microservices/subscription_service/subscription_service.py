@@ -606,6 +606,9 @@ class SubscriptionService:
     async def _publish_event(self, event_type: str, data: Dict[str, Any], subject: Optional[str] = None):
         """Publish an event using the NATS event bus"""
         if self.event_bus:
+            event_type_label = (
+                event_type.value if hasattr(event_type, "value") else str(event_type)
+            )
             try:
                 event = Event(
                     event_type=event_type,
@@ -615,11 +618,11 @@ class SubscriptionService:
                 )
                 result = await self.event_bus.publish_event(event)
                 if result:
-                    logger.info(f"Published event: {event_type.value}")
+                    logger.info(f"Published event: {event_type_label}")
                 else:
-                    logger.warning(f"Failed to publish event: {event_type.value}")
+                    logger.warning(f"Failed to publish event: {event_type_label}")
             except Exception as e:
-                logger.error(f"Failed to publish event {event_type.value}: {e}")
+                logger.error(f"Failed to publish event {event_type_label}: {e}")
 
 
 __all__ = [
