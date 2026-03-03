@@ -227,7 +227,7 @@ The Payment Service provides subscription management, payment processing, invoic
 ```
 **Error Codes**: 400 (Bad Request), 404 (Plan Not Found), 422 (Validation Error)
 
-#### GET /api/v1/payment/subscriptions/{user_id}
+#### GET /api/v1/payment/subscriptions/user/{user_id}
 **Description**: Get user's current subscription
 **Auth Required**: Yes
 **Response**: SubscriptionResponse object or null
@@ -298,10 +298,11 @@ The Payment Service provides subscription management, payment processing, invoic
 ```
 **Response**: Updated Payment object
 
-#### GET /api/v1/payment/payments
-**Description**: Get payment history
-**Query Parameters**:
+#### GET /api/v1/payment/payments/user/{user_id}
+**Description**: Get payment history for a user
+**Path Parameters**:
 - user_id: User ID
+**Query Parameters**:
 - status: (optional) Filter by status
 - start_date, end_date: (optional) Date range
 - limit: (optional, default: 100) Max results
