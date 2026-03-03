@@ -289,6 +289,11 @@ class UpdateTemplateRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+class RenderTemplateRequest(BaseModel):
+    """Template render request"""
+    variables: Dict[str, Any] = Field(default_factory=dict, description="Variables to substitute in the template")
+
+
 class RegisterPushSubscriptionRequest(BaseModel):
     """注册推送订阅请求"""
     user_id: str

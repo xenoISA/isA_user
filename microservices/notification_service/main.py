@@ -31,6 +31,7 @@ from .models import (
     HealthResponse,
     InAppNotification,
     Notification,
+    NotificationBatch,
     NotificationPriority,
     NotificationResponse,
     NotificationStatsResponse,
@@ -40,6 +41,7 @@ from .models import (
     PushPlatform,
     PushSubscription,
     RegisterPushSubscriptionRequest,
+    RenderTemplateRequest,
     SendBatchRequest,
     SendNotificationRequest,
     ServiceInfo,
@@ -316,6 +318,57 @@ async def update_template(template_id: str, request: UpdateTemplateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete(
+    "/api/v1/notifications/templates/{template_id}",
+    tags=["Templates"],
+)
+async def delete_template(template_id: str):
+    """Delete a notification template"""
+    try:
+        success = await service.repository.delete_template(template_id)
+        if success:
+            return {"message": "Template deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Template not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete template: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/api/v1/notifications/templates/{template_id}/render",
+    tags=["Templates"],
+)
+async def render_template(template_id: str, request: RenderTemplateRequest):
+    """Render a notification template with variables"""
+    template = await service.get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    rendered_content = service._replace_template_variables(
+        template.content, request.variables
+    )
+    rendered_html = None
+    if template.html_content:
+        rendered_html = service._replace_template_variables(
+            template.html_content, request.variables
+        )
+    rendered_subject = None
+    if template.subject:
+        rendered_subject = service._replace_template_variables(
+            template.subject, request.variables
+        )
+
+    return {
+        "template_id": template_id,
+        "subject": rendered_subject,
+        "content": rendered_content,
+        "html_content": rendered_html,
+    }
+
+
 # ====================
 # 发送通知
 # ====================
@@ -345,6 +398,19 @@ async def send_batch(request: SendBatchRequest):
     except Exception as e:
         logger.error(f"Failed to send batch: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/notifications/batch/{batch_id}",
+    response_model=NotificationBatch,
+    tags=["Notifications"],
+)
+async def get_batch(batch_id: str):
+    """Get batch notification status and statistics"""
+    batch = await service.repository.get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return batch
 
 
 @app.get(
@@ -503,6 +569,46 @@ async def get_notification_stats(
         return await service.get_notification_stats(user_id, period)
     except Exception as e:
         logger.error(f"Failed to get notification stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ====================
+# Single Notification by ID
+# NOTE: These routes use {notification_id} path param and MUST come after
+# all fixed-path routes (/batch, /in-app, /push, /stats, /templates)
+# to avoid FastAPI matching those paths as a notification_id.
+# ====================
+
+
+@app.get(
+    "/api/v1/notifications/{notification_id}",
+    response_model=Notification,
+    tags=["Notifications"],
+)
+async def get_notification(notification_id: str):
+    """Get a single notification by ID"""
+    notification = await service.repository.get_notification(notification_id)
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return notification
+
+
+@app.delete(
+    "/api/v1/notifications/{notification_id}",
+    tags=["Notifications"],
+)
+async def delete_notification(notification_id: str):
+    """Delete a notification"""
+    try:
+        success = await service.repository.delete_notification(notification_id)
+        if success:
+            return {"message": "Notification deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Notification not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete notification: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -256,6 +256,20 @@ class NotificationRepository:
             logger.error(f"Failed to update template {template_id}: {str(e)}")
             return False
 
+    async def delete_template(self, template_id: str) -> bool:
+        """Delete a notification template"""
+        try:
+            query = f'DELETE FROM {self.schema}.notification_templates WHERE template_id = $1'
+
+            async with self.db:
+                count = await self.db.execute(query, [template_id], schema=self.schema)
+
+            return count is not None and count > 0
+
+        except Exception as e:
+            logger.error(f"Failed to delete template {template_id}: {str(e)}")
+            return False
+
     # ====================
     # 通知管理
     # ====================
@@ -437,6 +451,20 @@ class NotificationRepository:
 
         except Exception as e:
             logger.error(f"Failed to update notification status {notification_id}: {str(e)}")
+            return False
+
+    async def delete_notification(self, notification_id: str) -> bool:
+        """Delete a notification"""
+        try:
+            query = f'DELETE FROM {self.schema}.notifications WHERE notification_id = $1'
+
+            async with self.db:
+                count = await self.db.execute(query, [notification_id], schema=self.schema)
+
+            return count is not None and count > 0
+
+        except Exception as e:
+            logger.error(f"Failed to delete notification {notification_id}: {str(e)}")
             return False
 
     async def get_pending_notifications(self, limit: int = 100) -> List[Notification]:
@@ -729,6 +757,46 @@ class NotificationRepository:
         except Exception as e:
             logger.error(f"Failed to update batch stats {batch_id}: {str(e)}")
             return False
+
+    async def get_batch(self, batch_id: str) -> Optional[NotificationBatch]:
+        """Get a notification batch by ID"""
+        try:
+            query = f'SELECT * FROM {self.schema}.notification_batches WHERE batch_id = $1 LIMIT 1'
+
+            async with self.db:
+                results = await self.db.query(query, [batch_id], schema=self.schema)
+
+            if results and len(results) > 0:
+                data = results[0]
+                batch = NotificationBatch(
+                    batch_id=data["batch_id"],
+                    name=data.get("name"),
+                    template_id=data["template_id"],
+                    type=NotificationType(data["type"]),
+                    recipients=[],
+                    total_recipients=data.get("total_count", 0),
+                    sent_count=data.get("sent_count", 0),
+                    delivered_count=data.get("delivered_count", 0),
+                    failed_count=data.get("failed_count", 0),
+                    metadata=_convert_protobuf_to_native(data.get("metadata", {})),
+                    created_by=data.get("created_by"),
+                )
+                batch.id = data.get("id")
+                if data.get("scheduled_at"):
+                    batch.scheduled_at = datetime.fromisoformat(data["scheduled_at"])
+                if data.get("started_at"):
+                    batch.started_at = datetime.fromisoformat(data["started_at"])
+                if data.get("completed_at"):
+                    batch.completed_at = datetime.fromisoformat(data["completed_at"])
+                if data.get("created_at"):
+                    batch.created_at = datetime.fromisoformat(data["created_at"])
+                return batch
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to get batch {batch_id}: {str(e)}")
+            return None
 
     # ====================
     # Push订阅管理
