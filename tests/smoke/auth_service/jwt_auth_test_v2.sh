@@ -116,9 +116,9 @@ echo ""
 # Test 5: Get User Info from Token
 if [ -n "$JWT_TOKEN" ] && [ "$JWT_TOKEN" != "" ]; then
     print_section "Test 5: Get User Info from Token"
-    echo "GET ${API_PATH}/user-info?token=..."
+    echo "POST ${API_PATH}/user-info"
 
-    RESPONSE=$(api_get "/user-info?token=${JWT_TOKEN}")
+    RESPONSE=$(api_post "/user-info" "{\"token\": \"${JWT_TOKEN}\"}")
     echo "$RESPONSE" | json_pretty
 
     USER_ID=$(json_get "$RESPONSE" "user_id")

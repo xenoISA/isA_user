@@ -857,14 +857,14 @@ class TestDevicePairingEndpoints:
 
 class TestUserInfoEndpoint:
     """
-    GOLDEN tests for GET /api/v1/auth/user-info
+    GOLDEN tests for POST /api/v1/auth/user-info
 
-    Tests user info extraction from token.
+    Tests user info extraction from token (POST to avoid token in URL/query params).
     """
 
     async def test_get_user_info_success(self, client, factory, mock_auth_service):
         """
-        GOLDEN: GET /api/v1/auth/user-info extracts user info from token
+        GOLDEN: POST /api/v1/auth/user-info extracts user info from token
         """
         token = factory.make_jwt_token()
 
@@ -875,21 +875,21 @@ class TestUserInfoEndpoint:
             "provider": "isa_user"
         }
 
-        response = await client.get(
+        response = await client.post(
             "/api/v1/auth/user-info",
-            headers={"Authorization": f"Bearer {token}"}
+            json={"token": token}
         )
 
         # GOLDEN: Success returns 200
         assert response.status_code in [200, 401, 500]
 
-    async def test_get_user_info_missing_token_returns_401(self, client):
+    async def test_get_user_info_missing_token_returns_422(self, client):
         """
-        GOLDEN: GET /api/v1/auth/user-info without token returns 401
+        GOLDEN: POST /api/v1/auth/user-info without body returns 422
         """
-        response = await client.get("/api/v1/auth/user-info")
+        response = await client.post("/api/v1/auth/user-info")
 
-        # GOLDEN: Missing auth header returns 401 or 403
+        # GOLDEN: Missing request body returns 422 (validation error)
         assert response.status_code in [401, 403, 422]
 
 

@@ -74,8 +74,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/",
-							"host": ["{{base_url}}"],
-							"path": [""]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								""
+							]
 						},
 						"description": "Root health check endpoint\n\nReturns:\n- service: auth_microservice\n- status: healthy\n- version: 2.0.0\n- timestamp: ISO 8601 timestamp"
 					},
@@ -107,8 +111,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/health",
-							"host": ["{{base_url}}"],
-							"path": ["health"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
 						},
 						"description": "Detailed service health check with capabilities\n\nReturns:\n- status: healthy\n- service: auth_microservice\n- port: 8201\n- version: 2.0.0\n- capabilities: [jwt_verification, api_key_management, token_generation]\n- providers: [auth0, supabase, local]"
 					},
@@ -141,8 +149,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{api_base}}/info",
-							"host": ["{{api_base}}"],
-							"path": ["info"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"info"
+							]
 						},
 						"description": "Get authentication service information and available endpoints\n\nReturns detailed information about:\n- Service capabilities\n- Supported JWT providers\n- Available endpoints\n- API version"
 					},
@@ -174,8 +186,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{api_base}}/stats",
-							"host": ["{{api_base}}"],
-							"path": ["stats"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"stats"
+							]
 						},
 						"description": "Get authentication service statistics\n\nReturns:\n- Service status\n- Capabilities\n- Uptime\n- Endpoint count"
 					},
@@ -230,8 +246,12 @@
 						},
 						"url": {
 							"raw": "{{api_base}}/dev-token",
-							"host": ["{{api_base}}"],
-							"path": ["dev-token"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"dev-token"
+							]
 						},
 						"description": "Generate a development JWT token for testing purposes\n\nRequest Body:\n- user_id: User identifier (required)\n- email: User email address (required)\n- expires_in: Token expiration in seconds (default: 3600)\n\nResponse:\n- success: boolean\n- token: JWT token string\n- expires_in: seconds until expiration\n- token_type: \"Bearer\"\n- user_id: user identifier\n- email: user email\n\nNote: Token is automatically saved to {{jwt_token}} variable"
 					},
@@ -274,10 +294,14 @@
 						},
 						"url": {
 							"raw": "{{api_base}}/verify-token",
-							"host": ["{{api_base}}"],
-							"path": ["verify-token"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"verify-token"
+							]
 						},
-						"description": "Verify JWT token from Auth0, Supabase, or local provider\n\nRequest Body:\n- token: JWT token to verify (required)\n- provider: Token provider - \"auth0\", \"supabase\", or \"local\" (optional)\n\nResponse:\n- valid: boolean indicating if token is valid\n- provider: detected provider\n- user_id: user identifier from token\n- email: user email from token\n- expires_at: token expiration timestamp\n- error: error message if validation fails\n\n⚠️ KNOWN ISSUE: Currently failing with 'Invalid audience' error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #1"
+						"description": "Verify JWT token from Auth0, Supabase, or local provider\n\nRequest Body:\n- token: JWT token to verify (required)\n- provider: Token provider - \"auth0\", \"supabase\", or \"local\" (optional)\n\nResponse:\n- valid: boolean indicating if token is valid\n- provider: detected provider\n- user_id: user identifier from token\n- email: user email from token\n- expires_at: token expiration timestamp\n- error: error message if validation fails\n\n\u26a0\ufe0f KNOWN ISSUE: Currently failing with 'Invalid audience' error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #1"
 					},
 					"response": []
 				},
@@ -296,26 +320,32 @@
 						}
 					],
 					"request": {
-						"method": "GET",
-						"header": [],
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
 						"url": {
-							"raw": "{{api_base}}/user-info?token={{jwt_token}}",
-							"host": ["{{api_base}}"],
-							"path": ["user-info"],
-							"query": [
-								{
-									"key": "token",
-									"value": "{{jwt_token}}",
-									"description": "JWT token to extract user info from"
-								}
+							"raw": "{{api_base}}/user-info",
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"user-info"
 							]
 						},
-						"description": "Extract user information from a JWT token\n\nQuery Parameters:\n- token: JWT token (required)\n\nExpected Response:\n- user_id: user identifier\n- email: user email\n- provider: token provider\n- expires_at: expiration timestamp\n\n⚠️ KNOWN ISSUE: Currently failing with 'Expected a string value' error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #2"
+						"description": "Extract user information from a JWT token\n\nRequest Body:\n- token: JWT token (required)\n\nUses POST to avoid exposing tokens in URLs/query params.\n\nExpected Response:\n- user_id: user identifier\n- email: user email\n- provider: token provider\n- expires_at: expiration timestamp",
+						"body": {
+							"mode": "raw",
+							"raw": "{\"token\": \"{{jwt_token}}\"}"
+						}
 					},
 					"response": []
 				}
 			],
-			"description": "JWT token verification and generation endpoints.\n\nSupports multiple providers:\n- Auth0\n- Supabase\n- Local (development)\n\n⚠️ Some endpoints have known issues - see auth_issues.md"
+			"description": "JWT token verification and generation endpoints.\n\nSupports multiple providers:\n- Auth0\n- Supabase\n- Local (development)\n\n\u26a0\ufe0f Some endpoints have known issues - see auth_issues.md"
 		},
 		{
 			"name": "API Key Management",
@@ -364,10 +394,14 @@
 						},
 						"url": {
 							"raw": "{{api_base}}/api-keys",
-							"host": ["{{api_base}}"],
-							"path": ["api-keys"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"api-keys"
+							]
 						},
-						"description": "Create a new API key for an organization\n\nRequest Body:\n- organization_id: Organization identifier (required)\n- name: Descriptive name for the API key (required)\n- permissions: Array of permission strings (default: [])\n- expires_days: Number of days until expiration (optional)\n\nResponse:\n- success: boolean\n- api_key: Generated API key string\n- key_id: Key identifier\n- name: Key name\n- expires_at: Expiration timestamp\n\n⚠️ KNOWN ISSUE: Currently failing with database error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #3"
+						"description": "Create a new API key for an organization\n\nRequest Body:\n- organization_id: Organization identifier (required)\n- name: Descriptive name for the API key (required)\n- permissions: Array of permission strings (default: [])\n- expires_days: Number of days until expiration (optional)\n\nResponse:\n- success: boolean\n- api_key: Generated API key string\n- key_id: Key identifier\n- name: Key name\n- expires_at: Expiration timestamp\n\n\u26a0\ufe0f KNOWN ISSUE: Currently failing with database error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #3"
 					},
 					"response": []
 				},
@@ -410,8 +444,12 @@
 						},
 						"url": {
 							"raw": "{{api_base}}/verify-api-key",
-							"host": ["{{api_base}}"],
-							"path": ["verify-api-key"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"verify-api-key"
+							]
 						},
 						"description": "Verify an API key and get associated permissions\n\nRequest Body:\n- api_key: API key to verify (required)\n\nResponse:\n- valid: boolean indicating if key is valid\n- key_id: key identifier\n- organization_id: organization identifier\n- name: key name\n- permissions: array of permission strings\n- error: error message if validation fails"
 					},
@@ -441,8 +479,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{api_base}}/api-keys/:organization_id",
-							"host": ["{{api_base}}"],
-							"path": ["api-keys", ":organization_id"],
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"api-keys",
+								":organization_id"
+							],
 							"variable": [
 								{
 									"key": "organization_id",
@@ -478,8 +521,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{api_base}}/api-keys/:key_id?organization_id=org_test_123",
-							"host": ["{{api_base}}"],
-							"path": ["api-keys", ":key_id"],
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"api-keys",
+								":key_id"
+							],
 							"query": [
 								{
 									"key": "organization_id",
@@ -500,7 +548,7 @@
 					"response": []
 				}
 			],
-			"description": "API key creation, verification, and management endpoints.\n\nAPI keys provide:\n- Organization-level authentication\n- Permission-based access control\n- Expiration management\n- Usage tracking\n\n⚠️ Some endpoints have known issues - see auth_issues.md"
+			"description": "API key creation, verification, and management endpoints.\n\nAPI keys provide:\n- Organization-level authentication\n- Permission-based access control\n- Expiration management\n- Usage tracking\n\n\u26a0\ufe0f Some endpoints have known issues - see auth_issues.md"
 		},
 		{
 			"name": "Device Authentication",
@@ -549,10 +597,15 @@
 						},
 						"url": {
 							"raw": "{{api_base}}/device/register",
-							"host": ["{{api_base}}"],
-							"path": ["device", "register"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"device",
+								"register"
+							]
 						},
-						"description": "Register a new device and get credentials\n\nRequest Body:\n- device_id: Unique device identifier (required)\n- organization_id: Organization identifier (required)\n- device_name: Human-readable device name (optional)\n- device_type: Device type (optional)\n- metadata: Device metadata object (optional)\n- expires_days: Credential expiration in days (optional)\n\nResponse:\n- success: boolean\n- device_id: device identifier\n- device_secret: Secret for authentication (store securely!)\n- expires_at: credential expiration timestamp\n\n⚠️ KNOWN ISSUE: Currently failing with database error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #4"
+						"description": "Register a new device and get credentials\n\nRequest Body:\n- device_id: Unique device identifier (required)\n- organization_id: Organization identifier (required)\n- device_name: Human-readable device name (optional)\n- device_type: Device type (optional)\n- metadata: Device metadata object (optional)\n- expires_days: Credential expiration in days (optional)\n\nResponse:\n- success: boolean\n- device_id: device identifier\n- device_secret: Secret for authentication (store securely!)\n- expires_at: credential expiration timestamp\n\n\u26a0\ufe0f KNOWN ISSUE: Currently failing with database error\nSee microservices/auth_service/docs/Issue/auth_issues.md Issue #4"
 					},
 					"response": []
 				},
@@ -597,8 +650,13 @@
 						},
 						"url": {
 							"raw": "{{api_base}}/device/authenticate",
-							"host": ["{{api_base}}"],
-							"path": ["device", "authenticate"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"device",
+								"authenticate"
+							]
 						},
 						"description": "Authenticate a device and get access token\n\nRequest Body:\n- device_id: Device identifier (required)\n- device_secret: Device secret from registration (required)\n\nResponse:\n- authenticated: boolean\n- access_token: JWT token for device\n- token_type: \"Bearer\"\n- expires_in: seconds until expiration\n- device_id: device identifier\n- organization_id: organization identifier\n\nNote: Token is automatically saved to {{device_token}} variable"
 					},
@@ -643,8 +701,13 @@
 						},
 						"url": {
 							"raw": "{{api_base}}/device/verify-token",
-							"host": ["{{api_base}}"],
-							"path": ["device", "verify-token"]
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"device",
+								"verify-token"
+							]
 						},
 						"description": "Verify a device JWT token\n\nRequest Body:\n- token: Device JWT token (required)\n\nResponse:\n- valid: boolean indicating if token is valid\n- device_id: device identifier\n- organization_id: organization identifier\n- expires_at: token expiration timestamp\n- error: error message if validation fails"
 					},
@@ -674,8 +737,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{api_base}}/device/list?organization_id=org_test_123",
-							"host": ["{{api_base}}"],
-							"path": ["device", "list"],
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"device",
+								"list"
+							],
 							"query": [
 								{
 									"key": "organization_id",
@@ -715,8 +783,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{api_base}}/device/:device_id/refresh-secret?organization_id=org_test_123",
-							"host": ["{{api_base}}"],
-							"path": ["device", ":device_id", "refresh-secret"],
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"device",
+								":device_id",
+								"refresh-secret"
+							],
 							"query": [
 								{
 									"key": "organization_id",
@@ -759,8 +833,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{api_base}}/device/:device_id?organization_id=org_test_123",
-							"host": ["{{api_base}}"],
-							"path": ["device", ":device_id"],
+							"host": [
+								"{{api_base}}"
+							],
+							"path": [
+								"device",
+								":device_id"
+							],
 							"query": [
 								{
 									"key": "organization_id",
@@ -781,7 +860,7 @@
 					"response": []
 				}
 			],
-			"description": "Device registration, authentication, and management endpoints.\n\nSupports:\n- Device credential management\n- JWT token-based device authentication\n- Device metadata tracking\n- Secret rotation\n- Multi-organization device isolation\n\n⚠️ Some endpoints have known issues - see auth_issues.md"
+			"description": "Device registration, authentication, and management endpoints.\n\nSupports:\n- Device credential management\n- JWT token-based device authentication\n- Device metadata tracking\n- Secret rotation\n- Multi-organization device isolation\n\n\u26a0\ufe0f Some endpoints have known issues - see auth_issues.md"
 		}
 	],
 	"auth": {

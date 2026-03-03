@@ -180,7 +180,9 @@ curl -X POST "http://localhost:8202/api/v1/auth/verify-token" \
 
 **Request:**
 ```bash
-curl -X GET "http://localhost:8202/api/v1/auth/user-info?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+curl -X POST "http://localhost:8202/api/v1/auth/user-info" \
+  -H "Content-Type: application/json" \
+  -d '{"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}'
 ```
 
 **Response:**
@@ -523,14 +525,14 @@ healthcheck:
 
 **Real Test Results:**
 ```
->ê Authentication Microservice Test Results:
+>ï¿½ Authentication Microservice Test Results:
    Health Checks:  PASS - Service operational on port 8202
    JWT Token Management:  PASS - Generation and verification working
    Multi-Provider Support:  PASS - Auth0, Supabase, Local providers
    API Key System:  PASS - Organization-based key management
    Error Handling:  PASS - Proper validation and error responses
    
-<¯ Overall Results: 5/5 tests passed 
+<ï¿½ Overall Results: 5/5 tests passed 
 ```
 
 ### Service Endpoints Summary
@@ -542,7 +544,7 @@ healthcheck:
 | `/api/v1/auth/stats` | GET | Service statistics |  Working |
 | `/api/v1/auth/dev-token` | POST | Generate development token |  Working |
 | `/api/v1/auth/verify-token` | POST | Verify JWT token |  Working |
-| `/api/v1/auth/user-info` | GET | Extract user info from token |  Working |
+| `/api/v1/auth/user-info` | POST | Extract user info from token |  Working |
 | `/api/v1/auth/verify-api-key` | POST | Verify API key |  Working |
 | `/api/v1/auth/api-keys` | POST | Create API key |  Working |
 | `/api/v1/auth/api-keys/{org_id}` | GET | List API keys |  Working |
