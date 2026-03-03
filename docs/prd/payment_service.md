@@ -444,6 +444,99 @@ The Payment Service provides subscription management, payment processing, invoic
 }
 ```
 
+### Crypto Payment Endpoints
+
+Crypto payment routes are defined in `crypto_routes.py` and handle cryptocurrency payments via providers like Coinbase Commerce.
+
+#### GET /crypto/info
+**Description**: Get crypto payment service information and supported capabilities
+**Auth Required**: No
+**Response**: Service info including supported providers, chains, and tokens
+
+#### GET /crypto/providers
+**Description**: List available crypto payment providers and their status
+**Auth Required**: No
+
+#### GET /crypto/chains
+**Description**: List supported blockchain networks (e.g., Ethereum, Polygon, Base)
+**Auth Required**: No
+
+#### GET /crypto/tokens
+**Description**: List supported cryptocurrencies/tokens for payments
+**Auth Required**: No
+
+#### POST /crypto/payments
+**Description**: Create a new crypto payment; returns a checkout URL for the user
+**Auth Required**: Yes
+**Request**: `CreateCryptoPaymentRequest` — amount, currency, order details
+**Response**: `CryptoPaymentResponse` — payment ID, checkout URL, status
+
+#### GET /crypto/payments/{payment_id}
+**Description**: Get details of a crypto payment
+**Auth Required**: Yes
+**Response**: `CryptoPaymentDetail` — full payment details including blockchain status
+
+#### GET /crypto/payments/{payment_id}/status
+**Description**: Check current status of a crypto payment (polls provider)
+**Auth Required**: Yes
+
+#### POST /crypto/payments/{payment_id}/cancel
+**Description**: Cancel a pending crypto payment
+**Auth Required**: Yes
+
+#### GET /crypto/users/{user_id}/payments
+**Description**: Get crypto payment history for a user
+**Auth Required**: Yes
+**Query Parameters**:
+- status: (optional) Filter by payment status
+- limit: (optional) Max results
+- offset: (optional) Pagination offset
+
+#### POST /crypto/refunds
+**Description**: Request a refund for a completed crypto payment
+**Auth Required**: Yes
+**Request**: `CreateRefundRequest` — payment ID, amount, reason
+
+#### POST /crypto/webhooks/coinbase
+**Description**: Handle Coinbase Commerce webhook events
+**Auth Required**: Coinbase webhook signature verification (`X-CC-Webhook-Signature`)
+
+#### GET /crypto/health
+**Description**: Check health of crypto payment providers
+**Auth Required**: No
+
+### Blockchain Integration Endpoints
+
+Low-level blockchain integration routes defined in `blockchain_integration.py` for direct on-chain payment processing and verification.
+
+#### POST /blockchain/payment
+**Description**: Process a blockchain payment directly
+**Auth Required**: Yes
+**Query Parameters**:
+- user_address: Wallet address
+- amount: Payment amount
+- order_id: Associated order
+- service_id: Service identifier
+
+#### GET /blockchain/payment/{tx_hash}/verify
+**Description**: Verify a payment transaction on-chain
+**Auth Required**: Yes
+**Query Parameters**:
+- amount: Expected amount to verify
+
+#### POST /blockchain/refund
+**Description**: Issue a blockchain refund
+**Auth Required**: Yes
+**Query Parameters**:
+- user_address: Wallet address for refund
+- amount: Refund amount
+- order_id: Original order
+- reason: Refund reason
+
+#### GET /blockchain/subscription/{user_address}/{service_id}
+**Description**: Check subscription status via blockchain smart contract
+**Auth Required**: Yes
+
 ---
 
 ## Functional Requirements
