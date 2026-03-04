@@ -59,6 +59,26 @@ class FulfillmentRepositoryProtocol(Protocol):
 
 
 @runtime_checkable
+class FulfillmentServiceProtocol(Protocol):
+    """Interface for Fulfillment Service business logic"""
+
+    async def create_shipment(
+        self, order_id: str, items: List[Dict[str, Any]],
+        address: Dict[str, Any], user_id: str = "unknown",
+    ) -> Dict[str, Any]: ...
+
+    async def create_label(self, shipment_id: str) -> Dict[str, Any]: ...
+
+    async def cancel_shipment(
+        self, shipment_id: str, reason: str = "manual_cancellation",
+    ) -> Dict[str, Any]: ...
+
+    async def get_shipment_by_order(self, order_id: str) -> Optional[Dict[str, Any]]: ...
+
+    async def get_shipment_by_tracking(self, tracking_number: str) -> Optional[Dict[str, Any]]: ...
+
+
+@runtime_checkable
 class EventBusProtocol(Protocol):
     """Interface for Event Bus"""
 

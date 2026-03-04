@@ -4,9 +4,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
-from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 
@@ -18,30 +16,31 @@ from core.nats_client import get_event_bus
 from core.config_manager import ConfigManager
 
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
+from .inventory_service import InventoryService
 from .inventory_repository import InventoryRepository
 
 logger = logging.getLogger(__name__)
 
 consul_registry: Optional[ConsulRegistry] = None
 event_bus = None
-repository: Optional[InventoryRepository] = None
+service: Optional[InventoryService] = None
 config_manager: Optional[ConfigManager] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global consul_registry, event_bus, repository, config_manager
+    global consul_registry, event_bus, service, config_manager
 
     # Initialize config manager
     config_manager = ConfigManager("inventory_service")
 
     # Initialize repository (PostgreSQL)
+    repository = None
     try:
         repository = InventoryRepository(config=config_manager)
         logger.info("Inventory repository initialized with PostgreSQL")
     except Exception as e:
         logger.error(f"Failed to initialize repository: {e}")
-        repository = None
 
     # Initialize event bus for event-driven communication
     try:
@@ -50,6 +49,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
+
+    # Create service layer
+    if repository:
+        service = InventoryService(repository=repository, event_bus=event_bus)
 
     # Register event handlers
     if event_bus and repository:
@@ -87,7 +90,6 @@ async def lifespan(app: FastAPI):
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info("Service registered with Consul")
         except Exception as e:
             logger.warning(f"Failed to register with Consul: {e}")
@@ -118,6 +120,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="inventory_service", version="0.1.0", lifespan=lifespan)
 
 
+def _get_service() -> InventoryService:
+    if not service:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    return service
+
+
 @app.get("/api/v1/inventory/health")
 @app.get("/health")
 async def health():
@@ -131,56 +139,15 @@ async def reserve_inventory(payload: Dict[str, Any]):
 
     Note: This endpoint is also triggered by order.created events via NATS.
     """
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    order_id = payload.get("order_id")
-    items = payload.get("items") or []
-    user_id = payload.get("user_id", "unknown")
-
-    if not order_id or not items:
-        raise HTTPException(status_code=400, detail="order_id and items are required")
-
-    # Create reservation in database
-    reservation = await repository.create_reservation(
-        order_id=order_id,
-        user_id=user_id,
-        items=items,
-        expires_in_minutes=30
-    )
-
-    reservation_id = reservation["reservation_id"]
-    expires_at = reservation["expires_at"]
-
-    # Publish event if event bus is available
-    if event_bus:
-        try:
-            from .events.publishers import publish_stock_reserved
-            from .events.models import ReservedItem
-
-            reserved_items = []
-            for item in items:
-                sku_id = item.get("sku_id") or item.get("product_id") or item.get("id")
-                if sku_id:
-                    reserved_items.append(ReservedItem(
-                        sku_id=sku_id,
-                        quantity=item.get("quantity", 1),
-                        unit_price=item.get("unit_price") or item.get("price")
-                    ))
-
-            if reserved_items:
-                await publish_stock_reserved(
-                    event_bus=event_bus,
-                    order_id=order_id,
-                    reservation_id=reservation_id,
-                    user_id=user_id,
-                    items=reserved_items,
-                    expires_at=expires_at
-                )
-        except Exception as e:
-            logger.error(f"Failed to publish stock reserved event: {e}")
-
-    return {"reservation_id": reservation_id, "status": "active", "expires_at": expires_at}
+    svc = _get_service()
+    try:
+        return await svc.reserve_inventory(
+            order_id=payload.get("order_id", ""),
+            items=payload.get("items") or [],
+            user_id=payload.get("user_id", "unknown"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/v1/inventory/commit")
@@ -190,49 +157,16 @@ async def commit_inventory(payload: Dict[str, Any]):
 
     Note: This endpoint is also triggered by payment.completed events via NATS.
     """
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    order_id = payload.get("order_id")
-    reservation_id = payload.get("reservation_id")
-
-    if not order_id:
-        raise HTTPException(status_code=400, detail="order_id is required")
-
-    # Find reservation
-    reservation = None
-    if reservation_id:
-        reservation = await repository.get_reservation(reservation_id)
-    if not reservation:
-        reservation = await repository.get_active_reservation_for_order(order_id)
-
-    if not reservation:
-        raise HTTPException(status_code=404, detail="No active reservation found")
-
-    res_id = reservation["reservation_id"]
-
-    # Commit reservation in database
-    await repository.commit_reservation(res_id)
-
-    # Publish event if event bus is available
-    if event_bus:
-        try:
-            from .events.publishers import publish_stock_committed
-            from .events.models import ReservedItem
-
-            items = reservation.get("items", [])
-            reserved_items = [ReservedItem(**item) for item in items]
-            await publish_stock_committed(
-                event_bus=event_bus,
-                order_id=order_id,
-                reservation_id=res_id,
-                user_id=reservation.get("user_id", "unknown"),
-                items=reserved_items
-            )
-        except Exception as e:
-            logger.error(f"Failed to publish stock committed event: {e}")
-
-    return {"order_id": order_id, "reservation_id": res_id, "status": "committed"}
+    svc = _get_service()
+    try:
+        return await svc.commit_reservation(
+            order_id=payload.get("order_id", ""),
+            reservation_id=payload.get("reservation_id"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.post("/api/v1/inventory/release")
@@ -242,62 +176,22 @@ async def release_inventory(payload: Dict[str, Any]):
 
     Note: This endpoint is also triggered by order.canceled events via NATS.
     """
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    order_id = payload.get("order_id")
-    reservation_id = payload.get("reservation_id")
-    reason = payload.get("reason", "manual_release")
-
-    if not order_id:
-        raise HTTPException(status_code=400, detail="order_id is required")
-
-    # Find reservation
-    reservation = None
-    if reservation_id:
-        reservation = await repository.get_reservation(reservation_id)
-    if not reservation:
-        reservation = await repository.get_active_reservation_for_order(order_id)
-
-    if not reservation:
-        # Already released or never existed
-        return {"order_id": order_id, "status": "released", "message": "No active reservation found"}
-
-    res_id = reservation["reservation_id"]
-
-    # Release reservation in database
-    await repository.release_reservation(res_id)
-
-    # Publish event if event bus is available
-    if event_bus:
-        try:
-            from .events.publishers import publish_stock_released
-            from .events.models import ReservedItem
-
-            items = reservation.get("items", [])
-            reserved_items = [ReservedItem(**item) for item in items]
-            await publish_stock_released(
-                event_bus=event_bus,
-                order_id=order_id,
-                reservation_id=res_id,
-                user_id=reservation.get("user_id", "unknown"),
-                items=reserved_items,
-                reason=reason
-            )
-        except Exception as e:
-            logger.error(f"Failed to publish stock released event: {e}")
-
-    return {"order_id": order_id, "reservation_id": res_id, "status": "released"}
+    svc = _get_service()
+    try:
+        return await svc.release_reservation(
+            order_id=payload.get("order_id", ""),
+            reservation_id=payload.get("reservation_id"),
+            reason=payload.get("reason", "manual_release"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/v1/inventory/reservations/{order_id}")
 async def get_reservation(order_id: str):
     """Get reservation status for an order."""
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    reservation = await repository.get_reservation_by_order(order_id)
+    svc = _get_service()
+    reservation = await svc.get_reservation(order_id)
     if not reservation:
         raise HTTPException(status_code=404, detail="Reservation not found")
-
     return reservation
