@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from .protocols import TaxRepositoryProtocol, EventBusProtocol
 from .events.models import TaxLineItem
-from .events.publishers import publish_tax_calculated, publish_tax_failed
+from .events.publishers import publish_tax_calculated
 
 logger = logging.getLogger(__name__)
 

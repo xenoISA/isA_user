@@ -52,11 +52,11 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
 
-    # Create service layer
-    if repository:
-        service = TaxService(
-            repository=repository, event_bus=event_bus, provider=provider
-        )
+    # Create service layer (always create — service handles None repository
+    # gracefully for stateless preview calculations without order_id)
+    service = TaxService(
+        repository=repository, event_bus=event_bus, provider=provider
+    )
 
     # Register event handlers
     if event_bus and repository:

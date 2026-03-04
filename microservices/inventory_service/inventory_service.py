@@ -14,7 +14,6 @@ from .events.publishers import (
     publish_stock_reserved,
     publish_stock_committed,
     publish_stock_released,
-    publish_stock_failed,
 )
 
 logger = logging.getLogger(__name__)
