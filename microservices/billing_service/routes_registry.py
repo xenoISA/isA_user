@@ -50,7 +50,19 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Check quota limits"
     },
+    {
+        "path": "/api/v1/billing/quota/{user_id}",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get user quota status"
+    },
     # Query and Statistics
+    {
+        "path": "/api/v1/billing/records",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "List billing records with pagination"
+    },
     {
         "path": "/api/v1/billing/records/user/{user_id}",
         "methods": ["GET"],

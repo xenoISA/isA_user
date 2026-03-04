@@ -363,6 +363,20 @@ class QuotaCheckResponse(BaseModel):
 # 系统模型
 # ====================
 
+class UserQuotaResponse(BaseModel):
+    """用户配额响应"""
+    user_id: str
+    quotas: List["BillingQuota"]
+
+
+class BillingRecordsListResponse(BaseModel):
+    """计费记录列表响应"""
+    records: List["BillingRecord"]
+    total: int
+    page: int
+    page_size: int
+
+
 class HealthResponse(BaseModel):
     """健康检查响应"""
     status: str
