@@ -2,7 +2,7 @@
 
 ## Overview
 
-Rolling out **6-Layer CDD + 5-Layer Test Pyramid** to all 29 microservices.
+Rolling out **6-Layer CDD + 5-Layer Test Pyramid** to all 35 microservices.
 
 **Architecture**:
 ```
@@ -24,20 +24,20 @@ CDD 6层文档                          3-Contract 测试合约
 
 | Category | Complete | Missing | Notes |
 |----------|----------|---------|-------|
-| DI Architecture | 22 | 7 | protocols.py + factory.py |
-| Domain Docs | 29 | 0 | docs/domain/ |
-| PRD Docs | 29 | 0 | docs/prd/ |
-| Design Docs | 29 | 0 | docs/design/ |
-| **Data Contract** | 29 | 0 | tests/contracts/{svc}/data_contract.py |
-| **Logic Contract** | 29 | 0 | tests/contracts/{svc}/logic_contract.md |
-| **System Contract** | **13** | **16** | tests/contracts/{svc}/system_contract.md |
-| Unit Tests | **29** | 0 | tests/unit/ (campaign added) |
-| Component Tests | **32** | 0 | tests/component/ (campaign added) |
-| Integration Tests | **27** | 2 | tests/integration/ (campaign added) |
-| API Tests | **27** | 2 | tests/api/ (campaign added) |
-| Smoke Tests | **28** | 1 | tests/smoke/ (campaign added) |
+| DI Architecture | **35** | 0 | protocols.py + factory.py — all services complete |
+| Domain Docs | 32 | 3 | docs/domain/ — missing: inventory, tax, fulfillment |
+| PRD Docs | 32 | 3 | docs/prd/ — missing: inventory, tax, fulfillment |
+| Design Docs | 32 | 3 | docs/design/ — missing: inventory, tax, fulfillment |
+| **Data Contract** | **35** | 0 | tests/contracts/{svc}/data_contract.py |
+| **Logic Contract** | **35** | 0 | tests/contracts/{svc}/logic_contract.md |
+| **System Contract** | **13** | **22** | tests/contracts/{svc}/system_contract.md |
+| Unit Tests | **35** | 0 | tests/unit/ (all services have golden tests) |
+| Component Tests | **35** | 0 | tests/component/ (all services have component tests) |
+| Integration Tests | **30** | 5 | tests/integration/ — missing: inventory, tax, fulfillment + 2 others |
+| API Tests | **30** | 5 | tests/api/ — missing: inventory, tax, fulfillment + 2 others |
+| Smoke Tests | **28** | 7 | tests/smoke/ — event_service dir empty; missing for new commerce services |
 
-**Last Updated**: 2026-02-02 (campaign_service TDD complete)
+**Last Updated**: 2026-03-04 (product audit — updated to 35 services)
 
 ---
 
@@ -57,14 +57,14 @@ CDD 6层文档                          3-Contract 测试合约
 
 | Status | Count | Services |
 |--------|-------|----------|
-| ✅ Complete | 22 | account, album, audit, auth, authorization, billing, calendar, device, document, media, memory, notification, order, organization, payment, product, session, subscription, task, vault, wallet, **weather** |
-| ❌ Missing | 8 | All others |
+| ✅ Complete | 35 | All 35 services now have protocols.py + factory.py |
+| ❌ Missing | 0 | — |
 
 ---
 
 ## Detailed Service Status
 
-**Contracts Column**: D=Data, L=Logic, S=System (all services missing System Contract)
+**Contracts Column**: D=Data, L=Logic, S=System (22/35 services missing System Contract)
 
 ### Tier 1: Core Identity & Auth
 
@@ -84,27 +84,28 @@ CDD 6层文档                          3-Contract 测试合约
 | **billing_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 30 | ✅ 53 | ✅ 13 | ✅ 15 | ✅ 14 | ✅ |
 | **payment_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 58 | ✅ 48 | ✅ 22 | ✅ 31 | ✅ 22 | ✅ |
 | **credit_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 74+86 | ✅ 79 | ⚠️ 35 skip | ✅ 24/32 | ✅ 11/20 | ✅ K8s Deployed |
+| **membership_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 183 | ✅ 86 | ✅ 56 | ✅ 30 | ✅ 18 | ✅ TDD Complete |
 
 ### Tier 3: Content & Data
 
 | Service | DI | Docs | D | L | S | Unit | Comp | Integ | API | Smoke | Status |
 |---------|:--:|:----:|:-:|:-:|:-:|:----:|:----:|:-----:|:---:|:-----:|:------:|
-| storage_service | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ 47 | ✅ 7 | ✅ 12 | ✅ 14 | ✅ 21 | ✅ |
+| storage_service | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 47 | ✅ 7 | ✅ 12 | ✅ 14 | ✅ 21 | ✅ |
 | **media_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 71 | ✅ 14 | ✅ 25 | ✅ 35 | ✅ ~46 | ✅ |
 | **memory_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 97 | ✅ 19 | ✅ 40 | ✅ 45 | ✅ ~136 | ✅ |
 | **album_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 35 | ✅ 35 | ✅ 35 | ✅ 35 | ✅ ~18 | ✅ |
 | **document_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 134 | ✅ 27 | ✅ 15 | ✅ 17 | ✅ 15 | ✅ |
-| **event_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 88 | ✅ 119 | ⚠️ 43 | ⚠️ 39 | ⚠️ 19 | ✅ CDD+TDD |
+| **event_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 88 | ✅ 119 | ⚠️ 43 | ⚠️ 39 | ⚠️ 19 | ✅ CDD+TDD |
 | **calendar_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 110 | ✅ 81 | ✅ 31 | ✅ 26 | ✅ 16 | ✅ |
 | **task_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 92 | ✅ 30 | ✅ 22 | ✅ 23 | ✅ 14 | ✅ |
-| **location_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 71 | ✅ 41 | ✅ 36 | ✅ 77 | ✅ ~20 | ✅ |
+| **location_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 71 | ✅ 41 | ✅ 36 | ✅ 77 | ✅ ~20 | ✅ |
 
 ### Tier 4: Supporting Services
 
 | Service | DI | Docs | D | L | S | Unit | Comp | Integ | API | Smoke | Status |
 |---------|:--:|:----:|:-:|:-:|:-:|:----:|:----:|:-----:|:---:|:-----:|:------:|
 | **notification_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 34 | ✅ 21 | ✅ 20 | ✅ ~80 | ✅ ~23 | ✅ |
-| **invitation_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 95 | ✅ 35 | ✅ 24 | ✅ 30 | ✅ 9 | ✅ |
+| **invitation_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 95 | ✅ 35 | ✅ 24 | ✅ 30 | ✅ 9 | ✅ |
 | **authorization_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 213 | ✅ 13 | ✅ 20 | ✅ 21 | ✅ ~18 | ✅ |
 | **product_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 72 | ✅ 65 | ✅ 40 | ✅ 42 | ✅ ~30 | ✅ |
 | **order_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 95 | ✅ 62 | ✅ 34 | ✅ 38 | ✅ 20 | ✅ |
@@ -115,11 +116,20 @@ CDD 6层文档                          3-Contract 测试合约
 | Service | DI | Docs | D | L | S | Unit | Comp | Integ | API | Smoke | Status |
 |---------|:--:|:----:|:-:|:-:|:-:|:----:|:----:|:-----:|:---:|:-----:|:------:|
 | **audit_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 195 | ⚠️ 69 | ✅ 37 | ✅ 38 | ✅ 18 | ✅ |
-| **compliance_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 52 | ✅ 30 | ✅ 27 | ✅ 25 | ✅ 17 | ✅ |
-| **telemetry_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 50 | ✅ 62 | ✅ 33 | ✅ 33 | ✅ 21 | ✅ |
-| **ota_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 37 | ✅ 99 | ✅ 42 | ✅ 45 | ✅ 17 | ✅ |
+| **compliance_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 52 | ✅ 30 | ✅ 27 | ✅ 25 | ✅ 17 | ✅ |
+| **telemetry_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 50 | ✅ 62 | ✅ 33 | ✅ 33 | ✅ 21 | ✅ |
+| **ota_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 37 | ✅ 99 | ✅ 42 | ✅ 45 | ✅ 17 | ✅ |
 | **vault_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 80 | ✅ 55 | ✅ 35 | ✅ 30 | ✅ 20 | ✅ |
 | **weather_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 117 | ✅ 21 | ✅ 19 | ✅ 22 | ✅ 14 | ✅ |
+
+### Tier 6: Commerce Services (NEW)
+
+| Service | DI | Docs | D | L | S | Unit | Comp | Integ | API | Smoke | Status |
+|---------|:--:|:----:|:-:|:-:|:-:|:----:|:----:|:-----:|:---:|:-----:|:------:|
+| **campaign_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 12 | ✅ 3 | ✅ 6 | ❌ | ✅ Production |
+| **inventory_service** | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ 2 | ❌ | ❌ | ❌ | ⚠️ Stub |
+| **tax_service** | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ 2 | ❌ | ❌ | ❌ | ⚠️ Stub |
+| **fulfillment_service** | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ 2 | ❌ | ❌ | ❌ | ⚠️ Stub |
 
 ---
 
@@ -141,7 +151,7 @@ CDD 6层文档                          3-Contract 测试合约
 | Docs | Domain + PRD + Design docs (docs/) |
 | D | data_contract.py (tests/contracts/{svc}/) |
 | L | logic_contract.md (tests/contracts/{svc}/) |
-| S | system_contract.md (tests/contracts/{svc}/) ← **全部缺失** |
+| S | system_contract.md (tests/contracts/{svc}/) ← **22/35 缺失** |
 | Unit | tests/unit/{service}/ |
 | Comp | tests/component/{service}/ |
 | Integ | tests/integration/{service}/ |
@@ -189,11 +199,16 @@ CDD 6层文档                          3-Contract 测试合约
 
 ## Next Priority
 
-### Immediate: System Contracts (大部分缺失)
+### Immediate: System Contracts (22/35 缺失) — #75
 为已完成服务补充 `system_contract.md`：
-- 17个服务有 Data + Logic，但缺少 System
+- 22个服务有 Data + Logic，但缺少 System
 - 使用 skill: `cdd-system-contract` 生成
 - 参考: `.claude/skills/cdd-system-contract/SKILL.md`
+
+### Immediate: Commerce Stubs → Production — #71, #72, #70
+- inventory_service, tax_service, fulfillment_service are stubs (no service layer, no PRD, mock providers only)
+- Need CDD 6-layer docs (#71), service layer implementation (#72), then TDD (#70)
+- See also: #76 (inter-service clients)
 
 ### Service Implementation:
 1. ~~storage_service~~ - ✅ **COMPLETED 2025-12-23** (101 tests, TDD 5-Layer, event publishing needs NATS stream config)
