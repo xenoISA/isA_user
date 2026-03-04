@@ -61,7 +61,7 @@ SERVICE_ROUTES = [
         "path": "/api/v1/billing/records",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List billing records with filtering and pagination"
+        "description": "List billing records with pagination"
     },
     {
         "path": "/api/v1/billing/records/user/{user_id}",

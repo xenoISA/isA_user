@@ -30,6 +30,7 @@ from .factory import create_billing_service
 from .models import (
     BillingCalculationRequest,
     BillingCalculationResponse,
+    BillingRecordsListResponse,
     BillingStats,
     HealthResponse,
     ProcessBillingRequest,
@@ -38,6 +39,7 @@ from .models import (
     QuotaCheckResponse,
     RecordUsageRequest,
     ServiceInfo,
+    UserQuotaResponse,
     UsageStatsRequest,
     UsageStatsResponse,
 )
@@ -358,13 +360,13 @@ async def check_quota(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/billing/quota/{user_id}")
-async def get_user_quotas(
+@app.get("/api/v1/billing/quota/{user_id}", response_model=UserQuotaResponse)
+async def get_user_quota_status(
     user_id: str,
     service_type: Optional[str] = None,
     service: BillingService = Depends(get_billing_service),
 ):
-    """获取用户的所有配额状态"""
+    """获取用户配额状态"""
     try:
         from .models import ServiceType
 
@@ -375,16 +377,12 @@ async def get_user_quotas(
             service_type=billing_service_type,
         )
 
-        return {
-            "user_id": user_id,
-            "quotas": [quota.model_dump() for quota in quotas],
-            "total_count": len(quotas),
-        }
+        return UserQuotaResponse(user_id=user_id, quotas=quotas)
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid parameter: {str(e)}")
     except Exception as e:
-        logger.error(f"Error getting user quotas: {e}")
+        logger.error(f"Error getting user quota status: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
@@ -393,53 +391,51 @@ async def get_user_quotas(
 # ====================
 
 
-@app.get("/api/v1/billing/records")
-async def get_billing_records(
+@app.get("/api/v1/billing/records", response_model=BillingRecordsListResponse)
+async def list_billing_records(
     user_id: Optional[str] = None,
     status: Optional[str] = None,
     service_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    limit: int = 50,
-    offset: int = 0,
+    page: int = 1,
+    page_size: int = 50,
     service: BillingService = Depends(get_billing_service),
 ):
-    """获取计费记录列表（通用查询，支持筛选和分页）"""
+    """获取计费记录列表（支持分页和过滤）"""
     try:
         from .models import BillingStatus, ServiceType
 
+        if page_size > 100:
+            page_size = 100
+        if page < 1:
+            page = 1
+
         billing_status = BillingStatus(status) if status else None
         billing_service_type = ServiceType(service_type) if service_type else None
+        offset = (page - 1) * page_size
 
-        records = await service.repository.get_billing_records(
+        records, total = await service.repository.list_billing_records(
             user_id=user_id,
             status=billing_status,
             service_type=billing_service_type,
             start_date=start_date,
             end_date=end_date,
-            limit=limit,
+            limit=page_size,
             offset=offset,
         )
 
-        total = await service.repository.count_billing_records(
-            user_id=user_id,
-            status=billing_status,
-            service_type=billing_service_type,
-            start_date=start_date,
-            end_date=end_date,
+        return BillingRecordsListResponse(
+            records=records,
+            total=total,
+            page=page,
+            page_size=page_size,
         )
 
-        return {
-            "records": [record.model_dump() for record in records],
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        }
-
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid parameter: {str(e)}")
+        raise HTTPException(status_code=422, detail=f"Invalid parameter: {str(e)}")
     except Exception as e:
-        logger.error(f"Error getting billing records: {e}")
+        logger.error(f"Error listing billing records: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
