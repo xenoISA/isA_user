@@ -46,6 +46,26 @@ class InventoryRepositoryProtocol(Protocol):
 
 
 @runtime_checkable
+class InventoryServiceProtocol(Protocol):
+    """Interface for Inventory Service business logic"""
+
+    async def reserve_inventory(
+        self, order_id: str, items: List[Dict[str, Any]], user_id: str = "unknown",
+    ) -> Dict[str, Any]: ...
+
+    async def commit_reservation(
+        self, order_id: str, reservation_id: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    async def release_reservation(
+        self, order_id: str, reservation_id: Optional[str] = None,
+        reason: str = "manual_release",
+    ) -> Dict[str, Any]: ...
+
+    async def get_reservation(self, order_id: str) -> Optional[Dict[str, Any]]: ...
+
+
+@runtime_checkable
 class EventBusProtocol(Protocol):
     """Interface for Event Bus"""
 

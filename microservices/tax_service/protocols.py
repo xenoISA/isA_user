@@ -39,6 +39,29 @@ class TaxRepositoryProtocol(Protocol):
 
 
 @runtime_checkable
+class TaxProviderProtocol(Protocol):
+    """Interface for Tax Provider"""
+
+    async def calculate(
+        self, items: List[Dict[str, Any]], address: Dict[str, Any],
+        currency: str = "USD",
+    ) -> Dict[str, Any]: ...
+
+
+@runtime_checkable
+class TaxServiceProtocol(Protocol):
+    """Interface for Tax Service business logic"""
+
+    async def calculate_tax(
+        self, items: List[Dict[str, Any]], address: Dict[str, Any],
+        currency: str = "USD", order_id: Optional[str] = None,
+        user_id: str = "unknown",
+    ) -> Dict[str, Any]: ...
+
+    async def get_calculation(self, order_id: str) -> Optional[Dict[str, Any]]: ...
+
+
+@runtime_checkable
 class EventBusProtocol(Protocol):
     """Interface for Event Bus"""
 

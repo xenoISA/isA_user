@@ -5,7 +5,6 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
-from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 
@@ -18,6 +17,7 @@ from core.config_manager import ConfigManager
 
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .providers.mock import MockTaxProvider
+from .tax_service import TaxService
 from .tax_repository import TaxRepository
 
 logger = logging.getLogger(__name__)
@@ -25,24 +25,24 @@ logger = logging.getLogger(__name__)
 consul_registry: Optional[ConsulRegistry] = None
 event_bus = None
 provider = MockTaxProvider()
-repository: Optional[TaxRepository] = None
+service: Optional[TaxService] = None
 config_manager: Optional[ConfigManager] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global consul_registry, event_bus, repository, config_manager
+    global consul_registry, event_bus, service, config_manager
 
     # Initialize config manager
     config_manager = ConfigManager("tax_service")
 
     # Initialize repository (PostgreSQL)
+    repository = None
     try:
         repository = TaxRepository(config=config_manager)
         logger.info("Tax repository initialized with PostgreSQL")
     except Exception as e:
         logger.error(f"Failed to initialize repository: {e}")
-        repository = None
 
     # Initialize event bus for event-driven communication
     try:
@@ -51,6 +51,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
+
+    # Create service layer
+    if repository:
+        service = TaxService(
+            repository=repository, event_bus=event_bus, provider=provider
+        )
 
     # Register event handlers
     if event_bus and repository:
@@ -88,7 +94,6 @@ async def lifespan(app: FastAPI):
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info("Service registered with Consul")
         except Exception as e:
             logger.warning(f"Failed to register with Consul: {e}")
@@ -119,6 +124,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="tax_service", version="0.1.0", lifespan=lifespan)
 
 
+def _get_service() -> TaxService:
+    if not service:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    return service
+
+
 @app.get("/api/v1/tax/health")
 @app.get("/health")
 async def health():
@@ -132,80 +143,24 @@ async def calculate_tax(payload: Dict[str, Any]):
 
     Note: Tax calculation is also triggered by inventory.reserved events via NATS.
     """
-    items = payload.get("items") or []
-    address = payload.get("address")
-    currency = payload.get("currency", "USD")
-    order_id = payload.get("order_id")
-    user_id = payload.get("user_id", "unknown")
-
-    if not items or not address:
-        raise HTTPException(status_code=400, detail="items and address are required")
-
-    result = await provider.calculate(items=items, address=address, currency=currency)
-
-    # Store calculation if order_id provided and repository is available
-    if order_id and repository:
-        subtotal = sum(item.get("amount", 0) or (item.get("unit_price", 0) * item.get("quantity", 1)) for item in items)
-
-        # Store in database
-        calculation = await repository.create_calculation(
-            order_id=order_id,
-            user_id=user_id,
-            subtotal=subtotal,
-            total_tax=result.get("total_tax", 0),
-            currency=currency,
-            tax_lines=result.get("lines", []),
-            shipping_address=address
+    svc = _get_service()
+    try:
+        return await svc.calculate_tax(
+            items=payload.get("items") or [],
+            address=payload.get("address") or {},
+            currency=payload.get("currency", "USD"),
+            order_id=payload.get("order_id"),
+            user_id=payload.get("user_id", "unknown"),
         )
-
-        calculation_id = calculation["calculation_id"]
-
-        # Publish event if event bus is available
-        if event_bus:
-            try:
-                from .events.publishers import publish_tax_calculated
-                from .events.models import TaxLineItem
-
-                tax_lines = [
-                    TaxLineItem(
-                        line_item_id=line.get("line_item_id", f"line_{i}"),
-                        sku_id=line.get("sku_id"),
-                        tax_amount=float(line.get("tax_amount", 0)),
-                        tax_rate=float(line.get("rate", 0)),
-                        jurisdiction=line.get("jurisdiction"),
-                        tax_type=line.get("tax_type")
-                    )
-                    for i, line in enumerate(result.get("lines", []))
-                ]
-
-                await publish_tax_calculated(
-                    event_bus=event_bus,
-                    order_id=order_id,
-                    calculation_id=calculation_id,
-                    user_id=user_id,
-                    subtotal=subtotal,
-                    total_tax=result.get("total_tax", 0),
-                    currency=currency,
-                    tax_lines=tax_lines,
-                    shipping_address=address
-                )
-            except Exception as e:
-                logger.error(f"Failed to publish tax calculated event: {e}")
-
-        result["calculation_id"] = calculation_id
-        result["order_id"] = order_id
-
-    return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/v1/tax/calculations/{order_id}")
 async def get_tax_calculation(order_id: str):
     """Get tax calculation for an order."""
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    calculation = await repository.get_calculation_by_order(order_id)
+    svc = _get_service()
+    calculation = await svc.get_calculation(order_id)
     if not calculation:
         raise HTTPException(status_code=404, detail="Tax calculation not found")
-
     return calculation

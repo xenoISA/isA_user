@@ -4,9 +4,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
-from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 
@@ -19,6 +17,7 @@ from core.config_manager import ConfigManager
 
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .providers.mock import MockFulfillmentProvider
+from .fulfillment_service import FulfillmentService
 from .fulfillment_repository import FulfillmentRepository
 
 logger = logging.getLogger(__name__)
@@ -26,24 +25,24 @@ logger = logging.getLogger(__name__)
 consul_registry: Optional[ConsulRegistry] = None
 event_bus = None
 provider = MockFulfillmentProvider()
-repository: Optional[FulfillmentRepository] = None
+service: Optional[FulfillmentService] = None
 config_manager: Optional[ConfigManager] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global consul_registry, event_bus, repository, config_manager
+    global consul_registry, event_bus, service, config_manager
 
     # Initialize config manager
     config_manager = ConfigManager("fulfillment_service")
 
     # Initialize repository (PostgreSQL)
+    repository = None
     try:
         repository = FulfillmentRepository(config=config_manager)
         logger.info("Fulfillment repository initialized with PostgreSQL")
     except Exception as e:
         logger.error(f"Failed to initialize repository: {e}")
-        repository = None
 
     # Initialize event bus for event-driven communication
     try:
@@ -52,6 +51,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
+
+    # Create service layer
+    if repository:
+        service = FulfillmentService(
+            repository=repository, event_bus=event_bus, provider=provider
+        )
 
     # Register event handlers
     if event_bus and repository:
@@ -89,7 +94,6 @@ async def lifespan(app: FastAPI):
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
             logger.info("Service registered with Consul")
         except Exception as e:
             logger.warning(f"Failed to register with Consul: {e}")
@@ -120,6 +124,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="fulfillment_service", version="0.1.0", lifespan=lifespan)
 
 
+def _get_service() -> FulfillmentService:
+    if not service:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    return service
+
+
 @app.get("/api/v1/fulfillment/health")
 @app.get("/health")
 async def health():
@@ -133,64 +143,16 @@ async def create_shipment(payload: Dict[str, Any]):
 
     Note: Shipments are also created automatically via tax.calculated events.
     """
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    order_id = payload.get("order_id")
-    items = payload.get("items") or []
-    address = payload.get("address")
-    user_id = payload.get("user_id", "unknown")
-
-    if not order_id or not items or not address:
-        raise HTTPException(status_code=400, detail="order_id, items, and address are required")
-
-    # Create shipment using provider to get tracking info
-    result = await provider.create_shipment(order_id=order_id, items=items, address=address)
-
-    # Store shipment in database
-    shipment = await repository.create_shipment(
-        order_id=order_id,
-        user_id=user_id,
-        items=items,
-        shipping_address=address,
-        tracking_number=result.get("tracking_number"),
-        status="created"
-    )
-
-    shipment_id = shipment["shipment_id"]
-
-    # Publish event if event bus is available
-    if event_bus:
-        try:
-            from .events.publishers import publish_shipment_prepared
-            from .events.models import ShipmentItem
-
-            shipment_items = [
-                ShipmentItem(
-                    sku_id=item.get("sku_id") or item.get("product_id") or "unknown",
-                    quantity=item.get("quantity", 1),
-                    weight_grams=item.get("weight_grams", 500)
-                )
-                for item in items
-            ]
-
-            await publish_shipment_prepared(
-                event_bus=event_bus,
-                order_id=order_id,
-                shipment_id=shipment_id,
-                user_id=user_id,
-                items=shipment_items,
-                shipping_address=address
-            )
-        except Exception as e:
-            logger.error(f"Failed to publish shipment prepared event: {e}")
-
-    return {
-        "shipment_id": shipment_id,
-        "order_id": order_id,
-        "status": "created",
-        "tracking_number": result.get("tracking_number")
-    }
+    svc = _get_service()
+    try:
+        return await svc.create_shipment(
+            order_id=payload.get("order_id", ""),
+            items=payload.get("items") or [],
+            address=payload.get("address") or {},
+            user_id=payload.get("user_id", "unknown"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/v1/fulfillment/shipments/{shipment_id}/label")
@@ -200,56 +162,11 @@ async def create_label(shipment_id: str, payload: Dict[str, Any] = None):
 
     Note: Labels are also created automatically via payment.completed events.
     """
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    shipment = await repository.get_shipment(shipment_id)
-    if not shipment:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-
-    if shipment["status"] == "label_purchased":
-        return {
-            "shipment_id": shipment_id,
-            "tracking_number": shipment["tracking_number"],
-            "carrier": shipment["carrier"],
-            "label_url": shipment["label_url"],
-            "status": "label_created"
-        }
-
-    # Create label
-    tracking_number = f"trk_{uuid4().hex[:10]}"
-    carrier = "USPS"
-
-    # Update shipment in database
-    await repository.create_label(
-        shipment_id=shipment_id,
-        carrier=carrier,
-        tracking_number=tracking_number
-    )
-
-    # Publish event if event bus is available
-    if event_bus:
-        try:
-            from .events.publishers import publish_label_created
-
-            await publish_label_created(
-                event_bus=event_bus,
-                order_id=shipment["order_id"],
-                shipment_id=shipment_id,
-                user_id=shipment.get("user_id", "unknown"),
-                carrier=carrier,
-                tracking_number=tracking_number,
-                estimated_delivery=datetime.now(timezone.utc) + timedelta(days=5)
-            )
-        except Exception as e:
-            logger.error(f"Failed to publish label created event: {e}")
-
-    return {
-        "shipment_id": shipment_id,
-        "tracking_number": tracking_number,
-        "carrier": carrier,
-        "status": "label_created"
-    }
+    svc = _get_service()
+    try:
+        return await svc.create_label(shipment_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.post("/api/v1/fulfillment/shipments/{shipment_id}/cancel")
@@ -259,74 +176,38 @@ async def cancel_shipment(shipment_id: str, payload: Dict[str, Any] = None):
 
     Note: Shipments are also canceled automatically via order.canceled events.
     """
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    shipment = await repository.get_shipment(shipment_id)
-    if not shipment:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-
+    svc = _get_service()
     payload = payload or {}
-
-    if shipment["status"] == "failed":
-        return {"shipment_id": shipment_id, "status": "canceled", "message": "Already canceled"}
-
-    reason = payload.get("reason", "manual_cancellation")
-    refund_shipping = shipment["status"] == "label_purchased"
-
-    # Cancel shipment in database
-    await repository.cancel_shipment(shipment_id, reason=reason)
-
-    # Publish event if event bus is available
-    if event_bus:
-        try:
-            from .events.publishers import publish_shipment_canceled
-
-            await publish_shipment_canceled(
-                event_bus=event_bus,
-                order_id=shipment["order_id"],
-                shipment_id=shipment_id,
-                user_id=shipment.get("user_id", "unknown"),
-                reason=reason,
-                refund_shipping=refund_shipping
-            )
-        except Exception as e:
-            logger.error(f"Failed to publish shipment canceled event: {e}")
-
-    return {
-        "shipment_id": shipment_id,
-        "status": "canceled",
-        "refund_shipping": refund_shipping
-    }
+    try:
+        return await svc.cancel_shipment(
+            shipment_id=shipment_id,
+            reason=payload.get("reason", "manual_cancellation"),
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.get("/api/v1/fulfillment/shipments/{order_id}")
 async def get_shipment(order_id: str):
     """Get shipment for an order."""
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    shipment = await repository.get_shipment_by_order(order_id)
+    svc = _get_service()
+    shipment = await svc.get_shipment_by_order(order_id)
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
-
     return shipment
 
 
 @app.get("/api/v1/fulfillment/tracking/{tracking_number}")
 async def get_tracking(tracking_number: str):
     """Get shipment by tracking number."""
-    if not repository:
-        raise HTTPException(status_code=503, detail="Repository not available")
-
-    shipment = await repository.get_shipment_by_tracking(tracking_number)
+    svc = _get_service()
+    shipment = await svc.get_shipment_by_tracking(tracking_number)
     if not shipment:
         raise HTTPException(status_code=404, detail="Tracking number not found")
-
     return {
         "tracking_number": tracking_number,
         "carrier": shipment["carrier"],
         "status": shipment["status"],
         "order_id": shipment["order_id"],
-        "shipment_id": shipment["shipment_id"]
+        "shipment_id": shipment["shipment_id"],
     }
