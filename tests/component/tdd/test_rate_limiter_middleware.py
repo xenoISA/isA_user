@@ -98,7 +98,9 @@ class TestRateLimitMiddleware:
     def test_remaining_decrements(self, client):
         r1 = client.get("/api/v1/auth/profile")
         r2 = client.get("/api/v1/auth/profile")
-        assert int(r1.headers["X-RateLimit-Remaining"]) > int(r2.headers["X-RateLimit-Remaining"])
+        assert int(r1.headers["X-RateLimit-Remaining"]) > int(
+            r2.headers["X-RateLimit-Remaining"]
+        )
 
 
 class TestRateLimitMiddlewareExclusions:

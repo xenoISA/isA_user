@@ -103,7 +103,10 @@ class CircuitBreaker:
 
     def record_success(self) -> None:
         """Record a successful call. Resets failure count, closes circuit if half-open."""
-        if self._state == CircuitState.HALF_OPEN or self.state == CircuitState.HALF_OPEN:
+        if (
+            self._state == CircuitState.HALF_OPEN
+            or self.state == CircuitState.HALF_OPEN
+        ):
             logger.info(
                 f"Circuit breaker '{self.name}' transitioned to CLOSED "
                 f"(probe succeeded)"
@@ -118,14 +121,16 @@ class CircuitBreaker:
         """Record a failed call. Opens circuit if threshold reached."""
         self._failure_count += 1
 
-        if self._state == CircuitState.HALF_OPEN or self.state == CircuitState.HALF_OPEN:
+        if (
+            self._state == CircuitState.HALF_OPEN
+            or self.state == CircuitState.HALF_OPEN
+        ):
             # Half-open probe failed → reopen
             self._state = CircuitState.OPEN
             self._opened_at = time.monotonic()
             self._half_open_calls = 0
             logger.warning(
-                f"Circuit breaker '{self.name}' re-opened "
-                f"(half-open probe failed)"
+                f"Circuit breaker '{self.name}' re-opened " f"(half-open probe failed)"
             )
             return
 

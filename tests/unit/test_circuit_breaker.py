@@ -73,6 +73,7 @@ class TestCircuitBreakerStates:
         cb.record_failure()
         # Wait for recovery timeout to transition to half-open
         import time
+
         time.sleep(0.11)
         assert cb.state == CircuitState.HALF_OPEN
         cb.check()  # Allow probe
@@ -81,7 +82,9 @@ class TestCircuitBreakerStates:
         assert cb._state == CircuitState.OPEN
 
     def test_half_open_limits_concurrent_probes(self):
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.0, half_open_max_calls=1)
+        cb = CircuitBreaker(
+            failure_threshold=1, recovery_timeout=0.0, half_open_max_calls=1
+        )
         cb.record_failure()
         # First probe allowed
         cb.check()
@@ -100,7 +103,9 @@ class TestCircuitBreakerConfig:
         assert cb.half_open_max_calls == 1
 
     def test_custom_config(self):
-        cb = CircuitBreaker(failure_threshold=10, recovery_timeout=60.0, half_open_max_calls=3)
+        cb = CircuitBreaker(
+            failure_threshold=10, recovery_timeout=60.0, half_open_max_calls=3
+        )
         assert cb.failure_threshold == 10
         assert cb.recovery_timeout == 60.0
         assert cb.half_open_max_calls == 3

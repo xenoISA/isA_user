@@ -22,6 +22,7 @@ EXCLUDED_PREFIXES = ("/health", "/docs", "/redoc", "/openapi.json", "/info")
 @dataclass
 class RateLimitConfig:
     """Rate limit configuration for an endpoint or default."""
+
     requests: int = 60
     window_seconds: int = 60
 
@@ -73,6 +74,7 @@ class RedisBackend:
     async def increment(self, key: str, window: float) -> int:
         """Increment counter using Redis sorted set with timestamp scores."""
         import time as _time
+
         now = _time.time()
         cutoff = now - window
         pipe = self._redis.pipeline()

@@ -111,6 +111,7 @@ class TestCircuitBreakerLogging:
 
     def test_logs_state_transition_to_open(self, caplog):
         import logging
+
         with caplog.at_level(logging.WARNING, logger="core.circuit_breaker"):
             cb = CircuitBreaker(name="test_service", failure_threshold=1)
             cb.record_failure()
@@ -118,8 +119,11 @@ class TestCircuitBreakerLogging:
 
     def test_logs_state_transition_to_closed(self, caplog):
         import logging
+
         with caplog.at_level(logging.INFO, logger="core.circuit_breaker"):
-            cb = CircuitBreaker(name="test_service", failure_threshold=1, recovery_timeout=0.0)
+            cb = CircuitBreaker(
+                name="test_service", failure_threshold=1, recovery_timeout=0.0
+            )
             cb.record_failure()
             cb.check()
             cb.record_success()
