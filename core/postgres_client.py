@@ -15,6 +15,7 @@ Usage:
         result = await db.query("SELECT * FROM albums WHERE user_id = $1", [user_id])
 """
 
+import asyncio
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -135,6 +136,7 @@ class PostgresClientWrapper:
 
 # Singleton instances per service
 _postgres_clients: Dict[str, PostgresClientWrapper] = {}
+_postgres_client_lock = asyncio.Lock()
 
 
 async def get_postgres_client(
@@ -159,14 +161,18 @@ async def get_postgres_client(
     """
     global _postgres_clients
 
-    if service_name not in _postgres_clients:
-        client = PostgresClientWrapper(
-            service_name=service_name,
-            host=host,
-            port=port,
-            database=database,
-            **kwargs,
-        )
-        _postgres_clients[service_name] = client
+    if service_name in _postgres_clients:
+        return _postgres_clients[service_name]
+
+    async with _postgres_client_lock:
+        if service_name not in _postgres_clients:
+            client = PostgresClientWrapper(
+                service_name=service_name,
+                host=host,
+                port=port,
+                database=database,
+                **kwargs,
+            )
+            _postgres_clients[service_name] = client
 
     return _postgres_clients[service_name]

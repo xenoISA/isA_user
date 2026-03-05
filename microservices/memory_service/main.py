@@ -22,7 +22,7 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Body
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
@@ -158,15 +158,6 @@ app = FastAPI(
     description="AI-powered memory service for intelligent information storage and retrieval",
     version="1.0.0",
     lifespan=lifespan
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 

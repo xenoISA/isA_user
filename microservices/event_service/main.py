@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Query, Body, BackgroundTasks, Request
-from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi.responses import JSONResponse
 import nats
 from nats.aio.client import Client as NATS
@@ -160,15 +160,6 @@ app = FastAPI(
     description="统一事件管理服务",
     version="1.0.0",
     lifespan=lifespan
-)
-
-# CORS配置
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 

@@ -20,7 +20,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Depends, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi.responses import JSONResponse, StreamingResponse
 import io
 import json
@@ -180,14 +180,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS配置
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # ====================
 # 依赖注入
