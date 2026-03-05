@@ -289,3 +289,19 @@ services:
     name: user-membership-service
     repository: isa/user-membership
     port: 8250
+  campaign:
+    name: user-campaign-service
+    repository: isa/user-campaign
+    port: 8251
+  inventory:
+    name: user-inventory-service
+    repository: isa/user-inventory
+    port: 8252
+  tax:
+    name: user-tax-service
+    repository: isa/user-tax
+    port: 8253
+  fulfillment:
+    name: user-fulfillment-service
+    repository: isa/user-fulfillment
+    port: 8254
