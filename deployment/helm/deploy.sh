@@ -48,6 +48,10 @@ declare -A SERVICES=(
     ["credit"]="8229"
     ["event"]="8230"
     ["membership"]="8250"
+    ["campaign"]="8251"
+    ["inventory"]="8252"
+    ["tax"]="8253"
+    ["fulfillment"]="8254"
 )
 
 # Parse arguments

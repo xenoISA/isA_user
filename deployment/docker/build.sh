@@ -47,6 +47,10 @@ SERVICES=(
     "credit_service:8229"
     "event_service:8230"
     "membership_service:8250"
+    "campaign_service:8251"
+    "inventory_service:8252"
+    "tax_service:8253"
+    "fulfillment_service:8254"
 )
 
 # Parse command line arguments
