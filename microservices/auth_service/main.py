@@ -400,6 +400,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Rate limiting
+from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
+
+app.add_middleware(
+    RateLimitMiddleware,
+    default_limit=RateLimitConfig(requests=60, window_seconds=60),
+    path_limits={
+        "/api/v1/auth/login": RateLimitConfig(requests=20, window_seconds=60),
+        "/api/v1/auth/token": RateLimitConfig(requests=20, window_seconds=60),
+        "/api/v1/auth/register": RateLimitConfig(requests=10, window_seconds=60),
+    },
+)
+
 
 # Dependency Injection
 

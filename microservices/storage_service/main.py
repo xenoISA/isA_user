@@ -175,6 +175,18 @@ app = FastAPI(
 )
 
 
+# Rate limiting
+from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
+
+app.add_middleware(
+    RateLimitMiddleware,
+    default_limit=RateLimitConfig(requests=60, window_seconds=60),
+    path_limits={
+        "/api/v1/storage/files/upload": RateLimitConfig(requests=10, window_seconds=60),
+    },
+)
+
+
 # ==================== 异常处理器 ====================
 
 

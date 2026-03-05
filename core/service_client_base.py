@@ -9,6 +9,8 @@ import logging
 from typing import Optional, Dict, Any
 from abc import ABC
 
+from core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,6 +37,10 @@ class BaseServiceClient(ABC):
     # 子类需要定义这些
     service_name: str = None  # 例如 "account_service"
     default_port: int = None   # 例如 8202
+
+    # Circuit breaker defaults (override in subclass if needed)
+    cb_failure_threshold: int = 5
+    cb_recovery_timeout: float = 30.0
 
     def __init__(
         self,
@@ -66,6 +72,13 @@ class BaseServiceClient(ABC):
         self.client = httpx.AsyncClient(
             timeout=timeout,
             headers=default_headers
+        )
+
+        # Circuit breaker per service
+        self._circuit_breaker = CircuitBreaker(
+            name=self.service_name,
+            failure_threshold=self.cb_failure_threshold,
+            recovery_timeout=self.cb_recovery_timeout,
         )
 
         logger.debug(
@@ -130,8 +143,23 @@ class BaseServiceClient(ABC):
         await self.close()
 
     # ========================================
-    # HTTP 方法封装
+    # HTTP 方法封装 (with circuit breaker)
     # ========================================
+
+    async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        """Execute an HTTP request with circuit breaker protection."""
+        self._circuit_breaker.check()
+        url = f"{self.base_url}{path}"
+        try:
+            response = await self.client.request(method, url, **kwargs)
+            if response.status_code >= 500:
+                self._circuit_breaker.record_failure()
+            else:
+                self._circuit_breaker.record_success()
+            return response
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            self._circuit_breaker.record_failure()
+            raise
 
     async def get(
         self,
@@ -140,9 +168,7 @@ class BaseServiceClient(ABC):
         headers: Optional[Dict[str, str]] = None
     ) -> httpx.Response:
         """GET 请求"""
-        url = f"{self.base_url}{path}"
-        response = await self.client.get(url, params=params, headers=headers)
-        return response
+        return await self._request("GET", path, params=params, headers=headers)
 
     async def post(
         self,
@@ -152,9 +178,7 @@ class BaseServiceClient(ABC):
         headers: Optional[Dict[str, str]] = None
     ) -> httpx.Response:
         """POST 请求"""
-        url = f"{self.base_url}{path}"
-        response = await self.client.post(url, json=json, data=data, headers=headers)
-        return response
+        return await self._request("POST", path, json=json, data=data, headers=headers)
 
     async def put(
         self,
@@ -163,9 +187,7 @@ class BaseServiceClient(ABC):
         headers: Optional[Dict[str, str]] = None
     ) -> httpx.Response:
         """PUT 请求"""
-        url = f"{self.base_url}{path}"
-        response = await self.client.put(url, json=json, headers=headers)
-        return response
+        return await self._request("PUT", path, json=json, headers=headers)
 
     async def delete(
         self,
@@ -173,9 +195,7 @@ class BaseServiceClient(ABC):
         headers: Optional[Dict[str, str]] = None
     ) -> httpx.Response:
         """DELETE 请求"""
-        url = f"{self.base_url}{path}"
-        response = await self.client.delete(url, headers=headers)
-        return response
+        return await self._request("DELETE", path, headers=headers)
 
     async def health_check(self) -> bool:
         """

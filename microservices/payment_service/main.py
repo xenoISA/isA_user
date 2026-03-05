@@ -239,7 +239,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 配置CORS
+# Rate limiting
+from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
+
+app.add_middleware(
+    RateLimitMiddleware,
+    default_limit=RateLimitConfig(requests=60, window_seconds=60),
+    path_limits={
+        "/api/v1/payment/payments/intent": RateLimitConfig(requests=30, window_seconds=60),
+        "/api/v1/payment/webhooks": RateLimitConfig(requests=120, window_seconds=60),
+    },
+)
+
 # CORS handled by Gateway
 
 # Include blockchain routes (legacy)
