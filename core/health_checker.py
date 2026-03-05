@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 from enum import Enum
+import asyncpg
 import aiohttp
 import json
 
@@ -66,30 +67,31 @@ class ServiceHealthChecker:
             "critical": critical
         }
     
-    async def check_database_health(self, db_url: Optional[str] = None) -> DependencyHealth:
-        """检查数据库健康状态"""
+    async def check_database_health(self, db_url: Optional[str] = None, timeout: float = 5.0) -> DependencyHealth:
+        """Check database health by executing SELECT 1 against Postgres."""
         start_time = time.time()
-        
+
+        if not db_url:
+            return DependencyHealth(
+                name="database",
+                status=HealthStatus.HEALTHY,
+                response_time=0,
+                error_message="No database configured"
+            )
+
+        conn = None
         try:
-            if not db_url:
-                return DependencyHealth(
-                    name="database",
-                    status=HealthStatus.HEALTHY,
-                    response_time=0,
-                    error_message="No database configured"
-                )
-            
-            # 这里应该根据数据库类型实现具体的检查逻辑
-            # 目前返回模拟结果
+            conn = await asyncpg.connect(db_url, timeout=timeout)
+            await conn.fetchval("SELECT 1")
             response_time = time.time() - start_time
-            
+
             return DependencyHealth(
                 name="database",
                 status=HealthStatus.HEALTHY,
                 response_time=response_time * 1000,
                 last_check=datetime.utcnow()
             )
-            
+
         except Exception as e:
             response_time = time.time() - start_time
             return DependencyHealth(
@@ -99,6 +101,9 @@ class ServiceHealthChecker:
                 error_message=str(e),
                 last_check=datetime.utcnow()
             )
+        finally:
+            if conn is not None:
+                await conn.close()
     
     async def check_external_api_health(self, api_url: str, timeout: float = 5.0) -> DependencyHealth:
         """检查外部API健康状态"""
