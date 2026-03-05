@@ -501,6 +501,7 @@ class NATSEventBus:
 
 # Singleton event bus instance per service
 _event_buses: Dict[str, NATSEventBus] = {}
+_event_bus_lock = asyncio.Lock()
 
 
 async def get_event_bus(
@@ -521,14 +522,18 @@ async def get_event_bus(
     """
     global _event_buses
 
-    if service_name not in _event_buses:
-        event_bus = NATSEventBus(
-            service_name=service_name,
-            config=config,
-            organization_id=organization_id,
-        )
-        await event_bus.connect()
-        _event_buses[service_name] = event_bus
+    if service_name in _event_buses:
+        return _event_buses[service_name]
+
+    async with _event_bus_lock:
+        if service_name not in _event_buses:
+            event_bus = NATSEventBus(
+                service_name=service_name,
+                config=config,
+                organization_id=organization_id,
+            )
+            await event_bus.connect()
+            _event_buses[service_name] = event_bus
 
     return _event_buses[service_name]
 

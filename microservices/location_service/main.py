@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi.responses import JSONResponse
 
 # Add parent directory to path
@@ -137,15 +137,6 @@ app = FastAPI(
     description="Location tracking and geofencing service with PostGIS support",
     version="1.0.0",
     lifespan=lifespan,
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 
