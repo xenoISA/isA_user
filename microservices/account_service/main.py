@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import ConfigManager
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -176,11 +177,13 @@ class AccountMicroservice:
 
 # Global microservice instance
 account_microservice = AccountMicroservice()
+shutdown_manager = GracefulShutdown("account_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
+    shutdown_manager.install_signal_handlers()
     # Initialize event bus
     event_bus = None
     try:
@@ -213,6 +216,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     await account_microservice.shutdown()
 
 
@@ -223,6 +228,7 @@ app = FastAPI(
     version="1.1.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # CORS middleware is handled by the Gateway
 # Remove local CORS to avoid duplicate headers

@@ -20,6 +20,7 @@ from typing import List, Optional
 
 from core.config_manager import ConfigManager
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 
 from isa_common.consul_client import ConsulRegistry
@@ -69,6 +70,7 @@ service: Optional[NotificationService] = None
 event_bus = None
 event_handlers = None
 consul_registry: Optional[ConsulRegistry] = None
+shutdown_manager = GracefulShutdown("notification_service")
 
 # 后台任务
 background_task = None
@@ -94,6 +96,7 @@ async def process_pending_notifications_task():
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     global service, background_task, event_bus, event_handlers, consul_registry
+    shutdown_manager.install_signal_handlers()
 
     # Initialize event bus first
     try:
@@ -174,6 +177,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # 关闭时清理
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
+
     logger.info("Shutting down Notification Service...")
 
     # Deregister from Consul
@@ -206,6 +212,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # 配置CORS
 # CORS handled by Gateway

@@ -38,6 +38,7 @@ from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from isa_common.consul_client import ConsulRegistry
 
 
@@ -61,12 +62,16 @@ js: Optional[JetStreamContext] = None
 event_bus = None  # Centralized NATS event bus
 consul_registry: Optional[ConsulRegistry] = None
 
+# Graceful shutdown manager
+shutdown_manager = GracefulShutdown("event_service")
+
 
 # ==================== 生命周期管理 ====================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     global event_service, event_repository, nats_client, js, event_bus, consul_registry
 
     try:
@@ -129,6 +134,8 @@ async def lifespan(app: FastAPI):
 
     finally:
         # 清理资源
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
         print(f"[event-service] Shutting down...")
 
         # Close centralized event bus
@@ -161,6 +168,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ==================== 依赖注入 ====================

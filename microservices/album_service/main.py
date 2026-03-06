@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -64,11 +65,13 @@ logger = app_logger
 album_service = None
 consul_registry: Optional[ConsulRegistry] = None
 mqtt_publisher: Optional[AlbumMQTTPublisher] = None
+shutdown_manager = GracefulShutdown("album_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
+    shutdown_manager.install_signal_handlers()
     global album_service, consul_registry, mqtt_publisher
 
     logger.info("Starting Album Service...")
@@ -199,6 +202,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     # Disconnect MQTT publisher
     if mqtt_publisher:
         try:
@@ -233,6 +238,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ==================== Dependency Injection ====================

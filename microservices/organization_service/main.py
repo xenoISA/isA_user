@@ -30,6 +30,7 @@ from .factory import create_organization_service, create_family_sharing_service
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.auth_dependencies import require_auth_or_internal_service, is_internal_service_request
 from isa_common.consul_client import ConsulRegistry
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
@@ -144,11 +145,13 @@ class OrganizationMicroservice:
 
 # Global microservice instance
 organization_microservice = OrganizationMicroservice()
+shutdown_manager = GracefulShutdown("organization_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
+    shutdown_manager.install_signal_handlers()
     # Initialize microservice
     await organization_microservice.initialize()
 
@@ -177,8 +180,11 @@ async def lifespan(app: FastAPI):
     logger.info("Service discovery via Consul agent sidecar")
     
     yield
-    
+
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
+
     if config.consul_enabled and hasattr(app.state, 'consul_registry'):
         app.state.consul_registry.stop_maintenance()
         app.state.consul_registry.deregister()
@@ -193,6 +199,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # CORS handled by Gateway
 

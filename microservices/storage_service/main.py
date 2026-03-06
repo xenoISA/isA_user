@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import Event, get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -60,11 +61,13 @@ storage_service = None
 event_bus = None
 consul_registry = None
 event_publisher = None
+shutdown_manager = GracefulShutdown("storage_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     global storage_service, event_bus, consul_registry, event_publisher
 
     logger.info("Starting Storage Service...")
@@ -152,6 +155,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # 清理
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
+
     logger.info("Shutting down Storage Service...")
 
     if consul_registry:
@@ -173,6 +179,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # Rate limiting

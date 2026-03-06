@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from isa_common.consul_client import ConsulRegistry
 
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import Event, get_event_bus
 
@@ -56,6 +57,8 @@ config = config_manager.get_service_config()
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("wallet_service")
 logger = app_logger  # for backward compatibility
+
+shutdown_manager = GracefulShutdown("wallet_service")
 
 # =============================================================================
 # NEW: Import standardized event handlers and clients
@@ -143,6 +146,7 @@ wallet_microservice = WalletMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
+    shutdown_manager.install_signal_handlers()
     # Initialize event bus
     event_bus = None
     try:
@@ -239,6 +243,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     if event_bus:
         await event_bus.close()
         logger.info("Event bus closed")
@@ -253,6 +259,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # CORS handled by Gateway
 

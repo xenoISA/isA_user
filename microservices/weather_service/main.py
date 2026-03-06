@@ -18,6 +18,7 @@ sys.path.append(
 )
 
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -44,6 +45,8 @@ config = config_manager.get_service_config()
 # Setup logger
 app_logger = setup_service_logger("weather_service")
 logger = app_logger
+
+shutdown_manager = GracefulShutdown("weather_service")
 
 
 # Service instance
@@ -129,12 +132,15 @@ microservice = WeatherMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     # Startup
     await microservice.initialize()
 
     yield
 
     # Shutdown
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     await microservice.shutdown()
 
 
@@ -145,6 +151,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # =============================================================================

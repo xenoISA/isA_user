@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from isa_common.consul_client import ConsulRegistry
 from core.nats_client import get_event_bus
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .inventory_service import InventoryService
@@ -25,11 +26,13 @@ consul_registry: Optional[ConsulRegistry] = None
 event_bus = None
 service: Optional[InventoryService] = None
 config_manager: Optional[ConfigManager] = None
+shutdown_manager = GracefulShutdown("inventory_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global consul_registry, event_bus, service, config_manager
+    shutdown_manager.install_signal_handlers()
 
     # Initialize config manager
     config_manager = ConfigManager("inventory_service")
@@ -100,6 +103,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
+
     if consul_registry:
         try:
             consul_registry.deregister()
@@ -118,6 +124,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="inventory_service", version="0.1.0", lifespan=lifespan)
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 def _get_service() -> InventoryService:

@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import ConfigManager
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -55,6 +56,8 @@ config = config_manager.get_service_config()
 # Setup loggers
 app_logger = setup_service_logger("subscription_service")
 logger = app_logger
+
+shutdown_manager = GracefulShutdown("subscription_service")
 
 
 class SubscriptionMicroservice:
@@ -105,6 +108,7 @@ subscription_microservice = SubscriptionMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
+    shutdown_manager.install_signal_handlers()
     # Initialize event bus
     event_bus = None
     try:
@@ -169,6 +173,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     await subscription_microservice.shutdown()
 
 
@@ -179,6 +185,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # Dependency injection

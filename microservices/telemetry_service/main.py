@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus, Event
 from isa_common.consul_client import ConsulRegistry
@@ -42,6 +43,8 @@ config = config_manager.get_service_config()
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("telemetry_service")
 logger = app_logger  # for backward compatibility
+
+shutdown_manager = GracefulShutdown("telemetry_service")
 
 # Service instance
 class TelemetryMicroservice:
@@ -108,6 +111,7 @@ microservice = TelemetryMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     # Startup
     # Initialize NATS event bus
     event_bus = None
@@ -147,6 +151,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     await microservice.shutdown()
 
 # Create FastAPI application
@@ -156,6 +162,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # ======================
 # Health Check Endpoints

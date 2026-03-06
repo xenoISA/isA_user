@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
@@ -54,12 +55,14 @@ logger = setup_service_logger("memory_service")
 # Global service instance
 memory_service = None
 consul_registry: Optional[ConsulRegistry] = None
+shutdown_manager = GracefulShutdown("memory_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
     global memory_service, consul_registry
+    shutdown_manager.install_signal_handlers()
 
     logger.info("Starting Memory Service with AI capabilities...")
 
@@ -138,6 +141,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
+
     logger.info("Shutting down Memory Service...")
     if event_bus:
         await event_bus.close()
@@ -159,6 +165,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ==================== Health Check ====================

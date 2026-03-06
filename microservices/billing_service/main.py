@@ -17,6 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -59,11 +60,13 @@ event_bus = None  # NATS event bus
 event_handlers = None  # Event handlers
 consul_registry = None  # Consul service registry
 SERVICE_PORT = config.service_port or 8216
+shutdown_manager = GracefulShutdown("billing_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     global billing_service, repository, consul_registry, event_bus, event_handlers
 
     try:
@@ -165,6 +168,8 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # 清理资源
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
         # Consul deregistration
         if consul_registry:
             try:
@@ -192,6 +197,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ====================

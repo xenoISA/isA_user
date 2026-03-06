@@ -29,6 +29,7 @@ from .factory import create_order_service
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus, Event
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     OrderCreateRequest, OrderUpdateRequest, OrderCancelRequest,
@@ -112,11 +113,13 @@ class OrderMicroservice:
 # Global microservice instance
 order_microservice = OrderMicroservice()
 consul_registry: Optional[ConsulRegistry] = None
+shutdown_manager = GracefulShutdown("order_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
+    shutdown_manager.install_signal_handlers()
     global consul_registry, payment_client, wallet_client, account_client, storage_client, billing_client
     global inventory_client, tax_client, fulfillment_client
 
@@ -229,6 +232,9 @@ async def lifespan(app: FastAPI):
 
     # Cleanup
     try:
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
+
         # Consul 注销
         if consul_registry:
             try:
@@ -286,6 +292,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # CORS handled by Gateway
 
