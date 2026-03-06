@@ -18,6 +18,7 @@ sys.path.append(
 )
 
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -100,12 +101,14 @@ class CalendarMicroservice:
 # Global instance
 microservice = CalendarMicroservice()
 consul_registry: Optional[ConsulRegistry] = None
+shutdown_manager = GracefulShutdown("calendar_service")
 
 
 # Lifespan management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     global consul_registry
 
     # Startup
@@ -146,6 +149,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     # Consul 注销
     if consul_registry:
         try:
@@ -164,6 +169,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # =============================================================================

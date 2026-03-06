@@ -19,6 +19,7 @@ sys.path.append(
 )
 
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -50,6 +51,8 @@ config = config_manager.get_service_config()
 app_logger = setup_service_logger("task_service")
 logger = app_logger  # for backward compatibility
 
+shutdown_manager = GracefulShutdown("task_service")
+
 
 # Service instance
 class TaskMicroservice:
@@ -75,6 +78,7 @@ microservice = TaskMicroservice()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     # Initialize event bus
     event_bus = None
     try:
@@ -156,6 +160,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     # Deregister from Consul
     if microservice.consul_registry:
         try:
@@ -182,6 +188,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # CORS middleware
 # CORS handled by Gateway

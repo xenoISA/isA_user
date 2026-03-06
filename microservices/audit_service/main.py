@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 # Add parent directory to path for consul_registry
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
@@ -45,11 +46,13 @@ logger = app_logger  # for backward compatibility
 audit_service: Optional[AuditService] = None
 event_bus = None
 consul_registry = None
+shutdown_manager = GracefulShutdown("audit_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     global audit_service, event_bus, consul_registry
 
     logger.info("🚀 Audit Service starting up...")
@@ -121,6 +124,8 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("🛑 Audit Service shutting down...")
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
 
     # Consul deregistration
     if consul_registry:
@@ -145,6 +150,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # CORS中间件
 # CORS handled by Gateway

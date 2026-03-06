@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from core.logger import setup_service_logger
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
 from .compliance_service import ComplianceService
@@ -64,6 +65,9 @@ compliance_repository: Optional[ComplianceRepository] = None
 event_bus = None  # NATS event bus
 consul_registry = None
 
+# Graceful shutdown manager
+shutdown_manager = GracefulShutdown("compliance_service")
+
 # ====================
 # 服务配置
 # ====================
@@ -79,6 +83,7 @@ SERVICE_HOST = config.service_host if config and config.service_host else os.get
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     global compliance_service, compliance_repository, consul_registry, event_bus
 
     try:
@@ -151,6 +156,8 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # Cleanup
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
         logger.info(f"[{SERVICE_NAME}] Shutting down...")
 
         # Consul deregistration
@@ -179,6 +186,7 @@ app = FastAPI(
     version=SERVICE_VERSION,
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ====================

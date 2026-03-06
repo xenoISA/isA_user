@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger  # 使用新的日志模块
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from isa_common.consul_client import ConsulRegistry
 
 from .payment_repository import PaymentRepository
@@ -90,9 +91,13 @@ async def get_authenticated_user_id(request: Request) -> str:
     )
 
 
+shutdown_manager = GracefulShutdown("payment_service")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
+    shutdown_manager.install_signal_handlers()
     global payment_service, consul_registry, account_client, wallet_client, billing_client, product_client
 
     # Initialize service clients
@@ -186,6 +191,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
+
     # Close service clients
     if account_client:
         try:
@@ -238,6 +246,7 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # Rate limiting
 from core.rate_limiter import RateLimitConfig, RateLimitMiddleware

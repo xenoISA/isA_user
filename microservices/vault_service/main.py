@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 # Import core components
 from core.blockchain_client import BlockchainClient
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -59,6 +60,8 @@ config = config_manager.get_service_config()
 # Setup loggers
 app_logger = setup_service_logger("vault_service")
 logger = app_logger
+
+shutdown_manager = GracefulShutdown("vault_service")
 
 # Global service instances
 vault_service = None
@@ -122,6 +125,7 @@ def get_vault_service() -> VaultService:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
+    shutdown_manager.install_signal_handlers()
     global consul_registry, vault_service, blockchain_client, event_bus
 
     try:
@@ -225,6 +229,8 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # Cleanup resources
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
         if event_bus:
             try:
                 await event_bus.close()
@@ -249,6 +255,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ============ Health & Info Endpoints ============

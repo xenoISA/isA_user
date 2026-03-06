@@ -12,7 +12,6 @@ Port: 8203
 
 import asyncio
 import logging
-import signal
 import sys
 import os
 from contextlib import asynccontextmanager
@@ -25,6 +24,7 @@ from fastapi.responses import JSONResponse
 # Add parent directory to path for consul_registry
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
@@ -51,10 +51,12 @@ logger = app_logger  # for backward compatibility
 authorization_service = None
 event_bus = None  # NATS event bus
 consul_registry = None  # Consul service registry
+shutdown_manager = GracefulShutdown("authorization_service")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
+    shutdown_manager.install_signal_handlers()
     global authorization_service, event_bus, consul_registry
 
     # Startup
@@ -131,6 +133,8 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("🛑 Authorization Service shutting down...")
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
 
     # Consul deregistration
     if consul_registry:
@@ -158,6 +162,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # CORS handled by Gateway
 
@@ -450,20 +455,11 @@ async def cleanup_expired_permissions():
         raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
 # ==========================================
-# Signal Handlers & Main
+# Main
 # ==========================================
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully"""
-    logger.info(f"Received signal {signum}, shutting down...")
-    sys.exit(0)
 
 def main():
     """Main entry point"""
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
     # Print configuration summary for debugging
     config_manager.print_config_summary()
     

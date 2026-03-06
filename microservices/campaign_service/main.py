@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 
 from .models import (
     Campaign,
@@ -70,10 +71,14 @@ startup_time = time.time()
 # Global factory instance
 factory: Optional[CampaignServiceFactory] = None
 
+# Graceful shutdown manager
+shutdown_manager = GracefulShutdown("campaign_service")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
+    shutdown_manager.install_signal_handlers()
     global factory
 
     logger.info(f"Starting {SERVICE_NAME} on port {SERVICE_PORT}")
@@ -112,6 +117,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     logger.info(f"Shutting down {SERVICE_NAME}")
     if consul_registry:
         try:
@@ -128,6 +135,7 @@ app = FastAPI(
     version=SERVICE_VERSION,
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ====================

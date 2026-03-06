@@ -35,6 +35,7 @@ from isa_common.consul_client import ConsulRegistry
 
 # Database connection now handled by repositories directly
 from core.config_manager import ConfigManager
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.logger import setup_service_logger
 from core.nats_client import NATSEventBus, get_event_bus
 
@@ -378,17 +379,21 @@ class AuthMicroservice:
 
 # 全局服务实例
 auth_microservice = AuthMicroservice()
+shutdown_manager = GracefulShutdown("auth_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
+    shutdown_manager.install_signal_handlers()
     # Initialize microservice
     await auth_microservice.initialize()
 
     yield
 
     # Cleanup
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     await auth_microservice.shutdown()
 
 
@@ -399,6 +404,7 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # Rate limiting
 from core.rate_limiter import RateLimitConfig, RateLimitMiddleware

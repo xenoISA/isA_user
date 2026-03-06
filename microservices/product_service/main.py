@@ -18,6 +18,7 @@ from isa_common.consul_client import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 from .product_repository import ProductRepository
@@ -46,11 +47,13 @@ event_bus = None  # NATS event bus
 account_client = None  # Account service client
 organization_client = None  # Organization service client
 SERVICE_PORT = config.service_port or 8215
+shutdown_manager = GracefulShutdown("product_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     global product_service, repository, consul_registry, event_bus, account_client, organization_client
 
     try:
@@ -134,12 +137,15 @@ async def lifespan(app: FastAPI):
         logger.info("Service discovery via Consul agent sidecar")
         logger.info(f"Product service started on port {SERVICE_PORT}")
         yield
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize product service: {e}")
         raise
     finally:
         # 清理资源
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
+
         # Deregister from Consul
         if consul_registry:
             try:
@@ -182,6 +188,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ====================

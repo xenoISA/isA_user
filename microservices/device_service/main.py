@@ -19,6 +19,7 @@ from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.service_discovery import get_service_discovery
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     DeviceRegistrationRequest, DeviceUpdateRequest, DeviceAuthRequest,
@@ -77,10 +78,14 @@ class DeviceMicroservice:
 # Global instance
 microservice = DeviceMicroservice()
 
+# Graceful shutdown manager
+shutdown_manager = GracefulShutdown("device_service")
+
 # Lifespan management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     # Startup
     await microservice.initialize()
 
@@ -146,6 +151,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    shutdown_manager.initiate_shutdown()
+    await shutdown_manager.wait_for_drain()
     await microservice.shutdown()
 
 # Create FastAPI application
@@ -155,6 +162,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # ======================
 # Health Check Endpoints

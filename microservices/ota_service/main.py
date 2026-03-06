@@ -18,6 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     FirmwareUploadRequest, UpdateCampaignRequest, DeviceUpdateRequest, UpdateApprovalRequest,
@@ -79,11 +80,13 @@ class OTAMicroservice:
 
 # Global instance
 microservice = OTAMicroservice()
+shutdown_manager = GracefulShutdown("ota_service")
 
 # Lifespan management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    shutdown_manager.install_signal_handlers()
     global device_client, storage_client, notification_client
     consul_registry = None
 
@@ -171,6 +174,9 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     try:
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
+
         # Consul deregistration
         if consul_registry:
             try:
@@ -217,6 +223,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # ======================
 # Health Check Endpoints

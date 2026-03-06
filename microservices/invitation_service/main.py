@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from isa_common.consul_client import ConsulRegistry
 from .invitation_service import InvitationService
 from .invitation_repository import InvitationRepository
@@ -41,6 +42,8 @@ logger = app_logger  # for backward compatibility
 # 全局服务实例
 invitation_service = None
 consul_registry: Optional[ConsulRegistry] = None
+shutdown_manager = GracefulShutdown("invitation_service")
+
 async def get_user_id(request: Request) -> str:
     """Extract user ID from verified authentication credentials (JWT, API Key, or internal service)."""
     from core.auth_dependencies import (
@@ -87,6 +90,7 @@ def get_invitation_service() -> InvitationService:
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     global consul_registry, invitation_service
+    shutdown_manager.install_signal_handlers()
 
     try:
         # Initialize event bus
@@ -161,6 +165,9 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # 清理资源
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
+
         # Consul 注销
         if consul_registry:
             try:
@@ -187,6 +194,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 # 添加CORS中间件
 # CORS handled by Gateway

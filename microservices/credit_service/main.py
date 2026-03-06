@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -65,10 +66,14 @@ consul_registry = None  # Consul service registry
 scheduler = None  # APScheduler for expiration job
 SERVICE_PORT = config.service_port or 8229
 
+# Graceful shutdown manager
+shutdown_manager = GracefulShutdown("credit_service")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
+    shutdown_manager.install_signal_handlers()
     global credit_service, repository, consul_registry, event_bus, event_handlers, scheduler
 
     try:
@@ -181,6 +186,8 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # Cleanup resources
+        shutdown_manager.initiate_shutdown()
+        await shutdown_manager.wait_for_drain()
         # Stop scheduler
         if scheduler:
             try:
@@ -216,6 +223,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 # ====================
