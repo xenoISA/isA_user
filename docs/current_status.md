@@ -2,7 +2,7 @@
 
 ## Overview
 
-Rolling out **6-Layer CDD + 5-Layer Test Pyramid** to all 29 microservices.
+Rolling out **6-Layer CDD + 5-Layer Test Pyramid** to all 35 microservices.
 
 **Architecture**:
 ```
@@ -24,20 +24,20 @@ CDD 6层文档                          3-Contract 测试合约
 
 | Category | Complete | Missing | Notes |
 |----------|----------|---------|-------|
-| DI Architecture | 22 | 7 | protocols.py + factory.py |
-| Domain Docs | 29 | 0 | docs/domain/ |
-| PRD Docs | 29 | 0 | docs/prd/ |
-| Design Docs | 29 | 0 | docs/design/ |
-| **Data Contract** | 29 | 0 | tests/contracts/{svc}/data_contract.py |
-| **Logic Contract** | 29 | 0 | tests/contracts/{svc}/logic_contract.md |
-| **System Contract** | **13** | **16** | tests/contracts/{svc}/system_contract.md |
-| Unit Tests | **29** | 0 | tests/unit/ (campaign added) |
-| Component Tests | **32** | 0 | tests/component/ (campaign added) |
-| Integration Tests | **27** | 2 | tests/integration/ (campaign added) |
-| API Tests | **27** | 2 | tests/api/ (campaign added) |
-| Smoke Tests | **28** | 1 | tests/smoke/ (campaign added) |
+| DI Architecture | **35** | 0 | protocols.py + factory.py |
+| Domain Docs | 35 | 0 | docs/domain/ |
+| PRD Docs | 35 | 0 | docs/prd/ |
+| Design Docs | 35 | 0 | docs/design/ |
+| **Data Contract** | 35 | 0 | tests/contracts/{svc}/data_contract.py |
+| **Logic Contract** | 35 | 0 | tests/contracts/{svc}/logic_contract.md |
+| **System Contract** | **15** | **20** | tests/contracts/{svc}/system_contract.md |
+| Unit Tests | **35** | 0 | tests/unit/ (inventory, tax, fulfillment added) |
+| Component Tests | **35** | 0 | tests/component/ (inventory, tax, fulfillment added) |
+| Integration Tests | **35** | 0 | tests/integration/ (inventory, tax, fulfillment added) |
+| API Tests | **35** | 0 | tests/api/ (inventory, tax, fulfillment added) |
+| Smoke Tests | **31** | 4 | tests/smoke/ (inventory, tax, fulfillment missing smoke) |
 
-**Last Updated**: 2026-02-02 (campaign_service TDD complete)
+**Last Updated**: 2026-03-07 (35 services, DI 35/35 complete, inventory/tax/fulfillment added)
 
 ---
 
@@ -57,14 +57,14 @@ CDD 6层文档                          3-Contract 测试合约
 
 | Status | Count | Services |
 |--------|-------|----------|
-| ✅ Complete | 22 | account, album, audit, auth, authorization, billing, calendar, device, document, media, memory, notification, order, organization, payment, product, session, subscription, task, vault, wallet, **weather** |
-| ❌ Missing | 8 | All others |
+| ✅ Complete | 35 | account, album, audit, auth, authorization, billing, calendar, campaign, compliance, credit, device, document, event, fulfillment, inventory, invitation, location, media, membership, memory, notification, order, organization, ota, payment, product, session, storage, subscription, task, tax, telemetry, vault, wallet, weather |
+| ❌ Missing | 0 | — |
 
 ---
 
 ## Detailed Service Status
 
-**Contracts Column**: D=Data, L=Logic, S=System (all services missing System Contract)
+**Contracts Column**: D=Data, L=Logic, S=System (15/35 have System Contract)
 
 ### Tier 1: Core Identity & Auth
 
@@ -84,27 +84,32 @@ CDD 6层文档                          3-Contract 测试合约
 | **billing_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 30 | ✅ 53 | ✅ 13 | ✅ 15 | ✅ 14 | ✅ |
 | **payment_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 58 | ✅ 48 | ✅ 22 | ✅ 31 | ✅ 22 | ✅ |
 | **credit_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 74+86 | ✅ 79 | ⚠️ 35 skip | ✅ 24/32 | ✅ 11/20 | ✅ K8s Deployed |
+| **inventory_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 13 | ✅ 26 | ✅ 13 | ✅ 14 | ❌ | ✅ |
+| **tax_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 20 | ✅ 17 | ✅ 10 | ✅ 11 | ❌ | ✅ |
+| **fulfillment_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 11 | ✅ 27 | ✅ 10 | ✅ 15 | ❌ | ✅ |
 
 ### Tier 3: Content & Data
 
 | Service | DI | Docs | D | L | S | Unit | Comp | Integ | API | Smoke | Status |
 |---------|:--:|:----:|:-:|:-:|:-:|:----:|:----:|:-----:|:---:|:-----:|:------:|
-| storage_service | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ 47 | ✅ 7 | ✅ 12 | ✅ 14 | ✅ 21 | ✅ |
+| **storage_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 47 | ✅ 7 | ✅ 12 | ✅ 14 | ✅ 21 | ✅ |
 | **media_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 71 | ✅ 14 | ✅ 25 | ✅ 35 | ✅ ~46 | ✅ |
 | **memory_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 97 | ✅ 19 | ✅ 40 | ✅ 45 | ✅ ~136 | ✅ |
 | **album_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 35 | ✅ 35 | ✅ 35 | ✅ 35 | ✅ ~18 | ✅ |
 | **document_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 134 | ✅ 27 | ✅ 15 | ✅ 17 | ✅ 15 | ✅ |
-| **event_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 88 | ✅ 119 | ⚠️ 43 | ⚠️ 39 | ⚠️ 19 | ✅ CDD+TDD |
+| **event_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 88 | ✅ 119 | ⚠️ 43 | ⚠️ 39 | ⚠️ 19 | ✅ CDD+TDD |
 | **calendar_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 110 | ✅ 81 | ✅ 31 | ✅ 26 | ✅ 16 | ✅ |
 | **task_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 92 | ✅ 30 | ✅ 22 | ✅ 23 | ✅ 14 | ✅ |
-| **location_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 71 | ✅ 41 | ✅ 36 | ✅ 77 | ✅ ~20 | ✅ |
+| **location_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 71 | ✅ 41 | ✅ 36 | ✅ 77 | ✅ ~20 | ✅ |
+| **campaign_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 412 | ✅ 104 | ✅ 27 | ✅ 35 | ✅ 14 | ✅ TDD Complete |
 
 ### Tier 4: Supporting Services
 
 | Service | DI | Docs | D | L | S | Unit | Comp | Integ | API | Smoke | Status |
 |---------|:--:|:----:|:-:|:-:|:-:|:----:|:----:|:-----:|:---:|:-----:|:------:|
 | **notification_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 34 | ✅ 21 | ✅ 20 | ✅ ~80 | ✅ ~23 | ✅ |
-| **invitation_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 95 | ✅ 35 | ✅ 24 | ✅ 30 | ✅ 9 | ✅ |
+| **invitation_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 95 | ✅ 35 | ✅ 24 | ✅ 30 | ✅ 9 | ✅ |
+| **membership_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 183 | ✅ 86 | ✅ 56 | ✅ 30 | ✅ 18 | ✅ TDD Complete |
 | **authorization_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 213 | ✅ 13 | ✅ 20 | ✅ 21 | ✅ ~18 | ✅ |
 | **product_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 72 | ✅ 65 | ✅ 40 | ✅ 42 | ✅ ~30 | ✅ |
 | **order_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 95 | ✅ 62 | ✅ 34 | ✅ 38 | ✅ 20 | ✅ |
@@ -115,9 +120,9 @@ CDD 6层文档                          3-Contract 测试合约
 | Service | DI | Docs | D | L | S | Unit | Comp | Integ | API | Smoke | Status |
 |---------|:--:|:----:|:-:|:-:|:-:|:----:|:----:|:-----:|:---:|:-----:|:------:|
 | **audit_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 195 | ⚠️ 69 | ✅ 37 | ✅ 38 | ✅ 18 | ✅ |
-| **compliance_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 52 | ✅ 30 | ✅ 27 | ✅ 25 | ✅ 17 | ✅ |
-| **telemetry_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 50 | ✅ 62 | ✅ 33 | ✅ 33 | ✅ 21 | ✅ |
-| **ota_service** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ 37 | ✅ 99 | ✅ 42 | ✅ 45 | ✅ 17 | ✅ |
+| **compliance_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 52 | ✅ 30 | ✅ 27 | ✅ 25 | ✅ 17 | ✅ |
+| **telemetry_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 50 | ✅ 62 | ✅ 33 | ✅ 33 | ✅ 21 | ✅ |
+| **ota_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 37 | ✅ 99 | ✅ 42 | ✅ 45 | ✅ 17 | ✅ |
 | **vault_service** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ 80 | ✅ 55 | ✅ 35 | ✅ 30 | ✅ 20 | ✅ |
 | **weather_service** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 117 | ✅ 21 | ✅ 19 | ✅ 22 | ✅ 14 | ✅ |
 
@@ -141,7 +146,7 @@ CDD 6层文档                          3-Contract 测试合约
 | Docs | Domain + PRD + Design docs (docs/) |
 | D | data_contract.py (tests/contracts/{svc}/) |
 | L | logic_contract.md (tests/contracts/{svc}/) |
-| S | system_contract.md (tests/contracts/{svc}/) ← **全部缺失** |
+| S | system_contract.md (tests/contracts/{svc}/) — 15/35 complete |
 | Unit | tests/unit/{service}/ |
 | Comp | tests/component/{service}/ |
 | Integ | tests/integration/{service}/ |
@@ -184,14 +189,18 @@ CDD 6层文档                          3-Contract 测试合约
 | **telemetry_service** | **199** (50 unit ✅ + 62 comp ✅ + 33 integ ✅ + 33 API ✅ + 21 smoke ✅) **TDD 5-Layer Complete** | **2025-12-23** |
 | **storage_service** | **101** (47 unit ✅ + 7 comp ✅ + 12 integ ✅ + 14 API ✅ + 21 smoke ⚠️) **TDD 5-Layer Complete** | **2025-12-23** |
 | **event_service** | **~308** (88 unit ✅ + 119 comp ✅ + 43 integ ⚠️ + 39 API ⚠️ + 19 smoke ⚠️) **CDD 6-Layer + TDD Complete** | **2025-12-30** |
+| **campaign_service** | **592** (412 unit ✅ + 104 comp ✅ + 27 integ ✅ + 35 API ✅ + 14 smoke ✅) **TDD 5-Layer Complete** | **2026-02-02** |
+| **inventory_service** | **66** (13 unit ✅ + 26 comp ✅ + 13 integ ✅ + 14 API ✅) **CDD Complete, smoke missing** | **2026-03-07** |
+| **tax_service** | **58** (20 unit ✅ + 17 comp ✅ + 10 integ ✅ + 11 API ✅) **CDD Complete, smoke missing** | **2026-03-07** |
+| **fulfillment_service** | **63** (11 unit ✅ + 27 comp ✅ + 10 integ ✅ + 15 API ✅) **CDD Complete, smoke missing** | **2026-03-07** |
 
 ---
 
 ## Next Priority
 
-### Immediate: System Contracts (大部分缺失)
+### Immediate: System Contracts (20 remaining)
 为已完成服务补充 `system_contract.md`：
-- 17个服务有 Data + Logic，但缺少 System
+- 20个服务有 Data + Logic，但缺少 System (15/35 complete)
 - 使用 skill: `cdd-system-contract` 生成
 - 参考: `.claude/skills/cdd-system-contract/SKILL.md`
 
