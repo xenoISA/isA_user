@@ -22,6 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.metrics import setup_metrics
 
 from .models import (
     Campaign,
@@ -136,6 +137,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
+setup_metrics(app, "campaign_service")
 
 
 # ====================

@@ -27,6 +27,7 @@ from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.metrics import setup_metrics
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -199,6 +200,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
+setup_metrics(app, "session_service")
 
 # CORS handled by Gateway
 
