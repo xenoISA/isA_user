@@ -238,6 +238,165 @@ class BillingRepository:
             logger.error(f"Error getting user billing records: {e}")
             raise
 
+    async def get_billing_records(
+        self,
+        user_id: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        status: Optional[BillingStatus] = None,
+        service_type: Optional[ServiceType] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[BillingRecord]:
+        """General billing records query with optional filters"""
+        try:
+            conditions = []
+            params = []
+            param_count = 0
+
+            if user_id:
+                param_count += 1
+                conditions.append(f"user_id = ${param_count}")
+                params.append(user_id)
+
+            if start_date:
+                param_count += 1
+                conditions.append(f"created_at >= ${param_count}")
+                params.append(start_date)
+
+            if end_date:
+                param_count += 1
+                conditions.append(f"created_at <= ${param_count}")
+                params.append(end_date)
+
+            if status:
+                param_count += 1
+                conditions.append(f"billing_status = ${param_count}")
+                params.append(status.value)
+
+            if service_type:
+                param_count += 1
+                conditions.append(f"service_type = ${param_count}")
+                params.append(service_type.value)
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            query = f'''
+                SELECT * FROM {self.schema}.{self.billing_records_table}
+                {where_clause}
+                ORDER BY created_at DESC
+                LIMIT ${param_count + 1} OFFSET ${param_count + 2}
+            '''
+
+            params.extend([limit, offset])
+
+            async with self.db:
+                results = await self.db.query(query, params=params)
+
+            return [self._row_to_billing_record(row) for row in results] if results else []
+
+        except Exception as e:
+            logger.error(f"Error getting billing records: {e}")
+            raise
+
+    async def count_billing_records(
+        self,
+        user_id: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        status: Optional[BillingStatus] = None,
+        service_type: Optional[ServiceType] = None,
+    ) -> int:
+        """Count billing records matching filters"""
+        try:
+            conditions = []
+            params = []
+            param_count = 0
+
+            if user_id:
+                param_count += 1
+                conditions.append(f"user_id = ${param_count}")
+                params.append(user_id)
+
+            if start_date:
+                param_count += 1
+                conditions.append(f"created_at >= ${param_count}")
+                params.append(start_date)
+
+            if end_date:
+                param_count += 1
+                conditions.append(f"created_at <= ${param_count}")
+                params.append(end_date)
+
+            if status:
+                param_count += 1
+                conditions.append(f"billing_status = ${param_count}")
+                params.append(status.value)
+
+            if service_type:
+                param_count += 1
+                conditions.append(f"service_type = ${param_count}")
+                params.append(service_type.value)
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            query = f'''
+                SELECT COUNT(*) as total FROM {self.schema}.{self.billing_records_table}
+                {where_clause}
+            '''
+
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
+
+            return result.get("total", 0) if result else 0
+
+        except Exception as e:
+            logger.error(f"Error counting billing records: {e}")
+            raise
+
+    async def get_user_quotas(
+        self,
+        user_id: str,
+        service_type: Optional[ServiceType] = None,
+    ) -> List[BillingQuota]:
+        """Get all quotas for a user, optionally filtered by service type"""
+        try:
+            conditions = ["user_id = $1"]
+            params = [user_id]
+            param_count = 1
+
+            # Current period filter
+            now = datetime.now(timezone.utc)
+            param_count += 1
+            conditions.append(f"period_start <= ${param_count}")
+            params.append(now)
+
+            param_count += 1
+            conditions.append(f"period_end >= ${param_count}")
+            params.append(now)
+
+            if service_type:
+                param_count += 1
+                conditions.append(f"service_type = ${param_count}")
+                params.append(service_type.value)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f'''
+                SELECT * FROM {self.schema}.{self.billing_quotas_table}
+                WHERE {where_clause}
+                ORDER BY service_type
+            '''
+
+            async with self.db:
+                results = await self.db.query(query, params=params)
+
+            return [self._row_to_billing_quota(row) for row in results] if results else []
+
+        except Exception as e:
+            logger.error(f"Error getting user quotas: {e}")
+            return []
+
     # ====================
     # 计费事件管理
     # ====================
