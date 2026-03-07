@@ -31,6 +31,8 @@ class MockBillingRepository:
         self.create_or_update_quota = AsyncMock(side_effect=self._create_or_update_quota)
         self.get_billing_stats = AsyncMock(side_effect=self._get_billing_stats)
         self.get_billing_quota = AsyncMock(side_effect=self._get_billing_quota)
+        self.get_user_quotas = AsyncMock(side_effect=self._get_user_quotas)
+        self.get_billing_records = AsyncMock(side_effect=self._get_billing_records)
 
     async def _get_billing_quota(
         self,
@@ -282,6 +284,73 @@ class MockBillingRepository:
             "failed_billing_records": failed,
             "total_revenue": total_revenue,
         }
+
+    async def _get_user_quotas(
+        self,
+        user_id: str,
+        service_type: Optional[str] = None,
+    ) -> List[Any]:
+        """Mock user quotas retrieval (all quotas for a user)"""
+        results = []
+        for key, data in self._quotas.items():
+            if data["user_id"] == user_id:
+                if service_type and data["service_type"] != service_type:
+                    continue
+                quota = MagicMock()
+                for k, v in data.items():
+                    setattr(quota, k, v)
+                # Add model_dump for serialization
+                quota.model_dump = MagicMock(return_value=dict(data))
+                results.append(quota)
+        return results
+
+    async def _get_billing_records(
+        self,
+        user_id: Optional[str] = None,
+        status: Optional[str] = None,
+        service_type: Optional[str] = None,
+        start_date=None,
+        end_date=None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Any]:
+        """Mock general billing records retrieval"""
+        records = []
+        for billing_id, data in self._records.items():
+            if user_id and data["user_id"] != user_id:
+                continue
+            if status and data["billing_status"] != status:
+                continue
+            if service_type and data["service_type"] != service_type:
+                continue
+            record = MagicMock()
+            for key, value in data.items():
+                setattr(record, key, value)
+            record.model_dump = MagicMock(return_value=dict(data))
+            records.append(record)
+
+        records.sort(key=lambda r: r.created_at, reverse=True)
+        return records[offset:offset + limit]
+
+    async def _count_billing_records(
+        self,
+        user_id: Optional[str] = None,
+        status: Optional[str] = None,
+        service_type: Optional[str] = None,
+        start_date=None,
+        end_date=None,
+    ) -> int:
+        """Mock billing records count"""
+        count = 0
+        for billing_id, data in self._records.items():
+            if user_id and data["user_id"] != user_id:
+                continue
+            if status and data["billing_status"] != status:
+                continue
+            if service_type and data["service_type"] != service_type:
+                continue
+            count += 1
+        return count
 
     def add_quota(self, user_id: str, service_type: str, quota_limit: Decimal, quota_used: Decimal = Decimal("0")):
         """Add quota to mock"""

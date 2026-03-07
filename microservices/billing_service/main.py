@@ -356,9 +356,89 @@ async def check_quota(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+@app.get("/api/v1/billing/quota/{user_id}")
+async def get_user_quotas(
+    user_id: str,
+    service_type: Optional[str] = None,
+    service: BillingService = Depends(get_billing_service),
+):
+    """获取用户的所有配额状态"""
+    try:
+        from .models import ServiceType
+
+        billing_service_type = ServiceType(service_type) if service_type else None
+
+        quotas = await service.repository.get_user_quotas(
+            user_id=user_id,
+            service_type=billing_service_type,
+        )
+
+        return {
+            "user_id": user_id,
+            "quotas": [quota.model_dump() for quota in quotas],
+            "total_count": len(quotas),
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid parameter: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error getting user quotas: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 # ====================
 # 查询和统计API
 # ====================
+
+
+@app.get("/api/v1/billing/records")
+async def get_billing_records(
+    user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    service_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    limit: int = 50,
+    offset: int = 0,
+    service: BillingService = Depends(get_billing_service),
+):
+    """获取计费记录列表（通用查询，支持筛选和分页）"""
+    try:
+        from .models import BillingStatus, ServiceType
+
+        billing_status = BillingStatus(status) if status else None
+        billing_service_type = ServiceType(service_type) if service_type else None
+
+        records = await service.repository.get_billing_records(
+            user_id=user_id,
+            status=billing_status,
+            service_type=billing_service_type,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            offset=offset,
+        )
+
+        total = await service.repository.count_billing_records(
+            user_id=user_id,
+            status=billing_status,
+            service_type=billing_service_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        return {
+            "records": [record.model_dump() for record in records],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid parameter: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error getting billing records: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/api/v1/billing/records/user/{user_id}")
