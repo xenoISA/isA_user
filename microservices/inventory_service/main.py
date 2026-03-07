@@ -15,6 +15,7 @@ from isa_common.consul_client import ConsulRegistry
 from core.nats_client import get_event_bus
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.metrics import setup_metrics
 
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .inventory_service import InventoryService
@@ -125,6 +126,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="inventory_service", version="0.1.0", lifespan=lifespan)
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
+setup_metrics(app, "inventory_service")
 
 
 def _get_service() -> InventoryService:

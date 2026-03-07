@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 # Import ConfigManager
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -229,6 +230,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
+setup_metrics(app, "account_service")
 
 # CORS middleware is handled by the Gateway
 # Remove local CORS to avoid duplicate headers

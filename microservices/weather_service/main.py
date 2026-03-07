@@ -19,6 +19,7 @@ sys.path.append(
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
@@ -152,6 +153,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
+setup_metrics(app, "weather_service")
 
 
 # =============================================================================

@@ -20,6 +20,7 @@ from core.logger import setup_service_logger
 from core.service_discovery import get_service_discovery
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.metrics import setup_metrics
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     DeviceRegistrationRequest, DeviceUpdateRequest, DeviceAuthRequest,
@@ -163,6 +164,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
+setup_metrics(app, "device_service")
 
 # ======================
 # Health Check Endpoints
