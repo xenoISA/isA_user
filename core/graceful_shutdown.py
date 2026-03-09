@@ -55,18 +55,36 @@ class GracefulShutdown:
         self._shutting_down = False
         self._in_flight = 0
         self._cleanups: List[Tuple[str, Callable]] = []
+        self._consul_registry = None
 
     @property
     def is_shutting_down(self) -> bool:
         return self._shutting_down
+
+    def set_consul_registry(self, registry) -> None:
+        """Register the Consul registry so shutdown can deregister before rejecting traffic."""
+        self._consul_registry = registry
 
     @property
     def in_flight_count(self) -> int:
         return self._in_flight
 
     def initiate_shutdown(self) -> None:
-        """Mark the service as shutting down."""
+        """Mark the service as shutting down.
+
+        Deregisters from Consul first (if registered) so traffic stops
+        being routed before we start rejecting requests with 503.
+        """
         if not self._shutting_down:
+            # Deregister from Consul BEFORE rejecting requests,
+            # so load balancers stop sending traffic to this instance.
+            if self._consul_registry:
+                try:
+                    self._consul_registry.deregister()
+                    logger.info(f"[{self.service_name}] Deregistered from Consul")
+                except Exception as e:
+                    logger.error(f"[{self.service_name}] Failed to deregister from Consul: {e}")
+
             self._shutting_down = True
             logger.info(
                 f"[{self.service_name}] Shutdown initiated "
