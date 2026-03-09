@@ -1,8 +1,8 @@
 """
 L1 Unit Tests for core/metrics.py
 
-Tests the Prometheus metrics setup: path exclusion logic,
-custom metric definitions, and setup_metrics configuration.
+Tests the observability wrapper: path exclusion logic,
+domain-specific metric definitions using isa_common.
 """
 
 import pytest
@@ -41,24 +41,27 @@ class TestShouldInstrument:
         assert _should_instrument("/healthy") is True
         assert _should_instrument("/api/v1/metrics-data") is True
 
+    def test_ready_excluded(self):
+        assert _should_instrument("/ready") is False
+
+    def test_live_excluded(self):
+        assert _should_instrument("/live") is False
+
 
 class TestCustomMetrics:
-    """Test that custom metrics are properly defined."""
+    """Test that domain-specific metrics are created via isa_common."""
 
-    def test_auth_failures_counter_exists(self):
-        assert AUTH_FAILURES._name == "auth_failures"
-        assert "service" in AUTH_FAILURES._labelnames
-        assert "method" in AUTH_FAILURES._labelnames
+    def test_auth_failures_has_labels(self):
+        labeled = AUTH_FAILURES.labels(service="test", method="token")
+        assert labeled is not None
 
-    def test_business_operations_counter_exists(self):
-        assert BUSINESS_OPERATIONS._name == "business_operations"
-        assert "service" in BUSINESS_OPERATIONS._labelnames
-        assert "operation" in BUSINESS_OPERATIONS._labelnames
-        assert "status" in BUSINESS_OPERATIONS._labelnames
+    def test_business_operations_has_labels(self):
+        labeled = BUSINESS_OPERATIONS.labels(service="test", operation="create", status="ok")
+        assert labeled is not None
 
-    def test_request_payload_histogram_exists(self):
-        assert REQUEST_PAYLOAD_SIZE._name == "http_request_content_length_bytes"
-        assert "service" in REQUEST_PAYLOAD_SIZE._labelnames
+    def test_request_payload_has_labels(self):
+        labeled = REQUEST_PAYLOAD_SIZE.labels(service="test")
+        assert labeled is not None
 
 
 class TestExcludedPaths:
@@ -72,3 +75,9 @@ class TestExcludedPaths:
 
     def test_metrics_in_excluded(self):
         assert "/metrics" in EXCLUDED_PATHS
+
+    def test_ready_in_excluded(self):
+        assert "/ready" in EXCLUDED_PATHS
+
+    def test_live_in_excluded(self):
+        assert "/live" in EXCLUDED_PATHS
