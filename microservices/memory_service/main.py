@@ -132,6 +132,7 @@ async def lifespan(app: FastAPI):
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
+            shutdown_manager.set_consul_registry(consul_registry)
             logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
@@ -150,13 +151,8 @@ async def lifespan(app: FastAPI):
         await event_bus.close()
         logger.info("Event bus closed")
 
-    # Consul 注销
-    if consul_registry:
-        try:
-            consul_registry.deregister()
-            logger.info("✅ Service deregistered from Consul")
-        except Exception as e:
-            logger.error(f"❌ Failed to deregister from Consul: {e}")
+    # Consul deregistration is handled by shutdown_manager.initiate_shutdown()
+    # so traffic stops before we reject requests with 503.
 
 
 # Create FastAPI app
@@ -177,6 +173,17 @@ setup_metrics(app, "memory_service")
 async def health_check():
     """Health check endpoint"""
     try:
+        # Report unhealthy during shutdown so Consul TTL checks fail
+        if shutdown_manager.is_shutting_down:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "shutting_down",
+                    "service": "memory_service",
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
         db_connected = await memory_service.check_connection()
 
         status = MemoryServiceStatus(
