@@ -2,7 +2,7 @@
 L2 Component Tests for core/metrics.py
 
 Tests setup_metrics with a real FastAPI app: endpoint exposure,
-instrumentation of requests, and metric content.
+instrumentation of requests, and metric content via isa_common.
 """
 
 import pytest
@@ -14,7 +14,7 @@ from core.metrics import setup_metrics
 
 @pytest.fixture(scope="module")
 def metrics_app():
-    """Create a FastAPI app with metrics enabled (module-scoped to avoid registry duplication)."""
+    """Create a FastAPI app with observability enabled."""
     app = FastAPI()
 
     @app.get("/api/v1/test")
@@ -54,8 +54,7 @@ class TestMetricsEndpoint:
     def test_metrics_contains_service_info(self, client):
         response = client.get("/metrics")
         body = response.text
-        assert "service_info" in body
-        assert "test_service" in body
+        assert "isa_test_service_service_info" in body
 
 
 class TestInstrumentation:
@@ -77,11 +76,12 @@ class TestInstrumentation:
 
 
 class TestSetupReturn:
-    """Test that setup_metrics returns the instrumentator."""
+    """Test that setup_metrics returns observability result."""
 
-    def test_returns_instrumentator(self):
+    def test_returns_dict(self):
         app = FastAPI()
         result = setup_metrics(app, "return_test_service")
-        assert result is not None
-        assert hasattr(result, "instrument")
-        assert hasattr(result, "expose")
+        assert isinstance(result, dict)
+        assert "metrics" in result
+        assert "tracing" in result
+        assert "logging" in result

@@ -1,9 +1,9 @@
 """
-Prometheus Metrics Middleware for isA_user Microservices
+Prometheus Metrics & Observability for isA_user Microservices
 
-Shared metrics instrumentation using prometheus-fastapi-instrumentator.
-Provides standard HTTP metrics (request count, latency histogram, error rate)
-and a `/metrics` endpoint for Prometheus scraping.
+Thin wrapper around isa_common observability clients. Provides:
+- setup_metrics(): one-liner to enable metrics, tracing, and logging
+- Domain-specific metrics: AUTH_FAILURES, BUSINESS_OPERATIONS, REQUEST_PAYLOAD_SIZE
 
 Usage:
     from core.metrics import setup_metrics
@@ -14,31 +14,28 @@ Usage:
 
 import logging
 
-from fastapi import FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
-from prometheus_client import Counter, Histogram, Info
+from isa_common.observability import setup_observability
+from isa_common.metrics import create_counter, create_histogram
 
 logger = logging.getLogger(__name__)
 
-# Paths excluded from metrics instrumentation
-EXCLUDED_PATHS = frozenset({"/health", "/health/detailed", "/metrics"})
+# Paths excluded from metrics instrumentation (handled by isa_common)
+EXCLUDED_PATHS = frozenset({"/health", "/health/detailed", "/metrics", "/ready", "/live"})
 
-# Shared custom metrics
-SERVICE_INFO = Info("service", "Service metadata")
-
-AUTH_FAILURES = Counter(
+# Domain-specific metrics (re-created with standardized naming via isa_common)
+AUTH_FAILURES = create_counter(
     "auth_failures_total",
     "Total authentication failures",
     ["service", "method"],
 )
 
-BUSINESS_OPERATIONS = Counter(
+BUSINESS_OPERATIONS = create_counter(
     "business_operations_total",
     "Business operation counter for domain-specific tracking",
     ["service", "operation", "status"],
 )
 
-REQUEST_PAYLOAD_SIZE = Histogram(
+REQUEST_PAYLOAD_SIZE = create_histogram(
     "http_request_content_length_bytes",
     "HTTP request payload size in bytes",
     ["service"],
@@ -54,28 +51,31 @@ def _should_instrument(path: str) -> bool:
     return True
 
 
-def setup_metrics(app: FastAPI, service_name: str) -> Instrumentator:
+def setup_metrics(app, service_name: str, version: str = "unknown"):
     """
-    Attach Prometheus metrics instrumentation and /metrics endpoint to a FastAPI app.
+    Attach full observability stack (metrics, tracing, logging) to a FastAPI app.
+
+    Delegates to isa_common.setup_observability() for standardized setup:
+    - Prometheus metrics with /metrics endpoint
+    - OpenTelemetry tracing to Tempo
+    - Structured logging to Loki
 
     Args:
         app: The FastAPI application instance.
         service_name: Name of the microservice (used in metric labels).
+        version: Service version string.
 
     Returns:
-        The configured Instrumentator instance.
+        Dict indicating which pillars were enabled.
     """
-    SERVICE_INFO.info({"service_name": service_name})
-
-    instrumentator = Instrumentator(
-        excluded_handlers=["/health", "/health/detailed", "/metrics"],
+    result = setup_observability(
+        app,
+        service_name=service_name,
+        version=version,
     )
 
-    instrumentator.instrument(app)
-    instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
-
-    logger.info(f"[{service_name}] Prometheus metrics enabled on /metrics")
-    return instrumentator
+    logger.info(f"[{service_name}] Observability enabled: {result}")
+    return result
 
 
 __all__ = [
