@@ -293,9 +293,9 @@ Return ONLY valid JSON with a "procedures" array."""
             await self._ensure_collection()
 
             # Use pre-computed embedding or generate one
-            if not query_embedding:
+            if query_embedding is None:
                 query_embedding = await self._generate_embedding(query)
-            if not query_embedding:
+            if query_embedding is None:
                 logger.warning("Failed to generate query embedding, falling back to text search")
                 return await self.search_procedures_by_skill_type(user_id, query, limit)
 

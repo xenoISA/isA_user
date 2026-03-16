@@ -407,9 +407,9 @@ Return ONLY valid JSON with a "facts" array. Example:
             await self._ensure_collection()
 
             # Use pre-computed embedding or generate one
-            if not query_embedding:
+            if query_embedding is None:
                 query_embedding = await self._generate_embedding(query)
-            if not query_embedding:
+            if query_embedding is None:
                 logger.warning("Failed to generate query embedding, falling back to text search")
                 return await self.search_facts_by_subject(user_id, query, limit)
 

@@ -42,6 +42,8 @@ from .models import (
     MemoryServiceStatus
 )
 from .memory_service import MemoryService
+from .context_ordering import order_by_importance_edges
+from .mmr_reranker import apply_mmr_reranking
 from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .factory import create_memory_service
@@ -57,6 +59,19 @@ logger = setup_service_logger("memory_service")
 memory_service = None
 consul_registry: Optional[ConsulRegistry] = None
 shutdown_manager = GracefulShutdown("memory_service")
+
+
+async def _maybe_rerank(results, query, service, rerank, mmr_lambda, limit):
+    """Apply MMR re-ranking if enabled, using the correct service's embedding generation."""
+    if not rerank or not results:
+        return results
+    try:
+        query_embedding = await service._generate_embedding(query)
+        if query_embedding is not None:
+            results = apply_mmr_reranking(results, query_embedding, lambda_param=mmr_lambda, top_k=limit)
+    except Exception as e:
+        logger.warning("MMR re-ranking failed, using raw results: %s", e)
+    return results
 
 
 @asynccontextmanager
@@ -705,18 +720,14 @@ async def search_factual_vector(
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
     rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
     mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for factual memories using Qdrant"""
     try:
         results = await memory_service.vector_search_factual(user_id, query, limit, score_threshold, with_vectors=rerank)
-        if rerank and results:
-            try:
-                from .mmr_reranker import apply_mmr_reranking
-                query_embedding = await memory_service.factual_service._generate_embedding(query)
-                if query_embedding:
-                    results = apply_mmr_reranking(results, query_embedding, lambda_param=mmr_lambda, top_k=limit)
-            except Exception as e:
-                logger.warning(f"MMR re-ranking failed, using raw results: {e}")
+        results = await _maybe_rerank(results, query, memory_service.factual_service, rerank, mmr_lambda, limit)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in factual vector search: {e}")
@@ -731,18 +742,14 @@ async def search_episodic_vector(
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
     rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
     mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for episodic memories using Qdrant"""
     try:
         results = await memory_service.vector_search_episodic(user_id, query, limit, score_threshold, with_vectors=rerank)
-        if rerank and results:
-            try:
-                from .mmr_reranker import apply_mmr_reranking
-                query_embedding = await memory_service.factual_service._generate_embedding(query)
-                if query_embedding:
-                    results = apply_mmr_reranking(results, query_embedding, lambda_param=mmr_lambda, top_k=limit)
-            except Exception as e:
-                logger.warning(f"MMR re-ranking failed, using raw results: {e}")
+        results = await _maybe_rerank(results, query, memory_service.episodic_service, rerank, mmr_lambda, limit)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in episodic vector search: {e}")
@@ -757,18 +764,14 @@ async def search_procedural_vector(
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
     rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
     mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for procedural memories using Qdrant"""
     try:
         results = await memory_service.vector_search_procedural(user_id, query, limit, score_threshold, with_vectors=rerank)
-        if rerank and results:
-            try:
-                from .mmr_reranker import apply_mmr_reranking
-                query_embedding = await memory_service.factual_service._generate_embedding(query)
-                if query_embedding:
-                    results = apply_mmr_reranking(results, query_embedding, lambda_param=mmr_lambda, top_k=limit)
-            except Exception as e:
-                logger.warning(f"MMR re-ranking failed, using raw results: {e}")
+        results = await _maybe_rerank(results, query, memory_service.procedural_service, rerank, mmr_lambda, limit)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in procedural vector search: {e}")
@@ -783,18 +786,14 @@ async def search_semantic_vector(
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
     rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
     mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for semantic memories using Qdrant"""
     try:
         results = await memory_service.vector_search_semantic(user_id, query, limit, score_threshold, with_vectors=rerank)
-        if rerank and results:
-            try:
-                from .mmr_reranker import apply_mmr_reranking
-                query_embedding = await memory_service.factual_service._generate_embedding(query)
-                if query_embedding:
-                    results = apply_mmr_reranking(results, query_embedding, lambda_param=mmr_lambda, top_k=limit)
-            except Exception as e:
-                logger.warning(f"MMR re-ranking failed, using raw results: {e}")
+        results = await _maybe_rerank(results, query, memory_service.semantic_service, rerank, mmr_lambda, limit)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in semantic vector search: {e}")
@@ -810,18 +809,14 @@ async def search_working_vector(
     include_expired: bool = Query(False),
     rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
     mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for working memories using Qdrant"""
     try:
         results = await memory_service.vector_search_working(user_id, query, limit, score_threshold, include_expired, with_vectors=rerank)
-        if rerank and results:
-            try:
-                from .mmr_reranker import apply_mmr_reranking
-                query_embedding = await memory_service.factual_service._generate_embedding(query)
-                if query_embedding:
-                    results = apply_mmr_reranking(results, query_embedding, lambda_param=mmr_lambda, top_k=limit)
-            except Exception as e:
-                logger.warning(f"MMR re-ranking failed, using raw results: {e}")
+        results = await _maybe_rerank(results, query, memory_service.working_service, rerank, mmr_lambda, limit)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in working vector search: {e}")
@@ -837,18 +832,14 @@ async def search_session_vector(
     session_id: Optional[str] = Query(None),
     rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
     mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for session memories using Qdrant"""
     try:
         results = await memory_service.vector_search_session(user_id, query, limit, score_threshold, session_id, with_vectors=rerank)
-        if rerank and results:
-            try:
-                from .mmr_reranker import apply_mmr_reranking
-                query_embedding = await memory_service.factual_service._generate_embedding(query)
-                if query_embedding:
-                    results = apply_mmr_reranking(results, query_embedding, lambda_param=mmr_lambda, top_k=limit)
-            except Exception as e:
-                logger.warning(f"MMR re-ranking failed, using raw results: {e}")
+        results = await _maybe_rerank(results, query, memory_service.session_service, rerank, mmr_lambda, limit)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in session vector search: {e}")
@@ -864,6 +855,7 @@ async def search_all_memories(
     similarity_threshold: float = Query(0.15, ge=0.0, le=1.0),
     rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
     mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=pure diversity, 1.0=pure relevance"),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """
     Universal semantic search across all memory types using vector similarity
@@ -898,7 +890,7 @@ async def search_all_memories(
 
         # Generate embedding ONCE and share across all memory type searches
         query_embedding = await memory_service.factual_service._generate_embedding(query)
-        if query_embedding:
+        if query_embedding is not None:
             logger.info(f"Generated shared query embedding ({len(query_embedding)} dims) for search: {query[:50]}...")
         else:
             logger.warning(f"Failed to generate query embedding for: {query[:50]}...")
@@ -1013,8 +1005,7 @@ async def search_all_memories(
                 results['session'] = []
 
         # Apply MMR re-ranking per memory type if enabled
-        if rerank and query_embedding:
-            from .mmr_reranker import apply_mmr_reranking
+        if rerank and query_embedding is not None:
             for memory_type in list(results.keys()):
                 if results[memory_type]:
                     try:
@@ -1024,6 +1015,12 @@ async def search_all_memories(
                         logger.info(f"MMR re-ranked {memory_type} results (lambda={mmr_lambda})")
                     except Exception as e:
                         logger.warning(f"MMR re-ranking failed for {memory_type}, using raw results: {e}")
+
+        # Apply context ordering per memory type if enabled
+        if order_results:
+            for memory_type in list(results.keys()):
+                if results[memory_type]:
+                    results[memory_type] = order_by_importance_edges(results[memory_type])
 
         response = {
             "query": query,
@@ -1035,6 +1032,8 @@ async def search_all_memories(
         if rerank:
             response["reranked"] = True
             response["mmr_lambda"] = mmr_lambda
+        if order_results:
+            response["context_ordered"] = True
 
         return response
 
