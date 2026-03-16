@@ -31,7 +31,8 @@ async def publish_memory_created(
     content: str,
     importance_score: Optional[float] = None,
     tags: Optional[List[str]] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    memory_data: Optional[Dict[str, Any]] = None
 ) -> bool:
     """
     Publish memory.created event
@@ -41,10 +42,11 @@ async def publish_memory_created(
         memory_id: Unique memory ID
         memory_type: Type of memory
         user_id: User ID
-        content: Memory content
+        content: Full memory content (used by isA_Data for entity extraction)
         importance_score: Importance score
         tags: Memory tags
         metadata: Additional metadata
+        memory_data: Type-specific structured data for graph extraction
 
     Returns:
         bool: True if published successfully
@@ -58,6 +60,7 @@ async def publish_memory_created(
             importance_score=importance_score,
             tags=tags,
             metadata=metadata,
+            memory_data=memory_data,
             timestamp=datetime.now(timezone.utc).isoformat()
         )
 
