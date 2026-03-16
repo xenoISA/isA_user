@@ -39,7 +39,7 @@ from isa_common.consul_client import ConsulRegistry
 from .models import (
     MemoryType, MemoryOperationResult,
     MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams,
-    MemoryServiceStatus
+    MemoryServiceStatus, DecayRequest, DecayResponse
 )
 from .memory_service import MemoryService
 from .events.handlers import MemoryEventHandlers
@@ -948,6 +948,46 @@ async def search_all_memories(
 
     except Exception as e:
         logger.error(f"Error in universal search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Memory Decay ====================
+
+@app.post("/api/v1/memories/decay", response_model=DecayResponse)
+async def run_memory_decay(request: DecayRequest):
+    """
+    Run Ebbinghaus forgetting-curve decay on memory importance scores.
+
+    Reduces importance_score of unaccessed memories over time.
+    Memories with importance >= protected_threshold are never decayed.
+    Memories that decay below floor_threshold are soft-deleted (importance set to 0).
+    Access count resets the decay timer (spaced repetition effect).
+    """
+    try:
+        from .decay_service import DecayService, DecayConfig
+
+        config = DecayConfig(
+            half_life_days=request.half_life_days,
+            floor_threshold=request.floor_threshold,
+            protected_threshold=request.protected_threshold,
+        )
+        decay_svc = DecayService(memory_service=memory_service, config=config)
+        result = await decay_svc.run_decay_cycle(user_id=request.user_id)
+
+        return DecayResponse(
+            success=True,
+            total_processed=result["total_processed"],
+            decayed_count=result["decayed_count"],
+            floored_count=result["floored_count"],
+            protected_count=result["protected_count"],
+            skipped_count=result["skipped_count"],
+            message=(
+                f"Decay cycle complete: {result['decayed_count']} decayed, "
+                f"{result['floored_count']} floored, {result['protected_count']} protected"
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error running memory decay: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

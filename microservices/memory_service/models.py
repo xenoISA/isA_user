@@ -264,6 +264,25 @@ class MemoryListParams(BaseModel):
     importance_min: Optional[float] = None
 
 
+class DecayRequest(BaseModel):
+    """Request model for running a memory decay cycle"""
+    user_id: Optional[str] = Field(None, description="User ID to decay (None for global)")
+    half_life_days: int = Field(30, ge=1, description="Days for importance to halve")
+    floor_threshold: float = Field(0.1, ge=0.0, le=1.0, description="Below this, importance is set to 0")
+    protected_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Memories at or above this are never decayed")
+
+
+class DecayResponse(BaseModel):
+    """Response model for a decay cycle"""
+    success: bool
+    total_processed: int = 0
+    decayed_count: int = 0
+    floored_count: int = 0
+    protected_count: int = 0
+    skipped_count: int = 0
+    message: str = ""
+
+
 class MemoryServiceStatus(BaseModel):
     """Memory service status"""
     service: str = "memory_service"
