@@ -310,6 +310,26 @@ class ConsolidationResponse(BaseModel):
     message: str = ""
 
 
+class HybridSearchResult(BaseModel):
+    """A single result from hybrid search (vector + graph)."""
+    memory_id: str = Field(..., description="Unique memory identifier")
+    content: str = Field("", description="Memory content")
+    memory_type: str = Field("", description="Memory type (factual, episodic, etc.)")
+    final_score: float = Field(..., ge=0.0, description="Combined weighted score")
+    source: Literal["vector", "graph", "both"] = Field(..., description="Which retrieval method found this result")
+
+
+class HybridSearchResponse(BaseModel):
+    """Response model for the hybrid search endpoint."""
+    query: str = Field(..., description="Original search query")
+    user_id: str = Field(..., description="User who performed the search")
+    vector_weight: float = Field(..., description="Weight applied to vector results")
+    graph_weight: float = Field(..., description="Weight applied to graph results")
+    results: List[HybridSearchResult] = Field(default_factory=list, description="Merged results")
+    total_count: int = Field(0, description="Total number of results")
+    graph_available: bool = Field(True, description="Whether graph service was reachable")
+
+
 class MemoryServiceStatus(BaseModel):
     """Memory service status"""
     service: str = "memory_service"

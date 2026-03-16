@@ -42,12 +42,14 @@ from .models import (
     MemoryServiceStatus, DecayRequest, DecayResponse,
     ConsolidationRequest, ConsolidationResponse,
     GraphSearchResponse, GraphNeighborsResponse,
+    HybridSearchResponse
 )
 from .graph_client import GraphClient
 from .memory_service import MemoryService
 from .context_ordering import order_by_importance_edges
 from .context_compressor import ContextCompressor
 from .mmr_reranker import apply_mmr_reranking
+from .hybrid_search import merge_hybrid_results
 from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .factory import create_memory_service
@@ -1197,6 +1199,112 @@ async def search_all_memories(
 
     except Exception as e:
         logger.error(f"Error in universal search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Hybrid Search (Vector + Graph) ====================
+
+@app.get("/api/v1/memories/hybrid-search")
+async def hybrid_search(
+    query: str = Query(...),
+    user_id: str = Query(...),
+    memory_types: Optional[str] = Query(None, description="Comma-separated memory types (e.g., 'factual,episodic')"),
+    limit: int = Query(10, ge=1, le=100),
+    vector_weight: float = Query(0.6, ge=0.0, le=1.0, description="Weight for vector similarity results"),
+    graph_weight: float = Query(0.4, ge=0.0, le=1.0, description="Weight for graph traversal results"),
+):
+    """
+    Hybrid search combining Qdrant vector similarity with Neo4j graph traversal.
+
+    Merges results from both sources using configurable weights.
+    Falls back to vector-only if the graph service (isA_Data) is unavailable.
+
+    Each result includes a 'source' field: "vector", "graph", or "both".
+    """
+    try:
+        # --- Vector search across requested memory types ---
+        if memory_types:
+            types_to_search = [t.strip().lower() for t in memory_types.split(',')]
+        else:
+            types_to_search = ['factual', 'episodic', 'procedural', 'semantic', 'working', 'session']
+
+        # Generate embedding once
+        query_embedding = await memory_service.factual_service._generate_embedding(query)
+
+        # Collect vector results from all requested types
+        vector_results: List[Dict[str, Any]] = []
+
+        search_methods = {
+            'factual': memory_service.vector_search_factual,
+            'episodic': memory_service.vector_search_episodic,
+            'procedural': memory_service.vector_search_procedural,
+            'semantic': memory_service.vector_search_semantic,
+            'working': memory_service.vector_search_working,
+            'session': memory_service.vector_search_session,
+        }
+
+        for mem_type in types_to_search:
+            search_fn = search_methods.get(mem_type)
+            if not search_fn:
+                continue
+            try:
+                results = await search_fn(user_id, query, limit, 0.15, query_embedding=query_embedding)
+                for r in results:
+                    r.setdefault("memory_id", r.get("id", ""))
+                vector_results.extend(results)
+            except Exception as e:
+                logger.warning("Hybrid search: vector search failed for %s: %s", mem_type, e)
+
+        # --- Graph search via GraphClient ---
+        graph_results: List[Dict[str, Any]] = []
+        graph_available = True
+
+        try:
+            from .graph_client import GraphClient
+
+            graph_client = GraphClient(consul_registry=consul_registry)
+            if await graph_client.health_check():
+                entity_resp = await graph_client.search_entities(
+                    query=query, user_id=user_id, limit=limit
+                )
+                for entity in entity_resp.get("entities", []):
+                    graph_results.append({
+                        "memory_id": entity.get("id", entity.get("entity_id", "")),
+                        "content": entity.get("content", entity.get("name", "")),
+                        "memory_type": entity.get("memory_type", entity.get("type", "graph")),
+                        "relevance_score": entity.get("relevance_score", entity.get("score", 0.5)),
+                    })
+            else:
+                graph_available = False
+                logger.info("Hybrid search: graph service unavailable, falling back to vector-only")
+        except ImportError:
+            graph_available = False
+            logger.info("Hybrid search: graph_client not available, falling back to vector-only")
+        except Exception as e:
+            graph_available = False
+            logger.warning("Hybrid search: graph query failed, falling back to vector-only: %s", e)
+
+        # --- Merge results ---
+        merged = merge_hybrid_results(
+            vector_results, graph_results,
+            vector_weight=vector_weight, graph_weight=graph_weight,
+        )
+
+        # Trim to requested limit
+        merged = merged[:limit]
+
+        return {
+            "query": query,
+            "user_id": user_id,
+            "vector_weight": vector_weight,
+            "graph_weight": graph_weight,
+            "results": merged,
+            "total_count": len(merged),
+            "graph_available": graph_available,
+        }
+
+    except Exception as e:
+        logger.error("Error in hybrid search: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
