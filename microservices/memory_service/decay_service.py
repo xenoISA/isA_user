@@ -79,6 +79,10 @@ class DecayConfig:
     batch_size: int = 1000
     """Maximum number of memories to fetch per query batch."""
 
+    def __post_init__(self):
+        if self.half_life_days < 1:
+            self.half_life_days = 1
+
     @property
     def half_life_hours(self) -> float:
         return self.half_life_days * 24.0
@@ -235,11 +239,15 @@ class DecayService:
                 continue
 
             # Persist the update
+            user_id = mem.get("user_id")
+            if not user_id:
+                logger.warning("Skipping decay update for memory %s: missing user_id", mem.get("id"))
+                continue
             try:
                 await repo.update(
                     mem["id"],
                     {"importance_score": new_importance},
-                    mem.get("user_id"),
+                    user_id,
                 )
                 counts["decayed_count"] += 1
             except Exception as e:
@@ -274,6 +282,7 @@ class DecayService:
         all_results: List[Dict[str, Any]] = []
         offset = 0
         batch_size = self.config.batch_size
+        # TODO: Replace OFFSET pagination with keyset (WHERE id > $last_id) for better performance on large tables
 
         while True:
             if user_id:
