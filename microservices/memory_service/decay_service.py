@@ -76,6 +76,9 @@ class DecayConfig:
     min_decay_delta: float = 0.001
     """Minimum change in importance to bother persisting an update."""
 
+    batch_size: int = 1000
+    """Maximum number of memories to fetch per query batch."""
+
     @property
     def half_life_hours(self) -> float:
         return self.half_life_days * 24.0
@@ -94,6 +97,13 @@ _SERVICE_ATTR = {
     "episodic": "episodic_service",
     "semantic": "semantic_service",
 }
+
+# Allowlists for SQL identifier validation (prevents SQL injection)
+_ALLOWED_SCHEMAS = frozenset({"memory", "public"})
+_ALLOWED_TABLES = frozenset({
+    "memories", "factual_memories", "procedural_memories",
+    "episodic_memories", "semantic_memories",
+})
 
 
 class DecayService:
@@ -247,35 +257,59 @@ class DecayService:
         Fetch memories that are candidates for decay.
 
         We query for memories where importance_score > 0 and
-        importance_score < protected_threshold.
+        importance_score < protected_threshold, in batches to avoid
+        unbounded result sets.
         """
         schema = getattr(repo, "schema", "memory")
         table = getattr(repo, "table_name", "memories")
 
-        if user_id:
-            query = f"""
-                SELECT id, user_id, importance_score, access_count,
-                       last_accessed_at, created_at
-                FROM {schema}.{table}
-                WHERE user_id = $1
-                  AND importance_score > 0
-                  AND importance_score < $2
-            """
-            params = [user_id, self.config.protected_threshold]
-        else:
-            query = f"""
-                SELECT id, user_id, importance_score, access_count,
-                       last_accessed_at, created_at
-                FROM {schema}.{table}
-                WHERE importance_score > 0
-                  AND importance_score < $1
-            """
-            params = [self.config.protected_threshold]
-
-        try:
-            async with repo.db:
-                results = await repo.db.query(query, params, schema=schema)
-            return results or []
-        except Exception as e:
-            logger.error(f"Error fetching decayable memories from {table}: {e}")
+        # Validate schema/table against allowlist to prevent SQL injection
+        if schema not in _ALLOWED_SCHEMAS:
+            logger.error(f"Rejected unknown schema: {schema!r}")
             return []
+        if table not in _ALLOWED_TABLES:
+            logger.error(f"Rejected unknown table: {table!r}")
+            return []
+
+        all_results: List[Dict[str, Any]] = []
+        offset = 0
+        batch_size = self.config.batch_size
+
+        while True:
+            if user_id:
+                query = f"""
+                    SELECT id, user_id, importance_score, access_count,
+                           last_accessed_at, created_at
+                    FROM {schema}.{table}
+                    WHERE user_id = $1
+                      AND importance_score > 0
+                      AND importance_score < $2
+                    ORDER BY id
+                    LIMIT $3 OFFSET $4
+                """
+                params = [user_id, self.config.protected_threshold, batch_size, offset]
+            else:
+                query = f"""
+                    SELECT id, user_id, importance_score, access_count,
+                           last_accessed_at, created_at
+                    FROM {schema}.{table}
+                    WHERE importance_score > 0
+                      AND importance_score < $1
+                    ORDER BY id
+                    LIMIT $2 OFFSET $3
+                """
+                params = [self.config.protected_threshold, batch_size, offset]
+
+            try:
+                async with repo.db:
+                    batch = await repo.db.query(query, params, schema=schema)
+                batch = batch or []
+                all_results.extend(batch)
+                if len(batch) < batch_size:
+                    break
+                offset += batch_size
+            except Exception as e:
+                logger.error(f"Error fetching decayable memories from {table}: {e}")
+                break
+
+        return all_results

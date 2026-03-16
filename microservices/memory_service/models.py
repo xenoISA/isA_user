@@ -5,7 +5,7 @@ Pydantic models for different memory types based on cognitive science
 
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Literal
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from enum import Enum
 import uuid
 
@@ -270,6 +270,15 @@ class DecayRequest(BaseModel):
     half_life_days: int = Field(30, ge=1, description="Days for importance to halve")
     floor_threshold: float = Field(0.1, ge=0.0, le=1.0, description="Below this, importance is set to 0")
     protected_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Memories at or above this are never decayed")
+
+    @model_validator(mode="after")
+    def floor_below_protected(self) -> "DecayRequest":
+        if self.floor_threshold >= self.protected_threshold:
+            raise ValueError(
+                f"floor_threshold ({self.floor_threshold}) must be less than "
+                f"protected_threshold ({self.protected_threshold})"
+            )
+        return self
 
 
 class DecayResponse(BaseModel):
