@@ -43,6 +43,7 @@ from .models import (
 )
 from .memory_service import MemoryService
 from .context_ordering import order_by_importance_edges
+from .context_compressor import ContextCompressor
 from .mmr_reranker import apply_mmr_reranking
 from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
@@ -882,6 +883,8 @@ async def search_all_memories(
     rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
     mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=pure diversity, 1.0=pure relevance"),
     order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
+    compress: bool = Query(False, description="Compress results into a focused summary using LLM"),
+    target_tokens: int = Query(500, ge=50, le=5000, description="Target token count for compressed summary"),
 ):
     """
     Universal semantic search across all memory types using vector similarity
@@ -1047,6 +1050,28 @@ async def search_all_memories(
             for memory_type in list(results.keys()):
                 if results[memory_type]:
                     results[memory_type] = order_by_importance_edges(results[memory_type])
+
+        # Apply context compression if enabled
+        if compress:
+            try:
+                compressor = ContextCompressor()
+                compressed_summary = await compressor.compress_memories(
+                    memories=results,
+                    target_tokens=target_tokens,
+                    query_context=query,
+                )
+                return {
+                    "query": query,
+                    "user_id": user_id,
+                    "searched_types": types_to_search,
+                    "compressed": True,
+                    "target_tokens": target_tokens,
+                    "summary": compressed_summary,
+                    "results": results,
+                    "total_count": total_count,
+                }
+            except Exception as e:
+                logger.warning(f"Context compression failed, returning uncompressed: {e}")
 
         response = {
             "query": query,
