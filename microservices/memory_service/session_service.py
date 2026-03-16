@@ -249,7 +249,9 @@ class SessionMemoryService:
         query: str,
         limit: int = 10,
         score_threshold: float = 0.15,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Search session memories using vector similarity (Qdrant)
@@ -260,6 +262,7 @@ class SessionMemoryService:
             limit: Maximum number of results
             score_threshold: Minimum similarity score (0.0-1.0)
             session_id: Optional session ID to filter by
+            query_embedding: Pre-computed embedding (skips redundant model call)
 
         Returns:
             List of matching memories with similarity scores
@@ -268,9 +271,10 @@ class SessionMemoryService:
             # Ensure collection exists
             await self._ensure_collection()
 
-            # Generate embedding for query
-            query_embedding = await self._generate_embedding(query)
-            if not query_embedding:
+            # Use pre-computed embedding or generate one
+            if query_embedding is None:
+                query_embedding = await self._generate_embedding(query)
+            if query_embedding is None:
                 logger.warning("Failed to generate query embedding for session memory")
                 return []
 
@@ -296,7 +300,8 @@ class SessionMemoryService:
                     filter_conditions=filter_conditions,
                     limit=limit,
                     score_threshold=score_threshold,
-                    with_payload=True
+                    with_payload=True,
+                    with_vectors=with_vectors,
                 )
 
             if not search_results:
@@ -306,16 +311,19 @@ class SessionMemoryService:
             # Get memory IDs and scores from results
             memory_ids = [str(result['id']) for result in search_results]
             scores = {str(result['id']): result.get('score', 0.0) for result in search_results}
+            vectors = {str(result['id']): result.get('vector') for result in search_results} if with_vectors else {}
 
             logger.info(f"Vector search found {len(memory_ids)} session memory matches for user {user_id}")
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)
 
-            # Add similarity scores to results
+            # Add similarity scores (and optionally embeddings) to results
             for memory in memories:
                 memory_id = memory.get('id')
                 memory['similarity_score'] = scores.get(memory_id, 0.0)
+                if with_vectors and memory_id in vectors:
+                    memory['embedding'] = vectors[memory_id]
 
             # Sort by score descending
             memories.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
