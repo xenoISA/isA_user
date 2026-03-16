@@ -3,10 +3,10 @@
 ## Product Overview
 
 **Product Name**: Memory Service
-**Version**: 1.0
+**Version**: 2.0
 **Status**: Active Development
 **Owner**: AI Platform Team
-**Last Updated**: 2025-12-11
+**Last Updated**: 2026-03-17
 
 ### Vision
 Enable AI systems to maintain human-like memory capabilities with intelligent extraction, semantic search, and contextual understanding across six cognitive memory types.
@@ -24,9 +24,12 @@ Provide a scalable, intelligent memory service that transforms conversational AI
 ### Key Differentiators
 1. **Cognitive Science Foundation**: Six memory types based on human cognition
 2. **AI-Powered Extraction**: LLM automatically extracts structured memories
-3. **Dual Storage**: PostgreSQL (structured) + Qdrant (semantic) for optimal retrieval
-4. **Event-Driven**: Real-time notifications for memory mutations
+3. **Triple Storage**: PostgreSQL (structured) + Qdrant (vector) + Neo4j (graph) for optimal retrieval
+4. **Event-Driven**: Real-time notifications for memory mutations via NATS
 5. **Type Safety**: Full Pydantic validation throughout
+6. **Active Forgetting**: Ebbinghaus-inspired memory decay with spaced repetition
+7. **Knowledge Graph**: Entity/relationship extraction with graph traversal (via isA_Data)
+8. **Context Engineering**: MMR diversity, lost-in-the-middle ordering, LLM compression
 
 ---
 
@@ -456,6 +459,137 @@ Provide a scalable, intelligent memory service that transforms conversational AI
 
 ---
 
+### Epic 7: Memory System v2 — Decay, Graph Integration, and Retrieval Quality [Complete]
+
+**Objective**: Upgrade the memory system to bridge the gap between v1 implementation and 2026 SOTA (MAGMA, SimpleMem, A-MEM, MemoryBank). Integrate with isA_Data's existing Neo4j, MMR, and entity extraction capabilities.
+
+**GitHub**: Epic #111 (closed), Milestone "Memory System v2" (10/10 stories closed)
+
+**Architecture Decision**:
+- Graph building: NATS events (`memory.created` → isA_Data subscribes, async non-blocking)
+- Graph retrieval: HTTP calls to isA_Data (sync, agent needs results immediately)
+- Decay: Internal to memory_service (no external dependency)
+- Re-ranking: Standalone MMR implementation in memory_service
+
+#### E7-US1: Ebbinghaus Memory Decay [Complete]
+**As a** Memory System
+**I want to** decay importance scores of unaccessed memories over time
+**So that** the memory store stays relevant and noise-free
+
+**Acceptance Criteria**:
+- [x] Decay formula: `importance * e^(-ln(2)/half_life * hours_since_access)`
+- [x] Configurable: `half_life_days` (default 30), `floor_threshold` (default 0.1), `protected_threshold` (default 0.8)
+- [x] Protected memories (importance > threshold) never decay
+- [x] Memories below floor soft-deleted (importance set to 0.0)
+- [x] `POST /api/v1/memories/decay` runs cycle, returns decayed/floored/protected counts
+- [x] Access count resets decay timer (spaced repetition)
+
+**API Reference**: `POST /api/v1/memories/decay`
+
+#### E7-US2: MMR Re-ranking for Search Diversity [Complete]
+**As an** AI Assistant
+**I want to** receive diverse, non-redundant search results
+**So that** context contains maximum unique information
+
+**Acceptance Criteria**:
+- [x] `rerank=true` and `mmr_lambda` query params on all search endpoints
+- [x] Standalone MMR with cosine similarity between result embeddings
+- [x] Lambda 0.0 (pure relevance) to 1.0 (pure diversity), capped to [0,1]
+- [x] Input capped at 200 documents for performance
+- [x] Falls back to raw similarity if re-ranking fails
+- [x] Embeddings fetched from Qdrant only when reranking requested
+
+**API Reference**: `GET /api/v1/memories/search?rerank=true&mmr_lambda=0.5`
+
+#### E7-US3: Neo4j Knowledge Graph Wiring [Complete]
+**As a** Knowledge System
+**I want to** build a knowledge graph from extracted memories
+**So that** I can support multi-hop reasoning and relationship queries
+
+**Acceptance Criteria**:
+- [x] `memory.created` NATS events include enriched `memory_data` field for downstream extraction
+- [x] `GraphClient` queries isA_Data's Neo4j graph via HTTP (5s timeout, Consul discovery)
+- [x] `include_graph=true` on universal search merges graph results
+- [x] Graph endpoints: `GET /memories/graph/search`, `GET /memories/graph/neighbors`
+- [x] Graceful degradation when graph service unavailable
+
+**Note**: isA_Data NATS subscriber to consume events and populate Neo4j is pending (isA_Data side).
+
+**API Reference**: `GET /api/v1/memories/graph/search`, `GET /api/v1/memories/graph/neighbors`
+
+#### E7-US4: A-MEM Memory Associations (Cross-Links) [Complete]
+**As a** Memory System
+**I want to** link new memories to related existing memories
+**So that** I can traverse connected knowledge
+
+**Acceptance Criteria**:
+- [x] At extraction time, find top-k similar memories via Qdrant
+- [x] LLM classifies relationships: `similar_to`, `elaborates`, `contradicts`
+- [x] Bidirectional links stored in `memory_associations` table
+- [x] `GET /api/v1/memories/{type}/{id}/related` returns cross-linked memories
+- [x] LLM target_memory_id validated against candidate set
+- [x] Strength values clamped to [0.0, 1.0]
+
+**API Reference**: `GET /api/v1/memories/{type}/{id}/related`
+
+#### E7-US5: Context Ordering [Complete]
+**As an** AI Agent
+**I want to** receive memories ordered to minimize lost-in-the-middle effect
+**So that** I attend to the most important context
+
+**Acceptance Criteria**:
+- [x] `order_results=true` query param on all search endpoints
+- [x] Highest importance at start and end, lowest in middle (edge interleave)
+- [x] `context_ordered` flag in response when applied
+
+**API Reference**: `GET /api/v1/memories/search?order_results=true`
+
+#### E7-US6: Context Compression [Complete]
+**As an** AI Agent
+**I want to** receive compressed memory context
+**So that** I use fewer tokens while retaining key information
+
+**Acceptance Criteria**:
+- [x] `compress=true` and `target_tokens` query params on universal search
+- [x] LLM compresses memories into reasoning-aligned summaries
+- [x] 30s LLM timeout with fallback to concatenation (10K char limit)
+- [x] Query context wrapped in delimiter tags for injection defense
+
+**API Reference**: `GET /api/v1/memories/search?compress=true&target_tokens=500`
+
+#### E7-US7: Memory Consolidation Pipeline [Complete]
+**As a** Memory System
+**I want to** consolidate frequently-accessed episodic memories into semantic knowledge
+**So that** long-term knowledge is abstracted and compact
+
+**Acceptance Criteria**:
+- [x] `POST /api/v1/memories/consolidate` with configurable thresholds
+- [x] Identifies episodics with access_count >= N and age >= M days
+- [x] Clusters by embedding similarity (union-find algorithm)
+- [x] LLM summarizes cluster into semantic memory
+- [x] Original episodics tagged `consolidated`
+- [x] Bidirectional associations: `consolidated_from` / `consolidated_into`
+- [x] Candidates capped at 500, episode content in delimiter tags
+
+**API Reference**: `POST /api/v1/memories/consolidate`
+
+#### E7-US8: Hybrid Search (Vector + Graph) [Complete]
+**As an** API Client
+**I want to** search memories using both vector similarity and graph traversal
+**So that** I get both semantically similar and structurally connected results
+
+**Acceptance Criteria**:
+- [x] `GET /api/v1/memories/hybrid-search` with configurable weights
+- [x] Min-max normalization + weighted scoring + deduplication
+- [x] Neutral 0.5 for equal-score normalization (avoids bias)
+- [x] Falls back to vector-only when graph unavailable
+- [x] Each result tagged with source: `vector`, `graph`, or `both`
+- [x] `graph_available` flag in response
+
+**API Reference**: `GET /api/v1/memories/hybrid-search?query=...&vector_weight=0.6&graph_weight=0.4`
+
+---
+
 ## API Surface Documentation
 
 ### Base URL
@@ -536,6 +670,27 @@ System SHALL maintain conversation context with sequential interaction tracking
 ### FR-10: Statistics
 System SHALL provide memory usage statistics per user
 
+### FR-11: Memory Decay (v2)
+System SHALL decay importance scores of unaccessed memories using the Ebbinghaus forgetting curve, with configurable half-life and protection thresholds
+
+### FR-12: Retrieval Diversity (v2)
+System SHALL support MMR re-ranking to eliminate near-duplicate search results and maximize information diversity
+
+### FR-13: Memory Associations (v2)
+System SHALL automatically link new memories to related existing memories using LLM-classified relationship types (similar_to, elaborates, contradicts)
+
+### FR-14: Knowledge Graph Integration (v2)
+System SHALL publish enriched NATS events for downstream entity extraction and provide graph query endpoints for Neo4j traversal via isA_Data
+
+### FR-15: Context Engineering (v2)
+System SHALL support context ordering (lost-in-the-middle mitigation) and LLM-based context compression before injection
+
+### FR-16: Memory Consolidation (v2)
+System SHALL consolidate frequently-accessed episodic memories into semantic knowledge through LLM summarization
+
+### FR-17: Hybrid Search (v2)
+System SHALL support combined vector similarity + graph traversal search with configurable weights and graceful degradation
+
 ---
 
 ## Non-Functional Requirements
@@ -606,22 +761,47 @@ System SHALL provide memory usage statistics per user
    - Service: memory_service
    - SLA: 99.9% availability
 
+6. **isA_Data Service** (v2): Graph storage, entity extraction, re-ranking
+   - Host: `isa-data:8230` (via Consul discovery or `DATA_SERVICE_URL` env)
+   - Components: Neo4jStore, GenericEntityExtractor, GenericRelationExtractor, GraphRAGRetriever
+   - Integration: NATS events (async graph building) + HTTP (sync graph retrieval)
+   - Timeout: 5s per request, graceful degradation when unavailable
+   - SLA: 99.5% availability (memory_service operates without it)
+
 ---
 
 ## Success Criteria
 
-### Phase 1: Core Functionality (Complete)
+### Phase 1: Core Functionality [Complete]
 - [x] All six memory types implemented
 - [x] CRUD operations working
 - [x] AI extraction functional
 - [x] PostgreSQL storage working
 - [x] Event publishing active
 
-### Phase 2: Enhanced Features (Current)
-- [ ] Qdrant integration for semantic search
-- [ ] Memory consolidation and optimization
-- [ ] Advanced search with filters
-- [ ] Memory decay algorithms
+### Phase 2: Enhanced Features [Complete]
+- [x] Qdrant integration for semantic search (6 collections, 1536-dim embeddings)
+- [x] Advanced search with filters (subject, event_type, category, timeframe)
+- [x] Universal cross-memory search with shared embedding generation
+- [x] Session summarization (3-tier compression)
+
+### Phase 2.5: Memory System v2 — Decay, Graph, Retrieval Quality [Complete]
+- [x] Ebbinghaus memory decay (Epic 7, #112)
+- [x] MMR re-ranking for search diversity (Epic 7, #113)
+- [x] Neo4j graph client + enriched NATS events (Epic 7, #114)
+- [x] Graph retrieval endpoints (Epic 7, #115)
+- [x] A-MEM-style memory cross-links (Epic 7, #116)
+- [x] Context ordering — lost-in-the-middle mitigation (Epic 7, #117)
+- [x] Memory consolidation pipeline — episodic → semantic (Epic 7, #118)
+- [x] SimpleMem-inspired context compression (Epic 7, #119)
+- [x] Hybrid search — vector + graph (Epic 7, #120)
+- [x] LoCoMo-lite memory quality benchmarks (Epic 7, #121)
+- [x] Quality hardening — 10 MUST FIX + 8 SHOULD FIX resolved (#136)
+- [x] Smoke tests for all v2 endpoints (8 new scripts, #133)
+
+### Phase 2.5 — Pending (isA_Data side)
+- [ ] isA_Data NATS subscriber to consume `memory.created` events and populate Neo4j
+- [ ] isA_Agent_SDK MemoryAggregator integration with graph retrieval + compression
 
 ### Phase 3: Production Ready (Future)
 - [ ] Authentication and authorization
@@ -682,11 +862,47 @@ curl -X GET "http://localhost:8223/api/v1/memories?user_id=usr_123&memory_type=f
 curl -X GET "http://localhost:8223/api/v1/memories/search?user_id=usr_123&query=machine%20learning&memory_types=factual,semantic&limit=10"
 ```
 
+### Run Memory Decay (v2)
+```bash
+curl -X POST http://localhost:8223/api/v1/memories/decay \
+  -H "Content-Type: application/json" \
+  -d '{"half_life_days": 30, "floor_threshold": 0.1, "protected_threshold": 0.8}'
+```
+
+### Search with MMR Re-ranking (v2)
+```bash
+curl -X GET "http://localhost:8223/api/v1/memories/search?user_id=usr_123&query=machine%20learning&rerank=true&mmr_lambda=0.5&limit=10"
+```
+
+### Get Related Memories (v2)
+```bash
+curl -X GET "http://localhost:8223/api/v1/memories/factual/mem_abc123/related?user_id=usr_123"
+```
+
+### Hybrid Search — Vector + Graph (v2)
+```bash
+curl -X GET "http://localhost:8223/api/v1/memories/hybrid-search?user_id=usr_123&query=machine%20learning&vector_weight=0.6&graph_weight=0.4&limit=10"
+```
+
+### Search with Context Ordering + Compression (v2)
+```bash
+curl -X GET "http://localhost:8223/api/v1/memories/search?user_id=usr_123&query=machine%20learning&order_results=true&compress=true&target_tokens=500"
+```
+
+### Run Memory Consolidation (v2)
+```bash
+curl -X POST http://localhost:8223/api/v1/memories/consolidate \
+  -H "Content-Type: application/json" \
+  -d '{"min_access_count": 5, "min_age_days": 7, "max_cluster_size": 10}'
+```
+
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2025-12-11
+**Document Version**: 2.0
+**Last Updated**: 2026-03-17
 **Maintained By**: Memory Service Product Team
 **Related Documents**:
 - Domain Context: docs/domain/memory_service.md
-- Design Doc: docs/design/memory_service.md (next)
+- Design Doc: docs/design/memory_service.md
+- Optimization Design: docs/design/memory_service_optimization.md
+- Memory System v2 Epic: GitHub #111 (closed)
