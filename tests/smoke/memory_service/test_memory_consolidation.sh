@@ -3,7 +3,7 @@
 # Memory Consolidation Testing Script
 # Tests promotion of frequently-accessed episodic memories into semantic knowledge
 
-BASE_URL="http://localhost"
+BASE_URL="${BASE_URL:-http://localhost}"
 API_BASE="${BASE_URL}/api/v1/memories"
 
 # Colors for output

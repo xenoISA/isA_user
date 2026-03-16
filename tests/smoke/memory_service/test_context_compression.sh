@@ -3,7 +3,7 @@
 # Context Compression Testing Script
 # Tests LLM-powered context compression for search results
 
-BASE_URL="http://localhost"
+BASE_URL="${BASE_URL:-http://localhost}"
 API_BASE="${BASE_URL}/api/v1/memories"
 
 # Colors for output

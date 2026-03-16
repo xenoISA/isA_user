@@ -3,7 +3,7 @@
 # Semantic Memory Testing Script
 # Tests semantic memory extraction and storage capabilities
 
-BASE_URL="http://localhost"
+BASE_URL="${BASE_URL:-http://localhost}"
 API_BASE="${BASE_URL}/api/v1/memories"
 
 # Colors for output

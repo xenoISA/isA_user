@@ -3,7 +3,7 @@
 # Context Ordering Testing Script
 # Tests lost-in-the-middle mitigation via importance-based edge ordering
 
-BASE_URL="http://localhost"
+BASE_URL="${BASE_URL:-http://localhost}"
 API_BASE="${BASE_URL}/api/v1/memories"
 
 # Colors for output
