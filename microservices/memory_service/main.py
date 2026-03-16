@@ -582,6 +582,32 @@ async def cleanup_expired_memories(user_id: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== Related Memories (A-MEM Cross-Links) ====================
+
+@app.get("/api/v1/memories/{memory_type}/{memory_id}/related")
+async def get_related_memories(
+    memory_type: MemoryType,
+    memory_id: str,
+    user_id: str = Query(...),
+):
+    """
+    Get cross-linked memories for a given memory (A-MEM associations).
+
+    Returns memories linked via similar_to, elaborates, or contradicts
+    relationships discovered at extraction time.
+    """
+    try:
+        results = await memory_service.get_related_memories(
+            memory_id=memory_id,
+            memory_type=memory_type.value,
+            user_id=user_id,
+        )
+        return {"related_memories": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Error getting related memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== Generic Memory Routes ====================
 
 @app.get("/api/v1/memories/{memory_type}/{memory_id}")

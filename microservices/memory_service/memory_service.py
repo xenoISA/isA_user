@@ -8,9 +8,10 @@ Uses dependency injection for testability:
 - Event publishers are lazily loaded
 """
 
+import asyncio
 import logging
 import uuid
-from typing import TYPE_CHECKING, Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Optional, Set
 from datetime import datetime, timedelta, timezone
 
 # Import only models (no I/O dependencies)
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from .semantic_service import SemanticMemoryService
     from .working_service import WorkingMemoryService
     from .session_service import SessionMemoryService
+    from .association_service import AssociationService
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ class MemoryService:
         semantic_service=None,
         working_service=None,
         session_service=None,
+        association_service=None,
     ):
         """
         Initialize memory service with all service instances
@@ -104,6 +107,25 @@ class MemoryService:
         else:
             from .session_service import SessionMemoryService
             self.session_service = SessionMemoryService()
+
+        if association_service is not None:
+            self.association_service = association_service
+        else:
+            from .association_service import AssociationService
+            self.association_service = AssociationService()
+
+        # Track background association-linking tasks to prevent GC
+        self._background_tasks: Set[asyncio.Task] = set()
+
+        # Wire the association service's memory_service_map so it can
+        # resolve memory content from any type's repository.
+        self.association_service._memory_service_map = {
+            "factual": self.factual_service,
+            "procedural": self.procedural_service,
+            "episodic": self.episodic_service,
+            "semantic": self.semantic_service,
+            "working": self.working_service,
+        }
 
         logger.info("Memory service initialized with AI capabilities")
 
@@ -541,6 +563,97 @@ class MemoryService:
                 message=f"Error: {str(e)}"
             )
 
+    # ==================== A-MEM Association Linking ====================
+
+    async def _link_associations(
+        self,
+        memory_ids: List[str],
+        memory_type: str,
+        user_id: str,
+    ):
+        """
+        After extraction, find related memories and create cross-links.
+
+        Runs in the background — failures do not affect the store result.
+        """
+        try:
+            service = self._get_service(MemoryType(memory_type))
+            if not service:
+                return
+
+            for memory_id in memory_ids:
+                # Get the stored memory's content
+                memory = await service.repository.get_by_id(memory_id, user_id)
+                if not memory:
+                    continue
+
+                content = memory.get("content", "")
+                if not content:
+                    continue
+
+                # Generate embedding for the new memory
+                embedding = await service._generate_embedding(content)
+                if not embedding:
+                    continue
+
+                # Find related memories across all types
+                candidates = await self.association_service.find_related_memories(
+                    memory_id=memory_id,
+                    memory_type=memory_type,
+                    user_id=user_id,
+                    embedding=embedding,
+                    top_k=5,
+                )
+
+                if candidates:
+                    result = await self.association_service.create_associations(
+                        source_memory_id=memory_id,
+                        source_type=memory_type,
+                        source_content=content,
+                        candidates=candidates,
+                        user_id=user_id,
+                    )
+                    logger.info(
+                        f"A-MEM: linked {result['created_count']} associations "
+                        f"for {memory_type}/{memory_id}"
+                    )
+
+        except Exception as e:
+            logger.error(f"Error linking associations for {memory_type}: {e}")
+
+    def _schedule_link_associations(
+        self,
+        memory_ids: List[str],
+        memory_type: str,
+        user_id: str,
+    ):
+        """
+        Schedule association linking as a background task.
+
+        Uses asyncio.create_task so store responses are not blocked.
+        Tasks are tracked in _background_tasks to prevent GC.
+        """
+        task = asyncio.create_task(
+            self._link_associations(memory_ids, memory_type, user_id)
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    # ==================== Related Memories Query ====================
+
+    async def get_related_memories(
+        self,
+        memory_id: str,
+        memory_type: str,
+        user_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Get cross-linked memories for a given memory"""
+        return await self.association_service.get_related_memories(
+            memory_id=memory_id,
+            memory_type=memory_type,
+            user_id=user_id,
+        )
+
     # ==================== AI-Powered Memory Storage ====================
 
     async def store_factual_memory(
@@ -553,6 +666,14 @@ class MemoryService:
         result = await self.factual_service.store_factual_memory(
             user_id, dialog_content, importance_score
         )
+
+        # A-MEM: link associations for newly stored memories (background)
+        if result.success and result.data and result.data.get("memory_ids"):
+            self._schedule_link_associations(
+                memory_ids=result.data["memory_ids"],
+                memory_type="factual",
+                user_id=user_id,
+            )
 
         # Publish memory.factual.stored event
         if result.success and self.event_bus:
@@ -582,6 +703,14 @@ class MemoryService:
             user_id, dialog_content, importance_score
         )
 
+        # A-MEM: link associations for newly stored memories (background)
+        if result.success and result.data and result.data.get("memory_ids"):
+            self._schedule_link_associations(
+                memory_ids=result.data["memory_ids"],
+                memory_type="episodic",
+                user_id=user_id,
+            )
+
         # Publish memory.episodic.stored event
         if result.success and self.event_bus:
             try:
@@ -610,6 +739,14 @@ class MemoryService:
             user_id, dialog_content, importance_score
         )
 
+        # A-MEM: link associations for newly stored memories (background)
+        if result.success and result.data and result.data.get("memory_ids"):
+            self._schedule_link_associations(
+                memory_ids=result.data["memory_ids"],
+                memory_type="procedural",
+                user_id=user_id,
+            )
+
         # Publish memory.procedural.stored event
         if result.success and self.event_bus:
             try:
@@ -637,6 +774,14 @@ class MemoryService:
         result = await self.semantic_service.store_semantic_memory(
             user_id, dialog_content, importance_score
         )
+
+        # A-MEM: link associations for newly stored memories (background)
+        if result.success and result.data and result.data.get("memory_ids"):
+            self._schedule_link_associations(
+                memory_ids=result.data["memory_ids"],
+                memory_type="semantic",
+                user_id=user_id,
+            )
 
         # Publish memory.semantic.stored event
         if result.success and self.event_bus:

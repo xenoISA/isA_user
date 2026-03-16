@@ -37,6 +37,7 @@ def create_memory_service(
     from .semantic_service import SemanticMemoryService
     from .working_service import WorkingMemoryService
     from .session_service import SessionMemoryService
+    from .association_service import AssociationService
 
     return MemoryService(
         consul_registry=consul_registry,
@@ -47,4 +48,5 @@ def create_memory_service(
         semantic_service=SemanticMemoryService(),
         working_service=WorkingMemoryService(),
         session_service=SessionMemoryService(),
+        association_service=AssociationService(),
     )
