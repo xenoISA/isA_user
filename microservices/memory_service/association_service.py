@@ -7,9 +7,11 @@ using the memory_associations table (migration 008). Inspired by A-MEM's
 Zettelkasten approach.
 """
 
+import asyncio
 import json
 import logging
 import uuid
+from collections import defaultdict
 from typing import Dict, List, Optional, Any
 
 import os
@@ -118,10 +120,11 @@ class AssociationService:
             ]
         }
 
-        for mem_type, collection_name in COLLECTION_MAP.items():
+        # Search all Qdrant collections in parallel
+        async def _search_collection(mem_type: str, collection_name: str):
             try:
                 async with self.qdrant:
-                    results = await self.qdrant.search_with_filter(
+                    return mem_type, await self.qdrant.search_with_filter(
                         collection_name=collection_name,
                         vector=embedding,
                         filter_conditions=filter_conditions,
@@ -129,34 +132,36 @@ class AssociationService:
                         score_threshold=0.3,
                         with_payload=True,
                     )
-
-                for r in (results or []):
-                    rid = str(r["id"])
-                    # Exclude the source memory itself
-                    if rid == memory_id and mem_type == memory_type:
-                        continue
-                    candidates.append({
-                        "id": rid,
-                        "memory_type": mem_type,
-                        "score": r.get("score", 0.0),
-                        "payload": r.get("payload", {}),
-                    })
             except Exception as e:
                 logger.warning(f"Error searching {collection_name}: {e}")
+                return mem_type, None
+
+        search_results = await asyncio.gather(
+            *[
+                _search_collection(mt, cn)
+                for mt, cn in COLLECTION_MAP.items()
+            ]
+        )
+
+        for mem_type, results in search_results:
+            for r in (results or []):
+                rid = str(r["id"])
+                # Exclude the source memory itself
+                if rid == memory_id and mem_type == memory_type:
+                    continue
+                candidates.append({
+                    "id": rid,
+                    "memory_type": mem_type,
+                    "score": r.get("score", 0.0),
+                    "payload": r.get("payload", {}),
+                })
 
         # Sort by score descending and take top_k
         candidates.sort(key=lambda c: c["score"], reverse=True)
         candidates = candidates[:top_k]
 
-        # Enrich candidates with content from PostgreSQL
-        enriched = []
-        for c in candidates:
-            content = await self._fetch_memory_content(
-                c["id"], c["memory_type"], user_id
-            )
-            if content:
-                c["content"] = content
-                enriched.append(c)
+        # Batch-fetch content from PostgreSQL (one query per memory type)
+        enriched = await self._batch_fetch_memory_content(candidates, user_id)
 
         return enriched
 
@@ -289,27 +294,33 @@ class AssociationService:
         if not associations:
             return []
 
-        results = []
+        # Collect related memory references
+        related_refs = []
         for assoc in associations:
-            # Determine which side is the "other" memory
             if (assoc["source_memory_id"] == memory_id
                     and assoc["source_memory_type"] == memory_type):
-                related_id = assoc["target_memory_id"]
-                related_type = assoc["target_memory_type"]
+                related_refs.append({
+                    "id": assoc["target_memory_id"],
+                    "memory_type": assoc["target_memory_type"],
+                })
             else:
-                related_id = assoc["source_memory_id"]
-                related_type = assoc["source_memory_type"]
+                related_refs.append({
+                    "id": assoc["source_memory_id"],
+                    "memory_type": assoc["source_memory_type"],
+                })
 
-            # Fetch related memory content
-            content = await self._fetch_memory_content(related_id, related_type, user_id)
+        # Batch-fetch all related memory content (one query per type)
+        content_map = await self._batch_fetch_content_map(related_refs, user_id)
 
+        results = []
+        for assoc, ref in zip(associations, related_refs):
             results.append({
                 "association_id": assoc.get("id"),
-                "related_memory_id": related_id,
-                "related_memory_type": related_type,
+                "related_memory_id": ref["id"],
+                "related_memory_type": ref["memory_type"],
                 "association_type": assoc.get("association_type"),
                 "strength": assoc.get("strength", 0.5),
-                "content": content,
+                "content": content_map.get((ref["id"], ref["memory_type"])),
                 "created_at": assoc.get("created_at"),
             })
 
@@ -333,6 +344,79 @@ class AssociationService:
         except Exception as e:
             logger.warning(f"Error fetching content for {memory_type}/{memory_id}: {e}")
         return None
+
+    async def _batch_fetch_memory_content(
+        self,
+        candidates: List[Dict[str, Any]],
+        user_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Batch-fetch content for candidates, grouping by memory_type to avoid N+1.
+
+        Returns only candidates where content was successfully fetched.
+        """
+        content_map = await self._batch_fetch_content_map(candidates, user_id)
+
+        enriched = []
+        for c in candidates:
+            content = content_map.get((c["id"], c["memory_type"]))
+            if content:
+                c["content"] = content
+                enriched.append(c)
+        return enriched
+
+    async def _batch_fetch_content_map(
+        self,
+        refs: List[Dict[str, Any]],
+        user_id: str,
+    ) -> Dict[tuple, Optional[str]]:
+        """
+        Fetch content for a list of memory references, batched by type.
+
+        Groups IDs by memory_type, issues one concurrent query per type,
+        and returns a dict mapping (memory_id, memory_type) -> content.
+        """
+        # Group IDs by memory type
+        ids_by_type: Dict[str, List[str]] = defaultdict(list)
+        for ref in refs:
+            ids_by_type[ref["memory_type"]].append(ref["id"])
+
+        content_map: Dict[tuple, Optional[str]] = {}
+
+        async def _fetch_type(mem_type: str, mem_ids: List[str]):
+            service = self._memory_service_map.get(mem_type)
+            if not service:
+                return
+            try:
+                # Use batch method if available, otherwise fall back to individual
+                repo = service.repository
+                if hasattr(repo, "get_by_ids"):
+                    memories = await repo.get_by_ids(mem_ids, user_id)
+                    for m in (memories or []):
+                        mid = m.get("id")
+                        if mid:
+                            content_map[(mid, mem_type)] = m.get("content")
+                else:
+                    # Fallback: concurrent individual fetches within this type
+                    results = await asyncio.gather(
+                        *[repo.get_by_id(mid, user_id) for mid in mem_ids],
+                        return_exceptions=True,
+                    )
+                    for mid, result in zip(mem_ids, results):
+                        if isinstance(result, Exception):
+                            logger.warning(
+                                f"Error fetching {mem_type}/{mid}: {result}"
+                            )
+                        elif result:
+                            content_map[(mid, mem_type)] = result.get("content")
+            except Exception as e:
+                logger.warning(f"Error batch-fetching {mem_type}: {e}")
+
+        await asyncio.gather(
+            *[_fetch_type(mt, ids) for mt, ids in ids_by_type.items()]
+        )
+
+        return content_map
 
     async def _classify_associations(
         self,

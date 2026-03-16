@@ -8,9 +8,10 @@ Uses dependency injection for testability:
 - Event publishers are lazily loaded
 """
 
+import asyncio
 import logging
 import uuid
-from typing import TYPE_CHECKING, Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Optional, Set
 from datetime import datetime, timedelta, timezone
 
 # Import only models (no I/O dependencies)
@@ -112,6 +113,9 @@ class MemoryService:
         else:
             from .association_service import AssociationService
             self.association_service = AssociationService()
+
+        # Track background association-linking tasks to prevent GC
+        self._background_tasks: Set[asyncio.Task] = set()
 
         # Wire the association service's memory_service_map so it can
         # resolve memory content from any type's repository.
@@ -617,6 +621,24 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Error linking associations for {memory_type}: {e}")
 
+    def _schedule_link_associations(
+        self,
+        memory_ids: List[str],
+        memory_type: str,
+        user_id: str,
+    ):
+        """
+        Schedule association linking as a background task.
+
+        Uses asyncio.create_task so store responses are not blocked.
+        Tasks are tracked in _background_tasks to prevent GC.
+        """
+        task = asyncio.create_task(
+            self._link_associations(memory_ids, memory_type, user_id)
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
     # ==================== Related Memories Query ====================
 
     async def get_related_memories(
@@ -645,9 +667,9 @@ class MemoryService:
             user_id, dialog_content, importance_score
         )
 
-        # A-MEM: link associations for newly stored memories
+        # A-MEM: link associations for newly stored memories (background)
         if result.success and result.data and result.data.get("memory_ids"):
-            await self._link_associations(
+            self._schedule_link_associations(
                 memory_ids=result.data["memory_ids"],
                 memory_type="factual",
                 user_id=user_id,
@@ -681,9 +703,9 @@ class MemoryService:
             user_id, dialog_content, importance_score
         )
 
-        # A-MEM: link associations for newly stored memories
+        # A-MEM: link associations for newly stored memories (background)
         if result.success and result.data and result.data.get("memory_ids"):
-            await self._link_associations(
+            self._schedule_link_associations(
                 memory_ids=result.data["memory_ids"],
                 memory_type="episodic",
                 user_id=user_id,
@@ -717,9 +739,9 @@ class MemoryService:
             user_id, dialog_content, importance_score
         )
 
-        # A-MEM: link associations for newly stored memories
+        # A-MEM: link associations for newly stored memories (background)
         if result.success and result.data and result.data.get("memory_ids"):
-            await self._link_associations(
+            self._schedule_link_associations(
                 memory_ids=result.data["memory_ids"],
                 memory_type="procedural",
                 user_id=user_id,
@@ -753,9 +775,9 @@ class MemoryService:
             user_id, dialog_content, importance_score
         )
 
-        # A-MEM: link associations for newly stored memories
+        # A-MEM: link associations for newly stored memories (background)
         if result.success and result.data and result.data.get("memory_ids"):
-            await self._link_associations(
+            self._schedule_link_associations(
                 memory_ids=result.data["memory_ids"],
                 memory_type="semantic",
                 user_id=user_id,
