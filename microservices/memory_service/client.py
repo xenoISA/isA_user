@@ -438,6 +438,84 @@ class MemoryServiceClient:
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
 
+    # ==================== Graph Operations ====================
+
+    async def graph_search(
+        self,
+        query: str,
+        user_id: str,
+        limit: int = 10,
+        max_depth: int = 2,
+        entity_types: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Search the knowledge graph for entities and relationships.
+
+        Args:
+            query: Search query text
+            user_id: User ID to scope results
+            limit: Maximum number of results
+            max_depth: Maximum traversal depth
+            entity_types: Optional filter by entity types
+
+        Returns:
+            Dictionary with entities and total count
+        """
+        params: Dict[str, Any] = {
+            "query": query,
+            "user_id": user_id,
+            "limit": limit,
+            "max_depth": max_depth,
+        }
+        if entity_types:
+            params["entity_types"] = entity_types
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(
+                f"{self.base_url}/api/v1/memories/graph/search",
+                params=params,
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def graph_neighbors(
+        self,
+        entity_id: str,
+        depth: int = 2,
+        user_id: Optional[str] = None,
+        relationship_types: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get neighbors of a graph entity.
+
+        Args:
+            entity_id: Source entity ID
+            depth: Maximum traversal depth
+            user_id: Optional user ID for scoping
+            relationship_types: Optional filter by relationship types
+
+        Returns:
+            Dictionary with neighbors and entity_id
+        """
+        params: Dict[str, Any] = {
+            "entity_id": entity_id,
+            "depth": depth,
+        }
+        if user_id:
+            params["user_id"] = user_id
+        if relationship_types:
+            params["relationship_types"] = relationship_types
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(
+                f"{self.base_url}/api/v1/memories/graph/neighbors",
+                params=params,
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            return response.json()
+
     # ==================== Statistics ====================
 
     async def get_memory_statistics(
@@ -745,6 +823,59 @@ class MemoryServiceSyncClient:
                 f"{self.base_url}/memories/session/{session_id}/deactivate",
                 params={"user_id": user_id},
                 headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+
+    def graph_search(
+        self,
+        query: str,
+        user_id: str,
+        limit: int = 10,
+        max_depth: int = 2,
+        entity_types: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Search the knowledge graph for entities and relationships."""
+        params: Dict[str, Any] = {
+            "query": query,
+            "user_id": user_id,
+            "limit": limit,
+            "max_depth": max_depth,
+        }
+        if entity_types:
+            params["entity_types"] = entity_types
+
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(
+                f"{self.base_url}/api/v1/memories/graph/search",
+                params=params,
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    def graph_neighbors(
+        self,
+        entity_id: str,
+        depth: int = 2,
+        user_id: Optional[str] = None,
+        relationship_types: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Get neighbors of a graph entity."""
+        params: Dict[str, Any] = {
+            "entity_id": entity_id,
+            "depth": depth,
+        }
+        if user_id:
+            params["user_id"] = user_id
+        if relationship_types:
+            params["relationship_types"] = relationship_types
+
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(
+                f"{self.base_url}/api/v1/memories/graph/neighbors",
+                params=params,
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()

@@ -40,8 +40,10 @@ from .models import (
     MemoryType, MemoryOperationResult,
     MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams,
     MemoryServiceStatus, DecayRequest, DecayResponse,
-    ConsolidationRequest, ConsolidationResponse
+    ConsolidationRequest, ConsolidationResponse,
+    GraphSearchResponse, GraphNeighborsResponse,
 )
+from .graph_client import GraphClient
 from .memory_service import MemoryService
 from .context_ordering import order_by_importance_edges
 from .context_compressor import ContextCompressor
@@ -49,7 +51,6 @@ from .mmr_reranker import apply_mmr_reranking
 from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .factory import create_memory_service
-from .graph_client import GraphClient
 
 # Initialize configuration
 config_manager = ConfigManager("memory_service")
@@ -60,7 +61,7 @@ logger = setup_service_logger("memory_service")
 
 # Global service instance
 memory_service = None
-graph_client = None
+graph_client: Optional[GraphClient] = None
 consul_registry: Optional[ConsulRegistry] = None
 shutdown_manager = GracefulShutdown("memory_service")
 
@@ -216,11 +217,20 @@ async def health_check():
 
         db_connected = await memory_service.check_connection()
 
+        # Check graph connectivity (non-blocking, graceful degradation)
+        graph_connected = False
+        if graph_client is not None:
+            try:
+                graph_connected = await graph_client.health_check()
+            except Exception:
+                graph_connected = False
+
         status = MemoryServiceStatus(
             service="memory_service",
             status="operational" if db_connected else "degraded",
             version="1.0.0",
             database_connected=db_connected,
+            graph_connected=graph_connected,
             timestamp=datetime.now()
         )
 
@@ -229,6 +239,7 @@ async def health_check():
             "service": status.service,
             "version": status.version,
             "database_connected": status.database_connected,
+            "graph_connected": status.graph_connected,
             "timestamp": status.timestamp.isoformat()
         }
 
@@ -595,6 +606,66 @@ async def cleanup_expired_memories(user_id: Optional[str] = Query(None)):
     except Exception as e:
         logger.error(f"Error cleaning up expired memories: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Graph Retrieval Endpoints ====================
+
+@app.get("/api/v1/memories/graph/search", response_model=GraphSearchResponse)
+async def graph_search(
+    query: str = Query(..., description="Search query text"),
+    user_id: str = Query(..., description="User ID to scope results"),
+    limit: int = Query(10, ge=1, le=100, description="Maximum number of results"),
+    max_depth: int = Query(2, ge=1, le=5, description="Maximum traversal depth"),
+    entity_types: Optional[List[str]] = Query(None, description="Filter by entity types"),
+):
+    """Search the knowledge graph for entities and relationships."""
+    if graph_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Graph service unavailable — graph_client is not configured",
+        )
+    try:
+        result = await graph_client.search_entities(
+            query=query,
+            user_id=user_id,
+            limit=limit,
+            entity_types=entity_types,
+        )
+        return result
+    except Exception as e:
+        logger.error("Graph search failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Graph service unavailable: {e}",
+        )
+
+
+@app.get("/api/v1/memories/graph/neighbors", response_model=GraphNeighborsResponse)
+async def graph_neighbors(
+    entity_id: str = Query(..., description="Source entity ID"),
+    depth: int = Query(2, ge=1, le=5, description="Maximum traversal depth"),
+    user_id: Optional[str] = Query(None, description="Optional user ID for scoping"),
+    relationship_types: Optional[List[str]] = Query(None, description="Filter by relationship types"),
+):
+    """Get neighbors of a graph entity."""
+    if graph_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Graph service unavailable — graph_client is not configured",
+        )
+    try:
+        result = await graph_client.get_entity_neighbors(
+            entity_id=entity_id,
+            max_depth=depth,
+            relationship_types=relationship_types,
+        )
+        return result
+    except Exception as e:
+        logger.error("Graph neighbors lookup failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Graph service unavailable: {e}",
+        )
 
 
 # ==================== Related Memories (A-MEM Cross-Links) ====================
