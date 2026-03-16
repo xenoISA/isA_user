@@ -42,6 +42,7 @@ from .models import (
     MemoryServiceStatus
 )
 from .memory_service import MemoryService
+from .context_ordering import order_by_importance_edges
 from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .factory import create_memory_service
@@ -702,11 +703,14 @@ async def search_factual_vector(
     user_id: str = Query(...),
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
-    score_threshold: float = Query(0.15, ge=0.0, le=1.0)
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for factual memories using Qdrant"""
     try:
         results = await memory_service.vector_search_factual(user_id, query, limit, score_threshold)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in factual vector search: {e}")
@@ -718,11 +722,14 @@ async def search_episodic_vector(
     user_id: str = Query(...),
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
-    score_threshold: float = Query(0.15, ge=0.0, le=1.0)
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for episodic memories using Qdrant"""
     try:
         results = await memory_service.vector_search_episodic(user_id, query, limit, score_threshold)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in episodic vector search: {e}")
@@ -734,11 +741,14 @@ async def search_procedural_vector(
     user_id: str = Query(...),
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
-    score_threshold: float = Query(0.15, ge=0.0, le=1.0)
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for procedural memories using Qdrant"""
     try:
         results = await memory_service.vector_search_procedural(user_id, query, limit, score_threshold)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in procedural vector search: {e}")
@@ -750,11 +760,14 @@ async def search_semantic_vector(
     user_id: str = Query(...),
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
-    score_threshold: float = Query(0.15, ge=0.0, le=1.0)
+    score_threshold: float = Query(0.15, ge=0.0, le=1.0),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for semantic memories using Qdrant"""
     try:
         results = await memory_service.vector_search_semantic(user_id, query, limit, score_threshold)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in semantic vector search: {e}")
@@ -767,11 +780,14 @@ async def search_working_vector(
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
-    include_expired: bool = Query(False)
+    include_expired: bool = Query(False),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for working memories using Qdrant"""
     try:
         results = await memory_service.vector_search_working(user_id, query, limit, score_threshold, include_expired)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in working vector search: {e}")
@@ -784,11 +800,14 @@ async def search_session_vector(
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
-    session_id: Optional[str] = Query(None)
+    session_id: Optional[str] = Query(None),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """Vector similarity search for session memories using Qdrant"""
     try:
         results = await memory_service.vector_search_session(user_id, query, limit, score_threshold, session_id)
+        if order_results and results:
+            results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error in session vector search: {e}")
@@ -801,7 +820,8 @@ async def search_all_memories(
     query: str = Query(...),
     memory_types: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=100),
-    similarity_threshold: float = Query(0.15, ge=0.0, le=1.0)
+    similarity_threshold: float = Query(0.15, ge=0.0, le=1.0),
+    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
 ):
     """
     Universal semantic search across all memory types using vector similarity
@@ -938,13 +958,23 @@ async def search_all_memories(
                 logger.warning(f"Error in session vector search: {e}")
                 results['session'] = []
 
-        return {
+        # Apply context ordering per memory type if enabled
+        if order_results:
+            for memory_type in list(results.keys()):
+                if results[memory_type]:
+                    results[memory_type] = order_by_importance_edges(results[memory_type])
+
+        response = {
             "query": query,
             "user_id": user_id,
             "searched_types": types_to_search,
             "results": results,
-            "total_count": total_count
+            "total_count": total_count,
         }
+        if order_results:
+            response["context_ordered"] = True
+
+        return response
 
     except Exception as e:
         logger.error(f"Error in universal search: {e}")
