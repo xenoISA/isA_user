@@ -3,7 +3,7 @@
 # Session Memory Testing Script
 # Tests session memory operations (conversation context)
 
-BASE_URL="http://localhost"
+BASE_URL="${BASE_URL:-http://localhost}"
 API_BASE="${BASE_URL}/api/v1/memories"
 
 # Colors for output
