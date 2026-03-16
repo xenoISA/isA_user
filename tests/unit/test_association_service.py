@@ -73,6 +73,11 @@ def memory_service_map():
             "content": f"Sample {mem_type} memory content",
             "importance_score": 0.7,
         })
+        # get_by_ids returns a list of memories matching the requested IDs
+        repo.get_by_ids = AsyncMock(side_effect=lambda ids, uid: [
+            {"id": mid, "content": f"Content for {mid}", "memory_type": mem_type}
+            for mid in ids
+        ])
         svc.repository = repo
         services[mem_type] = svc
     return services
@@ -123,6 +128,12 @@ class TestFindRelatedMemories:
             {"id": "mem-3", "score": 0.72, "payload": {"user_id": "user-123"}},
         ]
 
+        # Mock content fetch to return content for found memories
+        for svc in association_service._memory_service_map.values():
+            svc.repository.get_by_id = AsyncMock(side_effect=lambda mid, **kw: {
+                "id": mid, "content": f"content for {mid}", "memory_type": "factual",
+            })
+
         result = await association_service.find_related_memories(
             memory_id="mem-1",
             memory_type="factual",
@@ -151,6 +162,12 @@ class TestFindRelatedMemories:
             return []  # Other collections return nothing
 
         mock_qdrant.search_with_filter = mock_search
+
+        # Mock content fetch to return content for found memories
+        for svc in association_service._memory_service_map.values():
+            svc.repository.get_by_id = AsyncMock(side_effect=lambda mid, **kw: {
+                "id": mid, "content": f"content for {mid}", "memory_type": "factual",
+            })
 
         result = await association_service.find_related_memories(
             memory_id="mem-1",

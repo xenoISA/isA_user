@@ -137,7 +137,7 @@ class AssociationService:
                     with_payload=True,
                 )
             except Exception as e:
-                logger.warning(f"Error searching {collection_name}: {e}")
+                logger.warning("Error searching %s: %s", collection_name, e)
                 return mem_type, None
 
         async with self.qdrant:
