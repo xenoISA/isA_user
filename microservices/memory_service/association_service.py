@@ -23,7 +23,10 @@ from .association_repository import AssociationRepository
 logger = logging.getLogger(__name__)
 
 # Valid association types (excludes "unrelated" — those are never stored)
-VALID_ASSOCIATION_TYPES = {"similar_to", "elaborates", "elaborated_by", "contradicts"}
+VALID_ASSOCIATION_TYPES = {
+    "similar_to", "elaborates", "elaborated_by", "contradicts",
+    "consolidated_from", "consolidated_into",
+}
 
 # Qdrant collection names by memory type
 COLLECTION_MAP = {
@@ -120,28 +123,30 @@ class AssociationService:
             ]
         }
 
-        # Search all Qdrant collections in parallel
+        # Search all Qdrant collections in parallel.
+        # NOTE: We use a single context-manager entry for the shared Qdrant
+        # client rather than opening one per parallel task (M3 fix).
         async def _search_collection(mem_type: str, collection_name: str):
             try:
-                async with self.qdrant:
-                    return mem_type, await self.qdrant.search_with_filter(
-                        collection_name=collection_name,
-                        vector=embedding,
-                        filter_conditions=filter_conditions,
-                        limit=top_k,
-                        score_threshold=0.3,
-                        with_payload=True,
-                    )
+                return mem_type, await self.qdrant.search_with_filter(
+                    collection_name=collection_name,
+                    vector=embedding,
+                    filter_conditions=filter_conditions,
+                    limit=top_k,
+                    score_threshold=0.3,
+                    with_payload=True,
+                )
             except Exception as e:
-                logger.warning(f"Error searching {collection_name}: {e}")
+                logger.warning("Error searching %s: %s", collection_name, e)
                 return mem_type, None
 
-        search_results = await asyncio.gather(
-            *[
-                _search_collection(mt, cn)
-                for mt, cn in COLLECTION_MAP.items()
-            ]
-        )
+        async with self.qdrant:
+            search_results = await asyncio.gather(
+                *[
+                    _search_collection(mt, cn)
+                    for mt, cn in COLLECTION_MAP.items()
+                ]
+            )
 
         for mem_type, results in search_results:
             for r in (results or []):
@@ -200,11 +205,24 @@ class AssociationService:
             created_count = 0
             association_ids = []
 
+            # Build set of valid candidate IDs for LLM output validation (M4)
+            valid_ids = {c["id"] for c in candidates}
+
             for classification in classifications:
                 assoc_type = classification.get("association_type")
                 target_id = classification.get("target_memory_id")
                 target_type = classification.get("target_memory_type")
-                strength = classification.get("strength", 0.5)
+
+                # M4: Validate target_id exists in candidates
+                if target_id not in valid_ids:
+                    logger.warning("LLM returned invalid target_memory_id %s, skipping", target_id)
+                    continue
+
+                # M5: Validate and clamp LLM-returned strength to [0.0, 1.0]
+                try:
+                    strength = max(0.0, min(1.0, float(classification.get("strength", 0.5))))
+                except (TypeError, ValueError):
+                    strength = 0.5
 
                 if not assoc_type or assoc_type not in VALID_ASSOCIATION_TYPES:
                     continue
@@ -329,21 +347,6 @@ class AssociationService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    async def _fetch_memory_content(
-        self, memory_id: str, memory_type: str, user_id: str
-    ) -> Optional[str]:
-        """Fetch memory content from the appropriate sub-service repository."""
-        service = self._memory_service_map.get(memory_type)
-        if not service:
-            return None
-        try:
-            memory = await service.repository.get_by_id(memory_id, user_id)
-            if memory:
-                return memory.get("content")
-        except Exception as e:
-            logger.warning(f"Error fetching content for {memory_type}/{memory_id}: {e}")
-        return None
 
     async def _batch_fetch_memory_content(
         self,

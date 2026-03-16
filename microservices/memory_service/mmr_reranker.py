@@ -63,6 +63,15 @@ def mmr_rerank(
     if not doc_embeddings:
         return []
 
+    if len(doc_embeddings) != len(doc_scores):
+        raise ValueError(f"doc_embeddings ({len(doc_embeddings)}) and doc_scores ({len(doc_scores)}) must have same length")
+
+    if len(doc_embeddings) > 200:
+        doc_embeddings = doc_embeddings[:200]
+        doc_scores = doc_scores[:200]
+
+    lambda_param = max(0.0, min(1.0, lambda_param))
+
     n = len(doc_embeddings)
     selected: List[int] = []
     remaining = list(range(n))

@@ -75,10 +75,10 @@ class TestHybridMerge:
         v1 = next(r for r in merged if r["memory_id"] == "v1")
         g1 = next(r for r in merged if r["memory_id"] == "g1")
 
-        # v1: vector_weight * normalized_score(1.0) = 0.6 * 1.0 = 0.6, no graph component
-        assert v1["final_score"] == pytest.approx(0.6)
-        # g1: graph_weight * normalized_score(1.0) = 0.4 * 1.0 = 0.4, no vector component
-        assert g1["final_score"] == pytest.approx(0.4)
+        # v1: vector_weight * normalized_score(0.5) = 0.6 * 0.5 = 0.3 (single result normalizes to 0.5)
+        assert v1["final_score"] == pytest.approx(0.3)
+        # g1: graph_weight * normalized_score(0.5) = 0.4 * 0.5 = 0.2
+        assert g1["final_score"] == pytest.approx(0.2)
 
     def test_each_result_has_final_score_field(self):
         """Every result dict must include a 'final_score' key."""
@@ -122,7 +122,7 @@ class TestVectorOnlyFallback:
 
         merged = merge_hybrid_results(vector, [], vector_weight=0.6, graph_weight=0.4)
 
-        assert merged[0]["final_score"] == pytest.approx(0.6)
+        assert merged[0]["final_score"] == pytest.approx(0.3)
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +164,9 @@ class TestWeightConfiguration:
 
         v1 = next(r for r in merged if r["memory_id"] == "v1")
         g1 = next(r for r in merged if r["memory_id"] == "g1")
-        assert v1["final_score"] == pytest.approx(0.6)
-        assert g1["final_score"] == pytest.approx(0.4)
+        # Single result normalizes to 0.5 (neutral), so 0.6 * 0.5 = 0.3
+        assert v1["final_score"] == pytest.approx(0.3)
+        assert g1["final_score"] == pytest.approx(0.2)
 
     def test_equal_weights(self):
         """50/50 weighting should produce equal scores for identical inputs."""
@@ -176,8 +177,9 @@ class TestWeightConfiguration:
 
         v1 = next(r for r in merged if r["memory_id"] == "v1")
         g1 = next(r for r in merged if r["memory_id"] == "g1")
-        assert v1["final_score"] == pytest.approx(0.5)
-        assert g1["final_score"] == pytest.approx(0.5)
+        # Single result normalizes to 0.5, so 0.5 * 0.5 = 0.25
+        assert v1["final_score"] == pytest.approx(0.25)
+        assert g1["final_score"] == pytest.approx(0.25)
 
     def test_full_vector_weight(self):
         """With 1.0 vector weight and 0.0 graph, graph results get score 0."""
@@ -188,8 +190,8 @@ class TestWeightConfiguration:
 
         v1 = next(r for r in merged if r["memory_id"] == "v1")
         g1 = next(r for r in merged if r["memory_id"] == "g1")
-        # Single result normalizes to 1.0, so v1 = 1.0 * 1.0 = 1.0
-        assert v1["final_score"] == pytest.approx(1.0)
+        # Single result normalizes to 0.5, so v1 = 1.0 * 0.5 = 0.5
+        assert v1["final_score"] == pytest.approx(0.5)
         assert g1["final_score"] == pytest.approx(0.0)
 
     def test_full_graph_weight(self):
@@ -202,8 +204,8 @@ class TestWeightConfiguration:
         v1 = next(r for r in merged if r["memory_id"] == "v1")
         g1 = next(r for r in merged if r["memory_id"] == "g1")
         assert v1["final_score"] == pytest.approx(0.0)
-        # Single result normalizes to 1.0, so g1 = 1.0 * 1.0 = 1.0
-        assert g1["final_score"] == pytest.approx(1.0)
+        # Single result normalizes to 0.5, so g1 = 1.0 * 0.5 = 0.5
+        assert g1["final_score"] == pytest.approx(0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -241,8 +243,8 @@ class TestDeduplication:
         merged = merge_hybrid_results(vector, graph, vector_weight=0.6, graph_weight=0.4)
 
         shared = next(r for r in merged if r["memory_id"] == "shared")
-        # 0.6 * 1.0 + 0.4 * 1.0 = 1.0
-        assert shared["final_score"] == pytest.approx(1.0)
+        # 0.6 * 0.5 + 0.4 * 0.5 = 0.5 (single results normalize to 0.5)
+        assert shared["final_score"] == pytest.approx(0.5)
 
     def test_mixed_duplicates_and_unique(self):
         """Mix of shared and unique results should all appear correctly."""
@@ -351,20 +353,20 @@ class TestScoreNormalization:
         assert v2["final_score"] == pytest.approx(0.0)
 
     def test_single_result_normalization(self):
-        """A single result should get normalized score of 1.0."""
+        """A single result should get neutral normalized score of 0.5."""
         vector = [_vec("v1", 0.3)]
         graph = []
 
         merged = merge_hybrid_results(vector, graph, vector_weight=1.0, graph_weight=0.0)
 
-        assert merged[0]["final_score"] == pytest.approx(1.0)
+        assert merged[0]["final_score"] == pytest.approx(0.5)
 
     def test_all_equal_scores_normalization(self):
-        """When all scores are equal, all should normalize to 1.0."""
+        """When all scores are equal, all should normalize to 0.5 (neutral)."""
         vector = [_vec("v1", 0.5), _vec("v2", 0.5)]
         graph = []
 
         merged = merge_hybrid_results(vector, graph, vector_weight=1.0, graph_weight=0.0)
 
         for r in merged:
-            assert r["final_score"] == pytest.approx(1.0)
+            assert r["final_score"] == pytest.approx(0.5)

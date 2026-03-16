@@ -32,7 +32,7 @@ def _normalize_scores(scores: List[float]) -> List[float]:
     spread = max_score - min_score
 
     if spread == 0.0:
-        return [1.0] * len(scores)
+        return [0.5] * len(scores)
 
     return [(s - min_score) / spread for s in scores]
 
@@ -61,6 +61,16 @@ def merge_hybrid_results(
     if not vector_results and not graph_results:
         return []
 
+    # --- Validate and normalize weights ---
+    vector_weight = max(0.0, vector_weight)
+    graph_weight = max(0.0, graph_weight)
+    total = vector_weight + graph_weight
+    if total > 0:
+        vector_weight /= total
+        graph_weight /= total
+    else:
+        vector_weight, graph_weight = 0.5, 0.5
+
     # --- Step 1: Normalize scores within each set ---
 
     vec_raw_scores = [r.get("similarity_score", 0.0) for r in vector_results]
@@ -75,7 +85,9 @@ def merge_hybrid_results(
     merged: Dict[str, dict] = {}
 
     for i, result in enumerate(vector_results):
-        mid = result["memory_id"]
+        mid = result.get("memory_id")
+        if not mid:
+            continue
         weighted_score = vector_weight * vec_norm[i]
 
         entry = {**result, "final_score": weighted_score, "source": "vector"}
@@ -84,7 +96,9 @@ def merge_hybrid_results(
         merged[mid] = entry
 
     for i, result in enumerate(graph_results):
-        mid = result["memory_id"]
+        mid = result.get("memory_id")
+        if not mid:
+            continue
         weighted_score = graph_weight * graph_norm[i]
 
         if mid in merged:
