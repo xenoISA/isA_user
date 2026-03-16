@@ -39,7 +39,8 @@ from isa_common.consul_client import ConsulRegistry
 from .models import (
     MemoryType, MemoryOperationResult,
     MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams,
-    MemoryServiceStatus, DecayRequest, DecayResponse
+    MemoryServiceStatus, DecayRequest, DecayResponse,
+    ConsolidationRequest, ConsolidationResponse
 )
 from .memory_service import MemoryService
 from .context_ordering import order_by_importance_edges
@@ -1130,6 +1131,54 @@ async def run_memory_decay(request: DecayRequest):
         )
     except Exception as e:
         logger.error(f"Error running memory decay: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Memory Consolidation ====================
+
+@app.post("/api/v1/memories/consolidate", response_model=ConsolidationResponse)
+async def run_memory_consolidation(request: ConsolidationRequest):
+    """
+    Run memory consolidation pipeline: promote frequently-accessed episodic
+    memories into semantic knowledge.
+
+    Identifies episodic memories with high access counts and sufficient age,
+    clusters them by embedding similarity, and uses an LLM to summarize each
+    cluster into a semantic memory. Original episodics are tagged as consolidated,
+    and bidirectional associations are created between the new semantic memory
+    and its source episodics.
+    """
+    try:
+        from .consolidation_service import ConsolidationService, ConsolidationConfig
+
+        config = ConsolidationConfig(
+            min_access_count=request.min_access_count,
+            min_age_days=request.min_age_days,
+            max_cluster_size=request.max_cluster_size,
+            similarity_threshold=request.similarity_threshold,
+        )
+        consolidation_svc = ConsolidationService(
+            episodic_service=memory_service.episodic_service,
+            semantic_service=memory_service.semantic_service,
+            association_service=memory_service.association_service,
+            config=config,
+        )
+        result = await consolidation_svc.run_consolidation(
+            user_id=request.user_id, config=config
+        )
+
+        return ConsolidationResponse(
+            success=True,
+            consolidated_count=result["consolidated_count"],
+            new_semantic_ids=result["new_semantic_ids"],
+            source_episodic_ids=result["source_episodic_ids"],
+            message=(
+                f"Consolidation complete: {result['consolidated_count']} clusters consolidated, "
+                f"{len(result['source_episodic_ids'])} episodics processed"
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error running memory consolidation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

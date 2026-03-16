@@ -292,6 +292,24 @@ class DecayResponse(BaseModel):
     message: str = ""
 
 
+class ConsolidationRequest(BaseModel):
+    """Request model for triggering memory consolidation"""
+    user_id: Optional[str] = Field(None, description="User ID to consolidate (None for all)")
+    min_access_count: int = Field(5, ge=1, description="Minimum access count for candidates")
+    min_age_days: int = Field(7, ge=1, description="Minimum age in days for candidates")
+    max_cluster_size: int = Field(10, ge=1, le=50, description="Maximum memories per cluster")
+    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0, description="Embedding similarity threshold for clustering")
+
+
+class ConsolidationResponse(BaseModel):
+    """Response model for memory consolidation"""
+    success: bool
+    consolidated_count: int = 0
+    new_semantic_ids: List[str] = Field(default_factory=list)
+    source_episodic_ids: List[str] = Field(default_factory=list)
+    message: str = ""
+
+
 class MemoryServiceStatus(BaseModel):
     """Memory service status"""
     service: str = "memory_service"
