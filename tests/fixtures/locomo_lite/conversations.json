@@ -1,0 +1,215 @@
+{
+  "description": "LoCoMo-lite benchmark conversations: 12 multi-turn dialogues with expected memory extractions across diverse topics.",
+  "conversations": [
+    {
+      "id": "conv_01_personal_info",
+      "topic": "Personal information and preferences",
+      "turns": [
+        {"role": "user", "content": "My name is Alice Chen and I'm a software engineer at Anthropic."},
+        {"role": "assistant", "content": "Nice to meet you, Alice! That's a great company."},
+        {"role": "user", "content": "I live in San Francisco and I love hiking on weekends."},
+        {"role": "assistant", "content": "SF has amazing trails! Do you have a favorite?"},
+        {"role": "user", "content": "I really enjoy the Dipsea Trail in Marin County."}
+      ],
+      "expected_memories": [
+        {"type": "factual", "content": "Alice Chen is a software engineer at Anthropic", "subject": "Alice Chen", "predicate": "works at", "object_value": "Anthropic"},
+        {"type": "factual", "content": "Alice Chen lives in San Francisco", "subject": "Alice Chen", "predicate": "lives in", "object_value": "San Francisco"},
+        {"type": "factual", "content": "Alice Chen loves hiking on weekends", "subject": "Alice Chen", "predicate": "enjoys", "object_value": "hiking"},
+        {"type": "factual", "content": "Alice Chen enjoys the Dipsea Trail in Marin County", "subject": "Alice Chen", "predicate": "favorite trail", "object_value": "Dipsea Trail"}
+      ]
+    },
+    {
+      "id": "conv_02_travel_event",
+      "topic": "Travel experience",
+      "turns": [
+        {"role": "user", "content": "I just got back from a two-week trip to Japan last month."},
+        {"role": "assistant", "content": "How exciting! Where did you go in Japan?"},
+        {"role": "user", "content": "I visited Tokyo, Kyoto, and Osaka. The food in Osaka was incredible."},
+        {"role": "assistant", "content": "Osaka is known as Japan's kitchen! Any standout dishes?"},
+        {"role": "user", "content": "The takoyaki from a street vendor near Dotonbori was the best I've ever had."},
+        {"role": "assistant", "content": "Dotonbori takoyaki is legendary! Did you try any other local spots?"},
+        {"role": "user", "content": "Yes, I also visited Nara to see the deer park. It was magical."}
+      ],
+      "expected_memories": [
+        {"type": "episodic", "content": "Took a two-week trip to Japan", "event_type": "travel"},
+        {"type": "episodic", "content": "Visited Tokyo, Kyoto, and Osaka in Japan", "event_type": "travel"},
+        {"type": "episodic", "content": "Had amazing takoyaki near Dotonbori in Osaka", "event_type": "dining"},
+        {"type": "episodic", "content": "Visited Nara deer park", "event_type": "sightseeing"}
+      ]
+    },
+    {
+      "id": "conv_03_cooking_procedure",
+      "topic": "Cooking recipe instructions",
+      "turns": [
+        {"role": "user", "content": "Can you help me remember my grandmother's pasta sauce recipe?"},
+        {"role": "assistant", "content": "Of course! Tell me the steps."},
+        {"role": "user", "content": "First, saute garlic and onions in olive oil for 5 minutes on medium heat."},
+        {"role": "assistant", "content": "Got it. What's next?"},
+        {"role": "user", "content": "Add crushed San Marzano tomatoes, a pinch of sugar, fresh basil, and simmer for 45 minutes."},
+        {"role": "assistant", "content": "Classic approach. Any finishing touches?"},
+        {"role": "user", "content": "Season with salt and pepper, then stir in a tablespoon of butter at the end for richness."}
+      ],
+      "expected_memories": [
+        {"type": "procedural", "content": "Grandmother's pasta sauce recipe", "skill_type": "cooking", "steps": ["saute garlic and onions", "add tomatoes and basil", "simmer 45 minutes", "finish with butter"]}
+      ]
+    },
+    {
+      "id": "conv_04_health_info",
+      "topic": "Health and medical information",
+      "turns": [
+        {"role": "user", "content": "I'm allergic to shellfish and penicillin."},
+        {"role": "assistant", "content": "Important to know. Any other health conditions?"},
+        {"role": "user", "content": "I have mild asthma but it's well controlled with an albuterol inhaler."},
+        {"role": "assistant", "content": "Good that it's managed. Do you see a specialist?"},
+        {"role": "user", "content": "Yes, Dr. Sarah Kim at UCSF Medical Center is my pulmonologist."}
+      ],
+      "expected_memories": [
+        {"type": "factual", "content": "Allergic to shellfish and penicillin", "subject": "user", "predicate": "allergic to", "object_value": "shellfish, penicillin"},
+        {"type": "factual", "content": "Has mild asthma controlled with albuterol", "subject": "user", "predicate": "has condition", "object_value": "mild asthma"},
+        {"type": "factual", "content": "Dr. Sarah Kim at UCSF is pulmonologist", "subject": "Dr. Sarah Kim", "predicate": "is pulmonologist for", "object_value": "user"}
+      ]
+    },
+    {
+      "id": "conv_05_programming_concept",
+      "topic": "Programming concepts",
+      "turns": [
+        {"role": "user", "content": "Can you explain how Python's GIL affects multithreading?"},
+        {"role": "assistant", "content": "The GIL prevents true parallel execution of Python bytecode."},
+        {"role": "user", "content": "So for CPU-bound tasks I should use multiprocessing instead?"},
+        {"role": "assistant", "content": "Exactly. multiprocessing spawns separate processes, each with its own GIL."},
+        {"role": "user", "content": "What about asyncio? When is that better than threading?"},
+        {"role": "assistant", "content": "asyncio is ideal for I/O-bound tasks like network requests or file operations."}
+      ],
+      "expected_memories": [
+        {"type": "semantic", "content": "Python GIL prevents true parallel execution of bytecode", "concept_type": "programming"},
+        {"type": "semantic", "content": "Use multiprocessing for CPU-bound tasks in Python", "concept_type": "programming"},
+        {"type": "semantic", "content": "asyncio is ideal for I/O-bound tasks", "concept_type": "programming"}
+      ]
+    },
+    {
+      "id": "conv_06_work_meeting",
+      "topic": "Work meeting and deadlines",
+      "turns": [
+        {"role": "user", "content": "I have a quarterly review presentation next Tuesday at 2pm."},
+        {"role": "assistant", "content": "Would you like me to remember the details?"},
+        {"role": "user", "content": "Yes, it's in Conference Room B with my manager David and VP of Engineering Lisa."},
+        {"role": "assistant", "content": "Got it. What will you be presenting?"},
+        {"role": "user", "content": "Our team's progress on the real-time data pipeline. We hit 99.9% uptime this quarter."},
+        {"role": "assistant", "content": "That's impressive! Anything else to prepare?"},
+        {"role": "user", "content": "I need to prepare the latency graphs and cost savings slide by Monday."}
+      ],
+      "expected_memories": [
+        {"type": "episodic", "content": "Quarterly review presentation next Tuesday at 2pm in Conference Room B", "event_type": "meeting"},
+        {"type": "factual", "content": "Manager is David, VP of Engineering is Lisa", "subject": "work team", "predicate": "leadership", "object_value": "David (manager), Lisa (VP Eng)"},
+        {"type": "factual", "content": "Team's data pipeline achieved 99.9% uptime", "subject": "data pipeline", "predicate": "uptime", "object_value": "99.9%"}
+      ]
+    },
+    {
+      "id": "conv_07_pet_info",
+      "topic": "Pet information",
+      "turns": [
+        {"role": "user", "content": "My dog Max is a 3-year-old golden retriever."},
+        {"role": "assistant", "content": "Golden retrievers are wonderful! Is Max your only pet?"},
+        {"role": "user", "content": "No, I also have a cat named Luna. She's a 5-year-old tabby."},
+        {"role": "assistant", "content": "Do Max and Luna get along?"},
+        {"role": "user", "content": "They're best friends! Luna often sleeps on top of Max."},
+        {"role": "assistant", "content": "That's adorable! Any health notes for either of them?"},
+        {"role": "user", "content": "Max is on joint supplements because golden retrievers are prone to hip dysplasia."}
+      ],
+      "expected_memories": [
+        {"type": "factual", "content": "Dog named Max, 3-year-old golden retriever", "subject": "Max", "predicate": "is", "object_value": "3-year-old golden retriever"},
+        {"type": "factual", "content": "Cat named Luna, 5-year-old tabby", "subject": "Luna", "predicate": "is", "object_value": "5-year-old tabby"},
+        {"type": "factual", "content": "Max is on joint supplements for hip dysplasia prevention", "subject": "Max", "predicate": "takes", "object_value": "joint supplements"}
+      ]
+    },
+    {
+      "id": "conv_08_music_preferences",
+      "topic": "Music preferences and experiences",
+      "turns": [
+        {"role": "user", "content": "I play piano and guitar. I've been playing piano since I was 7."},
+        {"role": "assistant", "content": "That's a long time! What kind of music do you play?"},
+        {"role": "user", "content": "Mostly jazz and classical on piano, and indie rock on guitar."},
+        {"role": "assistant", "content": "Nice range! Any favorite composers or artists?"},
+        {"role": "user", "content": "Bill Evans is my favorite jazz pianist. For guitar, I love Radiohead."},
+        {"role": "assistant", "content": "Great taste! Do you perform anywhere?"},
+        {"role": "user", "content": "I play at an open mic night at The Blue Note cafe every other Thursday."}
+      ],
+      "expected_memories": [
+        {"type": "factual", "content": "Plays piano since age 7 and guitar", "subject": "user", "predicate": "plays", "object_value": "piano (since age 7), guitar"},
+        {"type": "factual", "content": "Favorite jazz pianist is Bill Evans", "subject": "user", "predicate": "favorite artist", "object_value": "Bill Evans"},
+        {"type": "episodic", "content": "Plays open mic at The Blue Note cafe every other Thursday", "event_type": "recurring_event"}
+      ]
+    },
+    {
+      "id": "conv_09_git_workflow",
+      "topic": "Git workflow procedure",
+      "turns": [
+        {"role": "user", "content": "Let me tell you our team's git workflow so you can help me follow it."},
+        {"role": "assistant", "content": "Sure, go ahead!"},
+        {"role": "user", "content": "We use trunk-based development. Feature branches off main, prefixed with feat/ or fix/."},
+        {"role": "assistant", "content": "Makes sense. What about code review?"},
+        {"role": "user", "content": "All PRs need at least 2 approvals. We squash merge into main."},
+        {"role": "assistant", "content": "What about CI requirements?"},
+        {"role": "user", "content": "All tests must pass, plus a linting check and security scan before merge."}
+      ],
+      "expected_memories": [
+        {"type": "procedural", "content": "Team uses trunk-based development with feature branches", "skill_type": "development_workflow", "steps": ["branch off main", "prefix feat/ or fix/", "get 2 approvals", "squash merge"]},
+        {"type": "factual", "content": "PRs require 2 approvals, all tests, linting, and security scan", "subject": "team workflow", "predicate": "requires", "object_value": "2 approvals, tests, lint, security scan"}
+      ]
+    },
+    {
+      "id": "conv_10_financial_goals",
+      "topic": "Financial goals and planning",
+      "turns": [
+        {"role": "user", "content": "I'm saving up for a down payment on a house in the Bay Area."},
+        {"role": "assistant", "content": "That's a big goal! What's your target?"},
+        {"role": "user", "content": "I need about $200,000 for a 20% down payment. I've saved $120,000 so far."},
+        {"role": "assistant", "content": "You're more than halfway there. What's your timeline?"},
+        {"role": "user", "content": "I want to buy by the end of next year. I save about $5,000 per month."},
+        {"role": "assistant", "content": "At that rate you'd reach $200K in about 16 months. Cutting it close!"},
+        {"role": "user", "content": "I know. I also have $50,000 in index funds that I could liquidate if needed."}
+      ],
+      "expected_memories": [
+        {"type": "factual", "content": "Saving for house down payment of $200,000 in Bay Area", "subject": "user", "predicate": "saving for", "object_value": "$200,000 down payment"},
+        {"type": "factual", "content": "Has saved $120,000 toward down payment", "subject": "user", "predicate": "has saved", "object_value": "$120,000"},
+        {"type": "factual", "content": "Saves $5,000 per month", "subject": "user", "predicate": "saves", "object_value": "$5,000/month"},
+        {"type": "factual", "content": "Has $50,000 in index funds as backup", "subject": "user", "predicate": "has invested", "object_value": "$50,000 in index funds"}
+      ]
+    },
+    {
+      "id": "conv_11_language_learning",
+      "topic": "Language learning",
+      "turns": [
+        {"role": "user", "content": "I'm learning Japanese. I started six months ago."},
+        {"role": "assistant", "content": "That's exciting! What level are you at?"},
+        {"role": "user", "content": "I know hiragana and katakana, and about 200 kanji. Studying for JLPT N4."},
+        {"role": "assistant", "content": "Great progress for six months! What resources do you use?"},
+        {"role": "user", "content": "I use Anki for kanji, Genki textbooks, and I watch Japanese shows with subtitles."},
+        {"role": "assistant", "content": "That's a solid approach. Any speaking practice?"},
+        {"role": "user", "content": "I have a language exchange partner named Yuki who I meet on Tuesdays over video call."}
+      ],
+      "expected_memories": [
+        {"type": "factual", "content": "Learning Japanese, started six months ago", "subject": "user", "predicate": "is learning", "object_value": "Japanese"},
+        {"type": "factual", "content": "Knows hiragana, katakana, 200 kanji, studying JLPT N4", "subject": "user", "predicate": "Japanese level", "object_value": "N4 prep, 200 kanji"},
+        {"type": "procedural", "content": "Japanese study routine: Anki, Genki textbooks, Japanese shows", "skill_type": "language_learning", "steps": ["Anki for kanji", "Genki textbooks", "shows with subtitles", "weekly exchange with Yuki"]},
+        {"type": "factual", "content": "Language exchange partner Yuki, meets Tuesdays via video", "subject": "Yuki", "predicate": "language partner", "object_value": "Tuesdays via video call"}
+      ]
+    },
+    {
+      "id": "conv_12_contradicting_info",
+      "topic": "Contradicting information update",
+      "turns": [
+        {"role": "user", "content": "Actually I should update something - I moved from San Francisco to Seattle last month."},
+        {"role": "assistant", "content": "Got it! What prompted the move?"},
+        {"role": "user", "content": "I got a new job at Amazon as a senior engineer."},
+        {"role": "assistant", "content": "Congratulations! So you're no longer at Anthropic?"},
+        {"role": "user", "content": "Right, I left Anthropic. I also switched from hiking to kayaking since Seattle has great water access."}
+      ],
+      "expected_memories": [
+        {"type": "factual", "content": "Alice Chen lives in Seattle (moved from San Francisco)", "subject": "Alice Chen", "predicate": "lives in", "object_value": "Seattle"},
+        {"type": "factual", "content": "Alice Chen works at Amazon as senior engineer (left Anthropic)", "subject": "Alice Chen", "predicate": "works at", "object_value": "Amazon"},
+        {"type": "factual", "content": "Alice Chen enjoys kayaking (switched from hiking)", "subject": "Alice Chen", "predicate": "enjoys", "object_value": "kayaking"}
+      ]
+    }
+  ]
+}
