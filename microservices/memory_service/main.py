@@ -801,7 +801,9 @@ async def search_all_memories(
     query: str = Query(...),
     memory_types: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=100),
-    similarity_threshold: float = Query(0.15, ge=0.0, le=1.0)
+    similarity_threshold: float = Query(0.15, ge=0.0, le=1.0),
+    compress: bool = Query(False, description="Enable LLM-based context compression of search results"),
+    target_tokens: int = Query(500, ge=50, le=5000, description="Target token count for compressed summary"),
 ):
     """
     Universal semantic search across all memory types using vector similarity
@@ -812,6 +814,8 @@ async def search_all_memories(
         memory_types: Comma-separated memory types (e.g., "factual,episodic"). If not provided, searches all types.
         limit: Maximum number of results per memory type
         similarity_threshold: Minimum similarity score (0.0-1.0)
+        compress: Enable LLM-based context compression (SimpleMem-inspired)
+        target_tokens: Target token count for compressed summary (default 500)
 
     Returns:
         Combined search results from all specified memory types with similarity scores
@@ -938,13 +942,34 @@ async def search_all_memories(
                 logger.warning(f"Error in session vector search: {e}")
                 results['session'] = []
 
-        return {
+        response = {
             "query": query,
             "user_id": user_id,
             "searched_types": types_to_search,
             "results": results,
-            "total_count": total_count
+            "total_count": total_count,
         }
+
+        # Apply context compression if requested
+        if compress and total_count > 0:
+            try:
+                from .context_compressor import ContextCompressor
+                compressor = ContextCompressor()
+                compressed_context = await compressor.compress_memories(
+                    memories=results,
+                    target_tokens=target_tokens,
+                    query_context=query,
+                )
+                response["compressed_context"] = compressed_context
+                response["compression_enabled"] = True
+                response["target_tokens"] = target_tokens
+                logger.info(f"Compressed {total_count} memories into ~{len(compressed_context.split())} words")
+            except Exception as e:
+                logger.warning(f"Context compression failed, returning uncompressed results: {e}")
+                response["compressed_context"] = None
+                response["compression_enabled"] = False
+
+        return response
 
     except Exception as e:
         logger.error(f"Error in universal search: {e}")
