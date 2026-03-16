@@ -237,7 +237,9 @@ class WorkingMemoryService:
         query: str,
         limit: int = 10,
         score_threshold: float = 0.15,
-        include_expired: bool = False
+        include_expired: bool = False,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Search working memories using vector similarity (Qdrant)
@@ -248,6 +250,7 @@ class WorkingMemoryService:
             limit: Maximum number of results
             score_threshold: Minimum similarity score (0.0-1.0)
             include_expired: Whether to include expired memories
+            query_embedding: Pre-computed embedding (skips redundant model call)
 
         Returns:
             List of matching memories with similarity scores
@@ -256,8 +259,9 @@ class WorkingMemoryService:
             # Ensure collection exists
             await self._ensure_collection()
 
-            # Generate embedding for query
-            query_embedding = await self._generate_embedding(query)
+            # Use pre-computed embedding or generate one
+            if not query_embedding:
+                query_embedding = await self._generate_embedding(query)
             if not query_embedding:
                 logger.warning("Failed to generate query embedding for working memory")
                 return []
@@ -278,7 +282,8 @@ class WorkingMemoryService:
                     filter_conditions=filter_conditions,
                     limit=limit,
                     score_threshold=score_threshold,
-                    with_payload=True
+                    with_payload=True,
+                    with_vectors=with_vectors,
                 )
 
             if not search_results:
@@ -288,6 +293,7 @@ class WorkingMemoryService:
             # Get memory IDs and scores from results
             memory_ids = [str(result['id']) for result in search_results]
             scores = {str(result['id']): result.get('score', 0.0) for result in search_results}
+            vectors = {str(result['id']): result.get('vector') for result in search_results} if with_vectors else {}
 
             logger.info(f"Vector search found {len(memory_ids)} working memory matches for user {user_id}")
 
@@ -300,10 +306,12 @@ class WorkingMemoryService:
                 now = datetime.now(timezone.utc)
                 memories = [m for m in memories if m.get('expires_at') and m['expires_at'] > now]
 
-            # Add similarity scores to results
+            # Add similarity scores (and optionally embeddings) to results
             for memory in memories:
                 memory_id = memory.get('id')
                 memory['similarity_score'] = scores.get(memory_id, 0.0)
+                if with_vectors and memory_id in vectors:
+                    memory['embedding'] = vectors[memory_id]
 
             # Sort by score descending
             memories.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)

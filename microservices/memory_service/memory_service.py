@@ -680,7 +680,9 @@ class MemoryService:
         user_id: str,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.4
+        score_threshold: float = 0.4,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Vector similarity search for factual memories using Qdrant
@@ -690,18 +692,22 @@ class MemoryService:
             query: Search query text
             limit: Maximum number of results
             score_threshold: Minimum similarity score
+            query_embedding: Pre-computed embedding (skips redundant model call)
+            with_vectors: Whether to include embedding vectors in results (for MMR re-ranking)
 
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.factual_service.vector_search(user_id, query, limit, score_threshold)
+        return await self.factual_service.vector_search(user_id, query, limit, score_threshold, query_embedding=query_embedding, with_vectors=with_vectors)
 
     async def vector_search_episodic(
         self,
         user_id: str,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.15
+        score_threshold: float = 0.15,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Vector similarity search for episodic memories using Qdrant
@@ -711,18 +717,22 @@ class MemoryService:
             query: Search query text
             limit: Maximum number of results
             score_threshold: Minimum similarity score
+            query_embedding: Pre-computed embedding (skips redundant model call)
+            with_vectors: Whether to include embedding vectors in results (for MMR re-ranking)
 
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.episodic_service.vector_search(user_id, query, limit, score_threshold)
+        return await self.episodic_service.vector_search(user_id, query, limit, score_threshold, query_embedding=query_embedding, with_vectors=with_vectors)
 
     async def vector_search_procedural(
         self,
         user_id: str,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.15
+        score_threshold: float = 0.15,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Vector similarity search for procedural memories using Qdrant
@@ -732,18 +742,22 @@ class MemoryService:
             query: Search query text
             limit: Maximum number of results
             score_threshold: Minimum similarity score
+            query_embedding: Pre-computed embedding (skips redundant model call)
+            with_vectors: Whether to include embedding vectors in results (for MMR re-ranking)
 
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.procedural_service.vector_search(user_id, query, limit, score_threshold)
+        return await self.procedural_service.vector_search(user_id, query, limit, score_threshold, query_embedding=query_embedding, with_vectors=with_vectors)
 
     async def vector_search_semantic(
         self,
         user_id: str,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.15
+        score_threshold: float = 0.15,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Vector similarity search for semantic memories using Qdrant
@@ -753,11 +767,13 @@ class MemoryService:
             query: Search query text
             limit: Maximum number of results
             score_threshold: Minimum similarity score
+            query_embedding: Pre-computed embedding (skips redundant model call)
+            with_vectors: Whether to include embedding vectors in results (for MMR re-ranking)
 
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.semantic_service.vector_search(user_id, query, limit, score_threshold)
+        return await self.semantic_service.vector_search(user_id, query, limit, score_threshold, query_embedding=query_embedding, with_vectors=with_vectors)
 
     async def vector_search_working(
         self,
@@ -765,7 +781,9 @@ class MemoryService:
         query: str,
         limit: int = 10,
         score_threshold: float = 0.15,
-        include_expired: bool = False
+        include_expired: bool = False,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Vector similarity search for working memories using Qdrant
@@ -776,11 +794,13 @@ class MemoryService:
             limit: Maximum number of results
             score_threshold: Minimum similarity score
             include_expired: Whether to include expired memories
+            query_embedding: Pre-computed embedding (skips redundant model call)
+            with_vectors: Whether to include embedding vectors in results (for MMR re-ranking)
 
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.working_service.vector_search(user_id, query, limit, score_threshold, include_expired)
+        return await self.working_service.vector_search(user_id, query, limit, score_threshold, include_expired, query_embedding=query_embedding, with_vectors=with_vectors)
 
     async def vector_search_session(
         self,
@@ -788,7 +808,9 @@ class MemoryService:
         query: str,
         limit: int = 10,
         score_threshold: float = 0.15,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Vector similarity search for session memories using Qdrant
@@ -799,11 +821,13 @@ class MemoryService:
             limit: Maximum number of results
             score_threshold: Minimum similarity score
             session_id: Optional session ID to filter by
+            query_embedding: Pre-computed embedding (skips redundant model call)
+            with_vectors: Whether to include embedding vectors in results (for MMR re-ranking)
 
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.session_service.vector_search(user_id, query, limit, score_threshold, session_id)
+        return await self.session_service.vector_search(user_id, query, limit, score_threshold, session_id, query_embedding=query_embedding, with_vectors=with_vectors)
 
     # ==================== Procedural Memory Operations ====================
 

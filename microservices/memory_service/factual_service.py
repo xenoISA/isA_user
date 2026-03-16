@@ -385,7 +385,9 @@ Return ONLY valid JSON with a "facts" array. Example:
         user_id: str,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.15
+        score_threshold: float = 0.15,
+        query_embedding: Optional[List[float]] = None,
+        with_vectors: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Search factual memories using vector similarity (Qdrant)
@@ -395,6 +397,7 @@ Return ONLY valid JSON with a "facts" array. Example:
             query: Search query text
             limit: Maximum number of results
             score_threshold: Minimum similarity score (0.0-1.0)
+            query_embedding: Pre-computed embedding (skips redundant model call)
 
         Returns:
             List of matching memories with similarity scores
@@ -403,8 +406,9 @@ Return ONLY valid JSON with a "facts" array. Example:
             # Ensure collection exists
             await self._ensure_collection()
 
-            # Generate embedding for query
-            query_embedding = await self._generate_embedding(query)
+            # Use pre-computed embedding or generate one
+            if not query_embedding:
+                query_embedding = await self._generate_embedding(query)
             if not query_embedding:
                 logger.warning("Failed to generate query embedding, falling back to text search")
                 return await self.search_facts_by_subject(user_id, query, limit)
@@ -456,7 +460,8 @@ Return ONLY valid JSON with a "facts" array. Example:
                     filter_conditions=filter_conditions,
                     limit=limit,
                     score_threshold=score_threshold,
-                    with_payload=True
+                    with_payload=True,
+                    with_vectors=with_vectors,
                 )
 
             if not search_results:
@@ -466,16 +471,20 @@ Return ONLY valid JSON with a "facts" array. Example:
             # Get memory IDs and scores from results (returns list of dicts)
             memory_ids = [str(result['id']) for result in search_results]
             scores = {str(result['id']): result.get('score', 0.0) for result in search_results}
+            # Capture vectors for MMR re-ranking when requested
+            vectors = {str(result['id']): result.get('vector') for result in search_results} if with_vectors else {}
 
             logger.info(f"Vector search found {len(memory_ids)} matches in Qdrant for user {user_id}")
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)
 
-            # Add similarity scores to results
+            # Add similarity scores (and optionally embeddings) to results
             for memory in memories:
                 memory_id = memory.get('id')
                 memory['similarity_score'] = scores.get(memory_id, 0.0)
+                if with_vectors and memory_id in vectors:
+                    memory['embedding'] = vectors[memory_id]
 
             # Sort by score descending
             memories.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
