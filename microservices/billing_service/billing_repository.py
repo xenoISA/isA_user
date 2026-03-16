@@ -604,6 +604,113 @@ class BillingRepository:
             logger.error(f"Error getting billing quota: {e}")
             return None
 
+    async def get_user_quotas(
+        self,
+        user_id: str,
+        service_type: Optional[ServiceType] = None,
+    ) -> List[BillingQuota]:
+        """获取用户的所有配额"""
+        try:
+            conditions = ["user_id = $1", "is_active = true"]
+            params: list = [user_id]
+            param_count = 1
+
+            if service_type:
+                param_count += 1
+                conditions.append(f"service_type = ${param_count}")
+                params.append(service_type.value)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f'''
+                SELECT * FROM {self.schema}.{self.billing_quotas_table}
+                WHERE {where_clause}
+                ORDER BY service_type
+            '''
+
+            async with self.db:
+                results = await self.db.query(query, params=params)
+
+            return [self._row_to_billing_quota(row) for row in results] if results else []
+
+        except Exception as e:
+            logger.error(f"Error getting user quotas: {e}")
+            return []
+
+    async def list_billing_records(
+        self,
+        user_id: Optional[str] = None,
+        status: Optional[BillingStatus] = None,
+        service_type: Optional[ServiceType] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[List[BillingRecord], int]:
+        """获取计费记录列表（支持分页和过滤）"""
+        try:
+            conditions: list[str] = []
+            params: list = []
+            param_count = 0
+
+            if user_id:
+                param_count += 1
+                conditions.append(f"user_id = ${param_count}")
+                params.append(user_id)
+
+            if status:
+                param_count += 1
+                conditions.append(f"billing_status = ${param_count}")
+                params.append(status.value)
+
+            if service_type:
+                param_count += 1
+                conditions.append(f"service_type = ${param_count}")
+                params.append(service_type.value)
+
+            if start_date:
+                param_count += 1
+                conditions.append(f"created_at >= ${param_count}")
+                params.append(start_date)
+
+            if end_date:
+                param_count += 1
+                conditions.append(f"created_at <= ${param_count}")
+                params.append(end_date)
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            # Count total
+            count_query = f'''
+                SELECT COUNT(*) as total
+                FROM {self.schema}.{self.billing_records_table}
+                {where_clause}
+            '''
+
+            async with self.db:
+                count_result = await self.db.query_row(count_query, params=params)
+            total = count_result.get("total", 0) if count_result else 0
+
+            # Fetch records
+            query = f'''
+                SELECT * FROM {self.schema}.{self.billing_records_table}
+                {where_clause}
+                ORDER BY created_at DESC
+                LIMIT ${param_count + 1} OFFSET ${param_count + 2}
+            '''
+
+            params.extend([limit, offset])
+
+            async with self.db:
+                results = await self.db.query(query, params=params)
+
+            records = [self._row_to_billing_record(row) for row in results] if results else []
+            return records, total
+
+        except Exception as e:
+            logger.error(f"Error listing billing records: {e}")
+            raise
+
     # ====================
     # 统计和报告
     # ====================

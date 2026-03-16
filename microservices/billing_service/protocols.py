@@ -90,6 +90,27 @@ class BillingRepositoryProtocol(Protocol):
         ...
 
     # Quotas
+    async def get_user_quotas(
+        self,
+        user_id: str,
+        service_type: Optional[ServiceType] = None,
+    ) -> List[BillingQuota]:
+        """Get all quotas for a user"""
+        ...
+
+    async def list_billing_records(
+        self,
+        user_id: Optional[str] = None,
+        status: Optional[BillingStatus] = None,
+        service_type: Optional[ServiceType] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[BillingRecord], int]:
+        """List billing records with pagination"""
+        ...
+
     async def get_billing_quota(
         self,
         user_id: Optional[str] = None,
