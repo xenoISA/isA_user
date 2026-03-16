@@ -52,10 +52,14 @@ class MemoryCreatedEvent(BaseModel):
     memory_id: str = Field(..., description="Unique memory ID")
     memory_type: str = Field(..., description="Type of memory (factual/episodic/procedural/semantic/working/session)")
     user_id: str = Field(..., description="User ID who owns the memory")
-    content: str = Field(..., description="Memory content")
+    content: str = Field(..., description="Full memory content for entity extraction by downstream services")
     importance_score: Optional[float] = Field(None, description="Importance score (0.0-1.0)")
     tags: Optional[List[str]] = Field(None, description="Memory tags")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+    memory_data: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Type-specific structured data for graph extraction (e.g. subject/predicate/object for factual)"
+    )
     timestamp: str = Field(..., description="Creation timestamp")
 
 

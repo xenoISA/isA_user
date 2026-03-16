@@ -48,6 +48,7 @@ from .mmr_reranker import apply_mmr_reranking
 from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .factory import create_memory_service
+from .graph_client import GraphClient
 
 # Initialize configuration
 config_manager = ConfigManager("memory_service")
@@ -58,6 +59,7 @@ logger = setup_service_logger("memory_service")
 
 # Global service instance
 memory_service = None
+graph_client = None
 consul_registry: Optional[ConsulRegistry] = None
 shutdown_manager = GracefulShutdown("memory_service")
 
@@ -78,7 +80,7 @@ async def _maybe_rerank(results, query, service, rerank, mmr_lambda, limit):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    global memory_service, consul_registry
+    global memory_service, graph_client, consul_registry
     shutdown_manager.install_signal_handlers()
 
     logger.info("Starting Memory Service with AI capabilities...")
@@ -123,6 +125,17 @@ async def lifespan(app: FastAPI):
         if not await memory_service.check_connection():
             logger.error("Failed to connect to database")
             raise RuntimeError("Database connection failed")
+
+    # Initialize GraphClient for Neo4j knowledge graph queries via isA_Data
+    try:
+        graph_client = GraphClient()
+        if await graph_client.health_check():
+            logger.info("GraphClient connected to isA_Data graph service")
+        else:
+            logger.warning("isA_Data graph service not reachable — graph queries will degrade gracefully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize GraphClient: {e}. Graph queries disabled.")
+        graph_client = GraphClient()  # keep instance for graceful degradation
 
     # Consul 服务注册
     if service_config.consul_enabled:
@@ -885,6 +898,7 @@ async def search_all_memories(
     order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
     compress: bool = Query(False, description="Compress results into a focused summary using LLM"),
     target_tokens: int = Query(500, ge=50, le=5000, description="Target token count for compressed summary"),
+    include_graph: bool = Query(False, description="Include knowledge graph results from Neo4j via isA_Data"),
 ):
     """
     Universal semantic search across all memory types using vector similarity
@@ -1051,6 +1065,25 @@ async def search_all_memories(
                 if results[memory_type]:
                     results[memory_type] = order_by_importance_edges(results[memory_type])
 
+        # Query knowledge graph if enabled
+        graph_results = None
+        if include_graph and graph_client is not None:
+            try:
+                graph_results = await graph_client.search_entities(
+                    query=query, user_id=user_id, limit=limit
+                )
+                if graph_results.get("error"):
+                    logger.warning("Graph query returned error: %s", graph_results["error"])
+                else:
+                    logger.info(
+                        "Graph search found %d entities for query: %s",
+                        graph_results.get("total", 0),
+                        query[:50],
+                    )
+            except Exception as e:
+                logger.warning("Graph query failed, continuing without graph results: %s", e)
+                graph_results = {"entities": [], "total": 0, "error": str(e)}
+
         # Apply context compression if enabled
         if compress:
             try:
@@ -1080,6 +1113,8 @@ async def search_all_memories(
             "results": results,
             "total_count": total_count,
         }
+        if graph_results is not None:
+            response["graph_results"] = graph_results
         if rerank:
             response["reranked"] = True
             response["mmr_lambda"] = mmr_lambda
