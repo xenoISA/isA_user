@@ -986,6 +986,37 @@ class MemoryService:
             logger.error(f"Error getting memory statistics: {e}")
             return {'error': str(e), 'user_id': user_id}
 
+    # ==================== Decay Operations ====================
+
+    async def run_decay_cycle(
+        self,
+        user_id: Optional[str] = None,
+        half_life_days: int = 30,
+        floor_threshold: float = 0.1,
+        protected_threshold: float = 0.8,
+    ) -> Dict[str, Any]:
+        """
+        Run Ebbinghaus forgetting-curve decay on memory importance scores.
+
+        Args:
+            user_id: If provided, only decay this user's memories.
+            half_life_days: Days for importance to halve.
+            floor_threshold: Below this, importance is set to 0.
+            protected_threshold: At or above this, memories are never decayed.
+
+        Returns:
+            Summary dict with decay counts.
+        """
+        from .decay_service import DecayService, DecayConfig
+
+        config = DecayConfig(
+            half_life_days=half_life_days,
+            floor_threshold=floor_threshold,
+            protected_threshold=protected_threshold,
+        )
+        decay_svc = DecayService(memory_service=self, config=config)
+        return await decay_svc.run_decay_cycle(user_id=user_id)
+
     async def check_connection(self) -> bool:
         """Check database connection"""
         try:
