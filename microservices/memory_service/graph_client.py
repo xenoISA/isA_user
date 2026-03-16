@@ -14,6 +14,7 @@ Service discovery via Consul or DATA_SERVICE_URL env var fallback.
 import logging
 import os
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import aiohttp
 
@@ -29,6 +30,8 @@ class GraphClient:
 
     Graph building is async (NATS events) — this client is only for retrieval.
     """
+
+    # TODO: Reuse aiohttp.ClientSession across requests instead of creating per-call
 
     def __init__(
         self,
@@ -105,6 +108,9 @@ class GraphClient:
         Returns:
             {"neighbors": [...], "entity_id": str} or fallback
         """
+        max_depth = min(max_depth, 10)
+        safe_entity_id = quote(entity_id, safe="")
+
         params: Dict[str, Any] = {
             "max_depth": max_depth,
         }
@@ -114,7 +120,7 @@ class GraphClient:
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
                 async with session.get(
-                    f"{self.base_url}/api/v1/graph/entities/{entity_id}/neighbors",
+                    f"{self.base_url}/api/v1/graph/entities/{safe_entity_id}/neighbors",
                     params=params,
                 ) as resp:
                     if resp.status == 200:
@@ -147,6 +153,8 @@ class GraphClient:
         Returns:
             {"paths": [...], "total_paths": int} or fallback
         """
+        max_depth = min(max_depth, 10)
+
         payload: Dict[str, Any] = {
             "start_entity": start_entity,
             "relationship_types": relationship_types,
