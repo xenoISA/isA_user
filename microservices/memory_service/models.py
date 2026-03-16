@@ -316,4 +316,54 @@ class MemoryServiceStatus(BaseModel):
     status: str
     version: str = "1.0.0"
     database_connected: bool
+    graph_connected: bool = False
     timestamp: datetime
+
+
+# ==================== Graph Models ====================
+
+class GraphEntity(BaseModel):
+    """An entity node in the knowledge graph."""
+    id: str = Field(..., description="Entity ID")
+    name: str = Field(..., description="Entity name")
+    type: str = Field(..., description="Entity type (e.g. technology, person)")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Entity properties")
+
+
+class GraphNeighbor(BaseModel):
+    """A neighbor entity with its relationship."""
+    id: str = Field(..., description="Neighbor entity ID")
+    name: str = Field(..., description="Neighbor entity name")
+    type: str = Field(..., description="Neighbor entity type")
+    relationship: str = Field(..., description="Relationship type to the source entity")
+    depth: int = Field(1, ge=1, description="Hop distance from source entity")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Entity properties")
+
+
+class GraphSearchRequest(BaseModel):
+    """Request model for graph entity search."""
+    query: str = Field(..., description="Search query text")
+    user_id: str = Field(..., description="User ID to scope results")
+    limit: int = Field(10, ge=1, le=100, description="Maximum number of results")
+    max_depth: int = Field(2, ge=1, le=5, description="Maximum traversal depth")
+    entity_types: Optional[List[str]] = Field(None, description="Filter by entity types")
+
+
+class GraphSearchResponse(BaseModel):
+    """Response model for graph entity search."""
+    entities: List[GraphEntity] = Field(default_factory=list, description="Matching entities")
+    total: int = Field(0, ge=0, description="Total number of matches")
+
+
+class GraphNeighborsRequest(BaseModel):
+    """Request model for graph neighbor lookup."""
+    entity_id: str = Field(..., description="Source entity ID")
+    depth: int = Field(2, ge=1, le=5, description="Maximum traversal depth")
+    user_id: Optional[str] = Field(None, description="Optional user ID for scoping")
+    relationship_types: Optional[List[str]] = Field(None, description="Filter by relationship types")
+
+
+class GraphNeighborsResponse(BaseModel):
+    """Response model for graph neighbor lookup."""
+    neighbors: List[GraphNeighbor] = Field(default_factory=list, description="Neighbor entities")
+    entity_id: str = Field(..., description="Source entity ID")
