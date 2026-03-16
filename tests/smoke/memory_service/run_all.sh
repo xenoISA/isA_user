@@ -40,6 +40,16 @@ run_test "test_working_memory.sh"
 run_test "memory_service_test_event_publishing.sh"
 run_test "memory_service_test_event_subscriptions.sh"
 
+# Memory v2 Feature Tests
+run_test "test_memory_decay.sh"
+run_test "test_mmr_reranking.sh"
+run_test "test_memory_associations.sh"
+run_test "test_context_ordering.sh"
+run_test "test_context_compression.sh"
+run_test "test_memory_consolidation.sh"
+run_test "test_graph_search.sh"
+run_test "test_hybrid_search.sh"
+
 echo ""
 echo "========================================"
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed"
