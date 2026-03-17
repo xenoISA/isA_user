@@ -123,11 +123,10 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to subscribe to events: {e}")
 
-    # Check database connection
+    # Check database connection (non-fatal — service starts in degraded mode)
     health = await document_service.check_health()
     if health.get("status") != "healthy":
-        logger.error("Failed to connect to database")
-        raise RuntimeError("Database connection failed")
+        logger.warning("Database not available at startup — service running in degraded mode")
 
     # Consul service registration
     if service_config.consul_enabled:
