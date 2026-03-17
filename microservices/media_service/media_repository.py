@@ -49,7 +49,7 @@ class MediaRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name="postgres_grpc_service",
+            service_name="postgres_service",
             default_host='localhost',
             default_port=5432,
             env_host_key="POSTGRES_HOST",
