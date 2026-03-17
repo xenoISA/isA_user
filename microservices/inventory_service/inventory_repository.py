@@ -76,8 +76,8 @@ class InventoryRepository:
                 "user_id": user_id,
                 "items": items,
                 "status": "active",
-                "expires_at": expires_at.isoformat(),
-                "created_at": now.isoformat(),
+                "expires_at": expires_at,
+                "created_at": now,
                 "metadata": metadata or {}
             }
 
@@ -142,7 +142,7 @@ class InventoryRepository:
             '''
 
             async with self.db:
-                await self.db.execute(query, ["committed", now.isoformat(), reservation_id], schema=self.schema)
+                await self.db.execute(query, ["committed", now, reservation_id], schema=self.schema)
 
             return await self.get_reservation(reservation_id)
 
@@ -161,7 +161,7 @@ class InventoryRepository:
             '''
 
             async with self.db:
-                await self.db.execute(query, ["released", now.isoformat(), reservation_id], schema=self.schema)
+                await self.db.execute(query, ["released", now, reservation_id], schema=self.schema)
 
             return await self.get_reservation(reservation_id)
 

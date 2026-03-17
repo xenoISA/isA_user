@@ -117,11 +117,11 @@ class OrderRepository:
                 "tracking_number": tracking_number,
                 "shipping_address": shipping_address,
                 "billing_address": billing_address,
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat(),
+                "created_at": now,
+                "updated_at": now,
                 "completed_at": None,
                 "cancelled_at": None,
-                "expires_at": expires_at.isoformat() if expires_at else None,
+                "expires_at": expires_at if expires_at else None,
                 "cancellation_reason": None,
                 "cancelled_by": None
             }
@@ -175,7 +175,7 @@ class OrderRepository:
         """Update order"""
         try:
             update_data = {
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc)
             }
 
             if status:
@@ -187,7 +187,7 @@ class OrderRepository:
             if metadata:
                 update_data["metadata"] = metadata  # Direct dict
             if completed_at:
-                update_data["completed_at"] = completed_at.isoformat()
+                update_data["completed_at"] = completed_at
             if fulfillment_status:
                 update_data["fulfillment_status"] = fulfillment_status
             if tracking_number:

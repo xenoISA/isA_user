@@ -79,7 +79,7 @@ class FulfillmentRepository:
                 "carrier": carrier,
                 "tracking_number": tracking_number,
                 "status": status,
-                "created_at": now.isoformat(),
+                "created_at": now,
                 "metadata": metadata or {}
             }
 
@@ -163,15 +163,15 @@ class FulfillmentRepository:
                 if status == "label_purchased":
                     param_count += 1
                     updates.append(f"label_created_at = ${param_count}")
-                    params.append(now.isoformat())
+                    params.append(now)
                 elif status == "in_transit":
                     param_count += 1
                     updates.append(f"shipped_at = ${param_count}")
-                    params.append(now.isoformat())
+                    params.append(now)
                 elif status == "delivered":
                     param_count += 1
                     updates.append(f"delivered_at = ${param_count}")
-                    params.append(now.isoformat())
+                    params.append(now)
 
             if carrier:
                 param_count += 1
@@ -191,7 +191,7 @@ class FulfillmentRepository:
             if estimated_delivery:
                 param_count += 1
                 updates.append(f"estimated_delivery = ${param_count}")
-                params.append(estimated_delivery.isoformat())
+                params.append(estimated_delivery)
 
             if metadata:
                 param_count += 1
@@ -249,7 +249,7 @@ class FulfillmentRepository:
                 WHERE shipment_id = $4
             '''
 
-            params = ["failed", now.isoformat(), reason or "manual_cancellation", shipment_id]
+            params = ["failed", now, reason or "manual_cancellation", shipment_id]
 
             async with self.db:
                 await self.db.execute(query, params, schema=self.schema)
