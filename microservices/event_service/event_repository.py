@@ -78,13 +78,13 @@ class EventRepository:
                 'context': event.context or {},
                 'properties': event.properties or {},
                 'status': event.status.value,
-                'processed_at': event.processed_at.isoformat() if event.processed_at else None,
+                'processed_at': event.processed_at if event.processed_at else None,
                 'processors': event.processors or [],
                 'error_message': event.error_message,
                 'retry_count': event.retry_count,
-                'timestamp': event.timestamp.isoformat(),
-                'created_at': event.created_at.isoformat(),
-                'updated_at': event.updated_at.isoformat(),
+                'timestamp': event.timestamp,
+                'created_at': event.created_at,
+                'updated_at': event.updated_at,
                 'version': event.version,
                 'schema_version': event.schema_version
             }
@@ -173,12 +173,12 @@ class EventRepository:
             if start_time:
                 param_count += 1
                 conditions.append(f"timestamp >= ${param_count}")
-                params.append(start_time.isoformat())
+                params.append(start_time)
 
             if end_time:
                 param_count += 1
                 conditions.append(f"timestamp <= ${param_count}")
-                params.append(end_time.isoformat())
+                params.append(end_time)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
@@ -214,16 +214,16 @@ class EventRepository:
         try:
             update_data = {
                 "status": status.value,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc)
             }
 
             if error_message:
                 update_data["error_message"] = error_message
 
             if processed_at:
-                update_data["processed_at"] = processed_at.isoformat()
+                update_data["processed_at"] = processed_at
             elif status == EventStatus.PROCESSED:
-                update_data["processed_at"] = datetime.now(timezone.utc).isoformat()
+                update_data["processed_at"] = datetime.now(timezone.utc)
 
             set_clauses = []
             params = []
@@ -262,11 +262,11 @@ class EventRepository:
                 "context": event.context or {},
                 "properties": event.properties or {},
                 "status": event.status.value,
-                "processed_at": event.processed_at.isoformat() if event.processed_at else None,
+                "processed_at": event.processed_at if event.processed_at else None,
                 "processors": event.processors or [],
                 "error_message": event.error_message,
                 "retry_count": event.retry_count,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc)
             }
 
             set_clauses = []
@@ -396,7 +396,7 @@ class EventRepository:
                 'processor_name': result.processor_name,
                 'status': result.status.value,
                 'message': result.message,
-                'processed_at': result.processed_at.isoformat() if result.processed_at else datetime.now(timezone.utc).isoformat(),
+                'processed_at': result.processed_at if result.processed_at else datetime.now(timezone.utc),
                 'duration_ms': result.duration_ms
             }
 
@@ -444,8 +444,8 @@ class EventRepository:
                 'state': projection.state or {},
                 'version': projection.version,
                 'last_event_id': projection.last_event_id,
-                'created_at': projection.created_at.isoformat(),
-                'updated_at': projection.updated_at.isoformat()
+                'created_at': projection.created_at,
+                'updated_at': projection.updated_at
             }
 
             async with self.db:
@@ -502,9 +502,9 @@ class EventRepository:
                 'config': processor.config or {},
                 'error_count': processor.error_count,
                 'last_error': processor.last_error,
-                'last_processed_at': processor.last_processed_at.isoformat() if processor.last_processed_at else None,
-                'created_at': processor.created_at.isoformat(),
-                'updated_at': processor.updated_at.isoformat()
+                'last_processed_at': processor.last_processed_at if processor.last_processed_at else None,
+                'created_at': processor.created_at,
+                'updated_at': processor.updated_at
             }
 
             async with self.db:
@@ -567,8 +567,8 @@ class EventRepository:
                 'webhook_secret': subscription.webhook_secret,
                 'enabled': subscription.enabled,
                 'retry_policy': subscription.retry_policy or {},
-                'created_at': subscription.created_at.isoformat(),
-                'updated_at': subscription.updated_at.isoformat()
+                'created_at': subscription.created_at,
+                'updated_at': subscription.updated_at
             }
 
             async with self.db:

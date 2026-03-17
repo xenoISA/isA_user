@@ -80,7 +80,7 @@ class TaxRepository:
                 "currency": currency,
                 "tax_lines": tax_lines or [],
                 "shipping_address": shipping_address,
-                "created_at": now.isoformat(),
+                "created_at": now,
                 "metadata": metadata or {}
             }
 

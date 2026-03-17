@@ -103,8 +103,8 @@ class PaymentRepository:
                 "stripe_product_id": plan.stripe_product_id,
                 "is_active": plan.is_active,
                 "is_public": plan.is_public,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
             }
 
             logger.info(f"Inserting subscription plan into {self.schema}.{self.plans_table} | plan_id={data['plan_id']}")
@@ -198,22 +198,22 @@ class PaymentRepository:
                 "plan_id": subscription.plan_id,
                 "status": subscription.status.value,
                 "tier": subscription.tier.value,
-                "current_period_start": subscription.current_period_start.isoformat(),
-                "current_period_end": subscription.current_period_end.isoformat(),
+                "current_period_start": subscription.current_period_start,
+                "current_period_end": subscription.current_period_end,
                 "billing_cycle": subscription.billing_cycle.value,
-                "trial_start": subscription.trial_start.isoformat() if subscription.trial_start else None,
-                "trial_end": subscription.trial_end.isoformat() if subscription.trial_end else None,
+                "trial_start": subscription.trial_start if subscription.trial_start else None,
+                "trial_end": subscription.trial_end if subscription.trial_end else None,
                 "cancel_at_period_end": subscription.cancel_at_period_end,
-                "canceled_at": subscription.canceled_at.isoformat() if subscription.canceled_at else None,
+                "canceled_at": subscription.canceled_at if subscription.canceled_at else None,
                 "cancellation_reason": subscription.cancellation_reason,
                 "payment_method_id": subscription.payment_method_id,
-                "last_payment_date": subscription.last_payment_date.isoformat() if subscription.last_payment_date else None,
-                "next_payment_date": subscription.next_payment_date.isoformat() if subscription.next_payment_date else None,
+                "last_payment_date": subscription.last_payment_date if subscription.last_payment_date else None,
+                "next_payment_date": subscription.next_payment_date if subscription.next_payment_date else None,
                 "stripe_subscription_id": subscription.stripe_subscription_id,
                 "stripe_customer_id": subscription.stripe_customer_id,
                 "metadata": subscription.metadata or {},  # Direct dict
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
             }
 
             async with self.db:
@@ -258,7 +258,7 @@ class PaymentRepository:
         """更新订阅"""
         try:
             # Add updated_at
-            updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+            updates["updated_at"] = datetime.now(timezone.utc)
 
             # Handle enum values
             if "status" in updates and hasattr(updates["status"], "value"):
@@ -377,9 +377,9 @@ class PaymentRepository:
         """取消订阅"""
         try:
             updates = {
-                "canceled_at": datetime.now(timezone.utc).isoformat(),
+                "canceled_at": datetime.now(timezone.utc),
                 "cancellation_reason": reason,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc)
             }
 
             if immediate:
@@ -446,9 +446,9 @@ class PaymentRepository:
                 "processor_response": payment.processor_response or {},  # Direct dict
                 "failure_reason": payment.failure_reason,
                 "failure_code": payment.failure_code,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
-                "failed_at": payment.failed_at.isoformat() if payment.failed_at else None
+                "created_at": datetime.now(timezone.utc),
+                "paid_at": payment.paid_at if payment.paid_at else None,
+                "failed_at": payment.failed_at if payment.failed_at else None
             }
 
             async with self.db:
@@ -492,16 +492,16 @@ class PaymentRepository:
         try:
             updates = {
                 "status": status.value,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc)
             }
 
             if status == PaymentStatus.SUCCEEDED:
-                updates["paid_at"] = datetime.now(timezone.utc).isoformat()
+                updates["paid_at"] = datetime.now(timezone.utc)
             elif status == PaymentStatus.FAILED:
                 if processor_response:
                     updates["failure_reason"] = processor_response.get("failure_reason")
                     updates["failure_code"] = processor_response.get("failure_code")
-                updates["failed_at"] = datetime.now(timezone.utc).isoformat()
+                updates["failed_at"] = datetime.now(timezone.utc)
 
             if processor_response:
                 updates["processor_response"] = processor_response  # Direct dict
@@ -591,16 +591,16 @@ class PaymentRepository:
                 "amount_paid": float(invoice.amount_paid),
                 "amount_due": float(invoice.amount_due),
                 "currency": invoice.currency.value,
-                "billing_period_start": invoice.billing_period_start.isoformat(),
-                "billing_period_end": invoice.billing_period_end.isoformat(),
+                "billing_period_start": invoice.billing_period_start,
+                "billing_period_end": invoice.billing_period_end,
                 "payment_method_id": invoice.payment_method_id,
                 "payment_intent_id": invoice.payment_intent_id,
                 "line_items": invoice.line_items or [],  # Direct list
                 "stripe_invoice_id": invoice.stripe_invoice_id,
-                "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
-                "paid_at": invoice.paid_at.isoformat() if invoice.paid_at else None,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "due_date": invoice.due_date if invoice.due_date else None,
+                "paid_at": invoice.paid_at if invoice.paid_at else None,
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
             }
 
             async with self.db:
@@ -644,8 +644,8 @@ class PaymentRepository:
             updates = {
                 "status": InvoiceStatus.PAID.value,
                 "payment_intent_id": payment_intent_id,
-                "paid_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "paid_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
             }
 
             # Build SET clause
@@ -718,9 +718,9 @@ class PaymentRepository:
                 "processor_response": refund.processor_response or {},  # Direct dict
                 "requested_by": refund.requested_by,
                 "approved_by": refund.approved_by,
-                "requested_at": refund.requested_at.isoformat(),
-                "processed_at": refund.processed_at.isoformat() if refund.processed_at else None,
-                "completed_at": refund.completed_at.isoformat() if refund.completed_at else None
+                "requested_at": refund.requested_at,
+                "processed_at": refund.processed_at if refund.processed_at else None,
+                "completed_at": refund.completed_at if refund.completed_at else None
             }
 
             async with self.db:
@@ -744,13 +744,13 @@ class PaymentRepository:
         try:
             updates = {
                 "status": status.value,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc)
             }
 
             if status == RefundStatus.PROCESSING:
-                updates["processed_at"] = datetime.now(timezone.utc).isoformat()
+                updates["processed_at"] = datetime.now(timezone.utc)
             elif status == RefundStatus.SUCCEEDED:
-                updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+                updates["completed_at"] = datetime.now(timezone.utc)
 
             # Build SET clause
             set_clauses = []
@@ -791,8 +791,8 @@ class PaymentRepository:
             updates = {
                 "status": RefundStatus.SUCCEEDED.value,
                 "approved_by": approved_by,
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-                "completed_at": datetime.now(timezone.utc).isoformat()
+                "processed_at": datetime.now(timezone.utc),
+                "completed_at": datetime.now(timezone.utc)
             }
 
             # Build SET clause
@@ -854,7 +854,7 @@ class PaymentRepository:
                 "stripe_payment_method_id": method.stripe_payment_method_id,
                 "is_default": method.is_default,
                 "is_verified": method.is_verified,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc)
             }
 
             async with self.db:
@@ -911,7 +911,7 @@ class PaymentRepository:
             async with self.db:
                 results = await self.db.query(
                     query,
-                    [PaymentStatus.SUCCEEDED.value, start_date.isoformat()],
+                    [PaymentStatus.SUCCEEDED.value, start_date],
                     schema=self.schema
                 )
 
@@ -983,7 +983,7 @@ class PaymentRepository:
             async with self.db:
                 canceled_result = await self.db.query_row(
                     canceled_query,
-                    [SubscriptionStatus.CANCELED.value, thirty_days_ago.isoformat()],
+                    [SubscriptionStatus.CANCELED.value, thirty_days_ago],
                     schema=self.schema
                 )
 

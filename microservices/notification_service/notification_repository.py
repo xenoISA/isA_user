@@ -90,8 +90,8 @@ class NotificationRepository:
                 "status": template.status.value,
                 "version": template.version,
                 "created_by": template.created_by,
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
+                "created_at": now,
+                "updated_at": now
             }
 
             async with self.db:
@@ -234,7 +234,7 @@ class NotificationRepository:
             # Add updated_at
             param_count += 1
             update_parts.append(f"updated_at = ${param_count}")
-            params.append(datetime.now(timezone.utc).isoformat())
+            params.append(datetime.now(timezone.utc))
 
             # Add template_id for WHERE clause
             param_count += 1
@@ -303,13 +303,13 @@ class NotificationRepository:
                 "template_id": notification.template_id,
                 "variables": notification.variables or {},  # Direct dict
                 "metadata": notification.metadata or {},  # Direct dict
-                "scheduled_at": notification.scheduled_at.isoformat() if notification.scheduled_at else None,
+                "scheduled_at": notification.scheduled_at if notification.scheduled_at else None,
                 "retry_count": notification.retry_count,
                 "max_retries": notification.max_retries,
                 "status": notification.status.value,
                 "error_message": notification.error_message,
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
+                "created_at": now,
+                "updated_at": now
             }
 
             async with self.db:
@@ -418,11 +418,11 @@ class NotificationRepository:
             if status == NotificationStatus.SENT:
                 param_count += 1
                 update_parts.append(f"sent_at = ${param_count}")
-                params.append(now.isoformat())
+                params.append(now)
             elif status == NotificationStatus.DELIVERED:
                 param_count += 1
                 update_parts.append(f"delivered_at = ${param_count}")
-                params.append(now.isoformat())
+                params.append(now)
             elif status == NotificationStatus.FAILED:
                 if error_message:
                     param_count += 1
@@ -470,7 +470,7 @@ class NotificationRepository:
     async def get_pending_notifications(self, limit: int = 100) -> List[Notification]:
         """获取待发送的通知"""
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
 
             query = f'''
                 SELECT * FROM {self.schema}.notifications
@@ -519,8 +519,8 @@ class NotificationRepository:
                 "is_read": notification.is_read,
                 "is_archived": notification.is_archived,
                 "metadata": getattr(notification, 'metadata', {}),  # Direct dict
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
+                "created_at": now,
+                "updated_at": now
             }
 
             async with self.db:
@@ -592,7 +592,7 @@ class NotificationRepository:
     async def mark_notification_as_read(self, notification_id: str, user_id: str) -> bool:
         """标记通知为已读"""
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
 
             query = f'''
                 UPDATE {self.schema}.in_app_notifications
@@ -622,7 +622,7 @@ class NotificationRepository:
     async def mark_notification_as_archived(self, notification_id: str, user_id: str) -> bool:
         """标记通知为已归档"""
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
 
             query = f'''
                 UPDATE {self.schema}.in_app_notifications
@@ -678,11 +678,11 @@ class NotificationRepository:
                 "delivered_count": batch.delivered_count,
                 "failed_count": batch.failed_count,
                 "status": getattr(batch, 'status', 'pending'),
-                "scheduled_at": batch.scheduled_at.isoformat() if batch.scheduled_at else None,
+                "scheduled_at": batch.scheduled_at if batch.scheduled_at else None,
                 "metadata": batch.metadata or {},  # Direct dict
                 "created_by": batch.created_by,
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
+                "created_at": now,
+                "updated_at": now
             }
 
             async with self.db:
@@ -730,7 +730,7 @@ class NotificationRepository:
             if completed:
                 param_count += 1
                 update_parts.append(f"completed_at = ${param_count}")
-                params.append(datetime.now(timezone.utc).isoformat())
+                params.append(datetime.now(timezone.utc))
 
                 param_count += 1
                 update_parts.append(f"status = ${param_count}")
@@ -821,8 +821,8 @@ class NotificationRepository:
                 "topics": getattr(subscription, 'topics', []),  # Direct list -> TEXT[]
                 "is_active": subscription.is_active,
                 "metadata": getattr(subscription, 'metadata', {}),  # Direct dict
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
+                "created_at": now,
+                "updated_at": now
             }
 
             # Use INSERT ... ON CONFLICT to upsert
@@ -921,7 +921,7 @@ class NotificationRepository:
     async def unsubscribe_push(self, user_id: str, device_token: str) -> bool:
         """取消推送订阅"""
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
             query = f'''
                 UPDATE {self.schema}.push_subscriptions
                 SET is_active = FALSE, updated_at = $1
@@ -940,7 +940,7 @@ class NotificationRepository:
     async def update_push_last_used(self, user_id: str, device_token: str) -> bool:
         """更新推送订阅最后使用时间"""
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
             query = f'''
                 UPDATE {self.schema}.push_subscriptions
                 SET last_used_at = $1
@@ -980,12 +980,12 @@ class NotificationRepository:
             if start_date:
                 param_count += 1
                 conditions.append(f"created_at >= ${param_count}")
-                params.append(start_date.isoformat())
+                params.append(start_date)
 
             if end_date:
                 param_count += 1
                 conditions.append(f"created_at <= ${param_count}")
-                params.append(end_date.isoformat())
+                params.append(end_date)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
             query = f'SELECT * FROM {self.schema}.notifications WHERE {where_clause}'

@@ -98,10 +98,10 @@ class DocumentRepository:
                 "chunking_strategy": document_data.chunking_strategy.value
                 if hasattr(document_data.chunking_strategy, "value")
                 else str(document_data.chunking_strategy),
-                "indexed_at": document_data.indexed_at.isoformat()
+                "indexed_at": document_data.indexed_at
                 if document_data.indexed_at
                 else None,
-                "last_updated_at": document_data.last_updated_at.isoformat()
+                "last_updated_at": document_data.last_updated_at
                 if document_data.last_updated_at
                 else None,
                 "access_level": document_data.access_level.value
@@ -114,8 +114,8 @@ class DocumentRepository:
                 "point_ids": document_data.point_ids or [],
                 "metadata": document_data.metadata or {},
                 "tags": document_data.tags or [],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
             }
 
             async with self.db:
@@ -260,14 +260,14 @@ class DocumentRepository:
                 if hasattr(value, "value"):
                     params.append(value.value)
                 elif isinstance(value, datetime):
-                    params.append(value.isoformat())
+                    params.append(value)
                 else:
                     params.append(value)
 
             # Add updated_at
             param_count += 1
             set_clauses.append(f"updated_at = ${param_count}")
-            params.append(datetime.now(timezone.utc).isoformat())
+            params.append(datetime.now(timezone.utc))
 
             # Add doc_id for WHERE clause
             param_count += 1
@@ -321,7 +321,7 @@ class DocumentRepository:
                 SET is_latest = false, updated_at = $1
                 WHERE doc_id = $2
             """
-            params = [datetime.now(timezone.utc).isoformat(), doc_id]
+            params = [datetime.now(timezone.utc), doc_id]
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -344,7 +344,7 @@ class DocumentRepository:
                 """
                 params = [
                     DocumentStatus.DELETED.value,
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(timezone.utc),
                     doc_id,
                     user_id,
                 ]
@@ -501,7 +501,7 @@ class DocumentRepository:
                 "users_removed": history_data.users_removed or [],
                 "groups_added": history_data.groups_added or [],
                 "groups_removed": history_data.groups_removed or [],
-                "changed_at": datetime.now(timezone.utc).isoformat(),
+                "changed_at": datetime.now(timezone.utc),
             }
 
             async with self.db:

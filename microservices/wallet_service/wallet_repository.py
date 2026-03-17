@@ -496,12 +496,12 @@ class WalletRepository:
             if filter_params.start_date:
                 param_count += 1
                 conditions.append(f"created_at >= ${param_count}")
-                params.append(filter_params.start_date.isoformat())
+                params.append(filter_params.start_date)
 
             if filter_params.end_date:
                 param_count += 1
                 conditions.append(f"created_at <= ${param_count}")
-                params.append(filter_params.end_date.isoformat())
+                params.append(filter_params.end_date)
 
             if filter_params.min_amount:
                 param_count += 1

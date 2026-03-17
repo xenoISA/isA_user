@@ -116,11 +116,8 @@ class DeviceRepository:
             tags = device_data.get("tags", [])
             metadata = device_data.get("metadata", {})
 
-            # Convert datetime objects to ISO format strings for gRPC
             now = datetime.now(timezone.utc)
             last_seen = device_data.get("last_seen")
-            if isinstance(last_seen, datetime):
-                last_seen = last_seen.isoformat()
 
             query = f"""
                 INSERT INTO {self.schema}.{self.devices_table} (

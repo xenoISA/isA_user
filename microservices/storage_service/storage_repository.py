@@ -83,9 +83,9 @@ class StorageRepository:
                 "metadata": file_data.metadata or {},
                 "tags": file_data.tags or [],
                 "download_url": file_data.download_url,
-                "download_url_expires_at": file_data.download_url_expires_at.isoformat() if file_data.download_url_expires_at else None,
-                "uploaded_at": (file_data.uploaded_at or datetime.now(timezone.utc)).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "download_url_expires_at": file_data.download_url_expires_at if file_data.download_url_expires_at else None,
+                "uploaded_at": file_data.uploaded_at or datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
             }
 
             async with self.db:
@@ -262,9 +262,9 @@ class StorageRepository:
                 "permissions": permissions_array or ["read"],
                 "max_downloads": share_data.max_downloads,
                 "download_count": share_data.download_count or 0,
-                "expires_at": share_data.expires_at.isoformat() if share_data.expires_at else None,
+                "expires_at": share_data.expires_at if share_data.expires_at else None,
                 "is_active": share_data.is_active if hasattr(share_data, 'is_active') else True,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc),
                 "accessed_at": None
             }
 
