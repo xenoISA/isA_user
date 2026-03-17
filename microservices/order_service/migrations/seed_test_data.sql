@@ -9,10 +9,10 @@ INSERT INTO orders.orders (
 ) VALUES
     ('order_test_001', 'test_user_001', 'purchase', 'completed', 99.99, 'USD',
      0.0, 9.99, 109.98, 'completed',
-     '[{"name": "Premium Subscription", "quantity": 1, "price": 99.99}]'::jsonb, '{}'::jsonb, 'delivered'),
+     '[{"product_id": "prod_premium", "title": "Premium Subscription", "quantity": 1, "unit_price": 99.99}]'::jsonb, '{}'::jsonb, 'delivered'),
     ('order_test_002', 'test_user_002', 'credit_purchase', 'pending', 50.00, 'USD',
      0.0, 0.0, 50.00, 'pending',
-     '[{"name": "1000 Credits", "quantity": 1, "price": 50.00}]'::jsonb, '{}'::jsonb, 'pending')
+     '[{"product_id": "prod_credits_1000", "title": "1000 Credits", "quantity": 1, "unit_price": 50.00}]'::jsonb, '{}'::jsonb, 'pending')
 ON CONFLICT (order_id) DO NOTHING;
 
 SELECT 'Orders:', COUNT(*) FROM orders.orders;

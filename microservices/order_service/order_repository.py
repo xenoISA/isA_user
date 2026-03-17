@@ -501,6 +501,22 @@ class OrderRepository:
             raise
 
     @staticmethod
+    def _normalize_item(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize legacy item format to match OrderLineItem schema."""
+        if not isinstance(item, dict):
+            return item
+        # price → unit_price
+        if "unit_price" not in item and "price" in item:
+            item["unit_price"] = item.pop("price")
+        # name → title
+        if "title" not in item and "name" in item:
+            item["title"] = item.pop("name")
+        # Ensure product_id exists
+        if "product_id" not in item:
+            item["product_id"] = "unknown"
+        return item
+
+    @staticmethod
     def _parse_datetime(value) -> datetime:
         """Parse a datetime value that may be a native datetime or an ISO string."""
         if isinstance(value, datetime):
@@ -509,13 +525,14 @@ class OrderRepository:
 
     def _dict_to_order(self, data: Dict[str, Any]) -> Order:
         """Convert dictionary to Order model"""
-        # Handle items (list)
+        # Handle items (list) — normalize legacy format (price→unit_price, name→title)
         items = data.get("items")
         if isinstance(items, str):
             import json
             items = json.loads(items)
         elif not isinstance(items, list):
             items = []
+        items = [self._normalize_item(item) for item in items]
 
         # Handle metadata (dict)
         metadata = data.get("metadata")
