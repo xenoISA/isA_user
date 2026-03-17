@@ -500,6 +500,13 @@ class OrderRepository:
             logger.error(f"Failed to get order statistics: {e}")
             raise
 
+    @staticmethod
+    def _parse_datetime(value) -> datetime:
+        """Parse a datetime value that may be a native datetime or an ISO string."""
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+
     def _dict_to_order(self, data: Dict[str, Any]) -> Order:
         """Convert dictionary to Order model"""
         # Handle items (list)
@@ -551,8 +558,8 @@ class OrderRepository:
             shipping_address=shipping_address,
             billing_address=billing_address,
             metadata=metadata,
-            created_at=datetime.fromisoformat(data["created_at"].replace('Z', '+00:00')),
-            updated_at=datetime.fromisoformat(data["updated_at"].replace('Z', '+00:00')),
-            completed_at=datetime.fromisoformat(data["completed_at"].replace('Z', '+00:00')) if data.get("completed_at") else None,
-            expires_at=datetime.fromisoformat(data["expires_at"].replace('Z', '+00:00')) if data.get("expires_at") else None
+            created_at=self._parse_datetime(data["created_at"]),
+            updated_at=self._parse_datetime(data["updated_at"]),
+            completed_at=self._parse_datetime(data["completed_at"]) if data.get("completed_at") else None,
+            expires_at=self._parse_datetime(data["expires_at"]) if data.get("expires_at") else None
         )
