@@ -33,7 +33,7 @@ class AlbumRepository:
             config = ConfigManager("album_service")
 
         host, port = config.discover_service(
-            service_name="postgres_grpc_service",
+            service_name="postgres_service",
             default_host='localhost',
             default_port=5432,
             env_host_key="POSTGRES_HOST",
