@@ -441,7 +441,7 @@ async def cancel_order(
     try:
         return await order_service.cancel_order(order_id, request)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/v1/orders/{order_id}/complete", response_model=OrderResponse)
@@ -454,7 +454,7 @@ async def complete_order(
     try:
         return await order_service.complete_order(order_id, request)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Order query endpoints
@@ -465,7 +465,7 @@ async def list_orders(
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     order_type: Optional[OrderType] = Query(None, description="Filter by order type"),
-    status: Optional[OrderStatus] = Query(None, description="Filter by status"),
+    order_status: Optional[OrderStatus] = Query(None, alias="status", description="Filter by status"),
     payment_status: Optional[PaymentStatus] = Query(None, description="Filter by payment status"),
     start_date: Optional[datetime] = Query(None, description="Start date filter"),
     end_date: Optional[datetime] = Query(None, description="End date filter"),
@@ -476,7 +476,7 @@ async def list_orders(
         filter_params = OrderFilter(
             user_id=user_id,
             order_type=order_type,
-            status=status,
+            status=order_status,
             payment_status=payment_status,
             start_date=start_date,
             end_date=end_date,
@@ -485,7 +485,7 @@ async def list_orders(
         )
         return await order_service.list_orders(filter_params)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Note: User orders can be retrieved using GET /api/v1/orders?user_id={user_id}

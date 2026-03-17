@@ -82,6 +82,11 @@ class PostgresClientWrapper:
         self.user_id = user_id or service_name
         self.organization_id = organization_id or os.getenv("ORGANIZATION_ID", "default-org")
 
+        # Pool sizing: with 35 microservices sharing PG max_connections=100,
+        # each service gets at most 2 connections (35×2=70, under the 100 limit).
+        self._min_pool_size = int(os.getenv("PG_MIN_POOL_SIZE", "1"))
+        self._max_pool_size = int(os.getenv("PG_MAX_POOL_SIZE", "2"))
+
         # Create underlying client
         self._client = AsyncPostgresClient(
             host=self.host,
@@ -91,6 +96,8 @@ class PostgresClientWrapper:
             password=self.password,
             user_id=self.user_id,
             organization_id=self.organization_id,
+            min_pool_size=self._min_pool_size,
+            max_pool_size=self._max_pool_size,
         )
 
         logger.info(f"PostgreSQL client initialized for {service_name}: {self.host}:{self.port}/{self.database}")
