@@ -54,7 +54,9 @@ class AuthorizationRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='authorization_service'
+            user_id='authorization_service',
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = "authz"
         self.table_name = "permissions"

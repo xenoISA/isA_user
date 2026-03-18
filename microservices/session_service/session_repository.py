@@ -54,7 +54,7 @@ class SessionRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='session_service'
+            user_id='session_service',
             min_pool_size=1,
             max_pool_size=2,
         )
@@ -302,7 +302,7 @@ class SessionMessageRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='session_service'
+            user_id='session_service',
             min_pool_size=1,
             max_pool_size=2,
         )

@@ -49,7 +49,7 @@ class DeviceRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='device_service'
+            user_id='device_service',
             min_pool_size=1,
             max_pool_size=2,
         )
