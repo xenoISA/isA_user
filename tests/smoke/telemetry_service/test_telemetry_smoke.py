@@ -71,6 +71,9 @@ def internal_headers() -> dict:
     """Headers for internal calls (bypass auth)"""
     return {
         "X-Internal-Call": "true",
+        "X-Internal-Service": "true",
+        "X-Internal-Service-Secret": "dev-internal-secret-change-in-production",
+        "X-User-ID": "smoke-test-user",
         "Content-Type": "application/json",
     }
 

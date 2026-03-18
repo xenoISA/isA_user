@@ -78,7 +78,13 @@ async def http_client():
 @pytest.fixture
 async def internal_headers():
     """Headers for internal service calls (bypass auth)"""
-    return {"X-Internal-Call": "true"}
+    return {
+        "X-Internal-Call": "true",
+        "X-Internal-Service": "true",
+        "X-Internal-Service-Secret": "dev-internal-secret-change-in-production",
+        "X-User-ID": "smoke-test-user",
+        "Content-Type": "application/json",
+    }
 
 
 @pytest.fixture

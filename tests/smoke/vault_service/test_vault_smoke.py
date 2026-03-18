@@ -70,6 +70,18 @@ async def http_client():
         yield client
 
 
+@pytest.fixture
+def internal_headers() -> dict:
+    """Headers for internal calls (bypass auth)"""
+    return {
+        "X-Internal-Call": "true",
+        "X-Internal-Service": "true",
+        "X-Internal-Service-Secret": "dev-internal-secret-change-in-production",
+        "X-User-ID": "smoke-test-user",
+        "Content-Type": "application/json",
+    }
+
+
 # =============================================================================
 # SMOKE TEST 1: Health Checks
 # =============================================================================
@@ -126,7 +138,7 @@ class TestSecretCreationSmoke:
         assert response.status_code == 401, \
             f"Expected 401, got {response.status_code}"
 
-    async def test_create_secret_validates_input(self, http_client):
+    async def test_create_secret_validates_input(self, http_client, internal_headers):
         """SMOKE: POST /secrets validates required fields"""
         user_id = unique_user_id()
         response = await http_client.post(
@@ -136,13 +148,13 @@ class TestSecretCreationSmoke:
                 "name": "",  # Empty name should be rejected
                 "secret_value": unique_secret_value(),
             },
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code in [400, 422], \
             f"Expected 400/422, got {response.status_code}"
 
-    async def test_create_secret_works(self, http_client):
+    async def test_create_secret_works(self, http_client, internal_headers):
         """SMOKE: POST /secrets creates secret successfully"""
         user_id = unique_user_id()
         response = await http_client.post(
@@ -152,7 +164,7 @@ class TestSecretCreationSmoke:
                 "name": unique_secret_name(),
                 "secret_value": unique_secret_value(),
             },
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code == 201, \
@@ -168,25 +180,25 @@ class TestSecretCreationSmoke:
 class TestSecretRetrievalSmoke:
     """Smoke: Secret retrieval sanity checks"""
 
-    async def test_list_secrets_works(self, http_client):
+    async def test_list_secrets_works(self, http_client, internal_headers):
         """SMOKE: GET /secrets returns secret list"""
         user_id = unique_user_id()
         response = await http_client.get(
             f"{API_V1}/secrets",
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code == 200, \
             f"List secrets failed: {response.status_code}"
 
-    async def test_get_secret_handles_not_found(self, http_client):
+    async def test_get_secret_handles_not_found(self, http_client, internal_headers):
         """SMOKE: GET /secrets/{id} handles non-existent secret"""
         user_id = unique_user_id()
         vault_id = unique_vault_id()
 
         response = await http_client.get(
             f"{API_V1}/secrets/{vault_id}",
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         # Should return 404 for non-existent secret
@@ -212,7 +224,7 @@ class TestSecretRetrievalSmoke:
 class TestSecretUpdateSmoke:
     """Smoke: Secret update sanity checks"""
 
-    async def test_update_secret_handles_not_found(self, http_client):
+    async def test_update_secret_handles_not_found(self, http_client, internal_headers):
         """SMOKE: PUT /secrets/{id} handles non-existent secret"""
         user_id = unique_user_id()
         vault_id = unique_vault_id()
@@ -220,7 +232,7 @@ class TestSecretUpdateSmoke:
         response = await http_client.put(
             f"{API_V1}/secrets/{vault_id}",
             json={"name": "new_name"},
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         # Should return 403/404 for non-existent secret
@@ -235,14 +247,14 @@ class TestSecretUpdateSmoke:
 class TestSecretDeletionSmoke:
     """Smoke: Secret deletion sanity checks"""
 
-    async def test_delete_secret_handles_not_found(self, http_client):
+    async def test_delete_secret_handles_not_found(self, http_client, internal_headers):
         """SMOKE: DELETE /secrets/{id} handles non-existent secret"""
         user_id = unique_user_id()
         vault_id = unique_vault_id()
 
         response = await http_client.delete(
             f"{API_V1}/secrets/{vault_id}",
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         # Should return 403/404 for non-existent secret
@@ -257,7 +269,7 @@ class TestSecretDeletionSmoke:
 class TestSecretSharingSmoke:
     """Smoke: Secret sharing sanity checks"""
 
-    async def test_share_secret_requires_target(self, http_client):
+    async def test_share_secret_requires_target(self, http_client, internal_headers):
         """SMOKE: POST /secrets/{id}/share validates share target"""
         user_id = unique_user_id()
 
@@ -269,7 +281,7 @@ class TestSecretSharingSmoke:
                 "name": unique_secret_name(),
                 "secret_value": unique_secret_value(),
             },
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         if create_response.status_code == 201:
@@ -279,19 +291,19 @@ class TestSecretSharingSmoke:
             share_response = await http_client.post(
                 f"{API_V1}/secrets/{vault_id}/share",
                 json={"permission_level": "read"},
-                headers={"X-User-Id": user_id}
+                headers={**internal_headers, "X-User-Id": user_id}
             )
 
             assert share_response.status_code in [400, 422], \
                 f"Expected 400/422, got {share_response.status_code}"
 
-    async def test_get_shared_secrets_works(self, http_client):
+    async def test_get_shared_secrets_works(self, http_client, internal_headers):
         """SMOKE: GET /shared returns shared secrets"""
         user_id = unique_user_id()
 
         response = await http_client.get(
             f"{API_V1}/shared",
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code == 200, \
@@ -305,7 +317,7 @@ class TestSecretSharingSmoke:
 class TestSecretRotationSmoke:
     """Smoke: Secret rotation sanity checks"""
 
-    async def test_rotate_secret_handles_not_found(self, http_client):
+    async def test_rotate_secret_handles_not_found(self, http_client, internal_headers):
         """SMOKE: POST /secrets/{id}/rotate handles non-existent secret"""
         user_id = unique_user_id()
         vault_id = unique_vault_id()
@@ -313,7 +325,7 @@ class TestSecretRotationSmoke:
         response = await http_client.post(
             f"{API_V1}/secrets/{vault_id}/rotate",
             params={"new_secret_value": unique_secret_value()},
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         # Should return 403/404 for non-existent secret
@@ -328,13 +340,13 @@ class TestSecretRotationSmoke:
 class TestStatisticsSmoke:
     """Smoke: Statistics endpoint sanity checks"""
 
-    async def test_get_statistics_works(self, http_client):
+    async def test_get_statistics_works(self, http_client, internal_headers):
         """SMOKE: GET /stats returns statistics"""
         user_id = unique_user_id()
 
         response = await http_client.get(
             f"{API_V1}/stats",
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code == 200, \
@@ -350,13 +362,13 @@ class TestStatisticsSmoke:
 class TestAuditLogsSmoke:
     """Smoke: Audit logs endpoint sanity checks"""
 
-    async def test_get_audit_logs_works(self, http_client):
+    async def test_get_audit_logs_works(self, http_client, internal_headers):
         """SMOKE: GET /audit-logs returns logs"""
         user_id = unique_user_id()
 
         response = await http_client.get(
             f"{API_V1}/audit-logs",
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code == 200, \
@@ -370,14 +382,14 @@ class TestAuditLogsSmoke:
 class TestCriticalFlowSmoke:
     """Smoke: Critical vault flow end-to-end"""
 
-    async def test_complete_vault_lifecycle(self, http_client):
+    async def test_complete_vault_lifecycle(self, http_client, internal_headers):
         """
         SMOKE: Complete vault lifecycle works end-to-end
 
         Tests: Create -> Get -> Update -> List -> Stats -> Delete
         """
         user_id = unique_user_id()
-        headers = {"X-User-Id": user_id}
+        headers = {**internal_headers, "X-User-Id": user_id}
 
         # Step 1: Create secret
         create_response = await http_client.post(
@@ -443,36 +455,33 @@ class TestCriticalFlowSmoke:
 class TestErrorHandlingSmoke:
     """Smoke: Error handling sanity checks"""
 
-    async def test_invalid_json_returns_error(self, http_client):
+    async def test_invalid_json_returns_error(self, http_client, internal_headers):
         """SMOKE: Invalid JSON returns 400 or 422"""
         user_id = unique_user_id()
 
         response = await http_client.post(
             f"{API_V1}/secrets",
             content="not valid json",
-            headers={
-                "X-User-Id": user_id,
-                "Content-Type": "application/json"
-            }
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code in [400, 422], \
             f"Expected 400/422, got {response.status_code}"
 
-    async def test_missing_required_fields_returns_422(self, http_client):
+    async def test_missing_required_fields_returns_422(self, http_client, internal_headers):
         """SMOKE: Missing required fields returns 422"""
         user_id = unique_user_id()
 
         response = await http_client.post(
             f"{API_V1}/secrets",
             json={},
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code in [400, 422], \
             f"Expected 400/422, got {response.status_code}"
 
-    async def test_invalid_secret_type_returns_422(self, http_client):
+    async def test_invalid_secret_type_returns_422(self, http_client, internal_headers):
         """SMOKE: Invalid secret_type returns 422"""
         user_id = unique_user_id()
 
@@ -483,7 +492,7 @@ class TestErrorHandlingSmoke:
                 "name": unique_secret_name(),
                 "secret_value": unique_secret_value(),
             },
-            headers={"X-User-Id": user_id}
+            headers={**internal_headers, "X-User-Id": user_id}
         )
 
         assert response.status_code in [400, 422], \
