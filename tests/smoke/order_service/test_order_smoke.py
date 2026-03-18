@@ -297,22 +297,26 @@ class TestOrderCompletionSmoke:
             }
         )
 
-        if create_response.status_code in [200, 201]:
-            data = create_response.json()
-            order_id = data.get("order", {}).get("order_id") or data.get("order_id")
+        if create_response.status_code not in [200, 201]:
+            pytest.skip(f"Order creation returned {create_response.status_code}")
 
-            if order_id:
-                # Try to complete without payment_confirmed=True
-                complete_response = await http_client.post(
-                    f"{API_V1}/{order_id}/complete",
-                    json={
-                        "payment_confirmed": False,
-                    }
-                )
+        data = create_response.json()
+        if not data:
+            pytest.skip("Order creation returned empty response")
 
-                # Service may accept completion regardless of payment_confirmed flag
-                assert complete_response.status_code in [200, 400, 401, 403, 422, 500], \
-                    f"Complete order failed unexpectedly: {complete_response.status_code}"
+        order_id = (data.get("order") or {}).get("order_id") or data.get("order_id")
+        if not order_id:
+            pytest.skip("Could not extract order_id from response")
+
+        # Try to complete without payment_confirmed=True
+        complete_response = await http_client.post(
+            f"{API_V1}/{order_id}/complete",
+            json={"payment_confirmed": False}
+        )
+
+        # Service may accept completion regardless of payment_confirmed flag
+        assert complete_response.status_code in [200, 400, 401, 403, 422, 500], \
+            f"Complete order failed unexpectedly: {complete_response.status_code}"
 
 
 # =============================================================================
