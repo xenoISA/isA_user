@@ -161,7 +161,7 @@ class OrderService:
                 expires_at = datetime.now(timezone.utc) + timedelta(minutes=request.expires_in_minutes)
             
             # Prepare items payload
-            items_payload = [item.model_dump() for item in request.items] if request.items else []
+            items_payload = [item.model_dump(mode="json") for item in request.items] if request.items else []
 
             # Compute totals if not provided
             subtotal_amount = request.subtotal_amount
@@ -203,8 +203,8 @@ class OrderService:
                 shipping_amount=shipping_amount,
                 discount_amount=discount_amount,
                 final_amount=final_amount,
-                shipping_address=request.shipping_address.model_dump() if request.shipping_address else None,
-                billing_address=request.billing_address.model_dump() if request.billing_address else None,
+                shipping_address=request.shipping_address.model_dump(mode="json") if request.shipping_address else None,
+                billing_address=request.billing_address.model_dump(mode="json") if request.billing_address else None,
                 expires_at=expires_at
             )
 
@@ -309,8 +309,8 @@ class OrderService:
                 metadata=request.metadata,
                 fulfillment_status=request.fulfillment_status.value if request.fulfillment_status else None,
                 tracking_number=request.tracking_number,
-                shipping_address=request.shipping_address.model_dump() if request.shipping_address else None,
-                billing_address=request.billing_address.model_dump() if request.billing_address else None
+                shipping_address=request.shipping_address.model_dump(mode="json") if request.shipping_address else None,
+                billing_address=request.billing_address.model_dump(mode="json") if request.billing_address else None
             )
             
             if updated_order:
