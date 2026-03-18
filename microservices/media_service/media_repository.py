@@ -57,7 +57,7 @@ class MediaRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="media_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="media_service", min_pool_size=1, max_pool_size=2)
 
         # Table names (media schema)
         self.schema = "media"

@@ -46,7 +46,7 @@ class VaultRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="vault_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="vault_service", min_pool_size=1, max_pool_size=2)
         self.schema = "vault"
         self.vault_table = "vault_items"
         self.access_log_table = "vault_access_logs"

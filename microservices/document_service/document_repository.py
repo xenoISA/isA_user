@@ -53,7 +53,7 @@ class DocumentRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="document_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="document_service", min_pool_size=1, max_pool_size=2)
 
         # Table names (document schema)
         self.schema = "document"
@@ -114,8 +114,8 @@ class DocumentRepository:
                 "point_ids": document_data.point_ids or [],
                 "metadata": document_data.metadata or {},
                 "tags": document_data.tags or [],
-                "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
+                "created_at": datetime.now(timezone.utc).replace(tzinfo=None).replace(tzinfo=None),
+                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).replace(tzinfo=None),
             }
 
             async with self.db:
@@ -267,7 +267,7 @@ class DocumentRepository:
             # Add updated_at
             param_count += 1
             set_clauses.append(f"updated_at = ${param_count}")
-            params.append(datetime.now(timezone.utc))
+            params.append(datetime.now(timezone.utc).replace(tzinfo=None))
 
             # Add doc_id for WHERE clause
             param_count += 1
@@ -301,10 +301,10 @@ class DocumentRepository:
                 update_data["chunk_count"] = chunk_count
 
             if status == DocumentStatus.INDEXED:
-                update_data["indexed_at"] = datetime.now(timezone.utc)
+                update_data["indexed_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
             if status in [DocumentStatus.UPDATING, DocumentStatus.UPDATE_PENDING]:
-                update_data["last_updated_at"] = datetime.now(timezone.utc)
+                update_data["last_updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
             result = await self.update_document(doc_id, update_data)
             return result is not None
@@ -321,7 +321,7 @@ class DocumentRepository:
                 SET is_latest = false, updated_at = $1
                 WHERE doc_id = $2
             """
-            params = [datetime.now(timezone.utc), doc_id]
+            params = [datetime.now(timezone.utc).replace(tzinfo=None), doc_id]
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -344,7 +344,7 @@ class DocumentRepository:
                 """
                 params = [
                     DocumentStatus.DELETED.value,
-                    datetime.now(timezone.utc),
+                    datetime.now(timezone.utc).replace(tzinfo=None),
                     doc_id,
                     user_id,
                 ]
@@ -430,7 +430,7 @@ class DocumentRepository:
                 status=DocumentStatus.INDEXED,
                 chunk_count=chunk_count,
                 chunking_strategy=base_doc.chunking_strategy,
-                indexed_at=datetime.now(timezone.utc),
+                indexed_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 access_level=base_doc.access_level,
                 allowed_users=base_doc.allowed_users,
                 allowed_groups=base_doc.allowed_groups,
@@ -501,7 +501,7 @@ class DocumentRepository:
                 "users_removed": history_data.users_removed or [],
                 "groups_added": history_data.groups_added or [],
                 "groups_removed": history_data.groups_removed or [],
-                "changed_at": datetime.now(timezone.utc),
+                "changed_at": datetime.now(timezone.utc).replace(tzinfo=None),
             }
 
             async with self.db:

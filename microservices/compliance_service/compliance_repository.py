@@ -44,7 +44,9 @@ class ComplianceRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
-            user_id="compliance_service"
+            user_id="compliance_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "compliance"
         self.checks_table = "compliance_checks"

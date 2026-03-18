@@ -514,7 +514,9 @@ class AuthorizationRepository:
         try:
             org_data = await self.org_client.get_organization(
                 organization_id=organization_id,
-                user_id="system"
+                user_id="system",
+            min_pool_size=1,
+            max_pool_size=2,
             )
 
             if not org_data:
@@ -523,7 +525,9 @@ class AuthorizationRepository:
 
             members = await self.org_client.get_members(
                 organization_id=organization_id,
-                user_id="system"
+                user_id="system",
+            min_pool_size=1,
+            max_pool_size=2,
             )
             member_count = len(members) if members else 0
 
@@ -543,7 +547,9 @@ class AuthorizationRepository:
         try:
             members = await self.org_client.get_members(
                 organization_id=organization_id,
-                user_id="system"
+                user_id="system",
+            min_pool_size=1,
+            max_pool_size=2,
             )
 
             if not members:

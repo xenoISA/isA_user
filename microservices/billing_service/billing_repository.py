@@ -47,7 +47,9 @@ class BillingRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
-            user_id="billing_service"
+            user_id="billing_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "billing"
         self.billing_records_table = "billing_records"

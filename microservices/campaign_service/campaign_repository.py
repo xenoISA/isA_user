@@ -88,7 +88,9 @@ class CampaignRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
-            user_id="campaign_service"
+            user_id="campaign_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "campaign"
 

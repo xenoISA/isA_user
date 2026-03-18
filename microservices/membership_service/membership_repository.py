@@ -46,7 +46,9 @@ class MembershipRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
-            user_id="membership_service"
+            user_id="membership_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "membership"
         self.memberships_table = "memberships"

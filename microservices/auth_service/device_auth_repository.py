@@ -57,7 +57,9 @@ class DeviceAuthRepository:
             if self.organization_service_client:
                 org = await self.organization_service_client.get_organization(
                     organization_id=device_data['organization_id'],
-                    user_id="system"
+                    user_id="system",
+                min_pool_size=1,
+                max_pool_size=2,
                 )
                 if not org:
                     raise Exception(f"Organization '{device_data.get('organization_id')}' not found.")

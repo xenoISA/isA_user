@@ -50,7 +50,9 @@ class PaymentRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
-            user_id="payment_service"
+            user_id="payment_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
 
         # Schema and table names

@@ -59,7 +59,7 @@ class OTARepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="ota_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="ota_service", min_pool_size=1, max_pool_size=2)
         self.schema = "ota"
         self.firmware_table = "firmware"
         self.campaigns_table = "update_campaigns"

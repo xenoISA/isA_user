@@ -43,7 +43,9 @@ class CreditRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
-            user_id="credit_service"
+            user_id="credit_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "credit"
         self.accounts_table = "credit_accounts"

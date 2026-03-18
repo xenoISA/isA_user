@@ -65,7 +65,9 @@ class NotificationRepository:
         self.db = AsyncPostgresClient(
             host=postgres_host,
             port=postgres_port,
-            user_id="notification_service"
+            user_id="notification_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "notification"
 

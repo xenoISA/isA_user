@@ -48,7 +48,7 @@ class InventoryRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="inventory_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="inventory_service", min_pool_size=1, max_pool_size=2)
 
         self.schema = "inventory"
         self.reservations_table = "reservations"

@@ -49,7 +49,9 @@ class TelemetryRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
-            user_id="telemetry_service"
+            user_id="telemetry_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "telemetry"
         self.data_table = "telemetry_data"

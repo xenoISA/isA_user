@@ -40,7 +40,9 @@ class AuditRepository:
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
-            user_id="audit_service"
+            user_id="audit_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "audit"
         self.audit_events_table = "audit_events"

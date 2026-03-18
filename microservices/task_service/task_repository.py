@@ -69,7 +69,9 @@ class TaskRepository:
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
         self.db = AsyncPostgresClient(
-            host=postgres_host, port=postgres_port, user_id="task_service"
+            host=postgres_host, port=postgres_port, user_id="task_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "task"
         self.table_name = "user_tasks"

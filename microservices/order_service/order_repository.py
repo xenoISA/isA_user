@@ -53,7 +53,7 @@ class OrderRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="order_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="order_service", min_pool_size=1, max_pool_size=2)
 
         self.schema = "orders"  # Using "orders" instead of "order" (reserved keyword)
         self.orders_table = "orders"
@@ -102,8 +102,6 @@ class OrderRepository:
                 "currency": currency,
                 "discount_amount": discount_value,
                 "tax_amount": tax_value,
-                "shipping_amount": shipping_value,
-                "subtotal_amount": subtotal_value,
                 "final_amount": final_value,
                 "payment_status": PaymentStatus.PENDING.value,
                 "payment_intent_id": payment_intent_id,
@@ -116,7 +114,6 @@ class OrderRepository:
                 "fulfillment_status": fulfillment_status or "pending",
                 "tracking_number": tracking_number,
                 "shipping_address": shipping_address,
-                "billing_address": billing_address,
                 "created_at": now,
                 "updated_at": now,
                 "completed_at": None,
@@ -312,7 +309,9 @@ class OrderRepository:
         return await self.list_orders(
             limit=limit,
             offset=offset,
-            user_id=user_id
+            user_id=user_id,
+        min_pool_size=1,
+        max_pool_size=2,
         )
 
     async def search_orders(

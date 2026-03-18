@@ -53,6 +53,8 @@ class BaseMemoryRepository:
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
             user_id='memory_service'
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = schema
         self.table_name = table_name

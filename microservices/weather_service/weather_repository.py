@@ -43,7 +43,7 @@ class WeatherRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="weather_service")
+        self.db = AsyncPostgresClient(host=host, port=port, user_id="weather_service", min_pool_size=1, max_pool_size=2)
         self.schema = "weather"
         self.locations_table = "weather_locations"
         self.cache_table = "weather_cache"

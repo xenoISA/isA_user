@@ -47,7 +47,9 @@ class SubscriptionRepository:
         self.db = AsyncPostgresClient(
             host=postgres_host,
             port=postgres_port,
-            user_id="subscription_service"
+            user_id="subscription_service",
+        min_pool_size=1,
+        max_pool_size=2,
         )
         self.schema = "subscription"
         self.subscriptions_table = "user_subscriptions"
