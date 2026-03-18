@@ -18,7 +18,7 @@ Usage:
     pytest tests/smoke/task_service -v -k "health"
 
 Environment Variables:
-    TASK_BASE_URL: Base URL for task service (default: http://localhost:8208)
+    TASK_BASE_URL: Base URL for task service (default: http://localhost:8211)
 """
 
 import os
@@ -31,7 +31,6 @@ pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
 BASE_URL = os.getenv("TASK_BASE_URL", "http://localhost:8211")
-AUTH_URL = os.getenv("AUTH_BASE_URL", "http://localhost:8201")
 API_V1 = f"{BASE_URL}/api/v1/tasks"
 TIMEOUT = 10.0
 
@@ -54,26 +53,20 @@ def unique_task_name() -> str:
 # Fixtures
 # =============================================================================
 
+INTERNAL_HEADERS = {
+    "X-Internal-Call": "true",
+    "X-Internal-Service": "true",
+    "X-Internal-Service-Secret": "dev-internal-secret-change-in-production",
+    "Content-Type": "application/json",
+}
+
+
 @pytest.fixture
 async def http_client():
-    """Async HTTP client with authentication for smoke tests"""
+    """Async HTTP client with internal service headers for smoke tests"""
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        # Get dev token for smoke tests
-        try:
-            token_response = await client.post(
-                f"{AUTH_URL}/api/v1/auth/dev-token",
-                json={
-                    "user_id": "smoke_test_user",
-                    "email": "smoke_test@example.com",
-                    "expires_in": 3600
-                }
-            )
-            if token_response.status_code == 200:
-                token = token_response.json().get("token")
-                if token:
-                    client.headers["Authorization"] = f"Bearer {token}"
-        except Exception:
-            pass  # Continue without auth if auth service unavailable
+        # Use internal service headers to bypass auth
+        client.headers.update(INTERNAL_HEADERS)
         yield client
 
 

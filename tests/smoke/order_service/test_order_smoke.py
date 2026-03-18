@@ -18,7 +18,7 @@ Usage:
     pytest tests/smoke/order_service -v -k "health"
 
 Environment Variables:
-    ORDER_BASE_URL: Base URL for order service (default: http://localhost:8213)
+    ORDER_BASE_URL: Base URL for order service (default: http://localhost:8210)
 """
 
 import os
@@ -30,7 +30,7 @@ from datetime import datetime
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("ORDER_BASE_URL", "http://localhost:8213")
+BASE_URL = os.getenv("ORDER_BASE_URL", "http://localhost:8210")
 API_V1 = f"{BASE_URL}/api/v1/orders"
 TIMEOUT = 10.0
 

@@ -8,7 +8,7 @@ Usage:
     pytest tests/smoke/wallet_service/test_wallet_smoke.py -v
 
 Environment Variables:
-    WALLET_SERVICE_URL: Wallet service base URL (default: http://localhost:8213)
+    WALLET_SERVICE_URL: Wallet service base URL (default: http://localhost:8208)
 """
 import os
 import pytest
@@ -17,7 +17,7 @@ import httpx
 pytestmark = [pytest.mark.smoke]
 
 # Service configuration from environment
-WALLET_SERVICE_URL = os.getenv("WALLET_SERVICE_URL", "http://localhost:8213")
+WALLET_SERVICE_URL = os.getenv("WALLET_SERVICE_URL", "http://localhost:8208")
 
 
 @pytest.fixture

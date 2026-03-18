@@ -68,8 +68,12 @@ def auth_headers(smoke_config):
     """Provide authorization headers"""
     return {
         "Authorization": "Bearer smoke_test_token",
+        "X-Internal-Call": "true",
+        "X-Internal-Service": "true",
+        "X-Internal-Service-Secret": "dev-internal-secret-change-in-production",
         "X-Organization-ID": "org_smoke_test",
         "X-User-ID": "usr_smoke_test",
+        "Content-Type": "application/json",
     }
 
 
