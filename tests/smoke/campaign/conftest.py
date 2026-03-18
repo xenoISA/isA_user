@@ -25,7 +25,7 @@ class SmokeTestConfig:
     """Configuration for smoke tests"""
 
     SERVICE_HOST = os.getenv("CAMPAIGN_SERVICE_HOST", "localhost")
-    SERVICE_PORT = int(os.getenv("CAMPAIGN_SERVICE_PORT", "8240"))
+    SERVICE_PORT = int(os.getenv("CAMPAIGN_SERVICE_PORT", "8251"))
     BASE_URL = f"http://{SERVICE_HOST}:{SERVICE_PORT}"
 
     # External Services

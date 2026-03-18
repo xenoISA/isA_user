@@ -18,7 +18,7 @@ Usage:
     pytest tests/smoke/organization_service -v -k "health"
 
 Environment Variables:
-    ORGANIZATION_BASE_URL: Base URL for organization service (default: http://localhost:8203)
+    ORGANIZATION_BASE_URL: Base URL for organization service (default: http://localhost:8212)
 """
 
 import os
@@ -30,8 +30,8 @@ from datetime import datetime
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("ORGANIZATION_BASE_URL", "http://localhost:8203")
-API_V1 = f"{BASE_URL}/api/v1/organizations"
+BASE_URL = os.getenv("ORGANIZATION_BASE_URL", "http://localhost:8212")
+API_V1 = f"{BASE_URL}/api/v1/organization/organizations"
 TIMEOUT = 10.0
 
 
@@ -58,10 +58,19 @@ def unique_email() -> str:
 # Fixtures
 # =============================================================================
 
+INTERNAL_HEADERS = {
+    "X-Internal-Call": "true",
+    "X-Internal-Service": "true",
+    "X-Internal-Service-Secret": "dev-internal-secret-change-in-production",
+    "Content-Type": "application/json",
+}
+
+
 @pytest.fixture
 async def http_client():
-    """Async HTTP client for smoke tests"""
+    """Async HTTP client with internal service headers for smoke tests"""
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        client.headers.update(INTERNAL_HEADERS)
         yield client
 
 
@@ -289,11 +298,11 @@ class TestUserOrganizationsSmoke:
     """Smoke: User organizations sanity checks"""
 
     async def test_get_user_organizations_works(self, http_client, test_organization):
-        """SMOKE: GET /organizations/users/{user_id} retrieves user's organizations"""
+        """SMOKE: GET /organizations retrieves user's organizations (user_id from header)"""
         user_id = test_organization["_owner_user_id"]
 
         response = await http_client.get(
-            f"{API_V1}/users/{user_id}",
+            API_V1,
             headers={"X-User-ID": user_id}
         )
 

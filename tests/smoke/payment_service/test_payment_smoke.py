@@ -31,8 +31,8 @@ pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
 BASE_URL = os.getenv("PAYMENT_BASE_URL", "http://localhost:8207")
-# Payment service uses /api/v1/payments (plural)
-API_V1 = f"{BASE_URL}/api/v1/payments"
+# Payment service uses /api/v1/payment (singular)
+API_V1 = f"{BASE_URL}/api/v1/payment"
 TIMEOUT = 10.0
 
 
