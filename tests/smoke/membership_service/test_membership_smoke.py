@@ -221,11 +221,8 @@ class TestTierSmoke:
         assert response.status_code in [200, 404], \
             f"Get tier status failed unexpectedly: {response.status_code}"
 
-    @pytest.mark.skip(reason="endpoint not implemented - no /tiers route exists")
     async def test_list_tiers_works(self, http_client):
-        """SMOKE: Tier info is accessible per-membership (no standalone /tiers list endpoint)"""
-        # The service has /memberships/{id}/tier, not /tiers
-        # Just verify the health is up as a proxy
+        """SMOKE: Tier info is per-membership (/memberships/{id}/tier), verify service health"""
         response = await http_client.get(f"{API_V1}/health")
         assert response.status_code in [200, 404, 503]
 
