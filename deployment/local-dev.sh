@@ -91,7 +91,8 @@ case "${1:-}" in
         export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/microservices/$SERVICE_NAME"
         SERVICE_PORT_ENV="$(echo "$SERVICE_NAME" | tr '[:lower:]' '[:upper:]')_PORT"
         env "$SERVICE_PORT_ENV=$SERVICE_PORT" PORT="$SERVICE_PORT" \
-        .venv/bin/python -m uvicorn microservices.$SERVICE_NAME.main:app --host 0.0.0.0 --port $SERVICE_PORT --reload
+        .venv/bin/python -m uvicorn microservices.$SERVICE_NAME.main:app --host 0.0.0.0 --port $SERVICE_PORT \
+            --reload --reload-dir "microservices/$SERVICE_NAME" --reload-dir "core"
         ;;
 
     --restart)
@@ -128,7 +129,8 @@ case "${1:-}" in
         export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/microservices/$SERVICE_NAME"
         SERVICE_PORT_ENV="$(echo "$SERVICE_NAME" | tr '[:lower:]' '[:upper:]')_PORT"
         env "$SERVICE_PORT_ENV=$SERVICE_PORT" PORT="$SERVICE_PORT" \
-        .venv/bin/python -m uvicorn microservices.$SERVICE_NAME.main:app --host 0.0.0.0 --port $SERVICE_PORT --reload
+        .venv/bin/python -m uvicorn microservices.$SERVICE_NAME.main:app --host 0.0.0.0 --port $SERVICE_PORT \
+            --reload --reload-dir "microservices/$SERVICE_NAME" --reload-dir "core"
         ;;
 
     --run-all)
@@ -156,7 +158,8 @@ case "${1:-}" in
                     env "$SERVICE_PORT_ENV=$SERVICE_PORT" PORT="$SERVICE_PORT" \
                     PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/microservices/$SERVICE_NAME" \
                     nohup .venv/bin/python -m uvicorn microservices.$SERVICE_NAME.main:app \
-                        --host 0.0.0.0 --port $SERVICE_PORT --reload \
+                        --host 0.0.0.0 --port $SERVICE_PORT \
+                        --reload --reload-dir "microservices/$SERVICE_NAME" --reload-dir "core" \
                         > logs/$SERVICE_NAME.log 2>&1 &
 
                     COUNT=$((COUNT+1))
