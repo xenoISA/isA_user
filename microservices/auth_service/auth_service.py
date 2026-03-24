@@ -278,6 +278,8 @@ class AuthenticationService:
             "verified": False,
         }
 
+        # Verification code is sent via notification service (email)
+
         # Send email with verification code via notification service
         if self.notification_client:
             try:
@@ -677,6 +679,7 @@ class AuthenticationService:
         client_id: str,
         client_secret: str,
         scope: Optional[str] = None,
+        resource: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Issue OAuth2 access token via client_credentials grant."""
         try:
@@ -717,6 +720,9 @@ class AuthenticationService:
 
             from core.jwt_manager import TokenClaims, TokenScope, TokenType
 
+            # Determine audience: use resource param if provided, else default "a2a"
+            audience = resource if resource else "a2a"
+
             claims = TokenClaims(
                 user_id=f"client:{client_id}",
                 email=None,
@@ -728,8 +734,9 @@ class AuthenticationService:
                     "client_id": client_id,
                     "client_name": client.get("client_name"),
                     "grant_type": "client_credentials",
-                    "aud": "a2a",
+                    "aud": audience,  # Keep in metadata for backward compat
                 },
+                audience=audience,  # Standard JWT aud claim
             )
             token = self.jwt_manager.create_access_token(
                 claims,

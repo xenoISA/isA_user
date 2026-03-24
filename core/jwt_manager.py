@@ -42,6 +42,7 @@ class TokenClaims:
     token_type: TokenType = TokenType.ACCESS
     permissions: List[str] = None
     metadata: Dict[str, Any] = None
+    audience: Optional[str] = None
 
     def __post_init__(self):
         if self.permissions is None:
@@ -137,6 +138,10 @@ class JWTManager:
             "metadata": claims.metadata,
         }
 
+        # Add audience as a standard JWT claim if provided
+        if claims.audience:
+            payload["aud"] = claims.audience
+
         # Remove None values
         payload = {k: v for k, v in payload.items() if v is not None}
 
@@ -225,12 +230,14 @@ class JWTManager:
         """
         try:
             # Decode and verify token
+            # Note: aud verification is disabled here because audience validation
+            # is context-dependent and handled by resource servers, not the issuer.
             payload = jwt.decode(
                 token,
                 self.secret_key,
                 algorithms=[self.algorithm],
                 issuer=self.issuer,
-                options={"verify_exp": verify_exp}
+                options={"verify_exp": verify_exp, "verify_aud": False}
             )
 
             # Check token type if specified

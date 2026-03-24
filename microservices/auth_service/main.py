@@ -551,6 +551,35 @@ async def get_auth_info():
     }
 
 
+# OAuth Authorization Server Metadata (RFC 8414)
+
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", f"http://localhost:{config.service_port}")
+
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_authorization_server_metadata():
+    """OAuth 2.0 Authorization Server Metadata (RFC 8414).
+
+    Public endpoint — no authentication required.
+    """
+    return {
+        "issuer": AUTH_SERVICE_URL,
+        "token_endpoint": f"{AUTH_SERVICE_URL}/oauth/token",
+        "scopes_supported": [
+            "mcp:tools:read",
+            "mcp:tools:execute",
+            "mcp:prompts:read",
+            "mcp:resources:read",
+            "a2a.invoke",
+            "a2a.tasks.read",
+            "a2a.tasks.cancel",
+        ],
+        "grant_types_supported": ["client_credentials"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post"],
+        "service_documentation": f"{AUTH_SERVICE_URL}/docs",
+    }
+
+
 # JWT Token Authentication Endpoints
 
 
@@ -597,19 +626,30 @@ async def oauth_token(
     client_id: str = Form(...),
     client_secret: str = Form(...),
     scope: Optional[str] = Form(None),
+    resource: Optional[str] = Form(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
 ):
-    """OAuth2 client credentials token endpoint."""
+    """OAuth2 client credentials token endpoint (RFC 8707 resource indicators)."""
     if grant_type != "client_credentials":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="unsupported_grant_type",
         )
 
+    # Validate resource parameter (RFC 8707): must be a non-empty URL string
+    if resource is not None:
+        resource = resource.strip()
+        if not resource:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid_target",
+            )
+
     result = await auth_service.issue_client_credentials_token(
         client_id=client_id,
         client_secret=client_secret,
         scope=scope,
+        resource=resource,
     )
     if not result.get("success"):
         error_code = result.get("error_code", "invalid_client")
