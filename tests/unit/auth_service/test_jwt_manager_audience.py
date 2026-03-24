@@ -140,3 +140,73 @@ class TestVerifyTokenWithAudience:
         result = jwt_manager.verify_token(token)
         assert result["valid"] is True
         assert "aud" not in result["payload"]
+
+
+class TestVerifyTokenAudienceEnforcement:
+    """Test that verify_token enforces aud when expected_audience is provided."""
+
+    def test_matching_audience_passes(self, jwt_manager, base_claims):
+        """Token with correct aud passes when expected_audience matches."""
+        base_claims.audience = "https://mcp.isa.io"
+        token = jwt_manager.create_access_token(base_claims)
+
+        result = jwt_manager.verify_token(token, expected_audience="https://mcp.isa.io")
+        assert result["valid"] is True
+
+    def test_wrong_audience_fails(self, jwt_manager, base_claims):
+        """Token with wrong aud fails when expected_audience doesn't match."""
+        base_claims.audience = "https://mcp.isa.io"
+        token = jwt_manager.create_access_token(base_claims)
+
+        result = jwt_manager.verify_token(token, expected_audience="https://other.isa.io")
+        assert result["valid"] is False
+        assert "audience" in result["error"].lower() or "aud" in result["error"].lower()
+
+    def test_no_audience_in_token_with_expected_audience_fails(self, jwt_manager):
+        """Token without aud fails when expected_audience is specified (no metadata fallback)."""
+        claims = TokenClaims(
+            user_id="usr_1",
+            scope=TokenScope.USER,
+            token_type=TokenType.ACCESS,
+        )
+        token = jwt_manager.create_access_token(claims)
+
+        result = jwt_manager.verify_token(token, expected_audience="https://mcp.isa.io")
+        assert result["valid"] is False
+
+    def test_metadata_aud_fallback(self, jwt_manager):
+        """Backward compat: token with aud only in metadata still passes."""
+        # Simulate legacy token: aud in metadata but not as root claim
+        claims = TokenClaims(
+            user_id="client:legacy",
+            scope=TokenScope.SERVICE,
+            token_type=TokenType.ACCESS,
+            metadata={"aud": "https://mcp.isa.io"},
+        )
+        # No audience field → no root aud claim
+        token = jwt_manager.create_access_token(claims)
+
+        # Without expected_audience, should pass (no enforcement)
+        result = jwt_manager.verify_token(token)
+        assert result["valid"] is True
+
+    def test_no_expected_audience_skips_check(self, jwt_manager, base_claims):
+        """Without expected_audience, any aud (or none) is accepted."""
+        base_claims.audience = "https://mcp.isa.io"
+        token = jwt_manager.create_access_token(base_claims)
+
+        # No expected_audience → no enforcement
+        result = jwt_manager.verify_token(token)
+        assert result["valid"] is True
+
+    def test_a2a_audience_enforcement(self, jwt_manager, base_claims):
+        """Legacy a2a audience works with enforcement."""
+        base_claims.audience = "a2a"
+        token = jwt_manager.create_access_token(base_claims)
+
+        result = jwt_manager.verify_token(token, expected_audience="a2a")
+        assert result["valid"] is True
+
+        # Wrong audience should fail
+        result = jwt_manager.verify_token(token, expected_audience="https://mcp.isa.io")
+        assert result["valid"] is False

@@ -215,7 +215,8 @@ class JWTManager:
         self,
         token: str,
         expected_type: Optional[TokenType] = None,
-        verify_exp: bool = True
+        verify_exp: bool = True,
+        expected_audience: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Verify and decode a JWT token
@@ -224,21 +225,41 @@ class JWTManager:
             token: JWT token string
             expected_type: Expected token type (optional)
             verify_exp: Verify expiration (default: True)
+            expected_audience: Expected audience claim (optional, enables aud verification)
 
         Returns:
             Dictionary with verification result and payload
         """
         try:
-            # Decode and verify token
-            # Note: aud verification is disabled here because audience validation
-            # is context-dependent and handled by resource servers, not the issuer.
+            # Build decode options
+            decode_options = {"verify_exp": verify_exp}
+            decode_kwargs = {
+                "algorithms": [self.algorithm],
+                "issuer": self.issuer,
+                "options": decode_options,
+            }
+
+            # Enable aud verification when caller specifies expected audience
+            if expected_audience:
+                decode_options["verify_aud"] = True
+                decode_kwargs["audience"] = expected_audience
+            else:
+                decode_options["verify_aud"] = False
+
             payload = jwt.decode(
                 token,
                 self.secret_key,
-                algorithms=[self.algorithm],
-                issuer=self.issuer,
-                options={"verify_exp": verify_exp, "verify_aud": False}
+                **decode_kwargs,
             )
+
+            # Backward compat: if aud not in root claims, check metadata.aud
+            if expected_audience and "aud" not in payload:
+                metadata_aud = (payload.get("metadata") or {}).get("aud")
+                if metadata_aud != expected_audience:
+                    return {
+                        "valid": False,
+                        "error": f"Invalid audience. Expected {expected_audience}, got {metadata_aud}"
+                    }
 
             # Check token type if specified
             if expected_type and payload.get("type") != expected_type.value:

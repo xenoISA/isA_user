@@ -764,9 +764,25 @@ class AuthenticationService:
         self,
         token: str,
         required_scopes: Optional[List[str]] = None,
+        resource_uri: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Verify access token and enforce optional scope checks for resource APIs."""
-        verification = await self.verify_token(token, provider=AuthProvider.ISA_USER.value)
+        """Verify access token and enforce optional scope/audience checks for resource APIs."""
+        if resource_uri and self.jwt_manager:
+            verification_result = self.jwt_manager.verify_token(
+                token, expected_audience=resource_uri
+            )
+            if not verification_result.get("valid"):
+                return verification_result
+            # Wrap in standard format
+            verification = {
+                "valid": True,
+                "provider": "isa_user",
+                "payload": verification_result.get("payload"),
+                "user_id": verification_result.get("user_id"),
+                "permissions": verification_result.get("permissions", []),
+            }
+        else:
+            verification = await self.verify_token(token, provider=AuthProvider.ISA_USER.value)
         if not verification.get("valid"):
             return verification
 
