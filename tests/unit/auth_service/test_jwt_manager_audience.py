@@ -38,7 +38,7 @@ def base_claims():
         email=None,
         scope=TokenScope.SERVICE,
         token_type=TokenType.ACCESS,
-        permissions=["a2a.invoke"],
+        permissions=["mcp:tools:execute"],
         metadata={
             "client_id": "test-client",
             "client_name": "Test Client",

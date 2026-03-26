@@ -39,6 +39,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Scope mapping for backward compatibility (a2a.* → mcp:*)
+_SCOPE_MIGRATION_MAP = {
+    "a2a.invoke": "mcp:tools:execute",
+    "a2a.tasks.read": "mcp:tasks:read",
+    "a2a.tasks.cancel": "mcp:tasks:cancel",
+}
+
+
+def _normalize_scopes(scopes: set) -> set:
+    """Normalize legacy a2a.* scopes to mcp:* format."""
+    normalized = set()
+    for scope in scopes:
+        normalized.add(_SCOPE_MIGRATION_MAP.get(scope, scope))
+    return normalized
+
 
 class AuthenticationService:
     """
@@ -708,14 +723,18 @@ class AuthenticationService:
 
             allowed_scopes = set(client.get("allowed_scopes") or [])
             requested_scopes = set((scope or "").split()) if scope else set()
-            if requested_scopes and not requested_scopes.issubset(allowed_scopes):
+
+            # Normalize both sides for backward-compatible a2a.* → mcp:* comparison
+            normalized_allowed = _normalize_scopes(allowed_scopes)
+            normalized_requested = _normalize_scopes(requested_scopes)
+            if normalized_requested and not normalized_requested.issubset(normalized_allowed):
                 return {
                     "success": False,
                     "error": "Requested scope is not allowed",
                     "error_code": "invalid_scope",
                 }
 
-            granted_scopes = requested_scopes if requested_scopes else allowed_scopes
+            granted_scopes = normalized_requested if normalized_requested else normalized_allowed
             ttl_seconds = max(300, min(int(client.get("token_ttl_seconds", 3600)), 86400))
 
             from core.jwt_manager import TokenClaims, TokenScope, TokenType
