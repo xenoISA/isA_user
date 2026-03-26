@@ -564,18 +564,21 @@ async def oauth_authorization_server_metadata():
     """
     return {
         "issuer": AUTH_SERVICE_URL,
+        "authorization_endpoint": f"{AUTH_SERVICE_URL}/oauth/authorize",
         "token_endpoint": f"{AUTH_SERVICE_URL}/oauth/token",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "client_credentials"],
+        "code_challenge_methods_supported": ["S256"],
+        "client_id_metadata_document_supported": True,
+        "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
         "scopes_supported": [
             "mcp:tools:read",
             "mcp:tools:execute",
             "mcp:prompts:read",
             "mcp:resources:read",
-            "a2a.invoke",
-            "a2a.tasks.read",
-            "a2a.tasks.cancel",
+            "mcp:tasks:read",
+            "mcp:tasks:cancel",
         ],
-        "grant_types_supported": ["client_credentials"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post"],
         "service_documentation": f"{AUTH_SERVICE_URL}/docs",
     }
 
