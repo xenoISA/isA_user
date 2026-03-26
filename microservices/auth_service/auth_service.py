@@ -71,6 +71,7 @@ class AuthenticationService:
         auth_repository: Optional[AuthRepositoryProtocol] = None,
         oauth_client_repository: Optional[Any] = None,
         config: Optional["ConfigManager"] = None,
+        authorization_code_service: Optional[Any] = None,
     ):
         """
         Initialize authentication service with injected dependencies.
@@ -83,6 +84,7 @@ class AuthenticationService:
             auth_repository: Auth repository for database operations (inject mock for testing)
             oauth_client_repository: OAuth client repository for machine-to-machine auth
             config: Configuration manager (optional, for backwards compatibility)
+            authorization_code_service: AuthorizationCodeService for auth code grant
         """
         # Store injected dependencies
         self.jwt_manager = jwt_manager
@@ -91,6 +93,7 @@ class AuthenticationService:
         self.event_bus = event_bus
         self.auth_repository = auth_repository
         self.oauth_client_repository = oauth_client_repository
+        self._auth_code_service = authorization_code_service
 
         # Auth0 configuration (for OAuth integration)
         self.auth0_domain = (
@@ -773,6 +776,135 @@ class AuthenticationService:
 
         except Exception as e:
             logger.error(f"Client credentials token issuance failed: {e}")
+            return {
+                "success": False,
+                "error": "Token issuance failed",
+                "error_code": "server_error",
+            }
+
+    async def issue_authorization_code_token(
+        self,
+        *,
+        code: str,
+        redirect_uri: str,
+        code_verifier: Optional[str] = None,
+        client_id: str,
+        client_secret: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Exchange an authorization code for an access token (RFC 6749 s4.1.3).
+
+        Delegates PKCE/redirect_uri/expiry/single-use validation to
+        AuthorizationCodeService.consume_authorization_code().  Confidential
+        clients must also present a valid client_secret.
+
+        Returns a dict identical in shape to issue_client_credentials_token().
+        """
+        try:
+            if not self.jwt_manager:
+                return {
+                    "success": False,
+                    "error": "JWT manager not available",
+                    "error_code": "server_error",
+                }
+            if not self._auth_code_service:
+                return {
+                    "success": False,
+                    "error": "Authorization code service not available",
+                    "error_code": "server_error",
+                }
+            if not self.oauth_client_repository:
+                return {
+                    "success": False,
+                    "error": "OAuth client repository not available",
+                    "error_code": "server_error",
+                }
+
+            # 1. Consume the authorization code (validates PKCE, redirect_uri,
+            #    client_id, expiry, single-use)
+            try:
+                code_data = await self._auth_code_service.consume_authorization_code(
+                    code_value=code,
+                    redirect_uri=redirect_uri,
+                    code_verifier=code_verifier,
+                    client_id=client_id,
+                )
+            except ValueError as exc:
+                error_msg = str(exc)
+                # Extract OAuth error code prefix (e.g. "invalid_grant: ...")
+                if ":" in error_msg:
+                    error_code, _, detail = error_msg.partition(":")
+                    error_code = error_code.strip()
+                    detail = detail.strip()
+                else:
+                    error_code = "invalid_grant"
+                    detail = error_msg
+                return {
+                    "success": False,
+                    "error": detail,
+                    "error_code": error_code,
+                }
+
+            # 2. If confidential client, verify client_secret
+            client = await self.oauth_client_repository.get_client(client_id)
+            if client and client.get("client_type", "confidential") == "confidential":
+                if not client_secret:
+                    return {
+                        "success": False,
+                        "error": "Client secret required for confidential clients",
+                        "error_code": "invalid_client",
+                    }
+                verified = await self.oauth_client_repository.verify_client_credentials(
+                    client_id, client_secret
+                )
+                if not verified:
+                    return {
+                        "success": False,
+                        "error": "Invalid client credentials",
+                        "error_code": "invalid_client",
+                    }
+
+            # 3. Build token claims
+            user_id = code_data["user_id"]
+            scopes = set(code_data.get("scopes") or [])
+            resource = code_data.get("resource")
+            audience = resource if resource else "a2a"
+
+            # Normalize scopes
+            granted_scopes = _normalize_scopes(scopes)
+            ttl_seconds = 3600
+
+            from core.jwt_manager import TokenClaims, TokenScope, TokenType
+
+            claims = TokenClaims(
+                user_id=user_id,
+                email=None,
+                organization_id=code_data.get("organization_id"),
+                scope=TokenScope.USER,
+                token_type=TokenType.ACCESS,
+                permissions=sorted(granted_scopes),
+                metadata={
+                    "client_id": client_id,
+                    "grant_type": "authorization_code",
+                    "aud": audience,
+                },
+                audience=audience,
+            )
+            token = self.jwt_manager.create_access_token(
+                claims,
+                expires_delta=timedelta(seconds=ttl_seconds),
+            )
+
+            return {
+                "success": True,
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": ttl_seconds,
+                "scope": " ".join(sorted(granted_scopes)),
+                "client_id": client_id,
+            }
+
+        except Exception as e:
+            logger.error(f"Authorization code token issuance failed: {e}")
             return {
                 "success": False,
                 "error": "Token issuance failed",
