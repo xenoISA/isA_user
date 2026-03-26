@@ -365,6 +365,9 @@ class AuthMicroservice:
                 client_repo=self.oauth_client_repository,
             )
 
+            # Wire authorization code service into auth service for token exchange
+            self.auth_service._auth_code_service = self.authorization_code_service
+
             logger.info("Authentication microservice initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize authentication microservice: {e}")
@@ -642,18 +645,15 @@ async def verify_token(
 async def oauth_token(
     grant_type: str = Form(...),
     client_id: str = Form(...),
-    client_secret: str = Form(...),
+    client_secret: Optional[str] = Form(None),
     scope: Optional[str] = Form(None),
     resource: Optional[str] = Form(None),
+    code: Optional[str] = Form(None),
+    redirect_uri: Optional[str] = Form(None),
+    code_verifier: Optional[str] = Form(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
 ):
-    """OAuth2 client credentials token endpoint (RFC 8707 resource indicators)."""
-    if grant_type != "client_credentials":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="unsupported_grant_type",
-        )
-
+    """OAuth2 token endpoint supporting client_credentials and authorization_code grants."""
     # Validate resource parameter (RFC 8707): must be a non-empty URL string
     if resource is not None:
         resource = resource.strip()
@@ -663,12 +663,42 @@ async def oauth_token(
                 detail="invalid_target",
             )
 
-    result = await auth_service.issue_client_credentials_token(
-        client_id=client_id,
-        client_secret=client_secret,
-        scope=scope,
-        resource=resource,
-    )
+    if grant_type == "client_credentials":
+        if not client_secret:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid_request: client_secret required for client_credentials grant",
+            )
+        result = await auth_service.issue_client_credentials_token(
+            client_id=client_id,
+            client_secret=client_secret,
+            scope=scope,
+            resource=resource,
+        )
+    elif grant_type == "authorization_code":
+        if not code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid_request: code parameter required",
+            )
+        if not redirect_uri:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid_request: redirect_uri parameter required",
+            )
+        result = await auth_service.issue_authorization_code_token(
+            code=code,
+            redirect_uri=redirect_uri,
+            code_verifier=code_verifier,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="unsupported_grant_type",
+        )
+
     if not result.get("success"):
         error_code = result.get("error_code", "invalid_client")
         status_code = (
