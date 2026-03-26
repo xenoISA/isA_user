@@ -137,7 +137,7 @@ class OAuthClientCreateRequest(BaseModel):
     client_name: str = Field(..., description="Human-readable client name")
     organization_id: Optional[str] = Field(None, description="Owning organization ID")
     allowed_scopes: List[str] = Field(
-        default=["a2a.invoke"],
+        default=["mcp:tools:execute"],
         description="Allowed OAuth scopes for this client",
     )
     token_ttl_seconds: int = Field(
@@ -570,9 +570,8 @@ async def oauth_authorization_server_metadata():
             "mcp:tools:execute",
             "mcp:prompts:read",
             "mcp:resources:read",
-            "a2a.invoke",
-            "a2a.tasks.read",
-            "a2a.tasks.cancel",
+            "mcp:tasks:read",
+            "mcp:tasks:cancel",
         ],
         "grant_types_supported": ["client_credentials"],
         "token_endpoint_auth_methods_supported": ["client_secret_post"],
