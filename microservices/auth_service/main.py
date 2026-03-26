@@ -47,6 +47,8 @@ from .auth_service import AuthenticationService
 from .device_auth_repository import DeviceAuthRepository
 from .device_auth_service import DeviceAuthService
 from .oauth_client_repository import OAuthClientRepository
+from .authorization_code_repository import AuthorizationCodeRepository
+from .authorization_code_service import AuthorizationCodeService
 
 # Import route registry for Consul metadata
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
@@ -262,6 +264,8 @@ class AuthMicroservice:
         self.auth_repository = None
         self.device_auth_service = None
         self.device_auth_repository = None
+        self.authorization_code_repository = None
+        self.authorization_code_service = None
         self.event_bus: Optional[NATSEventBus] = None
         self.organization_service_client = None
         self.consul_registry: Optional[ConsulRegistry] = None
@@ -342,6 +346,9 @@ class AuthMicroservice:
                 organization_service_client=self.organization_service_client,
                 config=config_manager,
             )
+            self.authorization_code_repository = AuthorizationCodeRepository(
+                config=config_manager,
+            )
 
             # Initialize services using factory pattern
             from .factory import create_auth_service
@@ -352,6 +359,10 @@ class AuthMicroservice:
             self.api_key_service = ApiKeyService(self.api_key_repository)
             self.device_auth_service = DeviceAuthService(
                 self.device_auth_repository, event_bus=self.event_bus
+            )
+            self.authorization_code_service = AuthorizationCodeService(
+                code_repo=self.authorization_code_repository,
+                client_repo=self.oauth_client_repository,
             )
 
             logger.info("Authentication microservice initialized successfully")
@@ -443,6 +454,10 @@ def get_device_auth_service() -> DeviceAuthService:
 
 def get_oauth_client_repository() -> OAuthClientRepository:
     return auth_microservice.oauth_client_repository
+
+
+def get_authorization_code_service() -> AuthorizationCodeService:
+    return auth_microservice.authorization_code_service
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -667,6 +682,127 @@ async def oauth_token(
         "expires_in": result["expires_in"],
         "scope": result.get("scope", ""),
     }
+
+
+# OAuth Authorization Code + PKCE Endpoints
+
+
+class ConsentApprovalRequest(BaseModel):
+    """Consent approval request — submitted by the consent UI after user approves."""
+
+    client_id: str = Field(..., description="OAuth client ID")
+    state: str = Field(..., description="Opaque state for CSRF protection")
+    redirect_uri: str = Field(..., description="Callback URI")
+    scope: str = Field(..., description="Space-separated approved scopes")
+    resource: Optional[str] = Field(None, description="RFC 8707 resource indicator")
+    code_challenge: Optional[str] = Field(None, description="PKCE code challenge")
+    code_challenge_method: Optional[str] = Field(None, description="PKCE method (S256)")
+
+
+@app.get("/oauth/authorize")
+async def oauth_authorize(
+    response_type: str = Query(..., description="Must be 'code'"),
+    client_id: str = Query(..., description="OAuth client ID"),
+    redirect_uri: str = Query(..., description="Callback URI"),
+    scope: str = Query("", description="Space-separated scopes"),
+    state: str = Query("", description="Opaque state for CSRF protection"),
+    code_challenge: Optional[str] = Query(None, description="PKCE code challenge"),
+    code_challenge_method: Optional[str] = Query(None, description="PKCE method (S256)"),
+    resource: Optional[str] = Query(None, description="RFC 8707 resource indicator"),
+    authz_code_service: AuthorizationCodeService = Depends(get_authorization_code_service),
+    oauth_repo: OAuthClientRepository = Depends(get_oauth_client_repository),
+):
+    """OAuth 2.0 Authorization endpoint (RFC 6749 / RFC 7636).
+
+    Validates all parameters and returns a JSON payload for the consent UI to display.
+    The consent UI should call POST /oauth/consent-approval after user approval.
+    """
+    if response_type != "code":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="unsupported_response_type: only 'code' is supported",
+        )
+
+    # Validate client exists
+    client = await oauth_repo.get_client(client_id)
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_client: Client not found",
+        )
+
+    # Validate redirect_uri
+    allowed_uris = client.get("redirect_uris", [])
+    if allowed_uris and redirect_uri not in allowed_uris:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_request: redirect_uri not registered",
+        )
+
+    # Validate PKCE requirements
+    client_type = client.get("client_type", "confidential")
+    require_pkce = client.get("require_pkce", True)
+    if client_type == "public" or require_pkce:
+        if not code_challenge:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid_request: code_challenge required",
+            )
+        if code_challenge_method != "S256":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid_request: only S256 code_challenge_method supported",
+            )
+
+    return {
+        "action": "consent_required",
+        "client_id": client_id,
+        "client_name": client.get("client_name", client_id),
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+        "state": state,
+        "resource": resource,
+        "code_challenge": code_challenge,
+        "code_challenge_method": code_challenge_method,
+    }
+
+
+@app.post("/oauth/consent-approval")
+async def oauth_consent_approval(
+    request: ConsentApprovalRequest,
+    caller: Dict[str, Any] = Depends(get_current_caller),
+    authz_code_service: AuthorizationCodeService = Depends(get_authorization_code_service),
+):
+    """Process user consent and generate an authorization code.
+
+    Requires user authentication (Bearer token). Returns the authorization code
+    for the consent UI to redirect the user-agent back to the client.
+    """
+    user_id = caller.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Cannot determine user identity from token",
+        )
+
+    try:
+        result = await authz_code_service.create_authorization_request(
+            client_id=request.client_id,
+            redirect_uri=request.redirect_uri,
+            scope=request.scope,
+            state=request.state,
+            code_challenge=request.code_challenge,
+            code_challenge_method=request.code_challenge_method,
+            resource=request.resource,
+            user_id=user_id,
+            organization_id=caller.get("organization_id"),
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
 
 
 @app.post("/api/v1/auth/oauth/clients")
