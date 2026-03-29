@@ -280,6 +280,102 @@ class ProductRepository:
             updated_at=row.get("updated_at")
         )
 
+    # ==================== Admin Operations ====================
+
+    async def admin_soft_delete_product(self, product_id: str) -> bool:
+        """Soft-delete a product by setting is_active = FALSE"""
+        try:
+            query = f'''
+                UPDATE {self.schema}.{self.products_table}
+                SET is_active = FALSE, updated_at = $2
+                WHERE product_id = $1
+                RETURNING product_id
+            '''
+            async with self.db:
+                result = await self.db.query_row(query, params=[product_id, datetime.now(timezone.utc)])
+            return result is not None
+        except Exception as e:
+            logger.error(f"Error soft-deleting product {product_id}: {e}")
+            return False
+
+    async def admin_create_pricing(self, product_id: str, pricing_id: str, tier_name: str,
+                                    min_quantity: float, max_quantity: Optional[float],
+                                    unit_price: float, currency: str,
+                                    metadata: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Create a pricing tier for a product"""
+        try:
+            query = f'''
+                INSERT INTO {self.schema}.{self.pricing_table} (
+                    pricing_id, product_id, tier_name, min_quantity, max_quantity,
+                    unit_price, currency, metadata, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING *
+            '''
+            now = datetime.now(timezone.utc)
+            params = [
+                pricing_id, product_id, tier_name, min_quantity, max_quantity,
+                unit_price, currency, json.dumps(metadata or {}), now, now
+            ]
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Error creating pricing: {e}")
+            return None
+
+    async def admin_get_pricing(self, pricing_id: str) -> Optional[Dict[str, Any]]:
+        """Get a pricing tier by ID"""
+        try:
+            query = f'''
+                SELECT * FROM {self.schema}.{self.pricing_table}
+                WHERE pricing_id = $1
+            '''
+            async with self.db:
+                result = await self.db.query_row(query, params=[pricing_id])
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Error getting pricing {pricing_id}: {e}")
+            return None
+
+    async def admin_update_pricing(self, pricing_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update a pricing tier"""
+        try:
+            set_clauses = []
+            params = []
+            param_count = 0
+
+            for key, value in updates.items():
+                if value is None:
+                    continue
+                if key == "metadata":
+                    value = json.dumps(value)
+                param_count += 1
+                set_clauses.append(f"{key} = ${param_count}")
+                params.append(value)
+
+            if not set_clauses:
+                return await self.admin_get_pricing(pricing_id)
+
+            param_count += 1
+            set_clauses.append(f"updated_at = ${param_count}")
+            params.append(datetime.now(timezone.utc))
+
+            param_count += 1
+            params.append(pricing_id)
+
+            query = f'''
+                UPDATE {self.schema}.{self.pricing_table}
+                SET {", ".join(set_clauses)}
+                WHERE pricing_id = ${param_count}
+                RETURNING *
+            '''
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Error updating pricing {pricing_id}: {e}")
+            return None
+
     # ==================== Category Operations ====================
 
     async def get_categories(self) -> List[ProductCategory]:

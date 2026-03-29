@@ -26,7 +26,9 @@ from .product_repository import ProductRepository
 from .product_service import ProductService
 from .models import (
     Product, ProductCategory, PricingModel, ServicePlan, UserSubscription,
-    ProductUsageRecord, ProductType, PricingType, SubscriptionStatus, BillingCycle
+    ProductUsageRecord, ProductType, PricingType, SubscriptionStatus, BillingCycle,
+    AdminCreateProductRequest, AdminUpdateProductRequest,
+    AdminCreatePricingRequest, AdminUpdatePricingRequest,
 )
 
 # 初始化配置管理器
@@ -573,6 +575,128 @@ async def get_service_statistics(
         return await service.get_service_statistics()
     except Exception as e:
         logger.error(f"Error getting service statistics: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ====================
+# Admin API
+# ====================
+
+async def require_admin(request: Request):
+    """Check for admin role header"""
+    if request.headers.get("X-Admin-Role") != "true":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+@app.post("/api/v1/product/admin/products", status_code=201)
+async def admin_create_product(
+    body: AdminCreateProductRequest,
+    request: Request,
+    service: ProductService = Depends(get_product_service)
+):
+    """Create a new product"""
+    await require_admin(request)
+    try:
+        existing = await service.get_product(body.product_id)
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Product {body.product_id} already exists")
+        result = await service.admin_create_product(body.model_dump())
+        if not result:
+            raise HTTPException(status_code=500, detail="Failed to create product")
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating product: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.put("/api/v1/product/admin/products/{product_id}")
+async def admin_update_product(
+    product_id: str,
+    body: AdminUpdateProductRequest,
+    request: Request,
+    service: ProductService = Depends(get_product_service)
+):
+    """Update an existing product"""
+    await require_admin(request)
+    try:
+        result = await service.admin_update_product(product_id, body.model_dump(exclude_none=True))
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating product: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.delete("/api/v1/product/admin/products/{product_id}")
+async def admin_delete_product(
+    product_id: str,
+    request: Request,
+    service: ProductService = Depends(get_product_service)
+):
+    """Soft-delete a product (sets is_active = FALSE)"""
+    await require_admin(request)
+    try:
+        success = await service.admin_delete_product(product_id)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+        return {"message": f"Product {product_id} deactivated", "product_id": product_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting product: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/api/v1/product/admin/products/{product_id}/pricing", status_code=201)
+async def admin_create_pricing(
+    product_id: str,
+    body: AdminCreatePricingRequest,
+    request: Request,
+    service: ProductService = Depends(get_product_service)
+):
+    """Create a pricing tier for a product"""
+    await require_admin(request)
+    try:
+        result = await service.admin_create_pricing(product_id, body.model_dump())
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+            raise HTTPException(status_code=409, detail=f"Pricing {body.pricing_id} already exists")
+        logger.error(f"Error creating pricing: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.put("/api/v1/product/admin/pricing/{pricing_id}")
+async def admin_update_pricing(
+    pricing_id: str,
+    body: AdminUpdatePricingRequest,
+    request: Request,
+    service: ProductService = Depends(get_product_service)
+):
+    """Update a pricing tier"""
+    await require_admin(request)
+    try:
+        result = await service.admin_update_pricing(pricing_id, body.model_dump(exclude_none=True))
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"Pricing {pricing_id} not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating pricing: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

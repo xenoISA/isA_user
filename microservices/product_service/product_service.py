@@ -443,6 +443,119 @@ class ProductService:
             raise
 
     # ====================
+    # Admin Operations
+    # ====================
+
+    async def admin_create_product(self, data: Dict[str, Any]) -> Optional[Product]:
+        """Create a product via admin API"""
+        try:
+            product = Product(
+                product_id=data["product_id"],
+                category_id=data.get("category", "ai_models"),
+                name=data["product_name"],
+                product_code=data.get("product_code"),
+                description=data.get("description"),
+                product_type=ProductType(data["product_type"]) if isinstance(data["product_type"], str) else data["product_type"],
+                base_price=Decimal(str(data.get("base_price", 0))),
+                currency=Currency(data.get("currency", "USD")),
+                billing_interval=data.get("billing_interval"),
+                features=data.get("features", []),
+                quota_limits=data.get("quota_limits", {}),
+                metadata=data.get("metadata", {}),
+                tags=data.get("tags"),
+                is_active=data.get("is_active", True),
+            )
+            return await self.repository.create_product(product)
+        except Exception as e:
+            logger.error(f"Error in admin_create_product: {e}")
+            raise
+
+    async def admin_update_product(self, product_id: str, data: Dict[str, Any]) -> Optional[Product]:
+        """Update a product via admin API"""
+        try:
+            existing = await self.repository.get_product(product_id)
+            if not existing:
+                return None
+
+            updates = {}
+            field_map = {
+                "product_name": "product_name",
+                "description": "description",
+                "category": "category",
+                "product_type": "product_type",
+                "base_price": "base_price",
+                "currency": "currency",
+                "billing_interval": "billing_interval",
+                "features": "features",
+                "quota_limits": "quota_limits",
+                "metadata": "metadata",
+                "tags": "tags",
+                "is_active": "is_active",
+            }
+            for req_field, db_field in field_map.items():
+                if req_field in data and data[req_field] is not None:
+                    value = data[req_field]
+                    if req_field == "product_type" and isinstance(value, ProductType):
+                        value = value.value
+                    updates[db_field] = value
+
+            if not updates:
+                return existing
+
+            return await self.repository.update_product(product_id, updates)
+        except Exception as e:
+            logger.error(f"Error in admin_update_product: {e}")
+            raise
+
+    async def admin_delete_product(self, product_id: str) -> bool:
+        """Soft-delete a product via admin API"""
+        try:
+            existing = await self.repository.get_product(product_id)
+            if not existing:
+                return False
+            return await self.repository.admin_soft_delete_product(product_id)
+        except Exception as e:
+            logger.error(f"Error in admin_delete_product: {e}")
+            raise
+
+    async def admin_create_pricing(self, product_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Create a pricing tier via admin API"""
+        try:
+            product = await self.repository.get_product(product_id)
+            if not product:
+                return None
+
+            return await self.repository.admin_create_pricing(
+                product_id=product_id,
+                pricing_id=data["pricing_id"],
+                tier_name=data.get("tier_name", "base"),
+                min_quantity=data.get("min_quantity", 0),
+                max_quantity=data.get("max_quantity"),
+                unit_price=data["unit_price"],
+                currency=data.get("currency", "USD"),
+                metadata=data.get("metadata"),
+            )
+        except Exception as e:
+            logger.error(f"Error in admin_create_pricing: {e}")
+            raise
+
+    async def admin_update_pricing(self, pricing_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update a pricing tier via admin API"""
+        try:
+            existing = await self.repository.admin_get_pricing(pricing_id)
+            if not existing:
+                return None
+
+            updates = {k: v for k, v in data.items() if v is not None}
+            if not updates:
+                return existing
+
+            return await self.repository.admin_update_pricing(pricing_id, updates)
+        except Exception as e:
+            logger.error(f"Error in admin_update_pricing: {e}")
+            raise
+
+    # ====================
     # 业务逻辑辅助方法
     # ====================
 
