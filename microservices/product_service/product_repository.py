@@ -280,6 +280,63 @@ class ProductRepository:
             updated_at=row.get("updated_at")
         )
 
+    # ==================== Catalog Alignment ====================
+
+    async def get_catalog_alignment(self) -> Dict[str, Any]:
+        """Cross-check products vs cost_definitions for drift detection"""
+        try:
+            # Products with product_type = model_inference that are active
+            products_query = f'''
+                SELECT product_id, product_name, metadata
+                FROM {self.schema}.{self.products_table}
+                WHERE product_type = 'model_inference' AND is_active = true
+            '''
+            # Active cost definitions for model_inference
+            costs_query = f'''
+                SELECT DISTINCT model_name, provider, service_type
+                FROM {self.schema}.cost_definitions
+                WHERE service_type = 'model_inference' AND is_active = true
+                  AND (effective_until IS NULL OR effective_until > NOW())
+            '''
+            async with self.db:
+                products = await self.db.query(products_query, params=[])
+                costs = await self.db.query(costs_query, params=[])
+
+            product_models = {}
+            for p in (products or []):
+                meta = p.get("metadata") or {}
+                model = meta.get("model") or p.get("product_id")
+                product_models[model] = {
+                    "product_id": p["product_id"],
+                    "product_name": p.get("product_name"),
+                    "metadata": meta,
+                }
+
+            cost_models = set()
+            for c in (costs or []):
+                if c.get("model_name"):
+                    cost_models.add(c["model_name"])
+
+            products_without_costs = [
+                {"product_id": v["product_id"], "model": k, "action": "Add cost_definition for this model"}
+                for k, v in product_models.items() if k not in cost_models
+            ]
+            costs_without_products = [
+                {"model_name": m, "action": "Add product entry for this model"}
+                for m in cost_models if m not in product_models
+            ]
+
+            return {
+                "aligned": len(products_without_costs) == 0 and len(costs_without_products) == 0,
+                "total_products": len(product_models),
+                "total_cost_definitions": len(cost_models),
+                "products_without_cost_definitions": products_without_costs,
+                "cost_definitions_without_products": costs_without_products,
+            }
+        except Exception as e:
+            logger.error(f"Error checking catalog alignment: {e}")
+            return {"error": str(e)}
+
     # ==================== Category Operations ====================
 
     async def get_categories(self) -> List[ProductCategory]:

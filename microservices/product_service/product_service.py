@@ -443,6 +443,14 @@ class ProductService:
             raise
 
     # ====================
+    # Catalog Alignment
+    # ====================
+
+    async def get_catalog_alignment(self) -> Dict[str, Any]:
+        """Check alignment between products and cost_definitions"""
+        return await self.repository.get_catalog_alignment()
+
+    # ====================
     # 业务逻辑辅助方法
     # ====================
 

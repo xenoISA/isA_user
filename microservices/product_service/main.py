@@ -577,6 +577,21 @@ async def get_service_statistics(
 
 
 # ====================
+# Catalog Alignment Health Check
+# ====================
+
+@app.get("/api/v1/product/admin/health/catalog-alignment")
+async def admin_catalog_alignment(
+    request: Request,
+    service: ProductService = Depends(get_product_service)
+):
+    """Check alignment between products and cost_definitions"""
+    if request.headers.get("X-Admin-Role") != "true":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return await service.get_catalog_alignment()
+
+
+# ====================
 # 错误处理
 # ====================
 
