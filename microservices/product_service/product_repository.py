@@ -382,6 +382,125 @@ class ProductRepository:
             logger.error(f"Error updating pricing {pricing_id}: {e}")
             return None
 
+    # ==================== Cost Definition Operations ====================
+
+    async def get_cost_definitions(self, is_active=None, provider=None, service_type=None):
+        """List cost definitions with optional filters"""
+        try:
+            conditions, params, pc = [], [], 0
+            if is_active is not None:
+                pc += 1; conditions.append(f"is_active = ${pc}"); params.append(is_active)
+            if provider:
+                pc += 1; conditions.append(f"provider = ${pc}"); params.append(provider)
+            if service_type:
+                pc += 1; conditions.append(f"service_type = ${pc}"); params.append(service_type)
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            query = f'SELECT * FROM {self.schema}.cost_definitions {where} ORDER BY service_type, provider, model_name'
+            async with self.db:
+                results = await self.db.query(query, params=params)
+            return [dict(r) for r in results] if results else []
+        except Exception as e:
+            logger.error(f"Error getting cost definitions: {e}"); return []
+
+    async def get_cost_definition(self, cost_id: str):
+        """Get a cost definition by ID"""
+        try:
+            query = f'SELECT * FROM {self.schema}.cost_definitions WHERE cost_id = $1'
+            async with self.db:
+                result = await self.db.query_row(query, params=[cost_id])
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Error getting cost definition {cost_id}: {e}"); return None
+
+    async def create_cost_definition(self, data: Dict[str, Any]):
+        """Create a new cost definition"""
+        try:
+            query = f'''INSERT INTO {self.schema}.cost_definitions (
+                cost_id, product_id, service_type, provider, model_name, operation_type,
+                cost_per_unit, unit_type, unit_size, original_cost_usd, margin_percentage,
+                effective_from, effective_until, free_tier_limit, free_tier_period,
+                is_active, description, metadata, created_at, updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *'''
+            now = datetime.now(timezone.utc)
+            params = [
+                data["cost_id"], data.get("product_id"), data["service_type"],
+                data.get("provider"), data.get("model_name"), data.get("operation_type"),
+                data["cost_per_unit"], data["unit_type"], data.get("unit_size", 1),
+                data.get("original_cost_usd"), data.get("margin_percentage", 30.0),
+                data.get("effective_from", now), data.get("effective_until"),
+                data.get("free_tier_limit", 0), data.get("free_tier_period", "monthly"),
+                data.get("is_active", True), data.get("description"),
+                json.dumps(data.get("metadata", {})), now, now,
+            ]
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Error creating cost definition: {e}"); return None
+
+    async def update_cost_definition(self, cost_id: str, updates: Dict[str, Any]):
+        """Update a cost definition (metadata/description, not price)"""
+        try:
+            set_clauses, params, pc = [], [], 0
+            for k, v in updates.items():
+                if v is None: continue
+                if k == "metadata": v = json.dumps(v)
+                pc += 1; set_clauses.append(f"{k} = ${pc}"); params.append(v)
+            if not set_clauses: return await self.get_cost_definition(cost_id)
+            pc += 1; set_clauses.append(f"updated_at = ${pc}"); params.append(datetime.now(timezone.utc))
+            pc += 1; params.append(cost_id)
+            query = f'UPDATE {self.schema}.cost_definitions SET {", ".join(set_clauses)} WHERE cost_id = ${pc} RETURNING *'
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Error updating cost definition {cost_id}: {e}"); return None
+
+    async def expire_cost_definition(self, cost_id: str, effective_until: datetime) -> bool:
+        """Set effective_until on a cost definition"""
+        try:
+            query = f'UPDATE {self.schema}.cost_definitions SET effective_until = $1, updated_at = $2 WHERE cost_id = $3 RETURNING cost_id'
+            async with self.db:
+                result = await self.db.query_row(query, params=[effective_until, datetime.now(timezone.utc), cost_id])
+            return result is not None
+        except Exception as e:
+            logger.error(f"Error expiring cost definition {cost_id}: {e}"); return False
+
+    async def get_cost_history(self, model_name: str):
+        """Get price history for a model"""
+        try:
+            query = f'SELECT * FROM {self.schema}.cost_definitions WHERE model_name = $1 ORDER BY effective_from DESC'
+            async with self.db:
+                results = await self.db.query(query, params=[model_name])
+            return [dict(r) for r in results] if results else []
+        except Exception as e:
+            logger.error(f"Error getting cost history for {model_name}: {e}"); return []
+
+    # ==================== Catalog Alignment ====================
+
+    async def get_catalog_alignment(self) -> Dict[str, Any]:
+        """Cross-check products vs cost_definitions for drift detection"""
+        try:
+            pq = f"SELECT product_id, product_name, metadata FROM {self.schema}.{self.products_table} WHERE product_type = 'model_inference' AND is_active = true"
+            cq = f"SELECT DISTINCT model_name, provider FROM {self.schema}.cost_definitions WHERE service_type = 'model_inference' AND is_active = true AND (effective_until IS NULL OR effective_until > NOW())"
+            async with self.db:
+                products = await self.db.query(pq, params=[])
+                costs = await self.db.query(cq, params=[])
+            product_models = {}
+            for p in (products or []):
+                meta = p.get("metadata") or {}
+                model = meta.get("model") or p.get("product_id")
+                product_models[model] = {"product_id": p["product_id"], "product_name": p.get("product_name")}
+            cost_models = {c["model_name"] for c in (costs or []) if c.get("model_name")}
+            return {
+                "aligned": not any(k not in cost_models for k in product_models) and not any(m not in product_models for m in cost_models),
+                "total_products": len(product_models), "total_cost_definitions": len(cost_models),
+                "products_without_cost_definitions": [{"product_id": v["product_id"], "model": k, "action": "Add cost_definition"} for k, v in product_models.items() if k not in cost_models],
+                "cost_definitions_without_products": [{"model_name": m, "action": "Add product entry"} for m in cost_models if m not in product_models],
+            }
+        except Exception as e:
+            logger.error(f"Error checking catalog alignment: {e}"); return {"error": str(e)}
+
     # ==================== Category Operations ====================
 
     async def get_categories(self) -> List[ProductCategory]:

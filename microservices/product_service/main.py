@@ -708,6 +708,82 @@ async def admin_update_pricing(
 
 
 # ====================
+# Cost Definition Admin API
+# ====================
+
+@app.get("/api/v1/product/admin/cost-definitions")
+async def admin_list_cost_definitions(
+    is_active: Optional[bool] = Query(None), provider: Optional[str] = Query(None),
+    service_type: Optional[str] = Query(None), request: Request = None,
+    service: ProductService = Depends(get_product_service)
+):
+    await require_admin(request)
+    return await service.admin_get_cost_definitions(is_active=is_active, provider=provider, service_type=service_type)
+
+
+@app.post("/api/v1/product/admin/cost-definitions", status_code=201)
+async def admin_create_cost_definition(
+    body: Dict[str, Any] = Body(...), request: Request = None,
+    service: ProductService = Depends(get_product_service)
+):
+    await require_admin(request)
+    try:
+        result = await service.admin_create_cost_definition(body)
+        if not result: raise HTTPException(status_code=500, detail="Failed to create cost definition")
+        return result
+    except ValueError as e: raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+            raise HTTPException(status_code=409, detail="Cost definition already exists")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/v1/product/admin/cost-definitions/{cost_id}")
+async def admin_update_cost_definition(
+    cost_id: str, body: Dict[str, Any] = Body(...), request: Request = None,
+    service: ProductService = Depends(get_product_service)
+):
+    await require_admin(request)
+    result = await service.admin_update_cost_definition(cost_id, body)
+    if result is None: raise HTTPException(status_code=404, detail=f"Cost definition {cost_id} not found")
+    return result
+
+
+@app.post("/api/v1/product/admin/cost-definitions/rotate")
+async def admin_rotate_cost_definitions(
+    body: List[Dict[str, Any]] = Body(...), request: Request = None,
+    service: ProductService = Depends(get_product_service)
+):
+    await require_admin(request)
+    try:
+        results = await service.admin_rotate_cost_definitions(body)
+        return {"rotated": len(results), "details": results}
+    except ValueError as e: raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/product/admin/cost-definitions/history/{model_name}")
+async def admin_get_cost_history(
+    model_name: str, request: Request = None,
+    service: ProductService = Depends(get_product_service)
+):
+    await require_admin(request)
+    return await service.admin_get_cost_history(model_name)
+
+
+# ====================
+# Catalog Alignment Health Check
+# ====================
+
+@app.get("/api/v1/product/admin/health/catalog-alignment")
+async def admin_catalog_alignment(
+    request: Request, service: ProductService = Depends(get_product_service)
+):
+    await require_admin(request)
+    return await service.get_catalog_alignment()
+
+
+# ====================
 # 错误处理
 # ====================
 

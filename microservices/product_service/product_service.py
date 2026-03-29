@@ -556,6 +556,65 @@ class ProductService:
             raise
 
     # ====================
+    # Cost Definition Admin
+    # ====================
+
+    async def admin_get_cost_definitions(self, is_active=None, provider=None, service_type=None):
+        return await self.repository.get_cost_definitions(is_active=is_active, provider=provider, service_type=service_type)
+
+    async def admin_create_cost_definition(self, data):
+        effective_from = data.get("effective_from")
+        if effective_from and isinstance(effective_from, str):
+            effective_from = datetime.fromisoformat(effective_from)
+        if effective_from and effective_from < datetime.utcnow():
+            raise ValueError("effective_from cannot be in the past")
+        return await self.repository.create_cost_definition(data)
+
+    async def admin_update_cost_definition(self, cost_id, data):
+        existing = await self.repository.get_cost_definition(cost_id)
+        if not existing: return None
+        return await self.repository.update_cost_definition(cost_id, data)
+
+    async def admin_rotate_cost_definitions(self, rotations):
+        results = []
+        for r in rotations:
+            cost_id = r["cost_id"]
+            eff = r.get("effective_from")
+            if isinstance(eff, str): eff = datetime.fromisoformat(eff)
+            if eff and eff < datetime.utcnow():
+                raise ValueError(f"effective_from for {cost_id} cannot be in the past")
+            old = await self.repository.get_cost_definition(cost_id)
+            if not old: raise ValueError(f"Cost definition {cost_id} not found")
+            await self.repository.expire_cost_definition(cost_id, eff)
+            new_data = {
+                "cost_id": f"{cost_id}_v{int(datetime.utcnow().timestamp())}",
+                "product_id": old.get("product_id"), "service_type": old["service_type"],
+                "provider": old.get("provider"), "model_name": old.get("model_name"),
+                "operation_type": old.get("operation_type"),
+                "cost_per_unit": r.get("new_cost_per_unit", old["cost_per_unit"]),
+                "unit_type": old["unit_type"], "unit_size": old.get("unit_size", 1),
+                "original_cost_usd": r.get("new_original_cost_usd", old.get("original_cost_usd")),
+                "margin_percentage": old.get("margin_percentage", 30.0),
+                "effective_from": eff,
+                "free_tier_limit": old.get("free_tier_limit", 0),
+                "free_tier_period": old.get("free_tier_period", "monthly"),
+                "description": old.get("description"),
+            }
+            new_def = await self.repository.create_cost_definition(new_data)
+            results.append({"expired": cost_id, "created": new_def})
+        return results
+
+    async def admin_get_cost_history(self, model_name):
+        return await self.repository.get_cost_history(model_name)
+
+    # ====================
+    # Catalog Alignment
+    # ====================
+
+    async def get_catalog_alignment(self):
+        return await self.repository.get_catalog_alignment()
+
+    # ====================
     # 业务逻辑辅助方法
     # ====================
 
