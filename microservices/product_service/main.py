@@ -64,10 +64,17 @@ async def lifespan(app: FastAPI):
 
         # Initialize service clients
         try:
-            from .clients import AccountClient, OrganizationClient
+            from .clients import AccountClient, OrganizationClient, SubscriptionClient, BillingClient
             account_client = AccountClient()
             organization_client = OrganizationClient()
-            logger.info("✅ Service clients initialized successfully")
+            subscription_client = SubscriptionClient()
+            billing_client = BillingClient()
+            # Inject service clients into repository for delegation
+            repository.set_clients(
+                subscription_client=subscription_client,
+                billing_client=billing_client,
+            )
+            logger.info("✅ Service clients initialized successfully (account, org, subscription, billing)")
         except Exception as e:
             logger.warning(f"⚠️  Failed to initialize service clients: {e}")
             account_client = None

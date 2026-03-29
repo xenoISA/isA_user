@@ -7,6 +7,7 @@ HTTP clients for async communication with other services
 from .account_client import AccountClient
 from .organization_client import OrganizationClient
 from .subscription_client import SubscriptionClient
+from .billing_client import BillingClient
 
 # Import ProductServiceClient from parent directory
 import sys
@@ -18,5 +19,6 @@ __all__ = [
     "AccountClient",
     "OrganizationClient",
     "SubscriptionClient",
+    "BillingClient",
     "ProductServiceClient"
 ]
