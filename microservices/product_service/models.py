@@ -721,6 +721,65 @@ class CostDefinition(BaseModel):
 # Cost Lookup Request/Response
 # ====================
 
+# ====================
+# Admin Request/Response Models
+# ====================
+
+class AdminCreateProductRequest(BaseModel):
+    """Request to create a product via admin API"""
+    product_id: str = Field(..., min_length=1, max_length=100)
+    product_name: str = Field(..., min_length=1, max_length=255)
+    product_code: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    category: str = Field(default="ai_models")
+    product_type: ProductType
+    base_price: float = Field(default=0.0, ge=0)
+    currency: str = Field(default="USD")
+    billing_interval: Optional[str] = None
+    features: List[str] = Field(default_factory=list)
+    quota_limits: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    tags: Optional[List[str]] = None
+    is_active: bool = True
+
+
+class AdminUpdateProductRequest(BaseModel):
+    """Request to update a product via admin API — all fields optional"""
+    product_name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    product_type: Optional[ProductType] = None
+    base_price: Optional[float] = Field(default=None, ge=0)
+    currency: Optional[str] = None
+    billing_interval: Optional[str] = None
+    features: Optional[List[str]] = None
+    quota_limits: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    tags: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
+class AdminCreatePricingRequest(BaseModel):
+    """Request to create a pricing tier via admin API"""
+    pricing_id: str = Field(..., min_length=1, max_length=100)
+    tier_name: str = Field(default="base")
+    min_quantity: Optional[float] = Field(default=0, ge=0)
+    max_quantity: Optional[float] = None
+    unit_price: float = Field(..., ge=0)
+    currency: str = Field(default="USD")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AdminUpdatePricingRequest(BaseModel):
+    """Request to update a pricing tier via admin API — all fields optional"""
+    tier_name: Optional[str] = None
+    min_quantity: Optional[float] = Field(default=None, ge=0)
+    max_quantity: Optional[float] = None
+    unit_price: Optional[float] = Field(default=None, ge=0)
+    currency: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
 class CostLookupRequest(BaseModel):
     """Request to look up cost for a specific usage"""
     service_type: str
