@@ -67,8 +67,14 @@ class ProductRepository:
         self.schema = "product"
         self.products_table = "products"
         self.pricing_table = "product_pricing"
-        # In-memory storage for subscriptions (until we have a subscriptions table)
-        self._subscriptions_cache = {}
+        # Service clients for delegation (set via set_clients)
+        self._subscription_client = None
+        self._billing_client = None
+
+    def set_clients(self, subscription_client=None, billing_client=None):
+        """Inject service clients for subscription/usage delegation"""
+        self._subscription_client = subscription_client
+        self._billing_client = billing_client
 
     async def initialize(self):
         """Initialize repository (placeholder for consistency with other services)"""
@@ -418,53 +424,47 @@ class ProductRepository:
             logger.error(f"Error getting service plan: {e}")
             return None
 
-    # ==================== Subscription Operations ====================
+    # ==================== Subscription Operations (delegated to subscription_service) ====================
 
     async def create_subscription(self, subscription: Any) -> Any:
-        """创建订阅"""
+        """Delegate subscription creation to subscription_service"""
         try:
-            # TODO: Implement actual subscription creation when subscriptions table exists
-            # For now, store in memory cache
-            self._subscriptions_cache[subscription.subscription_id] = subscription
-            logger.info(f"Mock: Created subscription {subscription.subscription_id} for user {subscription.user_id}")
+            if self._subscription_client:
+                result = await self._subscription_client._client.create_subscription(
+                    user_id=subscription.user_id,
+                    tier_id=subscription.plan_id,
+                    billing_cycle=subscription.billing_cycle.value if hasattr(subscription.billing_cycle, 'value') else subscription.billing_cycle,
+                )
+                if result:
+                    logger.info(f"Created subscription {subscription.subscription_id} via subscription_service")
+                    return subscription
+            logger.warning("subscription_client not available, returning subscription as-is")
             return subscription
         except Exception as e:
-            logger.error(f"Error creating subscription: {e}")
-            return None
+            logger.warning(f"Failed to delegate subscription creation: {e}")
+            return subscription
 
     async def get_subscription(self, subscription_id: str) -> Optional[Any]:
-        """获取单个订阅"""
+        """Delegate subscription lookup to subscription_service"""
         try:
-            # TODO: Implement actual subscription query when subscriptions table exists
-            # For now, return from memory cache
-            subscription = self._subscriptions_cache.get(subscription_id)
-            if subscription:
-                logger.info(f"Mock: Found subscription {subscription_id}")
-            else:
-                logger.info(f"Mock: Subscription {subscription_id} not found in cache")
-            return subscription
+            if self._subscription_client:
+                result = await self._subscription_client.get_subscription(subscription_id)
+                if result:
+                    return result
+            return None
         except Exception as e:
-            logger.error(f"Error getting subscription: {e}")
+            logger.warning(f"Failed to get subscription {subscription_id} from subscription_service: {e}")
             return None
 
     async def update_subscription_status(self, subscription_id: str, new_status: str) -> bool:
-        """更新订阅状态"""
+        """Delegate subscription status update to subscription_service"""
         try:
-            # TODO: Implement actual subscription update when subscriptions table exists
-            # For now, update in memory cache
-            subscription = self._subscriptions_cache.get(subscription_id)
-            if not subscription:
-                logger.warning(f"Mock: Subscription {subscription_id} not found for update")
-                return False
-
-            # Update the status
-            from .models import SubscriptionStatus
-            subscription.status = SubscriptionStatus(new_status)
-            self._subscriptions_cache[subscription_id] = subscription
-            logger.info(f"Mock: Updated subscription {subscription_id} status to {new_status}")
-            return True
+            if self._subscription_client:
+                return await self._subscription_client._client.cancel_subscription(subscription_id)
+            logger.warning("subscription_client not available for status update")
+            return False
         except Exception as e:
-            logger.error(f"Error updating subscription status: {e}")
+            logger.warning(f"Failed to update subscription {subscription_id} status: {e}")
             return False
 
     async def get_user_subscriptions(
@@ -472,16 +472,16 @@ class ProductRepository:
         user_id: str,
         status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """获取用户订阅列表"""
+        """Delegate user subscription query to subscription_service"""
         try:
-            # TODO: Implement actual subscription query when subscriptions table exists
-            # For now, return empty list
+            if self._subscription_client:
+                return await self._subscription_client.get_user_subscriptions(user_id, status)
             return []
         except Exception as e:
-            logger.error(f"Error getting user subscriptions: {e}")
+            logger.warning(f"Failed to get subscriptions for user {user_id}: {e}")
             return []
 
-    # ==================== Usage Records Operations ====================
+    # ==================== Usage Records Operations (delegated to billing_service) ====================
 
     async def record_product_usage(
         self,
@@ -495,16 +495,29 @@ class ProductRepository:
         usage_details: Optional[Dict[str, Any]] = None,
         usage_timestamp: Optional[Any] = None
     ) -> str:
-        """记录产品使用量"""
+        """Delegate usage recording to billing_service"""
         try:
-            # TODO: Implement actual usage recording when usage_records table exists
-            # For now, generate a mock usage record ID
-            usage_record_id = f"usage_{uuid.uuid4().hex[:16]}"
-            logger.info(f"Mock: Recorded product usage {usage_record_id} for user {user_id}, product {product_id}, amount {usage_amount}")
-            return usage_record_id
+            if self._billing_client:
+                result = await self._billing_client.record_product_usage(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    product_id=product_id,
+                    usage_amount=float(usage_amount),
+                    session_id=session_id,
+                    request_id=request_id,
+                    usage_details=usage_details,
+                )
+                if result:
+                    logger.info(f"Recorded usage via billing_service for user {user_id}, product {product_id}")
+                    return result
+            # Fallback: generate local ID (billing_service unavailable)
+            fallback_id = f"usage_{uuid.uuid4().hex[:16]}"
+            logger.warning(f"billing_client unavailable, generated fallback usage ID: {fallback_id}")
+            return fallback_id
         except Exception as e:
-            logger.error(f"Error recording product usage: {e}")
-            raise
+            logger.warning(f"Failed to record usage via billing_service: {e}")
+            fallback_id = f"usage_{uuid.uuid4().hex[:16]}"
+            return fallback_id
 
     async def get_usage_records(
         self,
@@ -517,16 +530,24 @@ class ProductRepository:
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """获取使用记录"""
+        """Delegate usage records query to billing_service"""
         try:
-            # TODO: Implement actual usage records query when usage_records table exists
-            # For now, return empty list
+            if self._billing_client:
+                return await self._billing_client.get_usage_records(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    product_id=product_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    limit=limit,
+                    offset=offset,
+                )
             return []
         except Exception as e:
-            logger.error(f"Error getting usage records: {e}")
+            logger.warning(f"Failed to get usage records from billing_service: {e}")
             return []
 
-    # ==================== Statistics Operations ====================
+    # ==================== Statistics Operations (delegated to billing_service) ====================
 
     async def get_usage_statistics(
         self,
@@ -536,9 +557,16 @@ class ProductRepository:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
-        """获取使用统计"""
+        """Delegate usage statistics to billing_service"""
         try:
-            # TODO: Implement actual statistics when usage_records table exists
+            if self._billing_client:
+                return await self._billing_client.get_usage_statistics(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    product_id=product_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
             return {
                 "total_usage": 0,
                 "usage_by_product": {},
@@ -549,7 +577,7 @@ class ProductRepository:
                 }
             }
         except Exception as e:
-            logger.error(f"Error getting usage statistics: {e}")
+            logger.warning(f"Failed to get usage statistics from billing_service: {e}")
             return {}
 
 
