@@ -130,7 +130,7 @@ echo ""
 
 # Record product usage
 echo -e "${BLUE}Step 1: Record product usage${NC}"
-USAGE_PAYLOAD="{\"user_id\":\"${TEST_USER_ID}\",\"product_id\":\"prod_ai_tokens\",\"usage_amount\":100.5,\"subscription_id\":\"${SUBSCRIPTION_ID}\",\"usage_details\":{\"endpoint\":\"/api/test\"}}"
+USAGE_PAYLOAD="{\"user_id\":\"${TEST_USER_ID}\",\"product_id\":\"claude-sonnet-4\",\"usage_amount\":100.5,\"subscription_id\":\"${SUBSCRIPTION_ID}\",\"usage_details\":{\"endpoint\":\"/api/test\"}}"
 echo "POST ${BASE_URL}/usage/record"
 echo "Payload: ${USAGE_PAYLOAD}"
 USAGE_RESPONSE=$(curl -s -X POST "${BASE_URL}/usage/record" \

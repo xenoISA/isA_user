@@ -215,7 +215,7 @@ def sample_billing_request(sample_user: Dict) -> Dict[str, Any]:
     """Generate a sample billing request"""
     return {
         "user_id": sample_user["user_id"],
-        "product_id": "gpt-4",
+        "product_id": "gpt-4o",
         "usage_amount": 100,
     }
 
