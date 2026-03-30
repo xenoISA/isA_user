@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -23,6 +23,8 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 
 from isa_common.consul_client import ConsulRegistry
+
+from core.admin_audit import publish_admin_action
 
 from .billing_repository import BillingRepository
 from .billing_service import BillingService
@@ -569,7 +571,156 @@ async def get_billing_statistics(
 
 
 # ====================
-# 管理API
+# Admin API
+# ====================
+
+
+async def require_admin(request: Request):
+    """Check for admin role header"""
+    if request.headers.get("X-Admin-Role") != "true":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _extract_admin_context(request: Request) -> Dict[str, Any]:
+    """Extract admin identity and request context from headers for audit logging."""
+    return {
+        "admin_user_id": request.headers.get("X-Admin-User-Id", "unknown_admin"),
+        "admin_email": request.headers.get("X-Admin-Email"),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("User-Agent"),
+    }
+
+
+async def _audit_admin_action(
+    request: Request,
+    action: str,
+    resource_type: str,
+    resource_id: Optional[str] = None,
+    changes: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+):
+    """Fire-and-forget admin audit event. Never raises."""
+    try:
+        ctx = _extract_admin_context(request)
+        await publish_admin_action(
+            event_bus=event_bus,
+            admin_user_id=ctx["admin_user_id"],
+            admin_email=ctx["admin_email"],
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            changes=changes,
+            ip_address=ctx["ip_address"],
+            user_agent=ctx["user_agent"],
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.warning(f"Admin audit publish failed (non-blocking): {e}")
+
+
+@app.get("/api/v1/billing/admin/records", response_model=BillingRecordsListResponse)
+async def admin_list_billing_records(
+    request: Request,
+    user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    service_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    service: BillingService = Depends(get_billing_service),
+):
+    """[Admin] List all billing records with filters (paginated)"""
+    await require_admin(request)
+    try:
+        from .models import BillingStatus as BillingStatusEnum, ServiceType as ServiceTypeEnum
+
+        billing_status = BillingStatusEnum(status) if status else None
+        billing_service_type = ServiceTypeEnum(service_type) if service_type else None
+        offset = (page - 1) * page_size
+
+        records, total = await service.repository.list_billing_records(
+            user_id=user_id,
+            status=billing_status,
+            service_type=billing_service_type,
+            start_date=start_date,
+            end_date=end_date,
+            limit=page_size,
+            offset=offset,
+        )
+
+        return BillingRecordsListResponse(
+            records=records,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"Invalid parameter: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error listing billing records (admin): {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/api/v1/billing/admin/refund")
+async def admin_issue_refund(
+    request: Request,
+    billing_id: str = Query(..., description="Billing record ID to refund"),
+    reason: str = Query(..., description="Reason for refund"),
+    service: BillingService = Depends(get_billing_service),
+):
+    """[Admin] Issue a refund for a billing record with reason"""
+    await require_admin(request)
+    try:
+        from .models import BillingStatus as BillingStatusEnum
+
+        # Get the billing record
+        record = await service.repository.get_billing_record(billing_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Billing record not found")
+
+        if record.billing_status == BillingStatusEnum.REFUNDED:
+            raise HTTPException(status_code=400, detail="Billing record already refunded")
+
+        # Update status to refunded
+        updated_record = await service.repository.update_billing_record_status(
+            billing_id=billing_id,
+            status=BillingStatusEnum.REFUNDED,
+            failure_reason=f"Admin refund: {reason}",
+        )
+
+        if not updated_record:
+            raise HTTPException(status_code=500, detail="Failed to update billing record")
+
+        # Audit
+        await _audit_admin_action(
+            request, action="issue_refund", resource_type="billing_record",
+            resource_id=billing_id,
+            changes={
+                "before": {"status": record.billing_status.value},
+                "after": {"status": BillingStatusEnum.REFUNDED.value},
+            },
+            metadata={"reason": reason, "amount": str(record.total_amount)},
+        )
+
+        return {
+            "success": True,
+            "message": f"Refund issued for billing record {billing_id}",
+            "billing_id": billing_id,
+            "refunded_amount": str(record.total_amount),
+            "reason": reason,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error issuing refund (admin): {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ====================
+# 管理API (legacy)
 # ====================
 
 

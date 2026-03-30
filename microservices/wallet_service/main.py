@@ -17,7 +17,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 import uvicorn
-from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, status
 
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 # Import local components
 from isa_common.consul_client import ConsulRegistry
 
+from core.admin_audit import publish_admin_action
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
@@ -697,6 +698,174 @@ async def get_wallet_service_stats(
             },
         }
     except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+# ====================
+# Admin Endpoints
+# ====================
+
+async def require_admin(request: Request):
+    """Check for admin role header"""
+    if request.headers.get("X-Admin-Role") != "true":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _extract_admin_context(request: Request) -> dict:
+    """Extract admin identity and request context from headers for audit logging."""
+    return {
+        "admin_user_id": request.headers.get("X-Admin-User-Id", "unknown_admin"),
+        "admin_email": request.headers.get("X-Admin-Email"),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("User-Agent"),
+    }
+
+
+async def _audit_admin_action(
+    request: Request,
+    action: str,
+    resource_type: str,
+    resource_id: Optional[str] = None,
+    changes: Optional[dict] = None,
+    metadata: Optional[dict] = None,
+):
+    """Fire-and-forget admin audit event. Never raises."""
+    try:
+        ctx = _extract_admin_context(request)
+        await publish_admin_action(
+            event_bus=wallet_microservice.event_bus,
+            admin_user_id=ctx["admin_user_id"],
+            admin_email=ctx["admin_email"],
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            changes=changes,
+            ip_address=ctx["ip_address"],
+            user_agent=ctx["user_agent"],
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.warning(f"Admin audit publish failed (non-blocking): {e}")
+
+
+@app.get("/api/v1/wallet/admin/{user_id}")
+async def admin_get_wallet_details(
+    user_id: str,
+    request: Request,
+    wallet_service: WalletService = Depends(get_wallet_service),
+):
+    """[Admin] Get wallet details for a specific user"""
+    await require_admin(request)
+    try:
+        wallets = await wallet_service.get_user_wallets(user_id)
+
+        wallet_summaries = []
+        for w in wallets:
+            summary = {
+                "wallet_id": w.wallet_id,
+                "wallet_type": w.wallet_type.value if hasattr(w.wallet_type, "value") else str(w.wallet_type),
+                "balance": float(w.balance),
+                "locked_balance": float(w.locked_balance) if hasattr(w, "locked_balance") else 0.0,
+                "available_balance": float(w.available_balance) if hasattr(w, "available_balance") else float(w.balance),
+                "currency": w.currency,
+                "last_updated": w.last_updated.isoformat() if hasattr(w, "last_updated") and w.last_updated else None,
+            }
+            wallet_summaries.append(summary)
+
+        return {
+            "success": True,
+            "user_id": user_id,
+            "wallets": wallet_summaries,
+            "wallet_count": len(wallet_summaries),
+            "total_balance": sum(float(w.balance) for w in wallets),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting wallet details (admin): {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.post("/api/v1/wallet/admin/{user_id}/adjust")
+async def admin_adjust_wallet_balance(
+    user_id: str,
+    request: Request,
+    amount: Decimal = Query(..., description="Adjustment amount (positive to add, negative to subtract)"),
+    reason: str = Query(..., description="Reason for balance adjustment"),
+    wallet_id: Optional[str] = Query(None, description="Target wallet ID (defaults to primary fiat wallet)"),
+    wallet_service: WalletService = Depends(get_wallet_service),
+):
+    """[Admin] Adjust wallet balance for a user with reason"""
+    await require_admin(request)
+    try:
+        # Find the target wallet
+        if wallet_id:
+            wallet = await wallet_service.get_wallet(wallet_id)
+            if not wallet:
+                raise HTTPException(status_code=404, detail=f"Wallet {wallet_id} not found")
+            # Verify it belongs to the user
+            if hasattr(wallet, "user_id") and wallet.user_id != user_id:
+                raise HTTPException(status_code=400, detail="Wallet does not belong to specified user")
+            target_wallet_id = wallet_id
+        else:
+            # Get user's primary fiat wallet
+            wallets = await wallet_service.get_user_wallets(user_id)
+            fiat_wallets = [w for w in wallets if w.wallet_type == WalletType.FIAT]
+            if not fiat_wallets:
+                raise HTTPException(status_code=404, detail=f"No fiat wallet found for user {user_id}")
+            target_wallet_id = fiat_wallets[0].wallet_id
+
+        # Perform the adjustment as a deposit (positive) or withdraw (negative)
+        if amount > 0:
+            result = await wallet_service.deposit(
+                target_wallet_id,
+                DepositRequest(
+                    amount=abs(amount),
+                    description=f"Admin adjustment: {reason}",
+                    metadata={"admin_adjustment": True, "reason": reason},
+                ),
+            )
+        elif amount < 0:
+            result = await wallet_service.withdraw(
+                target_wallet_id,
+                WithdrawRequest(
+                    amount=abs(amount),
+                    description=f"Admin adjustment: {reason}",
+                    metadata={"admin_adjustment": True, "reason": reason},
+                ),
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Adjustment amount must be non-zero")
+
+        if not result.success:
+            raise HTTPException(status_code=400, detail=result.message)
+
+        # Audit
+        await _audit_admin_action(
+            request, action="balance_adjustment", resource_type="wallet",
+            resource_id=target_wallet_id,
+            changes={"adjustment": str(amount), "new_balance": str(result.balance)},
+            metadata={"user_id": user_id, "reason": reason},
+        )
+
+        return {
+            "success": True,
+            "message": f"Balance adjusted by {amount}",
+            "user_id": user_id,
+            "wallet_id": target_wallet_id,
+            "adjustment": str(amount),
+            "new_balance": str(result.balance),
+            "transaction_id": result.transaction_id,
+            "reason": reason,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adjusting wallet balance (admin): {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )

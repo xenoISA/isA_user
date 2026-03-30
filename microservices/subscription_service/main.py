@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -30,12 +30,15 @@ from core.nats_client import get_event_bus
 
 from isa_common.consul_client import ConsulRegistry
 
+from core.admin_audit import publish_admin_action
+
 from .models import (
     CreateSubscriptionRequest, CreateSubscriptionResponse,
     UpdateSubscriptionRequest, CancelSubscriptionRequest, CancelSubscriptionResponse,
     ConsumeCreditsRequest, ConsumeCreditsResponse, CreditBalanceResponse,
     SubscriptionResponse, SubscriptionListResponse, SubscriptionHistoryResponse,
-    SubscriptionStatus, ErrorResponse, HealthResponse
+    SubscriptionStatus, SubscriptionAction, SubscriptionHistory, InitiatedBy,
+    ErrorResponse, HealthResponse
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
@@ -413,6 +416,223 @@ async def get_subscription_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
+
+
+# ====================
+# Admin Endpoints
+# ====================
+
+async def require_admin(request: Request):
+    """Check for admin role header"""
+    if request.headers.get("X-Admin-Role") != "true":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _extract_admin_context(request: Request) -> dict:
+    """Extract admin identity and request context from headers for audit logging."""
+    return {
+        "admin_user_id": request.headers.get("X-Admin-User-Id", "unknown_admin"),
+        "admin_email": request.headers.get("X-Admin-Email"),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("User-Agent"),
+    }
+
+
+async def _audit_admin_action(
+    request: Request,
+    action: str,
+    resource_type: str,
+    resource_id: Optional[str] = None,
+    changes: Optional[dict] = None,
+    metadata: Optional[dict] = None,
+):
+    """Fire-and-forget admin audit event. Never raises."""
+    try:
+        ctx = _extract_admin_context(request)
+        await publish_admin_action(
+            event_bus=subscription_microservice.event_bus,
+            admin_user_id=ctx["admin_user_id"],
+            admin_email=ctx["admin_email"],
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            changes=changes,
+            ip_address=ctx["ip_address"],
+            user_agent=ctx["user_agent"],
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.warning(f"Admin audit publish failed (non-blocking): {e}")
+
+
+@app.get("/api/v1/subscriptions/admin/all", response_model=SubscriptionListResponse)
+async def admin_list_all_subscriptions(
+    request: Request,
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    tier_code: Optional[str] = Query(None, description="Filter by tier code"),
+    subscription_status: Optional[SubscriptionStatus] = Query(None, alias="status", description="Filter by status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    subscription_service: SubscriptionService = Depends(get_subscription_service),
+):
+    """[Admin] List all subscriptions with filters (paginated)"""
+    await require_admin(request)
+    try:
+        offset = (page - 1) * page_size
+        subscriptions = await subscription_service.repository.get_subscriptions(
+            user_id=user_id,
+            status=subscription_status,
+            tier_code=tier_code,
+            limit=page_size,
+            offset=offset,
+        )
+        return SubscriptionListResponse(
+            success=True,
+            message="Subscriptions retrieved",
+            subscriptions=subscriptions,
+            total=len(subscriptions),
+            page=page,
+            page_size=page_size,
+        )
+    except Exception as e:
+        logger.error(f"Error listing all subscriptions (admin): {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.put("/api/v1/subscriptions/admin/{subscription_id}/tier")
+async def admin_force_tier_change(
+    subscription_id: str,
+    request: Request,
+    new_tier_code: str = Query(..., description="New tier code to assign"),
+    reason: Optional[str] = Query(None, description="Reason for tier change"),
+    subscription_service: SubscriptionService = Depends(get_subscription_service),
+):
+    """[Admin] Force a tier change on a subscription"""
+    await require_admin(request)
+    try:
+        # Get current subscription
+        sub = await subscription_service.repository.get_subscription(subscription_id)
+        if not sub:
+            raise HTTPException(status_code=404, detail=f"Subscription {subscription_id} not found")
+
+        previous_tier = sub.tier_code
+
+        # Validate the new tier exists
+        tier_info = subscription_service._get_tier_info(new_tier_code)
+
+        # Update subscription tier
+        updates = {
+            "tier_code": new_tier_code,
+            "tier_id": tier_info.get("tier_id", new_tier_code),
+        }
+        updated = await subscription_service.repository.update_subscription(subscription_id, updates)
+
+        # Record history
+        import uuid as _uuid
+        await subscription_service.repository.add_history(SubscriptionHistory(
+            history_id=f"hist_{_uuid.uuid4().hex[:16]}",
+            subscription_id=subscription_id,
+            user_id=sub.user_id,
+            organization_id=sub.organization_id,
+            action=SubscriptionAction.UPGRADED if new_tier_code != previous_tier else SubscriptionAction.UPGRADED,
+            previous_tier_code=previous_tier,
+            new_tier_code=new_tier_code,
+            reason=reason or "Admin forced tier change",
+            initiated_by=InitiatedBy.ADMIN,
+        ))
+
+        # Audit
+        await _audit_admin_action(
+            request, action="force_tier_change", resource_type="subscription",
+            resource_id=subscription_id,
+            changes={"before": {"tier_code": previous_tier}, "after": {"tier_code": new_tier_code}},
+            metadata={"reason": reason},
+        )
+
+        return {
+            "success": True,
+            "message": f"Tier changed from {previous_tier} to {new_tier_code}",
+            "subscription_id": subscription_id,
+            "previous_tier": previous_tier,
+            "new_tier": new_tier_code,
+        }
+
+    except TierNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error force-changing tier (admin): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/subscriptions/admin/{subscription_id}/credits")
+async def admin_credit_adjustment(
+    subscription_id: str,
+    request: Request,
+    credits: int = Query(..., description="Credit adjustment amount (positive to add, negative to subtract)"),
+    reason: str = Query(..., description="Reason for credit adjustment"),
+    subscription_service: SubscriptionService = Depends(get_subscription_service),
+):
+    """[Admin] Adjust credits on a subscription with reason"""
+    await require_admin(request)
+    try:
+        sub = await subscription_service.repository.get_subscription(subscription_id)
+        if not sub:
+            raise HTTPException(status_code=404, detail=f"Subscription {subscription_id} not found")
+
+        previous_remaining = sub.credits_remaining
+        new_remaining = max(0, previous_remaining + credits)
+
+        updates = {"credits_remaining": new_remaining}
+        if credits > 0:
+            updates["credits_allocated"] = sub.credits_allocated + credits
+
+        await subscription_service.repository.update_subscription(subscription_id, updates)
+
+        # Record history
+        import uuid as _uuid
+        action = SubscriptionAction.CREDITS_ALLOCATED if credits > 0 else SubscriptionAction.CREDITS_CONSUMED
+        await subscription_service.repository.add_history(SubscriptionHistory(
+            history_id=f"hist_{_uuid.uuid4().hex[:16]}",
+            subscription_id=subscription_id,
+            user_id=sub.user_id,
+            organization_id=sub.organization_id,
+            action=action,
+            credits_change=credits,
+            credits_balance_after=new_remaining,
+            reason=reason,
+            initiated_by=InitiatedBy.ADMIN,
+        ))
+
+        # Audit
+        await _audit_admin_action(
+            request, action="credit_adjustment", resource_type="subscription",
+            resource_id=subscription_id,
+            changes={
+                "before": {"credits_remaining": previous_remaining},
+                "after": {"credits_remaining": new_remaining},
+            },
+            metadata={"credits_delta": credits, "reason": reason},
+        )
+
+        return {
+            "success": True,
+            "message": f"Credits adjusted by {credits:+d}",
+            "subscription_id": subscription_id,
+            "previous_credits": previous_remaining,
+            "new_credits": new_remaining,
+            "adjustment": credits,
+            "reason": reason,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adjusting credits (admin): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ====================
