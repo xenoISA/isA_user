@@ -198,6 +198,65 @@ class AdminAccountListResponse(BaseModel):
     has_next: bool
 
 
+# --- Admin management models (#193) ---
+
+ACCOUNT_STATUSES = ["active", "suspended", "banned"]
+
+
+class AdminStatusUpdateRequest(BaseModel):
+    """Admin request to change account status (activate/suspend/ban)"""
+    status: str = Field(..., description="Target status: active, suspended, or banned")
+    reason: Optional[str] = Field(None, description="Reason for the status change", max_length=500)
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        if v not in ACCOUNT_STATUSES:
+            raise ValueError(f"Invalid status: {v}. Must be one of {ACCOUNT_STATUSES}")
+        return v
+
+
+class AdminNoteRequest(BaseModel):
+    """Admin request to add an internal support note"""
+    note: str = Field(..., description="Note content", min_length=1, max_length=2000)
+
+
+class AdminNote(BaseModel):
+    """A single admin/support note"""
+    note_id: str
+    user_id: str
+    author_id: str
+    note: str
+    created_at: datetime
+
+
+class AdminAccountDetailResponse(BaseModel):
+    """Full account detail response for admin view"""
+    user_id: str
+    email: Optional[str] = None
+    name: Optional[str] = None
+    is_active: bool
+    account_status: str = "active"
+    status_reason: Optional[str] = None
+    admin_roles: Optional[List[str]] = None
+    preferences: Dict[str, Any] = {}
+    notes: List[AdminNote] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminNoteResponse(BaseModel):
+    """Response after adding an admin note"""
+    note_id: str
+    user_id: str
+    author_id: str
+    note: str
+    created_at: datetime
+
+
 # Export all models
 __all__ = [
     'User',
@@ -207,4 +266,6 @@ __all__ = [
     'AccountListParams', 'AccountSearchParams',
     'ADMIN_ROLES', 'AdminRolesUpdateRequest', 'AdminAccountResponse',
     'AdminAccountListResponse',
+    'ACCOUNT_STATUSES', 'AdminStatusUpdateRequest', 'AdminNoteRequest',
+    'AdminNote', 'AdminAccountDetailResponse', 'AdminNoteResponse',
 ]
