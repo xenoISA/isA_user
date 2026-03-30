@@ -78,11 +78,22 @@ class AccountRepository:
         elif not preferences:
             preferences = {}
 
+        # Parse admin_roles (JSONB column, may be None, list, or string)
+        admin_roles = row.get('admin_roles')
+        if isinstance(admin_roles, str):
+            try:
+                admin_roles = json.loads(admin_roles)
+            except (json.JSONDecodeError, TypeError):
+                admin_roles = None
+        elif hasattr(admin_roles, 'fields'):
+            admin_roles = MessageToDict(admin_roles)
+
         return User(
             user_id=row["user_id"],
             email=row.get("email"),
             name=row.get("name"),
             is_active=row.get("is_active", True),
+            admin_roles=admin_roles if admin_roles else None,
             preferences=preferences,
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")
@@ -416,3 +427,62 @@ class AccountRepository:
         except Exception as e:
             logger.error(f"Failed to get accounts by IDs: {e}")
             return []
+
+    async def update_admin_roles(self, user_id: str, admin_roles: Optional[List[str]]) -> Optional[User]:
+        """Update admin roles for a user account (JSONB column)"""
+        try:
+            existing = await self.get_account_by_id_include_inactive(user_id)
+            if not existing:
+                raise UserNotFoundException(f"Account not found: {user_id}")
+
+            now = datetime.now(tz=timezone.utc)
+            # Store as JSON — None clears admin roles
+            roles_json = json.dumps(admin_roles) if admin_roles else None
+
+            async with self.db:
+                await self.db.execute(
+                    f"UPDATE {self.schema}.{self.users_table} SET admin_roles = $1, updated_at = $2 WHERE user_id = $3",
+                    params=[roles_json, now, user_id]
+                )
+
+            return await self.get_account_by_id_include_inactive(user_id)
+
+        except UserNotFoundException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to update admin roles for {user_id}: {e}")
+            return None
+
+    async def get_total_account_count(
+        self,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        """Get total account count with optional filters (for pagination)"""
+        try:
+            conditions = []
+            params = []
+            param_count = 1
+
+            if is_active is not None:
+                conditions.append(f"is_active = ${param_count}")
+                params.append(is_active)
+                param_count += 1
+
+            if search is not None:
+                conditions.append(f"(name ILIKE ${param_count} OR email ILIKE ${param_count})")
+                params.append(f"%{search}%")
+                param_count += 1
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            query = f"SELECT COUNT(*) as total FROM {self.schema}.{self.users_table} {where_clause}"
+
+            async with self.db:
+                result = await self.db.query_row(query, params=params)
+
+            return result["total"] if result else 0
+
+        except Exception as e:
+            logger.error(f"Failed to get total account count: {e}")
+            return 0

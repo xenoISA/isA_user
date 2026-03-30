@@ -22,6 +22,7 @@ class User(BaseModel):
     email: Optional[str] = None
     name: Optional[str] = None
     is_active: bool = True
+    admin_roles: Optional[List[str]] = Field(default=None, description="Admin roles (JSONB)")
     preferences: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -150,11 +151,60 @@ class AccountSearchParams(BaseModel):
     include_inactive: bool = Field(False, description="Include inactive accounts")
 
 
+# Admin Operations Models
+
+ADMIN_ROLES = [
+    "super_admin",
+    "billing_admin",
+    "product_admin",
+    "support_admin",
+    "compliance_admin",
+]
+
+
+class AdminRolesUpdateRequest(BaseModel):
+    """Admin roles update request"""
+    admin_roles: List[str] = Field(..., description="List of admin roles to assign")
+
+    @field_validator('admin_roles')
+    @classmethod
+    def validate_admin_roles(cls, v):
+        invalid = [r for r in v if r not in ADMIN_ROLES]
+        if invalid:
+            raise ValueError(f"Invalid admin roles: {invalid}. Valid roles: {ADMIN_ROLES}")
+        return v
+
+
+class AdminAccountResponse(BaseModel):
+    """Account response including admin_roles for admin endpoints"""
+    user_id: str
+    email: Optional[str] = None
+    name: Optional[str] = None
+    is_active: bool
+    admin_roles: Optional[List[str]] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminAccountListResponse(BaseModel):
+    """Admin account list response with pagination"""
+    accounts: List[AdminAccountResponse]
+    total_count: int
+    page: int
+    page_size: int
+    has_next: bool
+
+
 # Export all models
 __all__ = [
     'User',
     'AccountEnsureRequest', 'AccountUpdateRequest', 'AccountPreferencesRequest',
     'AccountStatusChangeRequest', 'AccountProfileResponse', 'AccountSummaryResponse',
     'AccountSearchResponse', 'AccountStatsResponse', 'AccountServiceStatus',
-    'AccountListParams', 'AccountSearchParams'
+    'AccountListParams', 'AccountSearchParams',
+    'ADMIN_ROLES', 'AdminRolesUpdateRequest', 'AdminAccountResponse',
+    'AdminAccountListResponse',
 ]

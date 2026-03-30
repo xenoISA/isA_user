@@ -93,6 +93,19 @@ AUTH_SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Authenticate user with email and password"
     },
+    # Admin authentication
+    {
+        "path": "/api/v1/auth/admin/login",
+        "methods": ["POST"],
+        "auth_required": False,
+        "description": "Authenticate admin user with email and password"
+    },
+    {
+        "path": "/api/v1/auth/admin/verify",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Verify admin JWT token and return admin user info"
+    },
     {
         "path": "/api/v1/auth/dev/pending-registration/{pending_id}",
         "methods": ["GET"],
@@ -272,6 +285,7 @@ SERVICE_METADATA = {
         "oauth2_client_credentials",
         "device_authentication",
         "user_registration",
-        "user_login"
+        "user_login",
+        "admin_authentication"
     ]
 }

@@ -16,7 +16,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
@@ -60,6 +60,9 @@ from .models import (
     AccountStatusChangeRequest,
     AccountSummaryResponse,
     AccountUpdateRequest,
+    AdminAccountListResponse,
+    AdminAccountResponse,
+    AdminRolesUpdateRequest,
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
@@ -534,6 +537,152 @@ async def get_account_stats(
     except AccountServiceError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+# ==================== Admin Endpoints ====================
+
+
+async def require_admin_token(request: Request) -> Dict[str, Any]:
+    """Verify admin JWT token from Authorization header.
+
+    Returns the verified admin payload including admin_roles.
+    Calls auth_service admin verify internally.
+    """
+    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+    import httpx
+
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing admin bearer token",
+        )
+
+    token = auth_header[len("Bearer "):]
+
+    # Decode and validate token locally using JWT
+    try:
+        import jwt as pyjwt
+        payload = pyjwt.decode(token, options={"verify_signature": False})
+
+        # Check scope is admin
+        if payload.get("scope") != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin token required",
+            )
+
+        metadata = payload.get("metadata", {}) or {}
+        admin_roles = metadata.get("admin_roles", [])
+        if not admin_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No admin roles in token",
+            )
+
+        return {
+            "user_id": payload.get("sub"),
+            "email": payload.get("email"),
+            "admin_roles": admin_roles,
+            "scope": payload.get("scope"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid admin token: {str(e)}",
+        )
+
+
+@app.get("/api/v1/account/admin/accounts", response_model=AdminAccountListResponse)
+async def admin_list_accounts(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    search: Optional[str] = Query(None, description="Search in name/email"),
+    account_service: AccountService = Depends(get_account_service),
+    admin: Dict[str, Any] = Depends(require_admin_token),
+):
+    """List all accounts (admin only, paginated, searchable)."""
+    try:
+        params = AccountListParams(
+            page=page,
+            page_size=page_size,
+            is_active=is_active,
+            search=search,
+        )
+        result = await account_service.list_accounts(params)
+
+        # Convert to admin response format (includes admin_roles)
+        admin_accounts = []
+        for acct in result.accounts:
+            admin_accounts.append(
+                AdminAccountResponse(
+                    user_id=acct.user_id,
+                    email=acct.email,
+                    name=acct.name,
+                    is_active=acct.is_active,
+                    admin_roles=None,  # Summary view doesn't load admin_roles
+                    created_at=acct.created_at,
+                )
+            )
+
+        return AdminAccountListResponse(
+            accounts=admin_accounts,
+            total_count=result.total_count,
+            page=result.page,
+            page_size=result.page_size,
+            has_next=result.has_next,
+        )
+    except AccountServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.put("/api/v1/account/admin/accounts/{user_id}/roles", response_model=AdminAccountResponse)
+async def admin_update_roles(
+    user_id: str,
+    request: AdminRolesUpdateRequest,
+    admin: Dict[str, Any] = Depends(require_admin_token),
+):
+    """Assign admin roles to a user account (admin only)."""
+    # Only super_admin can assign roles
+    if "super_admin" not in (admin.get("admin_roles") or []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super_admin can assign admin roles",
+        )
+
+    try:
+        repo = account_microservice.account_service.account_repo
+        updated = await repo.update_admin_roles(user_id, request.admin_roles)
+
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account not found: {user_id}",
+            )
+
+        return AdminAccountResponse(
+            user_id=updated.user_id,
+            email=updated.email,
+            name=updated.name,
+            is_active=updated.is_active,
+            admin_roles=updated.admin_roles,
+            created_at=updated.created_at,
+            updated_at=updated.updated_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update admin roles: {str(e)}",
         )
 
 

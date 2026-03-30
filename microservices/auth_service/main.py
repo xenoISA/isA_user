@@ -1035,6 +1035,131 @@ async def login(
         )
 
 
+# ================================
+# Admin Authentication Endpoints
+# ================================
+
+
+class AdminLoginRequest(BaseModel):
+    """Admin login request (email + password)"""
+
+    email: str = Field(..., description="Admin email")
+    password: str = Field(..., description="Admin password")
+
+
+class AdminLoginResponse(BaseModel):
+    """Admin login response"""
+
+    success: bool
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    admin_roles: Optional[List[str]] = None
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    token_type: Optional[str] = None
+    expires_in: Optional[int] = None
+    error: Optional[str] = None
+
+
+class AdminVerifyResponse(BaseModel):
+    """Admin token verification response"""
+
+    valid: bool
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    admin_roles: Optional[List[str]] = None
+    scope: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/v1/auth/admin/login", response_model=AdminLoginResponse)
+async def admin_login(
+    request: AdminLoginRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+):
+    """Authenticate admin user with email and password.
+
+    Returns admin JWT with scope=super_admin and admin_roles claim.
+    Admin tokens expire in 4 hours (shorter than regular tokens).
+
+    Example:
+    {
+      "email": "admin@example.com",
+      "password": "your_password"
+    }
+    """
+    try:
+        result = await auth_service.admin_login(
+            email=request.email,
+            password=request.password,
+        )
+
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=result.get("error", "Admin authentication failed"),
+            )
+
+        return AdminLoginResponse(
+            success=True,
+            user_id=result.get("user_id"),
+            email=result.get("email"),
+            name=result.get("name"),
+            admin_roles=result.get("admin_roles"),
+            access_token=result.get("access_token"),
+            refresh_token=result.get("refresh_token"),
+            token_type=result.get("token_type"),
+            expires_in=result.get("expires_in"),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin login failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Admin login failed",
+        )
+
+
+@app.get("/api/v1/auth/admin/verify", response_model=AdminVerifyResponse)
+async def admin_verify(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+):
+    """Verify an admin JWT token and return admin user info.
+
+    Pass the admin token as a Bearer token in the Authorization header.
+    Returns admin user info including admin_roles if valid.
+    """
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+        )
+
+    result = await auth_service.admin_verify(credentials.credentials)
+
+    if not result.get("valid"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=result.get("error", "Invalid admin token"),
+        )
+
+    return AdminVerifyResponse(
+        valid=True,
+        user_id=result.get("user_id"),
+        email=result.get("email"),
+        name=result.get("name"),
+        admin_roles=result.get("admin_roles"),
+        scope=result.get("scope"),
+        expires_at=result.get("expires_at"),
+    )
+
+
 @app.post("/api/v1/auth/dev-token")
 async def generate_dev_token(
     request: DevTokenRequest,
