@@ -60,9 +60,13 @@ from .models import (
     AccountStatusChangeRequest,
     AccountSummaryResponse,
     AccountUpdateRequest,
+    AdminAccountDetailResponse,
     AdminAccountListResponse,
     AdminAccountResponse,
+    AdminNoteRequest,
+    AdminNoteResponse,
     AdminRolesUpdateRequest,
+    AdminStatusUpdateRequest,
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
@@ -683,6 +687,119 @@ async def admin_update_roles(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update admin roles: {str(e)}",
+        )
+
+
+@app.get("/api/v1/account/admin/accounts/{user_id}", response_model=AdminAccountDetailResponse)
+async def admin_get_account_detail(
+    user_id: str,
+    admin: Dict[str, Any] = Depends(require_admin_token),
+):
+    """Get full account details including status, notes, and metadata (admin only)."""
+    try:
+        repo = account_microservice.account_service.account_repo
+        detail = await repo.get_account_detail(user_id)
+
+        if not detail:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account not found: {user_id}",
+            )
+
+        return AdminAccountDetailResponse(**detail)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get account detail: {str(e)}",
+        )
+
+
+@app.put("/api/v1/account/admin/accounts/{user_id}/status")
+async def admin_update_account_status(
+    user_id: str,
+    request: AdminStatusUpdateRequest,
+    admin: Dict[str, Any] = Depends(require_admin_token),
+):
+    """Activate, suspend, or ban an account with a reason (admin only)."""
+    try:
+        repo = account_microservice.account_service.account_repo
+        success = await repo.update_account_status(
+            user_id=user_id,
+            status=request.status,
+            reason=request.reason,
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update account status",
+            )
+
+        return {
+            "message": f"Account status updated to '{request.status}'",
+            "user_id": user_id,
+            "status": request.status,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account not found: {user_id}",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update account status: {str(e)}",
+        )
+
+
+@app.post("/api/v1/account/admin/accounts/{user_id}/note", response_model=AdminNoteResponse, status_code=201)
+async def admin_add_note(
+    user_id: str,
+    request: AdminNoteRequest,
+    admin: Dict[str, Any] = Depends(require_admin_token),
+):
+    """Add an internal support/admin note to an account (admin only)."""
+    try:
+        repo = account_microservice.account_service.account_repo
+        author_id = admin.get("user_id", "unknown_admin")
+
+        note = await repo.add_admin_note(
+            user_id=user_id,
+            author_id=author_id,
+            note=request.note,
+        )
+
+        if not note:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to add note",
+            )
+
+        return AdminNoteResponse(
+            note_id=note.note_id,
+            user_id=note.user_id,
+            author_id=note.author_id,
+            note=note.note,
+            created_at=note.created_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account not found: {user_id}",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add note: {str(e)}",
         )
 
 

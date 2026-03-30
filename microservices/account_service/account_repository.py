@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import logging
 import asyncio
 import json
+import uuid
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -20,7 +21,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from google.protobuf.json_format import MessageToDict
-from .models import User
+from .models import User, AdminNote
 from .protocols import DuplicateEntryError, UserNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -451,6 +452,150 @@ class AccountRepository:
             raise
         except Exception as e:
             logger.error(f"Failed to update admin roles for {user_id}: {e}")
+            return None
+
+    # --- Admin management methods (#193) ---
+
+    async def get_account_detail(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get full account detail including status metadata and notes (admin view).
+
+        Returns a dict with user fields plus account_status, status_reason, and notes.
+        """
+        try:
+            user = await self.get_account_by_id_include_inactive(user_id)
+            if not user:
+                return None
+
+            # Fetch account_status and status_reason from admin_status table
+            account_status = "active"
+            status_reason = None
+            try:
+                async with self.db:
+                    status_row = await self.db.query_row(
+                        f"SELECT status, reason FROM {self.schema}.admin_account_status WHERE user_id = $1",
+                        params=[user_id]
+                    )
+                if status_row:
+                    account_status = status_row.get("status", "active")
+                    status_reason = status_row.get("reason")
+            except Exception:
+                # Table may not exist yet; derive from is_active
+                account_status = "active" if user.is_active else "suspended"
+
+            # Fetch admin notes
+            notes: List[AdminNote] = []
+            try:
+                async with self.db:
+                    note_rows = await self.db.query(
+                        f"SELECT * FROM {self.schema}.admin_notes WHERE user_id = $1 ORDER BY created_at DESC",
+                        params=[user_id]
+                    )
+                if note_rows:
+                    for row in note_rows:
+                        notes.append(AdminNote(
+                            note_id=row["note_id"],
+                            user_id=row["user_id"],
+                            author_id=row["author_id"],
+                            note=row["note"],
+                            created_at=row["created_at"],
+                        ))
+            except Exception:
+                # Table may not exist yet; return empty notes
+                pass
+
+            return {
+                "user_id": user.user_id,
+                "email": user.email,
+                "name": user.name,
+                "is_active": user.is_active,
+                "account_status": account_status,
+                "status_reason": status_reason,
+                "admin_roles": user.admin_roles,
+                "preferences": user.preferences,
+                "notes": notes,
+                "created_at": user.created_at,
+                "updated_at": user.updated_at,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get account detail for {user_id}: {e}")
+            return None
+
+    async def update_account_status(
+        self, user_id: str, status: str, reason: Optional[str] = None
+    ) -> bool:
+        """Update account status (active/suspended/banned) with reason.
+
+        Persists status in admin_account_status table and sets is_active accordingly.
+        """
+        try:
+            existing = await self.get_account_by_id_include_inactive(user_id)
+            if not existing:
+                raise UserNotFoundException(f"Account not found: {user_id}")
+
+            now = datetime.now(tz=timezone.utc)
+            is_active = status == "active"
+
+            # Update is_active on the users table
+            async with self.db:
+                await self.db.execute(
+                    f"UPDATE {self.schema}.{self.users_table} SET is_active = $1, updated_at = $2 WHERE user_id = $3",
+                    params=[is_active, now, user_id]
+                )
+
+            # Upsert into admin_account_status
+            try:
+                async with self.db:
+                    await self.db.execute(
+                        f"""INSERT INTO {self.schema}.admin_account_status (user_id, status, reason, updated_at)
+                            VALUES ($1, $2, $3, $4)
+                            ON CONFLICT (user_id) DO UPDATE SET status = $2, reason = $3, updated_at = $4""",
+                        params=[user_id, status, reason, now]
+                    )
+            except Exception as e:
+                # Table may not exist; log and continue (is_active was still updated)
+                logger.warning(f"Could not upsert admin_account_status for {user_id}: {e}")
+
+            logger.info(f"Account status updated: {user_id} -> {status}")
+            return True
+
+        except UserNotFoundException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to update account status for {user_id}: {e}")
+            return False
+
+    async def add_admin_note(
+        self, user_id: str, author_id: str, note: str
+    ) -> Optional[AdminNote]:
+        """Add an internal support/admin note to an account."""
+        try:
+            existing = await self.get_account_by_id_include_inactive(user_id)
+            if not existing:
+                raise UserNotFoundException(f"Account not found: {user_id}")
+
+            note_id = f"note_{uuid.uuid4().hex[:12]}"
+            now = datetime.now(tz=timezone.utc)
+
+            async with self.db:
+                await self.db.execute(
+                    f"""INSERT INTO {self.schema}.admin_notes (note_id, user_id, author_id, note, created_at)
+                        VALUES ($1, $2, $3, $4, $5)""",
+                    params=[note_id, user_id, author_id, note, now]
+                )
+
+            return AdminNote(
+                note_id=note_id,
+                user_id=user_id,
+                author_id=author_id,
+                note=note,
+                created_at=now,
+            )
+
+        except UserNotFoundException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to add admin note for {user_id}: {e}")
             return None
 
     async def get_total_account_count(

@@ -7,7 +7,7 @@ NO import-time I/O dependencies - safe to import anywhere.
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 # Import only models (no I/O dependencies)
-from .models import User
+from .models import User, AdminNote
 
 
 class DuplicateEntryError(Exception):
@@ -91,6 +91,22 @@ class AccountRepositoryProtocol(Protocol):
 
     async def get_accounts_by_ids(self, user_ids: List[str]) -> List[User]:
         """Get multiple accounts by IDs"""
+        ...
+
+    async def get_account_detail(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get full account detail including status and notes (admin view)"""
+        ...
+
+    async def update_account_status(
+        self, user_id: str, status: str, reason: Optional[str] = None
+    ) -> bool:
+        """Update account status (active/suspended/banned) with reason"""
+        ...
+
+    async def add_admin_note(
+        self, user_id: str, author_id: str, note: str
+    ) -> Optional[AdminNote]:
+        """Add an internal support/admin note to an account"""
         ...
 
 

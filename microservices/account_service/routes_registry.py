@@ -90,6 +90,24 @@ ACCOUNT_SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Assign admin roles to a user account"
     },
+    {
+        "path": "/api/v1/account/admin/accounts/{user_id}",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get full account details (admin only)"
+    },
+    {
+        "path": "/api/v1/account/admin/accounts/{user_id}/status",
+        "methods": ["PUT"],
+        "auth_required": True,
+        "description": "Activate/suspend/ban account (admin only)"
+    },
+    {
+        "path": "/api/v1/account/admin/accounts/{user_id}/note",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Add internal support note (admin only)"
+    },
 ]
 def get_routes_for_consul() -> Dict[str, Any]:
     """
