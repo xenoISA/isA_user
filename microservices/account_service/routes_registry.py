@@ -77,6 +77,19 @@ ACCOUNT_SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Get account service statistics"
     },
+    # Admin endpoints
+    {
+        "path": "/api/v1/account/admin/accounts",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "List accounts (admin only, paginated, searchable)"
+    },
+    {
+        "path": "/api/v1/account/admin/accounts/{user_id}/roles",
+        "methods": ["PUT"],
+        "auth_required": True,
+        "description": "Assign admin roles to a user account"
+    },
 ]
 def get_routes_for_consul() -> Dict[str, Any]:
     """

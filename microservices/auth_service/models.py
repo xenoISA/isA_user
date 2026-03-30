@@ -159,11 +159,56 @@ class UserInfoResponse(BaseModel):
     expires_at: Optional[datetime] = None
 
 
+# Admin Authentication Models
+
+# Valid admin roles
+ADMIN_ROLES = [
+    "super_admin",
+    "billing_admin",
+    "product_admin",
+    "support_admin",
+    "compliance_admin",
+]
+
+
+class AdminLoginRequest(BaseModel):
+    """Admin login request (email + password)"""
+    email: EmailStr = Field(..., description="Admin email")
+    password: str = Field(..., min_length=8, description="Admin password")
+
+
+class AdminLoginResponse(BaseModel):
+    """Admin login response"""
+    success: bool
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    admin_roles: Optional[List[str]] = None
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    token_type: Optional[str] = None
+    expires_in: Optional[int] = None
+    error: Optional[str] = None
+
+
+class AdminVerifyResponse(BaseModel):
+    """Admin token verification response"""
+    valid: bool
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    admin_roles: Optional[List[str]] = None
+    scope: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    error: Optional[str] = None
+
+
 # Export all models
 __all__ = [
     'AuthProvider', 'AuthUser', 'AuthSession',
     'TokenVerificationRequest', 'DevTokenRequest', 'TokenPairRequest',
     'RefreshTokenRequest', 'RegistrationRequest', 'RegistrationVerifyRequest',
     'TokenVerificationResponse', 'TokenResponse', 'RegistrationStartResponse',
-    'RegistrationVerifyResponse', 'UserInfoResponse'
+    'RegistrationVerifyResponse', 'UserInfoResponse',
+    'ADMIN_ROLES', 'AdminLoginRequest', 'AdminLoginResponse', 'AdminVerifyResponse',
 ]

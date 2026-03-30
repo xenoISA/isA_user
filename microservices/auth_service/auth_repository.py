@@ -105,19 +105,29 @@ class AuthRepository:
         try:
             async with self.db:
                 result = await self.db.query_row(
-                    f"SELECT user_id, email, name, password_hash, email_verified, is_active "
+                    f"SELECT user_id, email, name, password_hash, email_verified, is_active, admin_roles "
                     f"FROM {self.schema}.{self.users_table} WHERE email = $1",
                     params=[email]
                 )
 
             if result:
+                # Parse admin_roles (JSONB column, may be None or a list)
+                admin_roles = result.get("admin_roles")
+                if isinstance(admin_roles, str):
+                    import json
+                    try:
+                        admin_roles = json.loads(admin_roles)
+                    except (json.JSONDecodeError, TypeError):
+                        admin_roles = None
+
                 return {
                     "user_id": result["user_id"],
                     "email": result["email"],
                     "name": result.get("name"),
                     "password_hash": result.get("password_hash"),
                     "email_verified": result.get("email_verified", False),
-                    "is_active": result.get("is_active", True)
+                    "is_active": result.get("is_active", True),
+                    "admin_roles": admin_roles,
                 }
             return None
 

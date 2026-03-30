@@ -1036,6 +1036,167 @@ class AuthenticationService:
             logger.error(f"Login failed with exception: {e}")
             return {"success": False, "error": "Login failed"}
 
+    # ============================================
+    # Admin Authentication
+    # ============================================
+
+    async def admin_login(
+        self,
+        email: str,
+        password: str,
+    ) -> Dict[str, Any]:
+        """
+        Authenticate admin user with email and password.
+
+        Validates credentials, checks that user has admin_roles assigned,
+        and returns a JWT with scope=super_admin and admin_roles claim.
+        Admin tokens have a shorter expiry (4 hours).
+
+        Args:
+            email: Admin email
+            password: Admin password
+
+        Returns:
+            Dictionary with admin tokens on success, or error on failure
+        """
+        try:
+            # Normalize email
+            normalized_email = email.strip().lower()
+
+            if not self.auth_repository:
+                return {"success": False, "error": "Auth repository not available"}
+
+            # Get user with password hash
+            user = await self.auth_repository.get_user_for_login(normalized_email)
+
+            if not user:
+                logger.warning(f"Admin login failed: user not found for email {normalized_email}")
+                return {"success": False, "error": "Invalid email or password"}
+
+            # Check if account is active
+            if not user.get("is_active", True):
+                logger.warning(f"Admin login failed: account disabled for user {user['user_id']}")
+                return {"success": False, "error": "Account is disabled"}
+
+            # Verify password
+            password_hash = user.get("password_hash")
+            if not password_hash:
+                logger.warning(f"Admin login failed: no password set for user {user['user_id']}")
+                return {"success": False, "error": "Invalid email or password"}
+
+            from .password_utils import verify_password
+            if not verify_password(password, password_hash):
+                logger.warning(f"Admin login failed: invalid password for user {user['user_id']}")
+                return {"success": False, "error": "Invalid email or password"}
+
+            # Check admin_roles — must have at least one admin role
+            admin_roles = user.get("admin_roles")
+            if not admin_roles or not isinstance(admin_roles, list) or len(admin_roles) == 0:
+                logger.warning(f"Admin login failed: user {user['user_id']} has no admin roles")
+                return {"success": False, "error": "Insufficient admin privileges"}
+
+            # Update last login
+            await self.auth_repository.update_last_login(user["user_id"])
+
+            # Generate admin token pair with shorter expiry and admin claims
+            if not self.jwt_manager:
+                return {"success": False, "error": "JWT manager not available"}
+
+            from core.jwt_manager import TokenClaims, TokenScope, TokenType
+
+            admin_claims = TokenClaims(
+                user_id=user["user_id"],
+                email=user["email"],
+                organization_id=None,
+                scope=TokenScope.ADMIN,
+                token_type=TokenType.ACCESS,
+                permissions=[],
+                metadata={
+                    "admin_roles": admin_roles,
+                    "login_method": "admin_email_password",
+                },
+            )
+
+            # Admin access token: 4 hours (shorter than regular 24h)
+            access_token = self.jwt_manager.create_access_token(
+                admin_claims,
+                expires_delta=timedelta(hours=4),
+            )
+
+            # Admin refresh token: 24 hours (shorter than regular 7 days)
+            refresh_token = self.jwt_manager.create_refresh_token(
+                admin_claims,
+                expires_delta=timedelta(hours=24),
+            )
+
+            logger.info(f"Admin login successful for user {user['user_id']} with roles {admin_roles}")
+
+            return {
+                "success": True,
+                "user_id": user["user_id"],
+                "email": user["email"],
+                "name": user.get("name"),
+                "admin_roles": admin_roles,
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "expires_in": 4 * 3600,  # 4 hours in seconds
+                "token_type": "Bearer",
+            }
+
+        except Exception as e:
+            logger.error(f"Admin login failed with exception: {e}")
+            return {"success": False, "error": "Admin login failed"}
+
+    async def admin_verify(self, token: str) -> Dict[str, Any]:
+        """
+        Verify an admin JWT token and return admin user info.
+
+        Checks that the token is valid, has scope=admin, and contains
+        admin_roles in metadata.
+
+        Args:
+            token: JWT token to verify
+
+        Returns:
+            Dictionary with admin user info or error
+        """
+        try:
+            verification = await self.verify_token(token, provider=AuthProvider.ISA_USER.value)
+
+            if not verification.get("valid"):
+                return {"valid": False, "error": verification.get("error", "Invalid token")}
+
+            payload = verification.get("payload", {}) or {}
+
+            # Verify this is an access token
+            if payload.get("type") != "access":
+                return {"valid": False, "error": "Invalid token type"}
+
+            # Verify admin scope
+            if payload.get("scope") != "admin":
+                return {"valid": False, "error": "Not an admin token"}
+
+            # Extract admin_roles from metadata
+            metadata = payload.get("metadata", {}) or {}
+            admin_roles = metadata.get("admin_roles", [])
+
+            if not admin_roles:
+                return {"valid": False, "error": "No admin roles found in token"}
+
+            return {
+                "valid": True,
+                "user_id": verification.get("user_id"),
+                "email": verification.get("email"),
+                "name": metadata.get("name"),
+                "admin_roles": admin_roles,
+                "scope": payload.get("scope"),
+                "expires_at": verification.get("expires_at"),
+            }
+
+        except Exception as e:
+            logger.error(f"Admin token verification failed: {e}")
+            return {"valid": False, "error": f"Verification failed: {str(e)}"}
+
     async def get_user_info_from_token(self, token: str) -> Dict[str, Any]:
         """
         Extract user information from token
