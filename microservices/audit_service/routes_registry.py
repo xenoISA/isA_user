@@ -33,6 +33,9 @@ SERVICE_ROUTES = [
     {"path": "/api/v1/audit/compliance/reports", "methods": ["POST"], "auth_required": True, "description": "Generate compliance report"},
     {"path": "/api/v1/audit/compliance/standards", "methods": ["GET"], "auth_required": False, "description": "Get compliance standards"},
 
+    # Admin audit trail
+    {"path": "/api/v1/audit/admin/actions", "methods": ["GET", "POST"], "auth_required": True, "description": "Query/record admin actions"},
+
     # System maintenance
     {"path": "/api/v1/audit/maintenance/cleanup", "methods": ["POST"], "auth_required": True, "description": "Cleanup old data"},
 ]

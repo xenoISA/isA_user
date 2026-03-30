@@ -20,6 +20,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.admin_audit import publish_admin_action
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 from .product_repository import ProductRepository
@@ -595,6 +596,43 @@ async def require_admin(request: Request):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
+def _extract_admin_context(request: Request) -> Dict[str, Any]:
+    """Extract admin identity and request context from headers for audit logging."""
+    return {
+        "admin_user_id": request.headers.get("X-Admin-User-Id", "unknown_admin"),
+        "admin_email": request.headers.get("X-Admin-Email"),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("User-Agent"),
+    }
+
+
+async def _audit_admin_action(
+    request: Request,
+    action: str,
+    resource_type: str,
+    resource_id: Optional[str] = None,
+    changes: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+):
+    """Fire-and-forget admin audit event. Never raises."""
+    try:
+        ctx = _extract_admin_context(request)
+        await publish_admin_action(
+            event_bus=event_bus,
+            admin_user_id=ctx["admin_user_id"],
+            admin_email=ctx["admin_email"],
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            changes=changes,
+            ip_address=ctx["ip_address"],
+            user_agent=ctx["user_agent"],
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.warning(f"Admin audit publish failed (non-blocking): {e}")
+
+
 @app.post("/api/v1/product/admin/products", status_code=201)
 async def admin_create_product(
     body: AdminCreateProductRequest,
@@ -610,6 +648,10 @@ async def admin_create_product(
         result = await service.admin_create_product(body.model_dump())
         if not result:
             raise HTTPException(status_code=500, detail="Failed to create product")
+        await _audit_admin_action(
+            request, action="create_product", resource_type="product",
+            resource_id=body.product_id, changes={"after": body.model_dump()},
+        )
         return result
     except HTTPException:
         raise
@@ -630,9 +672,17 @@ async def admin_update_product(
     """Update an existing product"""
     await require_admin(request)
     try:
-        result = await service.admin_update_product(product_id, body.model_dump(exclude_none=True))
+        # Capture before state for audit diff
+        before = await service.get_product(product_id)
+        before_data = before if isinstance(before, dict) else None
+        update_fields = body.model_dump(exclude_none=True)
+        result = await service.admin_update_product(product_id, update_fields)
         if not result:
             raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+        await _audit_admin_action(
+            request, action="update_product", resource_type="product",
+            resource_id=product_id, changes={"before": before_data, "after": update_fields},
+        )
         return result
     except HTTPException:
         raise
@@ -655,6 +705,10 @@ async def admin_delete_product(
         success = await service.admin_delete_product(product_id)
         if not success:
             raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+        await _audit_admin_action(
+            request, action="delete_product", resource_type="product",
+            resource_id=product_id, changes={"after": {"is_active": False}},
+        )
         return {"message": f"Product {product_id} deactivated", "product_id": product_id}
     except HTTPException:
         raise
@@ -676,6 +730,12 @@ async def admin_create_pricing(
         result = await service.admin_create_pricing(product_id, body.model_dump())
         if result is None:
             raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+        await _audit_admin_action(
+            request, action="create_pricing", resource_type="pricing",
+            resource_id=getattr(body, 'pricing_id', None),
+            changes={"after": body.model_dump()},
+            metadata={"product_id": product_id},
+        )
         return result
     except HTTPException:
         raise
@@ -696,9 +756,14 @@ async def admin_update_pricing(
     """Update a pricing tier"""
     await require_admin(request)
     try:
-        result = await service.admin_update_pricing(pricing_id, body.model_dump(exclude_none=True))
+        update_fields = body.model_dump(exclude_none=True)
+        result = await service.admin_update_pricing(pricing_id, update_fields)
         if result is None:
             raise HTTPException(status_code=404, detail=f"Pricing {pricing_id} not found")
+        await _audit_admin_action(
+            request, action="update_pricing", resource_type="pricing",
+            resource_id=pricing_id, changes={"after": update_fields},
+        )
         return result
     except HTTPException:
         raise
@@ -730,8 +795,13 @@ async def admin_create_cost_definition(
     try:
         result = await service.admin_create_cost_definition(body)
         if not result: raise HTTPException(status_code=500, detail="Failed to create cost definition")
+        await _audit_admin_action(
+            request, action="create_cost_definition", resource_type="cost_definition",
+            resource_id=body.get("cost_id"), changes={"after": body},
+        )
         return result
     except ValueError as e: raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException: raise
     except Exception as e:
         if "duplicate" in str(e).lower() or "unique" in str(e).lower():
             raise HTTPException(status_code=409, detail="Cost definition already exists")
@@ -746,6 +816,10 @@ async def admin_update_cost_definition(
     await require_admin(request)
     result = await service.admin_update_cost_definition(cost_id, body)
     if result is None: raise HTTPException(status_code=404, detail=f"Cost definition {cost_id} not found")
+    await _audit_admin_action(
+        request, action="update_cost_definition", resource_type="cost_definition",
+        resource_id=cost_id, changes={"after": body},
+    )
     return result
 
 
@@ -757,6 +831,10 @@ async def admin_rotate_cost_definitions(
     await require_admin(request)
     try:
         results = await service.admin_rotate_cost_definitions(body)
+        await _audit_admin_action(
+            request, action="rotate_cost_definitions", resource_type="cost_definition",
+            changes={"after": {"rotated_count": len(results), "definitions": body}},
+        )
         return {"rotated": len(results), "details": results}
     except ValueError as e: raise HTTPException(status_code=422, detail=str(e))
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
