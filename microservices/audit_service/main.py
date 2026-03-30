@@ -28,6 +28,12 @@ from isa_common.consul_client import ConsulRegistry
 from .audit_service import AuditService
 from .factory import create_audit_service
 from .events.handlers import AuditEventHandlers
+from .events.admin_audit_handler import AdminAuditEventHandler
+from .admin_audit_repository import AdminAuditRepository
+from .admin_audit_models import (
+    AdminAuditCreateRequest, AdminAuditResponse, AdminAuditQueryResponse,
+    AdminAuditLogEntry,
+)
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
     AuditEventCreateRequest, AuditEventResponse, AuditQueryRequest, AuditQueryResponse,
@@ -45,6 +51,7 @@ logger = app_logger  # for backward compatibility
 
 # 全局服务实例
 audit_service: Optional[AuditService] = None
+admin_audit_repo: Optional[AdminAuditRepository] = None
 event_bus = None
 consul_registry = None
 shutdown_manager = GracefulShutdown("audit_service")
@@ -54,13 +61,16 @@ shutdown_manager = GracefulShutdown("audit_service")
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     shutdown_manager.install_signal_handlers()
-    global audit_service, event_bus, consul_registry
+    global audit_service, admin_audit_repo, event_bus, consul_registry
 
     logger.info("🚀 Audit Service starting up...")
 
     try:
         # 初始化服务 (使用工厂方法)
         audit_service = create_audit_service(config=config_manager)
+
+        # Initialize admin audit repository
+        admin_audit_repo = AdminAuditRepository(config=config_manager)
 
         # 检查数据库连接
         if await audit_service.repository.check_connection():
@@ -82,6 +92,15 @@ async def lifespan(app: FastAPI):
                 handler=event_handlers.handle_nats_event
             )
             logger.info("✅ Subscribed to all NATS events (*.*) for audit logging")
+
+            # Subscribe to admin action events for dedicated admin audit log
+            admin_audit_handler = AdminAuditEventHandler(admin_audit_repo)
+            await event_bus.subscribe_to_events(
+                pattern="admin.action.>",
+                handler=admin_audit_handler.handle_admin_action_event,
+                durable="audit-service-admin-actions-consumer",
+            )
+            logger.info("✅ Subscribed to admin.action.> for admin audit logging")
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to initialize event bus: {e}. Continuing without event subscriptions.")
@@ -499,6 +518,132 @@ async def get_compliance_standards():
             }
         ]
     }
+
+
+# ====================
+# Admin Action Audit Trail
+# ====================
+
+def get_admin_audit_repo() -> AdminAuditRepository:
+    """Get admin audit repository instance"""
+    if not admin_audit_repo:
+        raise HTTPException(status_code=503, detail="Admin audit repository not available")
+    return admin_audit_repo
+
+
+@app.get("/api/v1/audit/admin/actions", response_model=AdminAuditQueryResponse)
+async def get_admin_actions(
+    admin_user_id: Optional[str] = Query(None, description="Filter by admin user ID"),
+    action: Optional[str] = Query(None, description="Filter by action (e.g. create_product)"),
+    resource_type: Optional[str] = Query(None, description="Filter by resource type"),
+    resource_id: Optional[str] = Query(None, description="Filter by resource ID"),
+    start_time: Optional[datetime] = Query(None, description="Start of date range"),
+    end_time: Optional[datetime] = Query(None, description="End of date range"),
+    limit: int = Query(100, description="Max results", le=1000),
+    offset: int = Query(0, description="Offset for pagination"),
+    repo: AdminAuditRepository = Depends(get_admin_audit_repo),
+):
+    """Query admin action audit log with filters"""
+    try:
+        entries, total = await repo.query_admin_audit_log(
+            admin_user_id=admin_user_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            offset=offset,
+        )
+
+        filters = {
+            k: v for k, v in {
+                "admin_user_id": admin_user_id,
+                "action": action,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "start_time": start_time.isoformat() if start_time else None,
+                "end_time": end_time.isoformat() if end_time else None,
+            }.items() if v is not None
+        }
+
+        return AdminAuditQueryResponse(
+            actions=[
+                AdminAuditResponse(
+                    audit_id=e.audit_id,
+                    admin_user_id=e.admin_user_id,
+                    admin_email=e.admin_email,
+                    action=e.action,
+                    resource_type=e.resource_type,
+                    resource_id=e.resource_id,
+                    changes=e.changes,
+                    ip_address=e.ip_address,
+                    user_agent=e.user_agent,
+                    timestamp=e.timestamp,
+                    metadata=e.metadata,
+                )
+                for e in entries
+            ],
+            total_count=total,
+            limit=limit,
+            offset=offset,
+            filters_applied=filters,
+        )
+
+    except Exception as e:
+        logger.error(f"Error querying admin audit log: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to query admin audit log: {str(e)}")
+
+
+@app.post("/api/v1/audit/admin/actions", response_model=AdminAuditResponse, status_code=201)
+async def record_admin_action(
+    request_body: AdminAuditCreateRequest,
+    repo: AdminAuditRepository = Depends(get_admin_audit_repo),
+):
+    """
+    Record an admin action (internal endpoint, called by other services).
+
+    This endpoint is the synchronous alternative to NATS event publishing.
+    Services can POST here directly if NATS is unavailable.
+    """
+    try:
+        import uuid as _uuid
+        entry = AdminAuditLogEntry(
+            audit_id=f"admin_audit_{_uuid.uuid4().hex[:16]}",
+            admin_user_id=request_body.admin_user_id,
+            admin_email=request_body.admin_email,
+            action=request_body.action,
+            resource_type=request_body.resource_type,
+            resource_id=request_body.resource_id,
+            changes=request_body.changes,
+            ip_address=request_body.ip_address,
+            user_agent=request_body.user_agent,
+            metadata=request_body.metadata,
+        )
+
+        result = await repo.create_admin_audit_entry(entry)
+        if not result:
+            raise HTTPException(status_code=500, detail="Failed to record admin action")
+
+        return AdminAuditResponse(
+            audit_id=result.audit_id,
+            admin_user_id=result.admin_user_id,
+            admin_email=result.admin_email,
+            action=result.action,
+            resource_type=result.resource_type,
+            resource_id=result.resource_id,
+            changes=result.changes,
+            ip_address=result.ip_address,
+            user_agent=result.user_agent,
+            timestamp=result.timestamp,
+            metadata=result.metadata,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error recording admin action: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to record admin action: {str(e)}")
 
 
 # ====================
