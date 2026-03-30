@@ -281,6 +281,7 @@ class ProductRepository:
             display_order=int(row.get("display_order", 0) or 0),
             tags=row.get("tags"),
             specifications=row.get("specifications", {}),
+            metadata=row.get("metadata") or {},
             is_active=row.get("is_active", True),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")

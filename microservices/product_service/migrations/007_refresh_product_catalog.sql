@@ -158,7 +158,7 @@ INSERT INTO product.products (
 -- NATS Messaging
 ('nats_messaging', 'NATS Messaging', 'NATS-MSG',
  'NATS JetStream event messaging and streaming',
- 'infrastructure', 'messaging', 0.001, 'USD', 'per_message',
+ 'infrastructure', 'integration', 0.001, 'USD', 'per_message',
  '["pub_sub", "jetstream", "queue_groups", "key_value"]'::jsonb,
  '{"max_messages_per_month": 10000000, "free_tier_messages": 100000}'::jsonb,
  TRUE,
@@ -168,7 +168,7 @@ INSERT INTO product.products (
 -- Compute (general)
 ('compute_general', 'Compute', 'COMPUTE-GEN',
  'General compute resources for workloads',
- 'infrastructure', 'compute', 0.01, 'USD', 'per_minute',
+ 'infrastructure', 'computation', 0.01, 'USD', 'per_minute',
  '["container_execution", "gpu_access", "auto_scaling"]'::jsonb,
  '{"max_compute_minutes_per_month": 100000}'::jsonb,
  TRUE,
