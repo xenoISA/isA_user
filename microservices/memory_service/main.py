@@ -1012,114 +1012,64 @@ async def search_all_memories(
         else:
             logger.warning(f"Failed to generate query embedding for: {query[:50]}...")
 
-        # Search factual memories using vector search
-        if 'factual' in types_lower:
-            try:
-                factual_results = await memory_service.vector_search_factual(
-                    user_id, query, limit, similarity_threshold, query_embedding=query_embedding, with_vectors=with_vectors
-                )
-                results['factual'] = factual_results
-                total_count += len(factual_results)
-                logger.info(f"Vector search found {len(factual_results)} factual memories for query: {query[:50]}...")
-            except Exception as e:
-                logger.warning(f"Error in factual vector search, falling back to text: {e}")
-                try:
-                    factual_results = await memory_service.search_facts_by_subject(user_id, query, limit)
-                    results['factual'] = factual_results
-                    total_count += len(factual_results)
-                except Exception as e2:
-                    logger.warning(f"Fallback text search also failed: {e2}")
-                    results['factual'] = []
+        # Search all memory types in parallel
+        search_dispatch = {
+            'factual': (
+                memory_service.vector_search_factual,
+                memory_service.search_facts_by_subject,
+            ),
+            'episodic': (
+                memory_service.vector_search_episodic,
+                memory_service.search_episodes_by_event_type,
+            ),
+            'procedural': (
+                memory_service.vector_search_procedural,
+                memory_service.search_procedures_by_skill_type,
+            ),
+            'semantic': (
+                memory_service.vector_search_semantic,
+                memory_service.search_concepts_by_category,
+            ),
+            'working': (
+                memory_service.vector_search_working,
+                None,  # fallback handled inline
+            ),
+            'session': (
+                memory_service.vector_search_session,
+                None,
+            ),
+        }
 
-        # Search episodic memories using vector search
-        if 'episodic' in types_lower:
+        async def _search_one(memory_type: str):
+            vector_fn, fallback_fn = search_dispatch[memory_type]
             try:
-                episodic_results = await memory_service.vector_search_episodic(
-                    user_id, query, limit, similarity_threshold, query_embedding=query_embedding, with_vectors=with_vectors
+                return memory_type, await vector_fn(
+                    user_id, query, limit, similarity_threshold,
+                    query_embedding=query_embedding, with_vectors=with_vectors,
                 )
-                results['episodic'] = episodic_results
-                total_count += len(episodic_results)
-                logger.info(f"Vector search found {len(episodic_results)} episodic memories")
             except Exception as e:
-                logger.warning(f"Error in episodic vector search, falling back to text: {e}")
-                try:
-                    episodic_results = await memory_service.search_episodes_by_event_type(user_id, query, limit)
-                    results['episodic'] = episodic_results
-                    total_count += len(episodic_results)
-                except Exception as e2:
-                    logger.warning(f"Fallback text search also failed: {e2}")
-                    results['episodic'] = []
+                logger.warning(f"Error in {memory_type} vector search, trying fallback: {e}")
+                if fallback_fn:
+                    try:
+                        return memory_type, await fallback_fn(user_id, query, limit)
+                    except Exception as e2:
+                        logger.warning(f"Fallback for {memory_type} also failed: {e2}")
+                elif memory_type == 'working':
+                    try:
+                        all_working = await memory_service.get_active_working_memories(user_id)
+                        filtered = [m for m in all_working if query.lower() in m.get('content', '').lower()]
+                        return memory_type, filtered[:limit]
+                    except Exception as e2:
+                        logger.warning(f"Working memory fallback failed: {e2}")
+                return memory_type, []
 
-        # Search procedural memories using vector search
-        if 'procedural' in types_lower:
-            try:
-                procedural_results = await memory_service.vector_search_procedural(
-                    user_id, query, limit, similarity_threshold, query_embedding=query_embedding, with_vectors=with_vectors
-                )
-                results['procedural'] = procedural_results
-                total_count += len(procedural_results)
-                logger.info(f"Vector search found {len(procedural_results)} procedural memories")
-            except Exception as e:
-                logger.warning(f"Error in procedural vector search, falling back to text: {e}")
-                try:
-                    procedural_results = await memory_service.search_procedures_by_skill_type(user_id, query, limit)
-                    results['procedural'] = procedural_results
-                    total_count += len(procedural_results)
-                except Exception as e2:
-                    logger.warning(f"Fallback text search also failed: {e2}")
-                    results['procedural'] = []
-
-        # Search semantic memories using vector search
-        if 'semantic' in types_lower:
-            try:
-                semantic_results = await memory_service.vector_search_semantic(
-                    user_id, query, limit, similarity_threshold, query_embedding=query_embedding, with_vectors=with_vectors
-                )
-                results['semantic'] = semantic_results
-                total_count += len(semantic_results)
-                logger.info(f"Vector search found {len(semantic_results)} semantic memories")
-            except Exception as e:
-                logger.warning(f"Error in semantic vector search, falling back to text: {e}")
-                try:
-                    semantic_results = await memory_service.search_concepts_by_category(user_id, query, limit)
-                    results['semantic'] = semantic_results
-                    total_count += len(semantic_results)
-                except Exception as e2:
-                    logger.warning(f"Fallback text search also failed: {e2}")
-                    results['semantic'] = []
-
-        # Search working memories using vector search
-        if 'working' in types_lower:
-            try:
-                working_results = await memory_service.vector_search_working(
-                    user_id, query, limit, similarity_threshold, query_embedding=query_embedding, with_vectors=with_vectors
-                )
-                results['working'] = working_results
-                total_count += len(working_results)
-                logger.info(f"Vector search found {len(working_results)} working memories")
-            except Exception as e:
-                logger.warning(f"Error in working vector search, falling back to filter: {e}")
-                try:
-                    working_results = await memory_service.get_active_working_memories(user_id)
-                    working_filtered = [m for m in working_results if query.lower() in m.get('content', '').lower()]
-                    results['working'] = working_filtered[:limit]
-                    total_count += len(results['working'])
-                except Exception as e2:
-                    logger.warning(f"Fallback filter also failed: {e2}")
-                    results['working'] = []
-
-        # Search session memories using vector search
-        if 'session' in types_lower:
-            try:
-                session_results = await memory_service.vector_search_session(
-                    user_id, query, limit, similarity_threshold, query_embedding=query_embedding, with_vectors=with_vectors
-                )
-                results['session'] = session_results
-                total_count += len(session_results)
-                logger.info(f"Vector search found {len(session_results)} session memories")
-            except Exception as e:
-                logger.warning(f"Error in session vector search: {e}")
-                results['session'] = []
+        parallel_results = await asyncio.gather(
+            *[_search_one(t) for t in types_lower if t in search_dispatch]
+        )
+        for memory_type, type_results in parallel_results:
+            results[memory_type] = type_results
+            total_count += len(type_results)
+            logger.info(f"Vector search found {len(type_results)} {memory_type} memories")
 
         # Apply MMR re-ranking per memory type if enabled
         if rerank and query_embedding is not None:
