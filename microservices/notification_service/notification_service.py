@@ -401,14 +401,23 @@ class NotificationService:
         except Exception as e:
             logger.error(f"Failed to process batch {batch.batch_id}: {str(e)}")
     
-    async def _process_notification(self, notification: Notification):
+    async def _process_notification(
+        self,
+        notification: Notification,
+        claim_if_pending: bool = True,
+    ):
         """处理单个通知发送"""
         try:
-            # 更新状态为发送中
-            await self.repository.update_notification_status(
-                notification.notification_id,
-                NotificationStatus.SENDING
-            )
+            if claim_if_pending:
+                claimed = await self.repository.claim_notification(
+                    notification.notification_id
+                )
+                if not claimed:
+                    logger.info(
+                        f"Skipping notification {notification.notification_id}: "
+                        "already claimed by another worker"
+                    )
+                    return
             
             # 根据类型发送通知
             if notification.type == NotificationType.EMAIL:
@@ -956,7 +965,12 @@ class NotificationService:
                     continue
                 
                 # 创建发送任务
-                tasks.append(self._process_notification(notification))
+                tasks.append(
+                    self._process_notification(
+                        notification,
+                        claim_if_pending=False,
+                    )
+                )
             
             # 执行所有任务
             if tasks:

@@ -244,17 +244,19 @@ class OrderService:
             # Publish ORDER_CREATED event
             if self.event_bus:
                 try:
-                    await publish_order_created(
-                        event_bus=self.event_bus,
-                        order_id=order.order_id,
-                        user_id=request.user_id,
-                        order_type=request.order_type.value,
-                        total_amount=float(order.total_amount),
-                        currency=request.currency,
-                        payment_intent_id=payment_intent_id,
-                        items=items_payload
-                    )
-                    logger.info(f"Published order.created event for order {order.order_id}")
+                    self._lazy_load_event_publishers()
+                    if self._publish_order_created:
+                        await self._publish_order_created(
+                            event_bus=self.event_bus,
+                            order_id=order.order_id,
+                            user_id=request.user_id,
+                            order_type=request.order_type.value,
+                            total_amount=float(order.total_amount),
+                            currency=request.currency,
+                            payment_intent_id=payment_intent_id,
+                            items=items_payload
+                        )
+                        logger.info(f"Published order.created event for order {order.order_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish order.created event: {e}")
 
@@ -366,17 +368,19 @@ class OrderService:
                 # Publish ORDER_CANCELED event
                 if self.event_bus:
                     try:
-                        await publish_order_canceled(
-                            event_bus=self.event_bus,
-                            order_id=order_id,
-                            user_id=existing_order.user_id,
-                            order_type=existing_order.order_type.value,
-                            total_amount=float(existing_order.total_amount),
-                            currency=existing_order.currency,
-                            reason=request.reason,
-                            refund_amount=float(request.refund_amount) if request.refund_amount else 0
-                        )
-                        logger.info(f"Published order.canceled event for order {order_id}")
+                        self._lazy_load_event_publishers()
+                        if self._publish_order_canceled:
+                            await self._publish_order_canceled(
+                                event_bus=self.event_bus,
+                                order_id=order_id,
+                                user_id=existing_order.user_id,
+                                order_type=existing_order.order_type.value,
+                                total_amount=float(existing_order.total_amount),
+                                currency=existing_order.currency,
+                                reason=request.reason,
+                                refund_amount=float(request.refund_amount) if request.refund_amount else 0
+                            )
+                            logger.info(f"Published order.canceled event for order {order_id}")
                     except Exception as e:
                         logger.error(f"Failed to publish order.canceled event: {e}")
 
@@ -441,17 +445,19 @@ class OrderService:
                 # Publish ORDER_COMPLETED event
                 if self.event_bus:
                     try:
-                        await publish_order_completed(
-                            event_bus=self.event_bus,
-                            order_id=order_id,
-                            user_id=existing_order.user_id,
-                            order_type=existing_order.order_type.value,
-                            total_amount=float(existing_order.total_amount),
-                            currency=existing_order.currency,
-                            transaction_id=request.transaction_id,
-                            credits_added=request.credits_added if request.credits_added else 0
-                        )
-                        logger.info(f"Published order.completed event for order {order_id}")
+                        self._lazy_load_event_publishers()
+                        if self._publish_order_completed:
+                            await self._publish_order_completed(
+                                event_bus=self.event_bus,
+                                order_id=order_id,
+                                user_id=existing_order.user_id,
+                                order_type=existing_order.order_type.value,
+                                total_amount=float(existing_order.total_amount),
+                                currency=existing_order.currency,
+                                transaction_id=request.transaction_id,
+                                credits_added=request.credits_added if request.credits_added else 0
+                            )
+                            logger.info(f"Published order.completed event for order {order_id}")
                     except Exception as e:
                         logger.error(f"Failed to publish order.completed event: {e}")
 

@@ -19,7 +19,8 @@ from .protocols import AuditRepositoryProtocol
 from .models import (
     AuditEvent, UserActivity, SecurityEvent, ComplianceReport,
     AuditEventCreateRequest, AuditEventResponse, AuditQueryRequest, AuditQueryResponse,
-    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest,  EventSeverity, EventStatus, AuditCategory
+    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest, EventSeverity,
+    EventStatus, AuditCategory, EventType
 )
 
 # Type checking imports (not executed at runtime)

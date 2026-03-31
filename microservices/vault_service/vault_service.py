@@ -19,6 +19,7 @@ from core.nats_client import Event
 from .models import (
     EncryptionMethod,
     SecretType,
+    VaultAccessLog,
     VaultAccessLogResponse,
     VaultAction,
     VaultCreateRequest,

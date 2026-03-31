@@ -37,6 +37,7 @@ class MockNotificationRepository:
         # Notification methods - create returns input
         self.create_notification = AsyncMock(side_effect=lambda x: x)
         self.get_notification = AsyncMock(return_value=None)
+        self.claim_notification = AsyncMock(return_value=True)
         self.update_notification_status = AsyncMock(return_value=True)
         self.list_user_notifications = AsyncMock(return_value=[])
         self.get_pending_notifications = AsyncMock(return_value=[])

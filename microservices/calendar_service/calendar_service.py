@@ -76,16 +76,11 @@ class CalendarService:
         """Lazy load event publishers to avoid import-time I/O"""
         if not self._event_publishers_loaded:
             try:
-                # Import Event and EventType only when needed
+                # Import Event only when needed to avoid import-time I/O
                 from core.nats_client import Event
-                # Store them for later use
                 self.Event = Event
-                self.EventType = EventType
-                self.ServiceSource = ServiceSource
             except ImportError:
                 self.Event = None
-                self.EventType = None
-                self.ServiceSource = None
             self._event_publishers_loaded = True
 
     async def create_event(
@@ -364,4 +359,3 @@ class CalendarService:
 
 
 __all__ = ["CalendarService"]
-

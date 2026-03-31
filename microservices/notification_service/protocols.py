@@ -69,6 +69,10 @@ class NotificationRepositoryProtocol(Protocol):
         """Get notification by ID"""
         ...
 
+    async def claim_notification(self, notification_id: str) -> bool:
+        """Claim a pending notification for sending"""
+        ...
+
     async def update_notification_status(
         self,
         notification_id: str,

@@ -301,14 +301,28 @@ class EventRepository:
         """Get unprocessed events"""
         try:
             query = f'''
-                SELECT * FROM {self.schema}.{self.events_table}
-                WHERE status = $1
-                ORDER BY timestamp ASC
-                LIMIT {limit}
+                WITH claimed AS (
+                    SELECT event_id
+                    FROM {self.schema}.{self.events_table}
+                    WHERE status = $1
+                    ORDER BY timestamp ASC
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT {limit}
+                )
+                UPDATE {self.schema}.{self.events_table} AS events
+                SET status = $2,
+                    updated_at = NOW()
+                FROM claimed
+                WHERE events.event_id = claimed.event_id
+                RETURNING events.*
             '''
 
             async with self.db:
-                results = await self.db.query(query, [EventStatus.PENDING.value], schema=self.schema)
+                results = await self.db.query(
+                    query,
+                    [EventStatus.PENDING.value, EventStatus.PROCESSING.value],
+                    schema=self.schema,
+                )
 
             return [self._row_to_event(row) for row in results] if results else []
 

@@ -402,6 +402,33 @@ class NotificationRepository:
             logger.error(f"Failed to list notifications: {str(e)}")
             return []
 
+    async def claim_notification(self, notification_id: str) -> bool:
+        """Atomically claim a pending notification for sending"""
+        try:
+            query = f'''
+                UPDATE {self.schema}.notifications
+                SET status = $1
+                WHERE notification_id = $2
+                AND status = $3
+            '''
+
+            async with self.db:
+                count = await self.db.execute(
+                    query,
+                    [
+                        NotificationStatus.SENDING.value,
+                        notification_id,
+                        NotificationStatus.PENDING.value,
+                    ],
+                    schema=self.schema,
+                )
+
+            return count is not None and count > 0
+
+        except Exception as e:
+            logger.error(f"Failed to claim notification {notification_id}: {str(e)}")
+            return False
+
     async def update_notification_status(
         self,
         notification_id: str,
@@ -475,15 +502,32 @@ class NotificationRepository:
             now = datetime.now(timezone.utc)
 
             query = f'''
-                SELECT * FROM {self.schema}.notifications
-                WHERE status = $1
-                AND (scheduled_at IS NULL OR scheduled_at <= $2)
-                ORDER BY priority, created_at
-                LIMIT {limit}
+                WITH claimed AS (
+                    SELECT notification_id
+                    FROM {self.schema}.notifications
+                    WHERE status = $1
+                    AND (scheduled_at IS NULL OR scheduled_at <= $2)
+                    ORDER BY priority, created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT {limit}
+                )
+                UPDATE {self.schema}.notifications AS notifications
+                SET status = $3
+                FROM claimed
+                WHERE notifications.notification_id = claimed.notification_id
+                RETURNING notifications.*
             '''
 
             async with self.db:
-                results = await self.db.query(query, [NotificationStatus.PENDING.value, now], schema=self.schema)
+                results = await self.db.query(
+                    query,
+                    [
+                        NotificationStatus.PENDING.value,
+                        now,
+                        NotificationStatus.SENDING.value,
+                    ],
+                    schema=self.schema,
+                )
 
             notifications = []
             for data in results:
