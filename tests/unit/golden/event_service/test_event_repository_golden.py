@@ -194,6 +194,27 @@ class TestQueryErrorHandling:
     """Test query error handling"""
 
     @pytest.mark.asyncio
+    async def test_get_unprocessed_events_claims_rows_before_returning(
+        self,
+        event_repository,
+        mock_db_client,
+        sample_db_row,
+    ):
+        """Test get_unprocessed_events atomically claims rows for processing"""
+        claimed_row = {**sample_db_row, "status": EventStatus.PROCESSING.value}
+        mock_db_client.query.return_value = [claimed_row]
+
+        events = await event_repository.get_unprocessed_events(limit=25)
+
+        query, params = mock_db_client.query.await_args.args[:2]
+        assert "FOR UPDATE SKIP LOCKED" in query
+        assert "RETURNING events.*" in query
+        assert params == [EventStatus.PENDING.value, EventStatus.PROCESSING.value]
+        assert len(events) == 1
+        assert events[0].event_id == claimed_row["event_id"]
+        assert events[0].status == EventStatus.PROCESSING
+
+    @pytest.mark.asyncio
     async def test_get_event_returns_none_on_exception(self, event_repository, mock_db_client):
         """Test get_event returns None on database error"""
         mock_db_client.query_row.side_effect = Exception("Database error")
