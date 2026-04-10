@@ -282,13 +282,10 @@ async def publish_billing_error(
 
         # 创建事件对象 - 使用 mode='json' 确保 datetime 被正确序列化
         event = Event(
-            event_type="billing.record.created",  # 临时使用现有类型
+            event_type="billing.error",
             source="billing_service",
             data=error_data.model_dump(mode='json'),
         )
-
-        # 修改为自定义类型
-        event.type = "billing.error"
 
         # 发布事件
         result = await event_bus.publish_event(event)
@@ -347,13 +344,10 @@ async def publish_usage_recorded(
         }
 
         event = Event(
-            event_type="billing.record.created",
+            event_type="billing.usage.recorded",
             source="billing_service",
             data=event_data,
         )
-
-        # Custom type
-        event.type = "billing.usage.recorded"
 
         result = await event_bus.publish_event(event)
 

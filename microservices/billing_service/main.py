@@ -5,6 +5,7 @@ Billing Microservice API
 """
 
 import asyncio
+import inspect
 import logging
 import os
 import sys
@@ -106,7 +107,7 @@ async def lifespan(app: FastAPI):
                 handler_map = get_event_handlers(billing_service, event_bus)
                 consumer_suffix = os.getenv("BILLING_CONSUMER_SUFFIX", "").strip()
                 delivery_policy = os.getenv(
-                    "BILLING_CONSUMER_DELIVERY_POLICY", "all"
+                    "BILLING_CONSUMER_DELIVERY_POLICY", "new"
                 ).strip().lower() or "all"
 
                 # Subscribe to events
@@ -234,6 +235,8 @@ async def health_check():
         if repository and repository.db:
             # Use PostgresClient health check method
             is_healthy = repository.db.health_check()
+            if inspect.isawaitable(is_healthy):
+                is_healthy = await is_healthy
             dependencies["database"] = "healthy" if is_healthy else "unhealthy"
         else:
             dependencies["database"] = "unhealthy"
@@ -277,6 +280,7 @@ async def get_service_info():
             "wallet_deduction",
             "payment_charge",
             "credit_consumption",
+            "subscription_credit",
             "subscription_included",
         ],
     )
@@ -396,6 +400,11 @@ async def get_user_quota_status(
 @app.get("/api/v1/billing/records", response_model=BillingRecordsListResponse)
 async def list_billing_records(
     user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    billing_account_type: Optional[str] = None,
+    billing_account_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    product_id: Optional[str] = None,
     status: Optional[str] = None,
     service_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
@@ -419,6 +428,11 @@ async def list_billing_records(
 
         records, total = await service.repository.list_billing_records(
             user_id=user_id,
+            organization_id=organization_id,
+            billing_account_type=billing_account_type,
+            billing_account_id=billing_account_id,
+            agent_id=agent_id,
+            product_id=product_id,
             status=billing_status,
             service_type=billing_service_type,
             start_date=start_date,
@@ -444,6 +458,11 @@ async def list_billing_records(
 @app.get("/api/v1/billing/records/user/{user_id}")
 async def get_user_billing_records(
     user_id: str,
+    organization_id: Optional[str] = None,
+    billing_account_type: Optional[str] = None,
+    billing_account_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    product_id: Optional[str] = None,
     status: Optional[str] = None,
     service_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
@@ -461,6 +480,11 @@ async def get_user_billing_records(
 
         records = await service.repository.get_user_billing_records(
             user_id=user_id,
+            organization_id=organization_id,
+            billing_account_type=billing_account_type,
+            billing_account_id=billing_account_id,
+            agent_id=agent_id,
+            product_id=product_id,
             status=billing_status,
             service_type=billing_service_type,
             start_date=start_date,
@@ -508,8 +532,12 @@ async def get_billing_record(
 async def get_usage_aggregations(
     user_id: Optional[str] = None,
     organization_id: Optional[str] = None,
+    billing_account_type: Optional[str] = None,
+    billing_account_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
     subscription_id: Optional[str] = None,
     service_type: Optional[str] = None,
+    product_id: Optional[str] = None,
     period_start: Optional[datetime] = None,
     period_end: Optional[datetime] = None,
     period_type: Optional[str] = None,
@@ -525,8 +553,12 @@ async def get_usage_aggregations(
         aggregations = await service.repository.get_usage_aggregations(
             user_id=user_id,
             organization_id=organization_id,
+            billing_account_type=billing_account_type,
+            billing_account_id=billing_account_id,
+            agent_id=agent_id,
             subscription_id=subscription_id,
             service_type=billing_service_type,
+            product_id=product_id,
             period_start=period_start,
             period_end=period_end,
             period_type=period_type,
@@ -539,8 +571,12 @@ async def get_usage_aggregations(
             "filters": {
                 "user_id": user_id,
                 "organization_id": organization_id,
+                "billing_account_type": billing_account_type,
+                "billing_account_id": billing_account_id,
+                "agent_id": agent_id,
                 "subscription_id": subscription_id,
                 "service_type": service_type,
+                "product_id": product_id,
                 "period_start": period_start,
                 "period_end": period_end,
                 "period_type": period_type,
@@ -622,6 +658,11 @@ async def _audit_admin_action(
 async def admin_list_billing_records(
     request: Request,
     user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    billing_account_type: Optional[str] = None,
+    billing_account_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    product_id: Optional[str] = None,
     status: Optional[str] = None,
     service_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
@@ -641,6 +682,11 @@ async def admin_list_billing_records(
 
         records, total = await service.repository.list_billing_records(
             user_id=user_id,
+            organization_id=organization_id,
+            billing_account_type=billing_account_type,
+            billing_account_id=billing_account_id,
+            agent_id=agent_id,
+            product_id=product_id,
             status=billing_status,
             service_type=billing_service_type,
             start_date=start_date,

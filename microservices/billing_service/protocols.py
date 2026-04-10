@@ -52,6 +52,8 @@ class BillingRepositoryProtocol(Protocol):
         failure_reason: Optional[str] = None,
         wallet_transaction_id: Optional[str] = None,
         payment_transaction_id: Optional[str] = None,
+        subscription_id: Optional[str] = None,
+        billing_method: Optional[Any] = None,
     ) -> Optional[BillingRecord]:
         """Update billing record status"""
         ...
@@ -59,6 +61,11 @@ class BillingRepositoryProtocol(Protocol):
     async def get_user_billing_records(
         self,
         user_id: str,
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        product_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         status: Optional[BillingStatus] = None,
@@ -74,13 +81,44 @@ class BillingRepositoryProtocol(Protocol):
         """Create a billing event"""
         ...
 
+    async def claim_event_processing(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        processor_id: str,
+        stale_after_seconds: int = 300,
+    ) -> bool:
+        """Claim a billable event for processing if it is not already completed/in-flight."""
+        ...
+
+    async def mark_event_processing_completed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+    ) -> None:
+        """Mark a previously claimed event as completed."""
+        ...
+
+    async def mark_event_processing_failed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        error_message: str,
+    ) -> None:
+        """Mark a previously claimed event as failed so it can be retried later."""
+        ...
+
     # Usage Aggregations
     async def get_usage_aggregations(
         self,
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         subscription_id: Optional[str] = None,
         service_type: Optional[ServiceType] = None,
+        product_id: Optional[str] = None,
         period_start: Optional[datetime] = None,
         period_end: Optional[datetime] = None,
         period_type: Optional[str] = None,
@@ -101,6 +139,11 @@ class BillingRepositoryProtocol(Protocol):
     async def list_billing_records(
         self,
         user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        product_id: Optional[str] = None,
         status: Optional[BillingStatus] = None,
         service_type: Optional[ServiceType] = None,
         start_date: Optional[datetime] = None,
@@ -194,7 +237,12 @@ class SubscriptionClientProtocol(Protocol):
     """Protocol for subscription service client"""
 
     async def get_credit_balance(
-        self, user_id: str, organization_id: Optional[str] = None
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Get user's subscription credit balance"""
         ...
@@ -207,6 +255,9 @@ class SubscriptionClientProtocol(Protocol):
         description: str,
         usage_record_id: str,
         organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Consume subscription credits"""
         ...

@@ -29,6 +29,7 @@ class BillingMethod(str, Enum):
     WALLET_DEDUCTION = "wallet_deduction"  # 钱包扣费
     PAYMENT_CHARGE = "payment_charge"      # 支付扣费
     CREDIT_CONSUMPTION = "credit_consumption"  # 积分消费
+    SUBSCRIPTION_CREDIT = "subscription_credit"  # 订阅信用额度扣费
     SUBSCRIPTION_INCLUDED = "subscription_included"  # 订阅包含
 
 
@@ -47,7 +48,15 @@ class ServiceType(str, Enum):
     MODEL_INFERENCE = "model_inference"    # 模型推理
     MCP_SERVICE = "mcp_service"           # MCP服务
     AGENT_EXECUTION = "agent_execution"    # Agent执行
+    AGENT_RUNTIME = "agent_runtime"       # Dedicated/shared agent runtime
     STORAGE_MINIO = "storage_minio"       # Minio存储
+    DATA_SERVICE = "data_service"         # Data product query service
+    DATA_PIPELINE = "data_pipeline"       # Data pipeline execution
+    WEB_SERVICE = "web_service"           # Web automation/search service
+    PYTHON_REPL = "python_repl"           # Python execution service
+    COMPUTE_GENERAL = "compute_general"   # Shared compute infrastructure
+    VECTOR_STORAGE = "vector_storage"     # Vector storage and retrieval
+    NATS_MESSAGING = "nats_messaging"     # Messaging infrastructure
     API_GATEWAY = "api_gateway"           # API网关
     NOTIFICATION = "notification"          # 通知服务
     OTHER = "other"                       # 其他
@@ -58,6 +67,12 @@ class Currency(str, Enum):
     USD = "USD"
     CNY = "CNY"
     CREDIT = "CREDIT"                     # 平台积分
+
+
+class BillingAccountType(str, Enum):
+    """Canonical owner of a billable event."""
+    USER = "user"
+    ORGANIZATION = "organization"
 
 
 # ====================
@@ -71,7 +86,11 @@ class BillingRecord(BaseModel):
     
     # 关联信息
     user_id: str = Field(..., description="用户ID")
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
+    agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
     usage_record_id: str = Field(..., description="使用记录ID")
     
@@ -119,7 +138,11 @@ class BillingEvent(BaseModel):
     
     # 关联实体
     user_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
+    agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
     billing_record_id: Optional[str] = None
 
@@ -145,7 +168,11 @@ class UsageAggregation(BaseModel):
     
     # 聚合维度
     user_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
+    agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
     service_type: Optional[ServiceType] = None
     product_id: Optional[str] = None
@@ -215,14 +242,25 @@ class BillingQuota(BaseModel):
 class RecordUsageRequest(BaseModel):
     """记录使用量请求"""
     user_id: str
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
+    agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
     
     # 产品使用信息
     product_id: str
     service_type: ServiceType
     usage_amount: Decimal = Field(..., ge=0)
-    
+    unit_type: Optional[str] = None
+    meter_type: Optional[str] = None
+    operation_type: Optional[str] = None
+    source_service: Optional[str] = None
+    resource_name: Optional[str] = None
+    billing_surface: Optional[str] = None
+    cost_components: Optional[List[Dict[str, Any]]] = None
+
     # 会话信息
     session_id: Optional[str] = None
     request_id: Optional[str] = None
@@ -235,10 +273,15 @@ class RecordUsageRequest(BaseModel):
 class BillingCalculationRequest(BaseModel):
     """计费计算请求"""
     user_id: str
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
+    agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
     product_id: str
     usage_amount: Decimal = Field(..., ge=0)
+    unit_type: Optional[str] = None
 
 
 class BillingCalculationResponse(BaseModel):
@@ -248,7 +291,11 @@ class BillingCalculationResponse(BaseModel):
 
     # 用户/组织标识
     user_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
+    agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
 
     # 计算结果
@@ -273,10 +320,18 @@ class BillingCalculationResponse(BaseModel):
 
 
 class ProcessBillingRequest(BaseModel):
-    """处理计费请求"""
+    """Billing processing request."""
     usage_record_id: str
     billing_method: BillingMethod
-    force_process: bool = False  # 强制处理，即使余额不足
+    service_type: Optional[ServiceType] = None
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    subscription_id: Optional[str] = None
+    billing_metadata: Optional[Dict[str, Any]] = None
+    force_process: bool = False  # Force processing even if the balance is insufficient
 
 
 class ProcessBillingResponse(BaseModel):
@@ -302,6 +357,7 @@ class UsageStatsRequest(BaseModel):
     """使用量统计请求"""
     user_id: Optional[str] = None
     organization_id: Optional[str] = None
+    agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
     service_type: Optional[ServiceType] = None
     product_id: Optional[str] = None
@@ -336,6 +392,9 @@ class UsageStatsResponse(BaseModel):
 class QuotaCheckRequest(BaseModel):
     """配额检查请求"""
     user_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
     subscription_id: Optional[str] = None
     service_type: ServiceType

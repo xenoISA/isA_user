@@ -11,6 +11,7 @@ from .models import (
     UserSubscription,
     SubscriptionHistory,
     SubscriptionStatus,
+    CreditReservation,
 )
 
 
@@ -73,6 +74,9 @@ class SubscriptionRepositoryProtocol(Protocol):
         self,
         user_id: str,
         organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
         active_only: bool = True,
     ) -> Optional[UserSubscription]:
         """Get user's subscription"""
@@ -119,6 +123,43 @@ class SubscriptionRepositoryProtocol(Protocol):
         self, history: SubscriptionHistory
     ) -> Optional[SubscriptionHistory]:
         """Add subscription history entry"""
+        ...
+
+    async def reserve_credits(
+        self,
+        user_id: str,
+        estimated_credits: int,
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
+        model: Optional[str] = None,
+        request_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[CreditReservation]:
+        """Reserve credits idempotently for a request."""
+        ...
+
+    async def get_credit_reservation(
+        self,
+        reservation_id: str,
+    ) -> Optional[CreditReservation]:
+        """Get a previously created credit reservation."""
+        ...
+
+    async def reconcile_credit_reservation(
+        self,
+        reservation_id: str,
+        actual_credits: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Finalize a reservation against actual credits used."""
+        ...
+
+    async def release_credit_reservation(
+        self,
+        reservation_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Release a pending reservation and refund held credits."""
         ...
 
     async def get_subscription_history(

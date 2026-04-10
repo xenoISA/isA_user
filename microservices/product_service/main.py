@@ -5,6 +5,7 @@ Product Microservice API
 """
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Query, Body
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 import logging
@@ -28,6 +29,7 @@ from .product_service import ProductService
 from .models import (
     Product, ProductCategory, PricingModel, ServicePlan, UserSubscription,
     ProductUsageRecord, ProductType, PricingType, SubscriptionStatus, BillingCycle,
+    CompatibilityPricingCalculationRequest, CompatibilityPricingCalculationResponse,
     AdminCreateProductRequest, AdminUpdateProductRequest,
     AdminCreatePricingRequest, AdminUpdatePricingRequest,
 )
@@ -214,6 +216,63 @@ async def get_product_service() -> ProductService:
     return product_service
 
 
+def _normalize_subscription_payload(subscription: Any) -> Any:
+    """Normalize subscription_service payloads to the local UserSubscription schema."""
+    if not isinstance(subscription, dict):
+        return subscription
+
+    payload = subscription.get("subscription")
+    if not isinstance(payload, dict):
+        payload = subscription
+
+    if "plan_id" in payload and "plan_tier" in payload:
+        return payload
+
+    usage_this_period = payload.get("usage_this_period")
+    if not isinstance(usage_this_period, dict):
+        usage_this_period = {}
+        if payload.get("credits_used") is not None:
+            usage_this_period["credits_used"] = payload.get("credits_used")
+
+    quota_limits = payload.get("quota_limits")
+    if not isinstance(quota_limits, dict):
+        quota_limits = {
+            "credits_allocated": payload.get("credits_allocated"),
+            "credits_remaining": payload.get("credits_remaining"),
+            "credits_used": payload.get("credits_used"),
+            "seats_purchased": payload.get("seats_purchased"),
+            "seats_used": payload.get("seats_used"),
+        }
+        quota_limits = {key: value for key, value in quota_limits.items() if value is not None}
+
+    normalized = {
+        "id": payload.get("id"),
+        "subscription_id": payload.get("subscription_id"),
+        "user_id": payload.get("user_id"),
+        "organization_id": payload.get("organization_id"),
+        "plan_id": payload.get("plan_id") or payload.get("tier_id") or payload.get("tier_code"),
+        "plan_tier": payload.get("plan_tier") or payload.get("tier_code"),
+        "status": payload.get("status"),
+        "billing_cycle": payload.get("billing_cycle"),
+        "current_period_start": payload.get("current_period_start"),
+        "current_period_end": payload.get("current_period_end"),
+        "trial_start": payload.get("trial_start"),
+        "trial_end": payload.get("trial_end"),
+        "cancel_at_period_end": payload.get("cancel_at_period_end", False),
+        "canceled_at": payload.get("canceled_at"),
+        "cancellation_reason": payload.get("cancellation_reason"),
+        "next_billing_date": payload.get("next_billing_date"),
+        "payment_method_id": payload.get("payment_method_id"),
+        "external_subscription_id": payload.get("external_subscription_id"),
+        "usage_this_period": usage_this_period,
+        "quota_limits": quota_limits,
+        "metadata": payload.get("metadata") or {},
+        "created_at": payload.get("created_at"),
+        "updated_at": payload.get("updated_at"),
+    }
+    return {key: value for key, value in normalized.items() if value is not None}
+
+
 # ====================
 # 健康检查和服务信息
 # ====================
@@ -354,6 +413,57 @@ async def get_product_pricing(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+@app.get("/api/v1/costs/lookup")
+async def lookup_cost_definition(
+    service_type: str = Query(..., description="Billing service type"),
+    provider: Optional[str] = Query(None, description="Provider name"),
+    model_name: Optional[str] = Query(None, description="Model identifier"),
+    operation_type: Optional[str] = Query(None, description="Operation identifier"),
+    tool_name: Optional[str] = Query(None, description="Tool identifier"),
+    service: ProductService = Depends(get_product_service),
+):
+    """Compatibility endpoint for isa_model pricing lookups."""
+    try:
+        result = await service.lookup_cost(
+            service_type=service_type,
+            provider=provider,
+            model_name=model_name,
+            operation_type=operation_type,
+            tool_name=tool_name,
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail=result.get("message", "Cost definition not found"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error looking up cost definition: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/api/v1/pricing/calculate", response_model=CompatibilityPricingCalculationResponse)
+async def calculate_pricing(
+    request: CompatibilityPricingCalculationRequest,
+    service: ProductService = Depends(get_product_service),
+):
+    """Compatibility endpoint for isa_model price calculation."""
+    try:
+        result = await service.calculate_price(
+            product_id=request.product_id,
+            quantity=request.quantity,
+            unit_type=request.unit_type,
+            tier_code=request.tier_code,
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail=result.get("message", "Pricing not found"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error calculating pricing for {request.product_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @app.get("/api/v1/product/products/{product_id}/availability")
 async def check_product_availability(
     product_id: str,
@@ -387,10 +497,16 @@ async def get_user_subscriptions(
     """获取用户订阅列表"""
     try:
         status_enum = SubscriptionStatus(status) if status else None
-        return await service.get_user_subscriptions(
+        subscriptions = await service.get_user_subscriptions(
             user_id=user_id,
             status=status_enum
         )
+        if isinstance(subscriptions, dict):
+            subscriptions = subscriptions.get("subscriptions") or subscriptions.get("items") or []
+        return [
+            UserSubscription.model_validate(_normalize_subscription_payload(subscription))
+            for subscription in (subscriptions or [])
+        ]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid status: {str(e)}")
     except Exception as e:
@@ -405,10 +521,12 @@ async def get_subscription(
 ):
     """获取订阅详情"""
     try:
-        subscription = await service.get_subscription(subscription_id)
+        subscription = _normalize_subscription_payload(
+            await service.get_subscription(subscription_id)
+        )
         if not subscription:
             raise HTTPException(status_code=404, detail="Subscription not found")
-        return subscription
+        return UserSubscription.model_validate(subscription)
     except HTTPException:
         raise
     except Exception as e:
@@ -869,9 +987,9 @@ async def admin_catalog_alignment(
 async def global_exception_handler(request: Request, exc: Exception):
     """全局异常处理"""
     logger.error(f"Unhandled exception in {request.url}: {exc}", exc_info=True)
-    return HTTPException(
+    return JSONResponse(
         status_code=500,
-        detail="Internal server error occurred"
+        content={"detail": "Internal server error occurred"},
     )
 
 

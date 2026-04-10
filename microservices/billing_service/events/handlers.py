@@ -12,6 +12,7 @@ Both Event and EventEnvelope have the same interface:
 """
 
 import logging
+import os
 from datetime import datetime
 from decimal import Decimal
 from typing import Set, Union
@@ -58,6 +59,69 @@ def mark_event_processed(event_id: str):
         _processed_event_ids = set(list(_processed_event_ids)[5000:])
 
 
+def _get_event_repository(billing_service):
+    """Return the repository when the active billing service exposes one."""
+    repository = getattr(billing_service, "repository", None)
+    if repository is None:
+        return None
+    required_methods = (
+        "claim_event_processing",
+        "mark_event_processing_completed",
+        "mark_event_processing_failed",
+    )
+    if all(hasattr(repository, method_name) for method_name in required_methods):
+        return repository
+    return None
+
+
+async def _claim_usage_event_processing(
+    billing_service,
+    claim_key: str,
+    source_event_id: str,
+) -> bool:
+    """Claim the event in durable storage when available, otherwise use local memory."""
+    repository = _get_event_repository(billing_service)
+    if repository is not None:
+        processor_id = f"billing_service:{os.getenv('HOSTNAME') or 'local'}:{os.getpid()}"
+        return await repository.claim_event_processing(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+            processor_id=processor_id,
+        )
+
+    if is_event_processed(claim_key):
+        return False
+    return True
+
+
+async def _mark_usage_event_completed(
+    billing_service,
+    claim_key: str,
+    source_event_id: str,
+) -> None:
+    repository = _get_event_repository(billing_service)
+    if repository is not None:
+        await repository.mark_event_processing_completed(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+        )
+
+
+async def _mark_usage_event_failed(
+    billing_service,
+    claim_key: str,
+    source_event_id: str,
+    error_message: str,
+) -> None:
+    repository = _get_event_repository(billing_service)
+    if repository is not None:
+        await repository.mark_event_processing_failed(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+            error_message=error_message,
+        )
+
+
 # ============================================================================
 # Event Handlers - New Architecture (usage.recorded)
 # ============================================================================
@@ -65,31 +129,44 @@ def mark_event_processed(event_id: str):
 
 async def handle_usage_recorded(event: Event, billing_service, event_bus):
     """
-    处理 billing.usage.recorded 事件
-
-    由其他服务（isA_Model, storage_service等）发布
-    billing_service 处理此事件进行计费计算
+    Handle a `billing.usage.recorded.*` event from another service.
 
     Args:
-        event: 接收到的事件对象
-        billing_service: BillingService 实例
-        event_bus: 事件总线实例
-
-    工作流程:
-        1. 解析使用事件数据
-        2. 调用 product_service 获取定价
-        3. 计算成本和 token 等价值
-        4. 创建计费记录
-        5. 发布 billing.calculated 事件
+        event: The incoming event envelope.
+        billing_service: Billing service instance.
+        event_bus: Event bus instance.
     """
+    dedup_key = event.id
+    completed = False
     try:
-        # Check idempotency
+        # Check idempotency by event id first
         if is_event_processed(event.id):
             logger.debug(f"Event {event.id} already processed, skipping")
             return
 
-        # 解析事件数据
+        # Parse event payload
         usage_data = parse_usage_event(event.data)
+        dedup_key = usage_data.idempotency_key or event.id
+        if dedup_key != event.id and is_event_processed(dedup_key):
+            logger.debug("Usage event %s already processed via key %s", event.id, dedup_key)
+            mark_event_processed(event.id)
+            return
+
+        claimed = await _claim_usage_event_processing(
+            billing_service=billing_service,
+            claim_key=dedup_key,
+            source_event_id=event.id,
+        )
+        if not claimed:
+            logger.debug(
+                "Usage event %s already has an active/completed durable claim for key %s",
+                event.id,
+                dedup_key,
+            )
+            mark_event_processed(event.id)
+            if dedup_key != event.id:
+                mark_event_processed(dedup_key)
+            return
 
         logger.info(
             f"Processing usage event for user {usage_data.user_id}, "
@@ -97,33 +174,93 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
             f"usage {usage_data.usage_amount} {usage_data.unit_type}"
         )
 
-        # 从 usage_details 中提取 service_type，默认为 MODEL_INFERENCE
-        service_type_str = usage_data.usage_details.get("service_type", "model_inference")
+        # Prefer the first-class service_type field and fall back to usage_details
+        service_type_str = (
+            usage_data.service_type
+            or usage_data.usage_details.get("service_type")
+            or "model_inference"
+        )
         try:
             service_type = ServiceType(service_type_str)
         except ValueError:
-            service_type = ServiceType.MODEL_INFERENCE
+            service_type = ServiceType.OTHER
 
-        # 构建 RecordUsageRequest
+        usage_details = dict(usage_data.usage_details or {})
+        if usage_data.service_type:
+            usage_details.setdefault("service_type", usage_data.service_type)
+        if usage_data.operation_type:
+            usage_details.setdefault("operation_type", usage_data.operation_type)
+        if usage_data.source_service:
+            usage_details.setdefault("source_service", usage_data.source_service)
+        if usage_data.resource_name:
+            usage_details.setdefault("resource_name", usage_data.resource_name)
+        if usage_data.meter_type:
+            usage_details.setdefault("meter_type", usage_data.meter_type)
+        usage_details.setdefault("billing_surface", usage_data.billing_surface.value)
+        if usage_data.cost_components:
+            usage_details.setdefault(
+                "cost_components",
+                [
+                    component.model_dump(mode="json", exclude_none=True)
+                    for component in usage_data.cost_components
+                ],
+            )
+        if service_type == ServiceType.OTHER and service_type_str:
+            usage_details.setdefault("original_service_type", service_type_str)
+
+        # Build the canonical billing request
         request = RecordUsageRequest(
             user_id=usage_data.user_id,
+            actor_user_id=usage_data.actor_user_id,
+            billing_account_type=usage_data.billing_account_type,
+            billing_account_id=usage_data.billing_account_id,
             organization_id=usage_data.organization_id,
+            agent_id=usage_data.agent_id,
             subscription_id=usage_data.subscription_id,
             product_id=usage_data.product_id,
             service_type=service_type,
             usage_amount=usage_data.usage_amount,
+            unit_type=usage_data.unit_type.value,
+            meter_type=usage_data.meter_type,
+            operation_type=usage_data.operation_type,
+            source_service=usage_data.source_service,
+            resource_name=usage_data.resource_name,
+            billing_surface=usage_data.billing_surface.value,
+            cost_components=[
+                component.model_dump(mode="json", exclude_none=True)
+                for component in usage_data.cost_components
+            ] if usage_data.cost_components else None,
             session_id=usage_data.session_id,
-            usage_details=usage_data.usage_details,
+            request_id=usage_data.request_id,
+            usage_details=usage_details,
             usage_timestamp=usage_data.timestamp,
         )
 
-        # 调用 billing_service 的业务逻辑处理
-        billing_result = await billing_service.record_usage_and_bill(request)
+        if usage_data.credit_consumption_handled:
+            logger.info(
+                "Usage event %s was already billed upstream; recording only",
+                event.id,
+            )
+            billing_result = await billing_service.record_usage_with_external_billing(
+                request,
+                credits_used=usage_data.credits_used,
+                cost_usd=usage_data.cost_usd,
+                idempotency_key=usage_data.idempotency_key,
+                source_event_id=event.id,
+            )
+        else:
+            billing_result = await billing_service.record_usage_and_bill(request)
 
         if not billing_result or not billing_result.success:
             error_msg = billing_result.message if billing_result else "No response from billing service"
             logger.error(f"Failed to process usage for user {usage_data.user_id}: {error_msg}")
-            # 发布错误事件
+            await _mark_usage_event_failed(
+                billing_service=billing_service,
+                claim_key=dedup_key,
+                source_event_id=event.id,
+                error_message=error_msg,
+            )
+            # Publish an error event for downstream visibility
             await publish_billing_error(
                 event_bus=event_bus,
                 user_id=usage_data.user_id,
@@ -134,26 +271,42 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
             )
             return
 
-        # Mark as processed
-        mark_event_processed(event.id)
-
-        # 发布计费计算完成事件
-        # ProcessBillingResponse 包含: billing_record_id, amount_charged, billing_method_used 等
-        await publish_billing_calculated(
-            event_bus=event_bus,
-            user_id=usage_data.user_id,
-            billing_record_id=billing_result.billing_record_id or str(event.id),
-            product_id=usage_data.product_id,
-            actual_usage=usage_data.usage_amount,
-            unit_type=usage_data.unit_type,
-            token_equivalent=usage_data.usage_amount,  # 简化：直接使用 usage_amount
-            cost_usd=billing_result.amount_charged or Decimal("0"),
-            unit_price=Decimal("0"),  # 简化：从 product_service 获取的价格
-            token_conversion_rate=Decimal("1"),
-            is_free_tier=False,
-            is_included_in_subscription=False,
-            usage_event_id=event.id,
+        await _mark_usage_event_completed(
+            billing_service=billing_service,
+            claim_key=dedup_key,
+            source_event_id=event.id,
         )
+        completed = True
+
+        # Mark both the transport id and publisher idempotency key
+        mark_event_processed(event.id)
+        if dedup_key != event.id:
+            mark_event_processed(dedup_key)
+
+        # Publish the calculated billing event for downstream consumers
+        try:
+            await publish_billing_calculated(
+                event_bus=event_bus,
+                user_id=usage_data.user_id,
+                billing_record_id=billing_result.billing_record_id or str(event.id),
+                product_id=usage_data.product_id,
+                actual_usage=usage_data.usage_amount,
+                unit_type=usage_data.unit_type,
+                token_equivalent=usage_data.usage_amount,  # Simplified: use usage_amount directly
+                cost_usd=billing_result.amount_charged or Decimal("0"),
+                unit_price=Decimal("0"),  # Simplified placeholder until product pricing is attached
+                token_conversion_rate=Decimal("1"),
+                is_free_tier=False,
+                is_included_in_subscription=False,
+                usage_event_id=event.id,
+            )
+        except Exception as publish_error:
+            logger.error(
+                "Billing succeeded for usage event %s but publishing billing.calculated failed: %s",
+                event.id,
+                publish_error,
+                exc_info=True,
+            )
 
         logger.info(
             f"✅ Successfully processed usage event {event.id}, "
@@ -162,9 +315,24 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
         )
 
     except Exception as e:
+        if not completed:
+            try:
+                await _mark_usage_event_failed(
+                    billing_service=billing_service,
+                    claim_key=dedup_key,
+                    source_event_id=event.id,
+                    error_message=str(e),
+                )
+            except Exception as claim_error:
+                logger.error(
+                    "Failed to mark usage event %s as failed: %s",
+                    event.id,
+                    claim_error,
+                    exc_info=True,
+                )
         logger.error(f"❌ Error handling usage_recorded event: {e}", exc_info=True)
 
-        # 发布错误事件
+        # Publish an error event if the handler itself fails
         try:
             await publish_billing_error(
                 event_bus=event_bus,
@@ -422,21 +590,36 @@ def get_event_handlers(billing_service, event_bus):
     """
     return {
         # New architecture
-        "billing.usage.recorded.*": lambda event: handle_usage_recorded(
+        "billing.usage.recorded.>": lambda event: handle_usage_recorded(
+            event, billing_service, event_bus
+        ),
+        "*.billing.usage.recorded.>": lambda event: handle_usage_recorded(
             event, billing_service, event_bus
         ),
         # Legacy support
         "session.tokens_used": lambda event: handle_session_tokens_used(
             event, billing_service, event_bus
         ),
+        "*.session.tokens_used": lambda event: handle_session_tokens_used(
+            event, billing_service, event_bus
+        ),
         "order.completed": lambda event: handle_order_completed(
+            event, billing_service, event_bus
+        ),
+        "*.order.completed": lambda event: handle_order_completed(
             event, billing_service, event_bus
         ),
         "session.ended": lambda event: handle_session_ended(
             event, billing_service, event_bus
         ),
+        "*.session.ended": lambda event: handle_session_ended(
+            event, billing_service, event_bus
+        ),
         # User lifecycle
         "user.deleted": lambda event: handle_user_deleted(
+            event, billing_service, event_bus
+        ),
+        "*.user.deleted": lambda event: handle_user_deleted(
             event, billing_service, event_bus
         ),
     }

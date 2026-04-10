@@ -8,6 +8,7 @@
 import asyncio
 import os
 import sys
+import uuid
 from abc import ABC
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -50,11 +51,41 @@ class BaseIntegrationTest(ABC):
             from core.nats_client import get_event_bus
             self.event_bus = await get_event_bus("integration_test")
             self.event_collector = EventCollector()
-            await self.event_bus.subscribe_to_events(
-                pattern=">",
-                handler=self.event_collector.collect
-            )
-            await asyncio.sleep(0.5)
+            test_id = uuid.uuid4().hex[:8]
+            event_patterns = [
+                "account_service.user.*",
+                "device_service.device.*",
+                "wallet_service.wallet.*",
+                "billing_service.billing.*",
+                "session_service.session.*",
+                "order_service.order.*",
+                "organization_service.organization.*",
+                "subscription_service.subscription.*",
+                "payment_service.payment.*",
+                "notification_service.notification.*",
+                "storage_service.file.*",
+                "album_service.album.*",
+                "task_service.task.*",
+                "memory_service.memory.*",
+                "invitation_service.invitation.*",
+            ]
+
+            for pattern in event_patterns:
+                try:
+                    prefix = pattern.split(".")[0]
+                    durable_name = f"{prefix}-base-test-{test_id}"
+                    await self.event_bus.subscribe_to_events(
+                        pattern=pattern,
+                        handler=self.event_collector.collect,
+                        durable=durable_name,
+                        delivery_policy="new",
+                    )
+                except Exception:
+                    # Some streams may not exist in a given local stack.
+                    pass
+
+            self.event_collector.set_subscribe_time()
+            await asyncio.sleep(3.0)
             self.log("Connected to NATS event bus")
         except Exception as e:
             self.log(f"Warning: Could not connect to NATS: {e}")

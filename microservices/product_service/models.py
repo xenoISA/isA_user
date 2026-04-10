@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Optional, Dict, Any, List
 from datetime import datetime, date
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ====================
@@ -22,6 +22,7 @@ class ProductType(str, Enum):
     STORAGE = "storage"                  # 存储服务
     STORAGE_MINIO = "storage_minio"      # MinIO对象存储
     AGENT = "agent"                      # AI代理
+    AGENT_RUNTIME = "agent_runtime"      # Agent runtime hosting
     AGENT_EXECUTION = "agent_execution"  # AI代理执行
     MCP_TOOL = "mcp_tool"               # MCP工具
     MCP_SERVICE = "mcp_service"          # MCP服务
@@ -71,16 +72,25 @@ class PricingType(str, Enum):
 class UnitType(str, Enum):
     """计费单位类型"""
     TOKEN = "token"                      # Token
+    CHARACTER = "character"              # Character count
+    SECOND = "second"                    # Seconds
     REQUEST = "request"                  # 请求次数
+    EXECUTION = "execution"              # Execution count
+    OPERATION = "operation"              # Operation count
+    IMAGE = "image"                      # Generated image count
+    URL = "url"                          # URL count
+    BYTE = "byte"                        # Raw bytes
     MINUTE = "minute"                    # 分钟
     HOUR = "hour"                        # 小时
     DAY = "day"                          # 天
     MB = "mb"                            # 兆字节
     GB = "gb"                            # 千兆字节
+    GB_MONTH = "gb_month"                # GB-month
     USER = "user"                        # 用户数
     NOTIFICATION = "notification"        # 通知数量
     EMAIL = "email"                      # 邮件数量
     ITEM = "item"                        # 项目数量
+    UNIT = "unit"                        # Generic unit
 
 
 class PlanTier(str, Enum):
@@ -112,6 +122,66 @@ class Currency(str, Enum):
     EUR = "EUR"
     CNY = "CNY"
     CREDIT = "CREDIT"                    # 平台积分
+
+
+class BillingSurface(str, Enum):
+    """Customer-facing billing abstraction for a product."""
+    ABSTRACT_SERVICE = "abstract_service"
+    ADD_ON = "add_on"
+    INTERNAL_COMPONENT = "internal_component"
+
+
+class CostComponentType(str, Enum):
+    """Underlying cost component classes for abstract services."""
+    RUNTIME = "runtime"
+    TOKEN_COMPUTE = "token_compute"
+    STORAGE = "storage"
+    NETWORK = "network"
+    EXTERNAL_API = "external_api"
+
+
+class ProductCostComponent(BaseModel):
+    """Underlying cost component bundled into an invoiceable product."""
+    component_id: str = Field(..., description="Stable identifier for the component")
+    component_type: CostComponentType = Field(
+        ..., description="Underlying resource or external API class"
+    )
+    bundled: bool = Field(
+        default=True,
+        description="Whether the component is bundled into the product price",
+    )
+    customer_visible: bool = Field(
+        default=False,
+        description="Whether this component is intentionally exposed to customers",
+    )
+    provider: Optional[str] = Field(
+        default=None,
+        description="Provider or implementation behind the component",
+    )
+    meter_type: Optional[str] = Field(
+        default=None,
+        description="Meter used internally for the component",
+    )
+    unit_type: Optional["UnitType"] = Field(
+        default=None,
+        description="Unit used by the underlying component when known",
+    )
+    notes: Optional[str] = None
+
+
+class ProductBillingProfile(BaseModel):
+    """Typed billing profile stored inside product metadata."""
+    billing_surface: BillingSurface = BillingSurface.ABSTRACT_SERVICE
+    invoiceable: bool = True
+    primary_meter: Optional[str] = Field(
+        default=None,
+        description="Primary customer-facing meter for the product",
+    )
+    cost_components: List[ProductCostComponent] = Field(default_factory=list)
+
+    def as_metadata(self) -> Dict[str, Any]:
+        """Serialize the billing profile for storage in product metadata."""
+        return self.model_dump(mode="json", exclude_none=True)
 
 
 # ====================
@@ -186,8 +256,35 @@ class Product(BaseModel):
     service_type: Optional[str] = None
     
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    billing_profile: ProductBillingProfile = Field(
+        default_factory=ProductBillingProfile,
+        description="Typed billing profile derived from metadata",
+        exclude=True,
+    )
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _hydrate_billing_profile(cls, data: Any) -> Any:
+        """Load the billing profile from metadata when present."""
+        if not isinstance(data, dict):
+            return data
+
+        if "billing_profile" in data and data["billing_profile"] is not None:
+            return data
+
+        metadata = data.get("metadata")
+        if isinstance(metadata, dict) and "billing_profile" in metadata:
+            data = dict(data)
+            data["billing_profile"] = metadata["billing_profile"]
+        return data
+
+    def metadata_for_storage(self) -> Dict[str, Any]:
+        """Return metadata merged with the typed billing profile."""
+        metadata = dict(self.metadata or {})
+        metadata["billing_profile"] = self.billing_profile.as_metadata()
+        return metadata
 
 
 class ProductVariant(BaseModel):
@@ -368,6 +465,32 @@ class PricingCalculationResponse(BaseModel):
     plan_discount_applied: bool = False
     plan_discount_amount: Decimal = Field(default=Decimal("0"))
     
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CompatibilityPricingCalculationRequest(BaseModel):
+    """Compatibility request shape for isa_model pricing calculation."""
+    product_id: str
+    quantity: Decimal = Field(..., ge=0)
+    unit_type: Optional[str] = None
+    tier_code: Optional[str] = None
+
+
+class CompatibilityPricingCalculationResponse(BaseModel):
+    """Compatibility response shape for isa_model pricing calculation."""
+    product_id: str
+    quantity: Decimal
+    unit_type: str
+    unit_price: Decimal
+    total_price: Decimal
+    total_cost: Decimal
+    currency: str
+    pricing_found: bool = True
+    pricing_model_id: Optional[str] = None
+    tier_name: Optional[str] = None
+    tier_breakdown: List[Dict[str, Any]] = Field(default_factory=list)
+    plan_discount_applied: bool = False
+    plan_discount_amount: Decimal = Field(default=Decimal("0"))
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

@@ -29,10 +29,14 @@ from .protocols import (
 )
 from .models import (
     UserSubscription, SubscriptionHistory,
-    SubscriptionStatus, BillingCycle, SubscriptionAction, InitiatedBy,
+    BillingAccountType, SubscriptionStatus, BillingCycle, SubscriptionAction, InitiatedBy,
     CreateSubscriptionRequest, CreateSubscriptionResponse,
     UpdateSubscriptionRequest, CancelSubscriptionRequest, CancelSubscriptionResponse,
     ConsumeCreditsRequest, ConsumeCreditsResponse, CreditBalanceResponse,
+    ReserveCreditsRequest, ReserveCreditsResponse,
+    ReconcileReservationRequest, ReconcileReservationResponse,
+    ReleaseReservationRequest, ReleaseReservationResponse,
+    ReservationStatus,
     SubscriptionResponse, SubscriptionListResponse, SubscriptionHistoryResponse,
     SubscriptionStatsResponse
 )
@@ -144,6 +148,45 @@ class SubscriptionService:
         if not tier:
             raise TierNotFoundError(f"Tier '{tier_code}' not found")
         return tier
+
+    @staticmethod
+    def _resolve_billing_scope(
+        *,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
+        billing_account_type: Optional[BillingAccountType] = None,
+        billing_account_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Resolve the canonical payer while keeping legacy inputs compatible."""
+        resolved_actor_user_id = actor_user_id or user_id or billing_account_id or ""
+        resolved_type = billing_account_type
+        resolved_account_id = billing_account_id
+
+        if resolved_type is None:
+            if organization_id:
+                resolved_type = BillingAccountType.ORGANIZATION
+                resolved_account_id = organization_id
+            else:
+                resolved_type = BillingAccountType.USER
+                resolved_account_id = user_id or resolved_actor_user_id
+        elif resolved_account_id is None:
+            if resolved_type == BillingAccountType.ORGANIZATION:
+                resolved_account_id = organization_id
+            else:
+                resolved_account_id = user_id or resolved_actor_user_id
+
+        resolved_organization_id = organization_id
+        if resolved_type == BillingAccountType.ORGANIZATION:
+            resolved_organization_id = resolved_organization_id or resolved_account_id
+
+        return {
+            "user_id": user_id or resolved_actor_user_id,
+            "actor_user_id": resolved_actor_user_id,
+            "organization_id": resolved_organization_id,
+            "billing_account_type": resolved_type,
+            "billing_account_id": resolved_account_id,
+        }
 
     # ====================
     # Subscription Operations
@@ -296,12 +339,22 @@ class SubscriptionService:
     async def get_user_subscription(
         self,
         user_id: str,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[BillingAccountType] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
     ) -> SubscriptionResponse:
-        """Get active subscription for a user"""
+        """Get the active subscription for the resolved billing account."""
         subscription = await self.repository.get_user_subscription(
             user_id=user_id,
             organization_id=organization_id,
+            billing_account_type=(
+                billing_account_type.value
+                if isinstance(billing_account_type, BillingAccountType)
+                else billing_account_type
+            ),
+            billing_account_id=billing_account_id,
+            actor_user_id=actor_user_id,
             active_only=True
         )
         if not subscription:
@@ -427,10 +480,20 @@ class SubscriptionService:
     ) -> ConsumeCreditsResponse:
         """Consume credits from a user's subscription"""
         try:
-            # Get user's active subscription
-            subscription = await self.repository.get_user_subscription(
+            scope = self._resolve_billing_scope(
                 user_id=request.user_id,
                 organization_id=request.organization_id,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
+            )
+
+            subscription = await self.repository.get_user_subscription(
+                user_id=scope["user_id"],
+                organization_id=scope["organization_id"],
+                billing_account_type=scope["billing_account_type"].value,
+                billing_account_id=scope["billing_account_id"],
+                actor_user_id=scope["actor_user_id"],
                 active_only=True
             )
 
@@ -439,7 +502,10 @@ class SubscriptionService:
                     success=False,
                     message="No active subscription found",
                     credits_consumed=0,
-                    credits_remaining=0
+                    credits_remaining=0,
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    actor_user_id=scope["actor_user_id"],
                 )
 
             # Check if enough credits
@@ -449,7 +515,10 @@ class SubscriptionService:
                     message=f"Insufficient credits. Available: {subscription.credits_remaining}, Requested: {request.credits_to_consume}",
                     credits_consumed=0,
                     credits_remaining=subscription.credits_remaining,
-                    subscription_id=subscription.subscription_id
+                    subscription_id=subscription.subscription_id,
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    actor_user_id=scope["actor_user_id"],
                 )
 
             # Consume credits
@@ -464,15 +533,18 @@ class SubscriptionService:
                     message="Failed to consume credits",
                     credits_consumed=0,
                     credits_remaining=subscription.credits_remaining,
-                    subscription_id=subscription.subscription_id
+                    subscription_id=subscription.subscription_id,
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    actor_user_id=scope["actor_user_id"],
                 )
 
             # Add history entry
             await self.repository.add_history(SubscriptionHistory(
                 history_id=f"hist_{uuid.uuid4().hex[:16]}",
                 subscription_id=subscription.subscription_id,
-                user_id=request.user_id,
-                organization_id=request.organization_id,
+                user_id=scope["user_id"],
+                organization_id=scope["organization_id"],
                 action=SubscriptionAction.CREDITS_CONSUMED,
                 credits_change=-request.credits_to_consume,
                 credits_balance_after=updated.credits_remaining,
@@ -489,7 +561,10 @@ class SubscriptionService:
             if self.event_bus:
                 await self._publish_event("subscription.credits.consumed", {
                     "subscription_id": subscription.subscription_id,
-                    "user_id": request.user_id,
+                    "user_id": scope["user_id"],
+                    "actor_user_id": scope["actor_user_id"],
+                    "billing_account_type": scope["billing_account_type"].value,
+                    "billing_account_id": scope["billing_account_id"],
                     "credits_consumed": request.credits_to_consume,
                     "credits_remaining": updated.credits_remaining,
                     "service_type": request.service_type,
@@ -502,7 +577,10 @@ class SubscriptionService:
                 credits_consumed=request.credits_to_consume,
                 credits_remaining=updated.credits_remaining,
                 subscription_id=subscription.subscription_id,
-                consumed_from="subscription"
+                consumed_from="subscription",
+                billing_account_type=scope["billing_account_type"],
+                billing_account_id=scope["billing_account_id"],
+                actor_user_id=scope["actor_user_id"],
             )
 
         except Exception as e:
@@ -511,19 +589,248 @@ class SubscriptionService:
                 success=False,
                 message=str(e),
                 credits_consumed=0,
-                credits_remaining=0
+                credits_remaining=0,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
+                actor_user_id=request.actor_user_id or request.user_id,
+            )
+
+    async def reserve_credits(
+        self,
+        request: ReserveCreditsRequest,
+    ) -> ReserveCreditsResponse:
+        """Reserve credits before inference starts."""
+        try:
+            scope = self._resolve_billing_scope(
+                user_id=request.user_id,
+                organization_id=request.organization_id,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
+            )
+            subscription = await self.repository.get_user_subscription(
+                user_id=scope["user_id"],
+                organization_id=scope["organization_id"],
+                billing_account_type=scope["billing_account_type"].value,
+                billing_account_id=scope["billing_account_id"],
+                actor_user_id=scope["actor_user_id"],
+                active_only=True,
+            )
+            if not subscription:
+                return ReserveCreditsResponse(
+                    success=False,
+                    message="No active subscription found",
+                    credits_reserved=0,
+                    credits_remaining=0,
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    actor_user_id=scope["actor_user_id"],
+                )
+
+            reservation = await self.repository.reserve_credits(
+                user_id=scope["user_id"],
+                organization_id=scope["organization_id"],
+                billing_account_type=scope["billing_account_type"].value,
+                billing_account_id=scope["billing_account_id"],
+                actor_user_id=scope["actor_user_id"],
+                estimated_credits=request.estimated_credits,
+                model=request.model,
+                request_id=request.request_id,
+                metadata={"request_id": request.request_id} if request.request_id else None,
+            )
+            if not reservation:
+                return ReserveCreditsResponse(
+                    success=False,
+                    message="Insufficient credits",
+                    credits_reserved=0,
+                    credits_remaining=subscription.credits_remaining,
+                    subscription_id=subscription.subscription_id,
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    actor_user_id=scope["actor_user_id"],
+                )
+
+            if self.event_bus:
+                await self._publish_event("subscription.credits.reserved", {
+                    "reservation_id": reservation.reservation_id,
+                    "subscription_id": reservation.subscription_id,
+                    "user_id": reservation.user_id,
+                    "actor_user_id": reservation.actor_user_id,
+                    "billing_account_type": (
+                        reservation.billing_account_type.value
+                        if reservation.billing_account_type
+                        else None
+                    ),
+                    "billing_account_id": reservation.billing_account_id,
+                    "organization_id": reservation.organization_id,
+                    "estimated_credits": reservation.estimated_credits,
+                    "request_id": reservation.request_id,
+                    "model": reservation.model,
+                }, subject=reservation.subscription_id)
+
+            return ReserveCreditsResponse(
+                success=True,
+                message="Credits reserved successfully",
+                reservation_id=reservation.reservation_id,
+                credits_reserved=reservation.estimated_credits,
+                credits_remaining=reservation.credits_remaining_after_reserve or 0,
+                subscription_id=reservation.subscription_id,
+                billing_account_type=reservation.billing_account_type,
+                billing_account_id=reservation.billing_account_id,
+                actor_user_id=reservation.actor_user_id,
+            )
+
+        except Exception as e:
+            logger.error(f"Error reserving credits: {e}", exc_info=True)
+            return ReserveCreditsResponse(
+                success=False,
+                message=f"Reservation failed: {e}",
+                credits_reserved=0,
+                credits_remaining=0,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
+                actor_user_id=request.actor_user_id or request.user_id,
+            )
+
+    async def reconcile_reservation(
+        self,
+        request: ReconcileReservationRequest,
+    ) -> ReconcileReservationResponse:
+        """Reconcile a reservation with actual credits used."""
+        try:
+            result = await self.repository.reconcile_credit_reservation(
+                reservation_id=request.reservation_id,
+                actual_credits=request.actual_credits,
+            )
+            if not result:
+                return ReconcileReservationResponse(
+                    success=False,
+                    message="Reservation not found",
+                    reservation_id=request.reservation_id,
+                )
+
+            reservation = result["reservation"]
+            success = reservation.status == ReservationStatus.RECONCILED
+            message = result["message"]
+
+            if success and self.event_bus:
+                await self._publish_event("subscription.credits.reconciled", {
+                    "reservation_id": reservation.reservation_id,
+                    "subscription_id": reservation.subscription_id,
+                    "user_id": reservation.user_id,
+                    "actor_user_id": reservation.actor_user_id,
+                    "billing_account_type": (
+                        reservation.billing_account_type.value
+                        if reservation.billing_account_type
+                        else None
+                    ),
+                    "billing_account_id": reservation.billing_account_id,
+                    "organization_id": reservation.organization_id,
+                    "actual_credits": reservation.actual_credits,
+                    "credits_refunded": reservation.credits_refunded,
+                    "extra_credits_consumed": reservation.extra_credits_consumed,
+                }, subject=reservation.subscription_id)
+
+            return ReconcileReservationResponse(
+                success=success,
+                message=message,
+                reservation_id=reservation.reservation_id,
+                credits_consumed=reservation.actual_credits or reservation.estimated_credits,
+                credits_refunded=reservation.credits_refunded,
+                credits_remaining=result["credits_remaining"],
+                subscription_id=reservation.subscription_id,
+                billing_account_type=reservation.billing_account_type,
+                billing_account_id=reservation.billing_account_id,
+                actor_user_id=reservation.actor_user_id,
+            )
+
+        except Exception as e:
+            logger.error(f"Error reconciling reservation: {e}", exc_info=True)
+            return ReconcileReservationResponse(
+                success=False,
+                message=str(e),
+                reservation_id=request.reservation_id,
+            )
+
+    async def release_reservation(
+        self,
+        request: ReleaseReservationRequest,
+    ) -> ReleaseReservationResponse:
+        """Release a pending reservation after a failed inference."""
+        try:
+            result = await self.repository.release_credit_reservation(
+                reservation_id=request.reservation_id,
+            )
+            if not result:
+                return ReleaseReservationResponse(
+                    success=False,
+                    message="Reservation not found",
+                    reservation_id=request.reservation_id,
+                )
+
+            reservation = result["reservation"]
+            success = reservation.status == ReservationStatus.RELEASED
+            message = result["message"]
+
+            if success and self.event_bus:
+                await self._publish_event("subscription.credits.released", {
+                    "reservation_id": reservation.reservation_id,
+                    "subscription_id": reservation.subscription_id,
+                    "user_id": reservation.user_id,
+                    "actor_user_id": reservation.actor_user_id,
+                    "billing_account_type": (
+                        reservation.billing_account_type.value
+                        if reservation.billing_account_type
+                        else None
+                    ),
+                    "billing_account_id": reservation.billing_account_id,
+                    "organization_id": reservation.organization_id,
+                    "credits_released": reservation.credits_refunded,
+                }, subject=reservation.subscription_id)
+
+            return ReleaseReservationResponse(
+                success=success,
+                message=message,
+                reservation_id=reservation.reservation_id,
+                credits_released=reservation.credits_refunded,
+                credits_remaining=result["credits_remaining"],
+                subscription_id=reservation.subscription_id,
+                billing_account_type=reservation.billing_account_type,
+                billing_account_id=reservation.billing_account_id,
+                actor_user_id=reservation.actor_user_id,
+            )
+
+        except Exception as e:
+            logger.error(f"Error releasing reservation: {e}", exc_info=True)
+            return ReleaseReservationResponse(
+                success=False,
+                message=str(e),
+                reservation_id=request.reservation_id,
             )
 
     async def get_credit_balance(
         self,
         user_id: str,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[BillingAccountType] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
     ) -> CreditBalanceResponse:
-        """Get credit balance for a user"""
+        """Get the balance for the resolved billing account."""
         try:
-            subscription = await self.repository.get_user_subscription(
+            scope = self._resolve_billing_scope(
                 user_id=user_id,
                 organization_id=organization_id,
+                actor_user_id=actor_user_id,
+                billing_account_type=billing_account_type,
+                billing_account_id=billing_account_id,
+            )
+            subscription = await self.repository.get_user_subscription(
+                user_id=scope["user_id"],
+                organization_id=scope["organization_id"],
+                billing_account_type=scope["billing_account_type"].value,
+                billing_account_id=scope["billing_account_id"],
+                actor_user_id=scope["actor_user_id"],
                 active_only=True
             )
 
@@ -531,8 +838,11 @@ class SubscriptionService:
                 return CreditBalanceResponse(
                     success=True,
                     message="No active subscription",
-                    user_id=user_id,
-                    organization_id=organization_id,
+                    user_id=scope["user_id"],
+                    actor_user_id=scope["actor_user_id"],
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    organization_id=scope["organization_id"],
                     subscription_credits_remaining=0,
                     subscription_credits_total=0,
                     total_credits_available=0
@@ -543,8 +853,11 @@ class SubscriptionService:
             return CreditBalanceResponse(
                 success=True,
                 message="Credit balance retrieved",
-                user_id=user_id,
-                organization_id=organization_id,
+                user_id=scope["user_id"],
+                actor_user_id=scope["actor_user_id"],
+                billing_account_type=scope["billing_account_type"],
+                billing_account_id=scope["billing_account_id"],
+                organization_id=scope["organization_id"],
                 subscription_credits_remaining=subscription.credits_remaining,
                 subscription_credits_total=subscription.credits_allocated,
                 subscription_period_end=subscription.current_period_end,
@@ -560,6 +873,9 @@ class SubscriptionService:
                 success=False,
                 message=str(e),
                 user_id=user_id,
+                actor_user_id=actor_user_id or user_id,
+                billing_account_type=billing_account_type,
+                billing_account_id=billing_account_id,
                 organization_id=organization_id
             )
 

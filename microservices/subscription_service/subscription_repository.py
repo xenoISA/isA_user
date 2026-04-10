@@ -20,7 +20,8 @@ from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     UserSubscription, SubscriptionHistory, SubscriptionStatus,
-    BillingCycle, SubscriptionAction, InitiatedBy
+    BillingCycle, SubscriptionAction, InitiatedBy,
+    BillingAccountType, CreditReservation, ReservationStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,49 @@ logger = logging.getLogger(__name__)
 
 class SubscriptionRepository:
     """Subscription data access repository - PostgreSQL"""
+
+    @staticmethod
+    def _resolve_billing_scope(
+        *,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Resolve explicit payer fields while keeping legacy user/org inputs working."""
+        resolved_actor_user_id = actor_user_id or user_id or billing_account_id or ""
+        resolved_type = (
+            BillingAccountType(billing_account_type)
+            if isinstance(billing_account_type, str)
+            else billing_account_type
+        )
+        resolved_account_id = billing_account_id
+
+        if resolved_type is None:
+            if organization_id:
+                resolved_type = BillingAccountType.ORGANIZATION
+                resolved_account_id = organization_id
+            else:
+                resolved_type = BillingAccountType.USER
+                resolved_account_id = user_id or resolved_actor_user_id
+        elif resolved_account_id is None:
+            if resolved_type == BillingAccountType.ORGANIZATION:
+                resolved_account_id = organization_id
+            else:
+                resolved_account_id = user_id or resolved_actor_user_id
+
+        resolved_organization_id = organization_id
+        if resolved_type == BillingAccountType.ORGANIZATION:
+            resolved_organization_id = resolved_organization_id or resolved_account_id
+
+        return {
+            "user_id": user_id or resolved_actor_user_id,
+            "actor_user_id": resolved_actor_user_id,
+            "organization_id": resolved_organization_id,
+            "billing_account_type": resolved_type,
+            "billing_account_id": resolved_account_id,
+        }
 
     def __init__(self, config: Optional[ConfigManager] = None):
         """Initialize subscription repository with service discovery."""
@@ -54,9 +98,40 @@ class SubscriptionRepository:
         self.schema = "subscription"
         self.subscriptions_table = "user_subscriptions"
         self.history_table = "subscription_history"
+        self.reservations_table = "credit_reservations"
 
     async def initialize(self):
-        """Initialize repository"""
+        """Initialize repository and validate required schema."""
+        required_reservation_columns = {
+            "actor_user_id",
+            "billing_account_type",
+            "billing_account_id",
+        }
+        query = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = $1
+              AND table_name = $2
+        """
+
+        async with self.db:
+            results = await self.db.query(
+                query,
+                params=[self.schema, self.reservations_table],
+            )
+
+        available_columns = {
+            row["column_name"] if isinstance(row, dict) else row[0]
+            for row in (results or [])
+        }
+        missing_columns = sorted(required_reservation_columns - available_columns)
+        if missing_columns:
+            raise RuntimeError(
+                "subscription.credit_reservations schema is missing canonical payer "
+                f"columns: {', '.join(missing_columns)}. "
+                "Apply migration 003_add_canonical_payer_fields_to_credit_reservations.sql."
+            )
+
         logger.info("Subscription repository initialized")
 
     async def close(self):
@@ -161,11 +236,22 @@ class SubscriptionRepository:
         self,
         user_id: str,
         organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
         active_only: bool = True
     ) -> Optional[UserSubscription]:
-        """Get active subscription for a user/organization"""
+        """Get the active subscription for the resolved billing account."""
         try:
-            if organization_id:
+            scope = self._resolve_billing_scope(
+                user_id=user_id,
+                organization_id=organization_id,
+                billing_account_type=billing_account_type,
+                billing_account_id=billing_account_id,
+                actor_user_id=actor_user_id,
+            )
+
+            if scope["billing_account_type"] == BillingAccountType.ORGANIZATION:
                 query = f'''
                     SELECT * FROM {self.schema}.{self.subscriptions_table}
                     WHERE organization_id = $1
@@ -173,7 +259,7 @@ class SubscriptionRepository:
                     ORDER BY created_at DESC
                     LIMIT 1
                 '''
-                params = [organization_id]
+                params = [scope["billing_account_id"]]
                 if active_only:
                     params.append('active')
             else:
@@ -184,7 +270,7 @@ class SubscriptionRepository:
                     ORDER BY created_at DESC
                     LIMIT 1
                 '''
-                params = [user_id]
+                params = [scope["billing_account_id"]]
                 if active_only:
                     params.append('active')
 
@@ -368,6 +454,382 @@ class SubscriptionRepository:
             logger.error(f"Error allocating credits: {e}")
             return None
 
+    async def reserve_credits(
+        self,
+        user_id: str,
+        estimated_credits: int,
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
+        model: Optional[str] = None,
+        request_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[CreditReservation]:
+        """Reserve credits idempotently for a request."""
+        try:
+            await self.db._ensure_connected()
+            now = datetime.now(timezone.utc)
+            scope = self._resolve_billing_scope(
+                user_id=user_id,
+                organization_id=organization_id,
+                billing_account_type=billing_account_type,
+                billing_account_id=billing_account_id,
+                actor_user_id=actor_user_id,
+            )
+
+            async with self.db._pool.acquire() as conn:
+                async with conn.transaction():
+                    if request_id:
+                        existing = await conn.fetchrow(
+                            f"""
+                            SELECT * FROM {self.schema}.{self.reservations_table}
+                            WHERE request_id = $1
+                            """,
+                            request_id,
+                        )
+                        if existing:
+                            return self._row_to_credit_reservation(dict(existing))
+
+                    if scope["billing_account_type"] == BillingAccountType.ORGANIZATION:
+                        subscription = await conn.fetchrow(
+                            f"""
+                            SELECT * FROM {self.schema}.{self.subscriptions_table}
+                            WHERE organization_id = $1
+                              AND status = 'active'
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                            FOR UPDATE
+                            """,
+                            scope["billing_account_id"],
+                        )
+                    else:
+                        subscription = await conn.fetchrow(
+                            f"""
+                            SELECT * FROM {self.schema}.{self.subscriptions_table}
+                            WHERE user_id = $1
+                              AND organization_id IS NULL
+                              AND status = 'active'
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                            FOR UPDATE
+                            """,
+                            scope["billing_account_id"],
+                        )
+
+                    if not subscription:
+                        return None
+
+                    updated_subscription = await conn.fetchrow(
+                        f"""
+                        UPDATE {self.schema}.{self.subscriptions_table}
+                        SET
+                            credits_used = credits_used + $1,
+                            credits_remaining = credits_remaining - $1,
+                            updated_at = $2
+                        WHERE subscription_id = $3
+                          AND credits_remaining >= $1
+                        RETURNING *
+                        """,
+                        estimated_credits,
+                        now,
+                        subscription["subscription_id"],
+                    )
+
+                    if not updated_subscription:
+                        return None
+
+                    reservation_row = await conn.fetchrow(
+                        f"""
+                        INSERT INTO {self.schema}.{self.reservations_table} (
+                            reservation_id,
+                            request_id,
+                            subscription_id,
+                            user_id,
+                            actor_user_id,
+                            billing_account_type,
+                            billing_account_id,
+                            organization_id,
+                            model,
+                            estimated_credits,
+                            credits_remaining_after_reserve,
+                            status,
+                            metadata,
+                            created_at,
+                            updated_at
+                        ) VALUES (
+                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14
+                        )
+                        RETURNING *
+                        """,
+                        f"res_{uuid.uuid4().hex[:16]}",
+                        request_id,
+                        updated_subscription["subscription_id"],
+                        scope["user_id"],
+                        scope["actor_user_id"],
+                        scope["billing_account_type"].value
+                        if scope["billing_account_type"]
+                        else None,
+                        scope["billing_account_id"],
+                        scope["organization_id"],
+                        model,
+                        estimated_credits,
+                        updated_subscription["credits_remaining"],
+                        ReservationStatus.PENDING.value,
+                        json.dumps(metadata or {}),
+                        now,
+                    )
+
+                    if not reservation_row:
+                        return None
+
+                    return self._row_to_credit_reservation(dict(reservation_row))
+
+        except Exception as e:
+            logger.error(f"Error reserving credits: {e}", exc_info=True)
+            raise
+
+    async def get_credit_reservation(
+        self,
+        reservation_id: str,
+    ) -> Optional[CreditReservation]:
+        """Get a reservation by ID."""
+        try:
+            query = f"""
+                SELECT * FROM {self.schema}.{self.reservations_table}
+                WHERE reservation_id = $1
+            """
+
+            async with self.db:
+                results = await self.db.query(query, params=[reservation_id])
+
+            if results and len(results) > 0:
+                return self._row_to_credit_reservation(results[0])
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting credit reservation: {e}", exc_info=True)
+            return None
+
+    async def reconcile_credit_reservation(
+        self,
+        reservation_id: str,
+        actual_credits: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Finalize a reservation against actual usage."""
+        try:
+            await self.db._ensure_connected()
+            now = datetime.now(timezone.utc)
+
+            async with self.db._pool.acquire() as conn:
+                async with conn.transaction():
+                    reservation_row = await conn.fetchrow(
+                        f"""
+                        SELECT * FROM {self.schema}.{self.reservations_table}
+                        WHERE reservation_id = $1
+                        FOR UPDATE
+                        """,
+                        reservation_id,
+                    )
+                    if not reservation_row:
+                        return None
+
+                    reservation = self._row_to_credit_reservation(dict(reservation_row))
+                    subscription_row = await conn.fetchrow(
+                        f"""
+                        SELECT * FROM {self.schema}.{self.subscriptions_table}
+                        WHERE subscription_id = $1
+                        FOR UPDATE
+                        """,
+                        reservation.subscription_id,
+                    )
+                    if not subscription_row:
+                        return None
+
+                    if reservation.status != ReservationStatus.PENDING:
+                        return {
+                            "reservation": reservation,
+                            "credits_remaining": int(subscription_row["credits_remaining"]),
+                            "message": f"Reservation already {reservation.status.value}",
+                        }
+
+                    credits_refunded = max(reservation.estimated_credits - actual_credits, 0)
+                    extra_credits = max(actual_credits - reservation.estimated_credits, 0)
+
+                    if credits_refunded > 0:
+                        updated_subscription = await conn.fetchrow(
+                            f"""
+                            UPDATE {self.schema}.{self.subscriptions_table}
+                            SET
+                                credits_used = GREATEST(credits_used - $1, 0),
+                                credits_remaining = credits_remaining + $1,
+                                updated_at = $2
+                            WHERE subscription_id = $3
+                            RETURNING *
+                            """,
+                            credits_refunded,
+                            now,
+                            reservation.subscription_id,
+                        )
+                        if not updated_subscription:
+                            return None
+                        subscription_row = updated_subscription
+                    elif extra_credits > 0:
+                        updated_subscription = await conn.fetchrow(
+                            f"""
+                            UPDATE {self.schema}.{self.subscriptions_table}
+                            SET
+                                credits_used = credits_used + $1,
+                                credits_remaining = credits_remaining - $1,
+                                updated_at = $2
+                            WHERE subscription_id = $3
+                              AND credits_remaining >= $1
+                            RETURNING *
+                            """,
+                            extra_credits,
+                            now,
+                            reservation.subscription_id,
+                        )
+                        if not updated_subscription:
+                            return {
+                                "reservation": reservation,
+                                "credits_remaining": int(subscription_row["credits_remaining"]),
+                                "message": "Insufficient credits to reconcile reservation overage",
+                            }
+                        subscription_row = updated_subscription
+
+                    updated_reservation = await conn.fetchrow(
+                        f"""
+                        UPDATE {self.schema}.{self.reservations_table}
+                        SET
+                            status = $1,
+                            actual_credits = $2,
+                            credits_refunded = $3,
+                            extra_credits_consumed = $4,
+                            credits_remaining_after_finalize = $5,
+                            reconciled_at = $6,
+                            updated_at = $6
+                        WHERE reservation_id = $7
+                        RETURNING *
+                        """,
+                        ReservationStatus.RECONCILED.value,
+                        actual_credits,
+                        credits_refunded,
+                        extra_credits,
+                        int(subscription_row["credits_remaining"]),
+                        now,
+                        reservation_id,
+                    )
+
+                    if not updated_reservation:
+                        return None
+
+                    return {
+                        "reservation": self._row_to_credit_reservation(dict(updated_reservation)),
+                        "credits_remaining": int(subscription_row["credits_remaining"]),
+                        "message": "Reservation reconciled successfully",
+                    }
+
+        except Exception as e:
+            logger.error(f"Error reconciling credit reservation: {e}", exc_info=True)
+            return None
+
+    async def release_credit_reservation(
+        self,
+        reservation_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Release a pending reservation and refund held credits."""
+        try:
+            await self.db._ensure_connected()
+            now = datetime.now(timezone.utc)
+
+            async with self.db._pool.acquire() as conn:
+                async with conn.transaction():
+                    reservation_row = await conn.fetchrow(
+                        f"""
+                        SELECT * FROM {self.schema}.{self.reservations_table}
+                        WHERE reservation_id = $1
+                        FOR UPDATE
+                        """,
+                        reservation_id,
+                    )
+                    if not reservation_row:
+                        return None
+
+                    reservation = self._row_to_credit_reservation(dict(reservation_row))
+                    subscription_row = await conn.fetchrow(
+                        f"""
+                        SELECT * FROM {self.schema}.{self.subscriptions_table}
+                        WHERE subscription_id = $1
+                        FOR UPDATE
+                        """,
+                        reservation.subscription_id,
+                    )
+                    if not subscription_row:
+                        return None
+
+                    if reservation.status == ReservationStatus.RELEASED:
+                        return {
+                            "reservation": reservation,
+                            "credits_remaining": int(subscription_row["credits_remaining"]),
+                            "message": "Reservation already released",
+                        }
+
+                    if reservation.status == ReservationStatus.RECONCILED:
+                        return {
+                            "reservation": reservation,
+                            "credits_remaining": int(subscription_row["credits_remaining"]),
+                            "message": "Reservation already reconciled",
+                        }
+
+                    updated_subscription = await conn.fetchrow(
+                        f"""
+                        UPDATE {self.schema}.{self.subscriptions_table}
+                        SET
+                            credits_used = GREATEST(credits_used - $1, 0),
+                            credits_remaining = credits_remaining + $1,
+                            updated_at = $2
+                        WHERE subscription_id = $3
+                        RETURNING *
+                        """,
+                        reservation.estimated_credits,
+                        now,
+                        reservation.subscription_id,
+                    )
+                    if not updated_subscription:
+                        return None
+
+                    updated_reservation = await conn.fetchrow(
+                        f"""
+                        UPDATE {self.schema}.{self.reservations_table}
+                        SET
+                            status = $1,
+                            credits_refunded = $2,
+                            credits_remaining_after_finalize = $3,
+                            released_at = $4,
+                            updated_at = $4
+                        WHERE reservation_id = $5
+                        RETURNING *
+                        """,
+                        ReservationStatus.RELEASED.value,
+                        reservation.estimated_credits,
+                        int(updated_subscription["credits_remaining"]),
+                        now,
+                        reservation_id,
+                    )
+                    if not updated_reservation:
+                        return None
+
+                    return {
+                        "reservation": self._row_to_credit_reservation(dict(updated_reservation)),
+                        "credits_remaining": int(updated_subscription["credits_remaining"]),
+                        "message": "Reservation released successfully",
+                    }
+
+        except Exception as e:
+            logger.error(f"Error releasing credit reservation: {e}", exc_info=True)
+            return None
+
     # ====================
     # History Operations
     # ====================
@@ -527,6 +989,45 @@ class SubscriptionRepository:
             initiated_by=InitiatedBy(row.get("initiated_by", "system")),
             metadata=self._coerce_json_dict(row.get("metadata")),
             created_at=row.get("created_at")
+        )
+
+    def _row_to_credit_reservation(self, row: Dict[str, Any]) -> CreditReservation:
+        """Convert database row to CreditReservation model."""
+        return CreditReservation(
+            id=int(row.get("id")) if row.get("id") else None,
+            reservation_id=row.get("reservation_id"),
+            subscription_id=row.get("subscription_id"),
+            user_id=row.get("user_id"),
+            actor_user_id=row.get("actor_user_id") or row.get("user_id"),
+            billing_account_type=(
+                BillingAccountType(row.get("billing_account_type"))
+                if row.get("billing_account_type")
+                else None
+            ),
+            billing_account_id=row.get("billing_account_id"),
+            organization_id=row.get("organization_id"),
+            request_id=row.get("request_id"),
+            model=row.get("model"),
+            estimated_credits=int(row.get("estimated_credits", 0)),
+            actual_credits=int(row.get("actual_credits")) if row.get("actual_credits") is not None else None,
+            credits_refunded=int(row.get("credits_refunded", 0)),
+            extra_credits_consumed=int(row.get("extra_credits_consumed", 0)),
+            credits_remaining_after_reserve=(
+                int(row.get("credits_remaining_after_reserve"))
+                if row.get("credits_remaining_after_reserve") is not None
+                else None
+            ),
+            credits_remaining_after_finalize=(
+                int(row.get("credits_remaining_after_finalize"))
+                if row.get("credits_remaining_after_finalize") is not None
+                else None
+            ),
+            status=ReservationStatus(row.get("status", ReservationStatus.PENDING.value)),
+            metadata=self._coerce_json_dict(row.get("metadata")),
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+            reconciled_at=row.get("reconciled_at"),
+            released_at=row.get("released_at"),
         )
 
 

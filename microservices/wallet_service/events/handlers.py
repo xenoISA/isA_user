@@ -11,6 +11,7 @@ from typing import Optional
 
 from core.nats_client import Event
 
+from ..models import ConsumeRequest
 from .models import (
     BillingCalculatedEventData,
     TokensDeductedEventData,
@@ -65,32 +66,62 @@ async def handle_billing_calculated(event: Event, wallet_service, event_bus):
 
         # 需要从钱包扣费
         tokens_to_deduct = billing_data.token_equivalent
-
-        # 调用 wallet_service 的扣费方法
-        deduction_result = await wallet_service.consume_tokens(
-            user_id=billing_data.user_id,
+        consume_request = ConsumeRequest(
             amount=tokens_to_deduct,
-            billing_record_id=billing_data.billing_record_id,
             description=f"Usage charge for {billing_data.product_id}",
+            usage_record_id=billing_data.billing_record_id,
         )
 
-        if deduction_result.get("success"):
+        # 调用 wallet_service 的扣费方法
+        deduction_result = await wallet_service.consume_by_user(
+            user_id=billing_data.user_id,
+            request=consume_request,
+        )
+        deduction_payload = (
+            deduction_result.model_dump()
+            if hasattr(deduction_result, "model_dump")
+            else deduction_result.dict()
+            if hasattr(deduction_result, "dict")
+            else deduction_result
+        )
+        data = deduction_payload.get("data", {}) if isinstance(deduction_payload, dict) else {}
+        transaction = data.get("transaction", {}) if isinstance(data, dict) else {}
+
+        if deduction_payload.get("success"):
             # 扣费成功，发布 tokens.deducted 事件
             await publish_tokens_deducted(
                 event_bus=event_bus,
                 user_id=billing_data.user_id,
                 billing_record_id=billing_data.billing_record_id,
-                transaction_id=deduction_result.get("transaction_id"),
+                transaction_id=deduction_payload.get("transaction_id"),
                 tokens_deducted=tokens_to_deduct,
-                balance_before=Decimal(str(deduction_result.get("balance_before", 0))),
-                balance_after=Decimal(str(deduction_result.get("balance_after", 0))),
-                monthly_quota=deduction_result.get("monthly_quota"),
-                monthly_used=deduction_result.get("monthly_used"),
+                balance_before=Decimal(
+                    str(
+                        transaction.get(
+                            "balance_before",
+                            deduction_payload.get(
+                                "balance_before", deduction_payload.get("balance", 0)
+                            ),
+                        )
+                    )
+                ),
+                balance_after=Decimal(
+                    str(
+                        transaction.get(
+                            "balance_after",
+                            deduction_payload.get(
+                                "balance_after", deduction_payload.get("balance", 0)
+                            ),
+                        )
+                    )
+                ),
+                monthly_quota=data.get("monthly_quota"),
+                monthly_used=data.get("monthly_used"),
             )
 
             logger.info(
                 f"Successfully deducted {tokens_to_deduct} tokens from user {billing_data.user_id}, "
-                f"new balance: {deduction_result.get('balance_after')}"
+                f"new balance: {deduction_payload.get('balance')}"
             )
         else:
             # 扣费失败（余额不足），发布 tokens.insufficient 事件
@@ -100,16 +131,21 @@ async def handle_billing_calculated(event: Event, wallet_service, event_bus):
                 billing_record_id=billing_data.billing_record_id,
                 tokens_required=tokens_to_deduct,
                 tokens_available=Decimal(
-                    str(deduction_result.get("balance_available", 0))
+                    str(
+                        data.get(
+                            "balance_available",
+                            deduction_payload.get("balance", 0),
+                        )
+                    )
                 ),
-                suggested_action=deduction_result.get(
+                suggested_action=deduction_payload.get(
                     "suggested_action", "upgrade_plan"
                 ),
             )
 
             logger.warning(
                 f"Insufficient tokens for user {billing_data.user_id}, "
-                f"required: {tokens_to_deduct}, available: {deduction_result.get('balance_available')}"
+                f"required: {tokens_to_deduct}, available: {data.get('balance_available', deduction_payload.get('balance', 0))}"
             )
 
     except Exception as e:
@@ -132,6 +168,18 @@ async def setup_event_subscriptions(event_bus, wallet_service):
         # 订阅计费完成事件
         await event_bus.subscribe_to_events(
             pattern="billing.calculated",
+            handler=lambda event: handle_billing_calculated(
+                event, wallet_service, event_bus
+            ),
+        )
+        await event_bus.subscribe_to_events(
+            pattern="*.billing.calculated",
+            handler=lambda event: handle_billing_calculated(
+                event, wallet_service, event_bus
+            ),
+        )
+        await event_bus.subscribe_to_events(
+            pattern="billing_service.billing.calculated",
             handler=lambda event: handle_billing_calculated(
                 event, wallet_service, event_bus
             ),
@@ -564,6 +612,12 @@ def get_event_handlers(wallet_service, event_bus):
         ),
         "account_service.user.deleted": lambda event: handle_user_deleted(
             event, wallet_service
+        ),
+        "billing.calculated": lambda event: handle_billing_calculated(
+            event, wallet_service, event_bus
+        ),
+        "*.billing.calculated": lambda event: handle_billing_calculated(
+            event, wallet_service, event_bus
         ),
         "billing_service.billing.calculated": lambda event: handle_billing_calculated(
             event, wallet_service, event_bus

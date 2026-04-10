@@ -71,7 +71,11 @@ class TestBillingMethodEnum:
     def test_all_billing_methods_defined(self):
         """CHAR: All expected billing methods are defined"""
         expected_methods = {
-            "wallet_deduction", "payment_charge", "credit_consumption", "subscription_included"
+            "wallet_deduction",
+            "payment_charge",
+            "credit_consumption",
+            "subscription_credit",
+            "subscription_included",
         }
         actual_methods = {bm.value for bm in BillingMethod}
         assert actual_methods == expected_methods
@@ -88,8 +92,21 @@ class TestServiceTypeEnum:
     def test_all_service_types_defined(self):
         """CHAR: All expected service types are defined"""
         expected_types = {
-            "model_inference", "mcp_service", "agent_execution",
-            "storage_minio", "api_gateway", "notification", "other"
+            "model_inference",
+            "mcp_service",
+            "agent_execution",
+            "agent_runtime",
+            "storage_minio",
+            "data_service",
+            "data_pipeline",
+            "web_service",
+            "python_repl",
+            "compute_general",
+            "vector_storage",
+            "nats_messaging",
+            "api_gateway",
+            "notification",
+            "other",
         }
         actual_types = {st.value for st in ServiceType}
         assert actual_types == expected_types

@@ -52,7 +52,10 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
         self.subscription_id = None
         self.wallet_id = None
         self.product_id = None
+        self.subscription_tier_code = "pro"
         self.initial_credits = 1000
+        self.initial_subscription_credits = 0
+        self.last_billing_record_id = None
 
     async def run(self):
         """运行完整测试"""
@@ -73,7 +76,7 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
             await self.test_step_5_consume_credits()
             await self.test_step_6_verify_billing_record()
             await self.test_step_7_test_insufficient_credits()
-            await self.test_step_8_test_subscription_upgrade()
+            await self.test_step_8_verify_subscription_balance()
             await self.test_step_9_cancel_subscription()
             await self.test_step_10_verify_events()
 
@@ -116,26 +119,48 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
                 self.log(f"  Existing Wallet ID: {self.wallet_id}")
 
     async def test_step_2_get_subscription_products(self):
-        """Step 2: 获取订阅产品"""
-        self.log_step(2, "Get Subscription Products")
+        """Step 2: 获取可计费产品"""
+        self.log_step(2, "Get Billable Product")
 
         response = await self.get(
-            f"{self.config.PRODUCT_URL}/api/v1/products",
-            params={"product_type": "subscription", "limit": 10}
+            f"{self.config.PRODUCT_URL}/api/v1/product/products",
+            params={"is_active": True}
         )
 
         if self.assert_http_success(response, 200):
-            data = response.json()
-            products = data.get("products", data.get("items", []))
-            self.log(f"  Found {len(products)} subscription products")
+            products = response.json()
+            if not isinstance(products, list):
+                products = products.get("products", products.get("items", []))
 
-            if products:
-                self.product_id = products[0].get("product_id")
-                self.log(f"  Using Product: {products[0].get('name', self.product_id)}")
-                self.log(f"  Price: {products[0].get('price', 'N/A')}")
-            else:
-                self.product_id = "basic_subscription"
-                self.log(f"  Using default product ID: {self.product_id}", "yellow")
+            model_products = [
+                product
+                for product in products
+                if product.get("product_type") == "model_inference"
+            ]
+            preferred_ids = ["gpt-4o-mini", "gpt-4o", "claude-sonnet-4"]
+
+            selected = None
+            for product_id in preferred_ids:
+                selected = next(
+                    (
+                        product
+                        for product in model_products
+                        if product.get("product_id") == product_id
+                    ),
+                    None,
+                )
+                if selected:
+                    break
+
+            if not selected and model_products:
+                selected = model_products[0]
+
+            self.assert_not_none(selected, "Found at least one billable model product")
+            if selected:
+                self.product_id = selected.get("product_id")
+                self.log(f"  Using Product: {selected.get('name', self.product_id)}")
+                self.log(f"  Product ID: {self.product_id}")
+                self.log(f"  Tier Code: {self.subscription_tier_code}")
 
     async def test_step_3_create_subscription(self):
         """Step 3: 创建订阅"""
@@ -148,26 +173,28 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
             f"{self.config.SUBSCRIPTION_URL}/api/v1/subscriptions",
             json={
                 "user_id": self.test_user_id,
-                "product_id": self.product_id,
-                "plan_type": "monthly",
-                "auto_renew": True,
-                "payment_method": "wallet",
-                "credits_included": 500,
+                "tier_code": self.subscription_tier_code,
+                "billing_cycle": "monthly",
                 "metadata": {
                     "source": "integration_test"
                 }
             }
         )
 
-        if self.assert_http_success(response, 200) or self.assert_http_success(response, 201):
+        if self.assert_http_success(response, 200):
             data = response.json()
-            self.subscription_id = data.get("subscription_id")
+            subscription = data.get("subscription", {})
+            self.subscription_id = subscription.get("subscription_id")
             self.assert_not_none(self.subscription_id, "Subscription created")
             self.log(f"  Subscription ID: {self.subscription_id}")
-            self.log(f"  Status: {data.get('status', 'active')}")
-            self.log(f"  Plan: {data.get('plan_type', 'monthly')}")
+            self.log(f"  Status: {subscription.get('status', 'active')}")
+            self.log(f"  Tier: {subscription.get('tier_code', self.subscription_tier_code)}")
+            self.log(
+                f"  Credits Allocated: {data.get('credits_allocated', subscription.get('credits_allocated', 'N/A'))}"
+            )
 
             await self.wait(2, "Waiting for subscription.created event")
+            await self.assert_event_published("subscription.created", timeout=10.0)
 
     async def test_step_4_verify_credits_allocated(self):
         """Step 4: 验证积分已分配"""
@@ -179,22 +206,19 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
 
         # 检查订阅积分
         response = await self.get(
-            f"{self.config.SUBSCRIPTION_URL}/api/v1/subscriptions/{self.subscription_id}/credits"
+            f"{self.config.SUBSCRIPTION_URL}/api/v1/subscriptions/credits/balance",
+            params={"user_id": self.test_user_id},
         )
 
-        if response.status_code == 200:
+        if self.assert_http_success(response, 200):
             data = response.json()
-            credits_balance = data.get("credits_balance", data.get("remaining", 0))
+            credits_balance = data.get(
+                "subscription_credits_remaining",
+                data.get("total_credits_available", 0),
+            )
+            self.initial_subscription_credits = credits_balance
             self.log(f"  Credits Balance: {credits_balance}")
             self.assert_true(credits_balance > 0, "Credits allocated to subscription")
-        else:
-            # 也可以检查钱包余额
-            wallet_response = await self.get(
-                f"{self.config.WALLET_URL}/api/v1/wallets/{self.wallet_id}"
-            )
-            if wallet_response.status_code == 200:
-                wallet_data = wallet_response.json()
-                self.log(f"  Wallet Balance: {wallet_data.get('balance')}")
 
     async def test_step_5_consume_credits(self):
         """Step 5: 消耗积分"""
@@ -209,28 +233,34 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
 
         # 通过 billing_service 记录使用量
         response = await self.post(
-            f"{self.config.BILLING_URL}/api/v1/billing/usage",
+            f"{self.config.BILLING_URL}/api/v1/billing/usage/record",
             json={
                 "user_id": self.test_user_id,
-                "product_id": "gpt-4",
+                "subscription_id": self.subscription_id,
+                "product_id": self.product_id,
+                "service_type": "model_inference",
                 "usage_amount": 100,
                 "unit_type": "token",
                 "usage_details": {
                     "input_tokens": 50,
                     "output_tokens": 50,
-                    "model": "gpt-4",
+                    "model": self.product_id,
                     "operation": "chat"
                 }
             }
         )
 
-        if self.assert_http_success(response, 200) or self.assert_http_success(response, 201):
+        if self.assert_http_success(response, 200):
             data = response.json()
-            self.assert_true(True, "Usage recorded")
+            self.last_billing_record_id = data.get("billing_record_id")
+            self.assert_true(data.get("success", False), "Usage recorded")
             self.log(f"  Usage Amount: 100 tokens")
-            self.log(f"  Billing Record: {data.get('billing_record_id', 'N/A')}")
+            self.log(f"  Billing Record: {self.last_billing_record_id or 'N/A'}")
+            self.log(f"  Billing Method: {data.get('billing_method_used', 'N/A')}")
+            self.log(f"  Amount Charged: {data.get('amount_charged', 'N/A')}")
 
             await self.wait(3, "Waiting for billing.calculated event")
+            await self.assert_event_published("billing.calculated", timeout=10.0)
 
     async def test_step_6_verify_billing_record(self):
         """Step 6: 验证计费记录"""
@@ -241,8 +271,8 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
             return
 
         response = await self.get(
-            f"{self.config.BILLING_URL}/api/v1/billing/records",
-            params={"user_id": self.test_user_id, "limit": 5}
+            f"{self.config.BILLING_URL}/api/v1/billing/records/user/{self.test_user_id}",
+            params={"limit": 5}
         )
 
         if self.assert_http_success(response, 200):
@@ -252,9 +282,21 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
 
             if records:
                 latest = records[0]
+                self.assert_equal(
+                    latest.get("billing_id"),
+                    self.last_billing_record_id,
+                    "Latest billing record matches usage call",
+                )
+                self.assert_equal(
+                    latest.get("product_id"),
+                    self.product_id,
+                    "Billing record product matches selected product",
+                )
                 self.log(f"  Latest Record:")
                 self.log(f"    - Amount: {latest.get('usage_amount', latest.get('amount'))}")
-                self.log(f"    - Status: {latest.get('status')}")
+                self.log(
+                    f"    - Status: {latest.get('billing_status', latest.get('status'))}"
+                )
                 self.log(f"    - Product: {latest.get('product_id')}")
 
     async def test_step_7_test_insufficient_credits(self):
@@ -270,11 +312,13 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
 
         # 尝试消耗大量积分
         response = await self.post(
-            f"{self.config.BILLING_URL}/api/v1/billing/usage",
+            f"{self.config.BILLING_URL}/api/v1/billing/usage/record",
             json={
                 "user_id": self.test_user_id,
-                "product_id": "gpt-4",
-                "usage_amount": 50000,  # 大量使用
+                "subscription_id": self.subscription_id,
+                "product_id": self.product_id,
+                "service_type": "model_inference",
+                "usage_amount": 1000000000,
                 "unit_type": "token",
                 "usage_details": {
                     "operation": "large_batch_test"
@@ -284,45 +328,44 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
 
         if response.status_code == 200:
             data = response.json()
-            status = data.get("status", "")
-
-            if "insufficient" in status.lower():
+            message = str(data.get("message", ""))
+            if not data.get("success", True) or "insufficient" in message.lower():
                 self.assert_true(True, "Insufficient credits handled correctly")
-                self.log(f"  Status: {status}")
+                self.log(f"  Message: {message}")
             else:
-                self.log(f"  Response status: {status}", "yellow")
+                self.failed_assertions += 1
+                self.log(f"  FAIL: Expected insufficient credits, got: {data}", "red")
         elif response.status_code in [402, 400]:
             self.assert_true(True, "Insufficient credits rejected with proper error code")
             self.log(f"  Error Code: {response.status_code}")
 
         await self.wait(2, "Waiting for credits.insufficient event")
 
-    async def test_step_8_test_subscription_upgrade(self):
-        """Step 8: 测试订阅升级"""
-        self.log_step(8, "Test Subscription Upgrade")
+    async def test_step_8_verify_subscription_balance(self):
+        """Step 8: 验证订阅余额变化"""
+        self.log_step(8, "Verify Subscription Balance")
 
         if not self.subscription_id:
             self.log("  SKIP: No subscription_id", "yellow")
             return
 
-        if self.event_collector:
-            self.event_collector.clear()
-
-        response = await self.post(
-            f"{self.config.SUBSCRIPTION_URL}/api/v1/subscriptions/{self.subscription_id}/upgrade",
-            json={
-                "new_plan": "premium",
-                "prorate": True
-            }
+        response = await self.get(
+            f"{self.config.SUBSCRIPTION_URL}/api/v1/subscriptions/credits/balance",
+            params={"user_id": self.test_user_id},
         )
 
-        if response.status_code == 200:
+        if self.assert_http_success(response, 200):
             data = response.json()
-            self.assert_true(True, "Subscription upgrade initiated")
-            self.log(f"  New Plan: {data.get('plan_type', 'premium')}")
-            self.log(f"  Status: {data.get('status')}")
-        else:
-            self.log(f"  Upgrade returned {response.status_code}", "yellow")
+            remaining = data.get(
+                "subscription_credits_remaining",
+                data.get("total_credits_available", 0),
+            )
+            self.log(f"  Remaining Credits: {remaining}")
+            if self.initial_subscription_credits:
+                self.assert_true(
+                    remaining < self.initial_subscription_credits,
+                    "Subscription credits decreased after billing",
+                )
 
     async def test_step_9_cancel_subscription(self):
         """Step 9: 取消订阅"""
@@ -337,20 +380,23 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
 
         response = await self.post(
             f"{self.config.SUBSCRIPTION_URL}/api/v1/subscriptions/{self.subscription_id}/cancel",
+            params={"user_id": self.test_user_id},
             json={
                 "reason": "integration_test_complete",
                 "immediate": False,
-                "refund_unused": True
+                "feedback": "codex live billing e2e"
             }
         )
 
-        if response.status_code == 200:
+        if self.assert_http_success(response, 200):
             data = response.json()
-            self.assert_true(True, "Subscription cancelled")
-            self.log(f"  Cancel Status: {data.get('status')}")
-            self.log(f"  End Date: {data.get('end_date', 'end of period')}")
+            self.assert_true(data.get("success", False), "Subscription cancelled")
+            self.log(f"  Cancel Message: {data.get('message')}")
+            self.log(f"  Effective Date: {data.get('effective_date', 'N/A')}")
+            self.log(f"  Credits Remaining: {data.get('credits_remaining', 'N/A')}")
 
-            await self.wait(2, "Waiting for subscription.cancelled event")
+            await self.wait(2, "Waiting for subscription.canceled event")
+            await self.assert_event_published("subscription.canceled", timeout=10.0)
 
     async def test_step_10_verify_events(self):
         """Step 10: 验证事件"""
@@ -363,16 +409,10 @@ class SubscriptionBillingCreditsIntegrationTest(BaseIntegrationTest):
         summary = self.event_collector.summary()
         self.log(f"  Events collected: {summary}")
 
-        expected_events = [
-            "subscription.created",
-            "billing.calculated",
-        ]
-
-        for event_type in expected_events:
-            if self.event_collector.has_event(event_type):
-                self.assert_true(True, f"Event {event_type} published")
-            else:
-                self.log(f"  Event {event_type} not captured", "yellow")
+        if summary:
+            self.assert_true(True, "Collected billing flow events")
+        else:
+            self.log("  No events currently buffered", "yellow")
 
 
 async def main():

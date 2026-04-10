@@ -13,9 +13,11 @@ Event Architecture:
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+from ..models import BillingAccountType
 
 
 # =============================================================================
@@ -76,10 +78,65 @@ class UnitType(str, Enum):
     TOKEN = "token"  # LLM tokens (GPT-4, embeddings)
     IMAGE = "image"  # Image generation
     MINUTE = "minute"  # Audio processing
+    HOUR = "hour"
     CHARACTER = "character"  # TTS character count
     REQUEST = "request"  # API calls, tool executions
+    URL = "url"
     BYTE = "byte"  # Storage (Minio, Qdrant)
+    GB = "gb"
+    GB_MONTH = "gb_month"
+    EXECUTION = "execution"
+    OPERATION = "operation"
+    UNIT = "unit"
     SECOND = "second"  # Video processing
+
+
+class BillingSurface(str, Enum):
+    """Customer-facing abstraction for a billing event."""
+    ABSTRACT_SERVICE = "abstract_service"
+    ADD_ON = "add_on"
+
+
+class CostComponentType(str, Enum):
+    """Underlying component classes bundled into an abstract service."""
+    RUNTIME = "runtime"
+    TOKEN_COMPUTE = "token_compute"
+    STORAGE = "storage"
+    NETWORK = "network"
+    EXTERNAL_API = "external_api"
+
+
+class CostComponent(BaseModel):
+    """Underlying resource or external API component for a usage event."""
+    component_id: str = Field(..., description="Stable component identifier")
+    component_type: CostComponentType = Field(
+        ..., description="Underlying resource or API class"
+    )
+    bundled: bool = Field(
+        default=True,
+        description="Whether the component is bundled into the abstract service price",
+    )
+    customer_visible: bool = Field(
+        default=False,
+        description="Whether the component is intentionally exposed to customers",
+    )
+    provider: Optional[str] = Field(
+        default=None,
+        description="Provider or implementation behind the component",
+    )
+    meter_type: Optional[str] = Field(
+        default=None,
+        description="Internal meter for the component when known",
+    )
+    unit_type: Optional[UnitType] = Field(
+        default=None,
+        description="Native unit used by the component when known",
+    )
+    usage_amount: Optional[Decimal] = Field(
+        default=None,
+        description="Underlying usage amount when the producer provides it",
+    )
+    notes: Optional[str] = None
 
 
 class UsageEventData(BaseModel):
@@ -89,19 +146,39 @@ class UsageEventData(BaseModel):
     由以下服务发布：isA_Model, isA_MCP, storage_service 等
     billing_service 监听并处理此事件
 
-    NATS Subject: billing.usage.recorded.{product_id}
+    Canonical NATS subject family: billing.usage.recorded.>
     """
 
     # 用户上下文
     user_id: str = Field(..., description="触发使用的用户ID")
+    actor_user_id: Optional[str] = Field(None, description="Human actor ID")
+    billing_account_type: Optional[BillingAccountType] = Field(
+        None, description="Canonical payer type"
+    )
+    billing_account_id: Optional[str] = Field(
+        None, description="Canonical payer identifier"
+    )
     organization_id: Optional[str] = Field(
         None, description="组织ID（如果在组织上下文中）"
     )
+    agent_id: Optional[str] = Field(None, description="Agent identifier")
     subscription_id: Optional[str] = Field(None, description="活跃订阅ID")
 
     # 使用详情
     product_id: str = Field(
         ..., description="产品ID (gpt-4, dall-e-3, mcp-tool-web-search 等)"
+    )
+    service_type: Optional[str] = Field(
+        None, description="Canonical service type"
+    )
+    operation_type: Optional[str] = Field(
+        None, description="Canonical operation type"
+    )
+    source_service: Optional[str] = Field(
+        None, description="Originating service name"
+    )
+    resource_name: Optional[str] = Field(
+        None, description="Resource identifier within the service"
     )
     usage_amount: Decimal = Field(..., description="使用量（原生单位）")
     unit_type: UnitType = Field(..., description="单位类型")
@@ -112,9 +189,35 @@ class UsageEventData(BaseModel):
 
     # 元数据
     usage_details: Dict[str, Any] = Field(
-        default_factory=dict, description="额外的使用详情"
+        default_factory=dict, description="Additional usage details"
     )
-    timestamp: Optional[datetime] = Field(None, description="事件时间戳")
+    billing_surface: BillingSurface = Field(
+        default=BillingSurface.ABSTRACT_SERVICE,
+        description="Customer-facing abstraction for the invoiceable event",
+    )
+    cost_components: List[CostComponent] = Field(
+        default_factory=list,
+        description="Bundled underlying resource or external API components",
+    )
+    schema_version: Optional[str] = Field(
+        None, description="Event schema version when provided by the publisher"
+    )
+    meter_type: Optional[str] = Field(
+        None, description="Billing meter type when provided by the publisher"
+    )
+    credits_used: Optional[int] = Field(
+        None, ge=0, description="Credits already calculated by the publisher"
+    )
+    cost_usd: Optional[Decimal] = Field(
+        None, ge=0, description="USD cost already calculated by the publisher"
+    )
+    credit_consumption_handled: bool = Field(
+        False, description="Whether credit deduction was already handled upstream"
+    )
+    idempotency_key: Optional[str] = Field(
+        None, description="Idempotency key provided by the publisher"
+    )
+    timestamp: Optional[datetime] = Field(None, description="Event timestamp")
 
     class Config:
         json_encoders = {Decimal: lambda v: float(v), datetime: lambda v: v.isoformat()}

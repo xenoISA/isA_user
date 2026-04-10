@@ -20,6 +20,7 @@ PRODUCT_SERVICE_ROUTES = [
     {"path": "/api/v1/product/products", "methods": ["GET"], "auth_required": False, "description": "List products"},
     {"path": "/api/v1/product/products/{product_id}", "methods": ["GET"], "auth_required": False, "description": "Get product details"},
     {"path": "/api/v1/product/products/{product_id}/pricing", "methods": ["GET"], "auth_required": False, "description": "Get product pricing"},
+    {"path": "/api/v1/pricing/calculate", "methods": ["POST"], "auth_required": False, "description": "Calculate compatibility pricing"},
     {"path": "/api/v1/product/products/{product_id}/availability", "methods": ["GET"], "auth_required": False, "description": "Check product availability"},
 
     # Subscriptions

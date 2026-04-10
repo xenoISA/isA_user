@@ -62,6 +62,19 @@ class InitiatedBy(str, Enum):
     PAYMENT_PROVIDER = "payment_provider"
 
 
+class ReservationStatus(str, Enum):
+    """Credit reservation lifecycle status."""
+    PENDING = "pending"
+    RECONCILED = "reconciled"
+    RELEASED = "released"
+
+
+class BillingAccountType(str, Enum):
+    """Canonical owner of subscription-backed credits."""
+    USER = "user"
+    ORGANIZATION = "organization"
+
+
 # ====================
 # Core Data Models
 # ====================
@@ -164,6 +177,32 @@ class SubscriptionHistory(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class CreditReservation(BaseModel):
+    """Durable credit reservation used for billing middleware reconciliation."""
+    id: Optional[int] = None
+    reservation_id: str
+    subscription_id: str
+    user_id: str
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    request_id: Optional[str] = None
+    model: Optional[str] = None
+    estimated_credits: int = Field(..., ge=0)
+    actual_credits: Optional[int] = Field(default=None, ge=0)
+    credits_refunded: int = Field(default=0, ge=0)
+    extra_credits_consumed: int = Field(default=0, ge=0)
+    credits_remaining_after_reserve: Optional[int] = None
+    credits_remaining_after_finalize: Optional[int] = None
+    status: ReservationStatus = ReservationStatus.PENDING
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    reconciled_at: Optional[datetime] = None
+    released_at: Optional[datetime] = None
+
+
 # ====================
 # Request/Response Models
 # ====================
@@ -219,12 +258,78 @@ class CancelSubscriptionResponse(BaseModel):
 class ConsumeCreditsRequest(BaseModel):
     """Request to consume credits from a subscription"""
     user_id: str
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
     credits_to_consume: int = Field(..., gt=0)
     service_type: str  # model_inference, storage_minio, mcp_service, etc.
     usage_record_id: Optional[str] = None
     description: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+
+
+class ReserveCreditsRequest(BaseModel):
+    """Request to reserve credits before inference starts."""
+    user_id: str
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    estimated_credits: int = Field(..., gt=0)
+    model: Optional[str] = None
+    request_id: Optional[str] = None
+
+
+class ReserveCreditsResponse(BaseModel):
+    """Response returned after reserving credits."""
+    success: bool
+    message: str
+    reservation_id: Optional[str] = None
+    credits_reserved: int = 0
+    credits_remaining: int = 0
+    subscription_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
+
+
+class ReconcileReservationRequest(BaseModel):
+    """Request to reconcile a previous reservation with actual usage."""
+    reservation_id: str
+    actual_credits: int = Field(..., ge=0)
+
+
+class ReconcileReservationResponse(BaseModel):
+    """Response returned after reservation reconciliation."""
+    success: bool
+    message: str
+    reservation_id: Optional[str] = None
+    credits_consumed: int = 0
+    credits_refunded: int = 0
+    credits_remaining: int = 0
+    subscription_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
+
+
+class ReleaseReservationRequest(BaseModel):
+    """Request to release a reservation after a failed inference."""
+    reservation_id: str
+
+
+class ReleaseReservationResponse(BaseModel):
+    """Response returned after releasing a reservation."""
+    success: bool
+    message: str
+    reservation_id: Optional[str] = None
+    credits_released: int = 0
+    credits_remaining: int = 0
+    subscription_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
 
 
 class ConsumeCreditsResponse(BaseModel):
@@ -235,6 +340,9 @@ class ConsumeCreditsResponse(BaseModel):
     credits_remaining: int = 0
     subscription_id: Optional[str] = None
     consumed_from: Optional[str] = None  # subscription, purchased, bonus
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
 
 
 class CreditBalanceResponse(BaseModel):
@@ -242,6 +350,9 @@ class CreditBalanceResponse(BaseModel):
     success: bool
     message: str
     user_id: str
+    actor_user_id: Optional[str] = None
+    billing_account_type: Optional[BillingAccountType] = None
+    billing_account_id: Optional[str] = None
     organization_id: Optional[str] = None
 
     # Subscription Credits

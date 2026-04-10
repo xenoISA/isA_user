@@ -12,6 +12,7 @@ SERVICE_METADATA = {
         "subscription_management",
         "credit_allocation",
         "credit_consumption",
+        "credit_reservations",
         "subscription_history",
         "tier_management"
     ]
@@ -37,6 +38,9 @@ ROUTES = [
     # Credits
     {"path": "/api/v1/subscriptions/credits/balance", "methods": ["GET"], "description": "Get credit balance"},
     {"path": "/api/v1/subscriptions/credits/consume", "methods": ["POST"], "description": "Consume credits"},
+    {"path": "/api/v1/subscriptions/credits/reserve", "methods": ["POST"], "description": "Reserve credits"},
+    {"path": "/api/v1/subscriptions/credits/reconcile", "methods": ["POST"], "description": "Reconcile reserved credits"},
+    {"path": "/api/v1/subscriptions/credits/release", "methods": ["POST"], "description": "Release a reservation"},
 ]
 
 

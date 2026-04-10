@@ -39,6 +39,7 @@ class BillingMethodEnum(str, Enum):
     WALLET_DEDUCTION = "wallet_deduction"
     PAYMENT_CHARGE = "payment_charge"
     CREDIT_CONSUMPTION = "credit_consumption"
+    SUBSCRIPTION_CREDIT = "subscription_credit"
     SUBSCRIPTION_INCLUDED = "subscription_included"
 
 
@@ -47,7 +48,15 @@ class ServiceTypeEnum(str, Enum):
     MODEL_INFERENCE = "model_inference"
     MCP_SERVICE = "mcp_service"
     AGENT_EXECUTION = "agent_execution"
+    AGENT_RUNTIME = "agent_runtime"
     STORAGE_MINIO = "storage_minio"
+    DATA_SERVICE = "data_service"
+    DATA_PIPELINE = "data_pipeline"
+    WEB_SERVICE = "web_service"
+    PYTHON_REPL = "python_repl"
+    COMPUTE_GENERAL = "compute_general"
+    VECTOR_STORAGE = "vector_storage"
+    NATS_MESSAGING = "nats_messaging"
     API_GATEWAY = "api_gateway"
     NOTIFICATION = "notification"
     OTHER = "other"

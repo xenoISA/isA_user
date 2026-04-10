@@ -1,12 +1,5 @@
 #!/bin/bash
-# Helper script for running Alembic migrations across services.
-#
-# Usage:
-#   ./scripts/migrate.sh upgrade account_service        # upgrade one service
-#   ./scripts/migrate.sh upgrade all                    # upgrade all services
-#   ./scripts/migrate.sh downgrade payment_service -1   # rollback one step
-#   ./scripts/migrate.sh status auth_service            # show current revision
-#   ./scripts/migrate.sh list                           # list migratable services
+# Helper script for running tracked migrations across services.
 
 set -e
 
@@ -15,30 +8,28 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 GREEN='\033[0;32m'
-RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
 usage() {
     echo "Usage: $0 <command> [service] [args...]"
     echo ""
-    echo "Commands:"
-    echo "  upgrade <service|all> [revision]  Run upgrade (default: head)"
-    echo "  downgrade <service> <revision>    Run downgrade (e.g., -1)"
-    echo "  status <service|all>              Show current migration status"
-    echo "  revision <service> -m 'message'   Create a new migration"
-    echo "  list                              List services with alembic migrations"
+    echo "Alembic commands:"
+    echo "  upgrade <service|all> [revision]   Run Alembic upgrade (default: head)"
+    echo "  downgrade <service> <revision>     Run Alembic downgrade"
+    echo "  status <service|all>               Show Alembic status"
+    echo "  revision <service> -m 'message'    Create an Alembic revision"
+    echo "  list                               List services with Alembic migrations"
     echo ""
-    echo "Examples:"
-    echo "  $0 upgrade account_service"
-    echo "  $0 upgrade all"
-    echo "  $0 downgrade payment_service -1"
-    echo "  $0 status auth_service"
-    echo "  $0 revision account_service -m 'add email index'"
+    echo "Raw SQL commands:"
+    echo "  sql-upgrade <service|all>          Run tracked raw SQL migrations"
+    echo "  sql-status <service|all>           Show tracked raw SQL migration status"
+    echo "  sql-baseline <service|all> [ver]   Mark tracked raw SQL migrations as already applied"
+    echo "  sql-list                           List services with tracked raw SQL migrations"
     exit 1
 }
 
-list_services() {
+list_alembic_services() {
     find microservices/*/alembic/versions -maxdepth 0 -type d 2>/dev/null | \
         sed 's|microservices/||;s|/alembic/versions||' | sort
 }
@@ -57,7 +48,7 @@ shift
 case "$COMMAND" in
     list)
         echo -e "${CYAN}Services with Alembic migrations:${NC}"
-        list_services | while read -r svc; do
+        list_alembic_services | while read -r svc; do
             count=$(find "microservices/$svc/alembic/versions" -name "*.py" | wc -l | tr -d ' ')
             echo -e "  ${GREEN}$svc${NC} ($count revisions)"
         done
@@ -69,7 +60,7 @@ case "$COMMAND" in
         [ -z "$SERVICE" ] && usage
 
         if [ "$SERVICE" = "all" ]; then
-            for svc in $(list_services); do
+            for svc in $(list_alembic_services); do
                 echo -e "${CYAN}Upgrading $svc to $REVISION...${NC}"
                 run_alembic "$svc" upgrade "$REVISION"
                 echo -e "${GREEN}  Done.${NC}"
@@ -96,7 +87,7 @@ case "$COMMAND" in
         [ -z "$SERVICE" ] && usage
 
         if [ "$SERVICE" = "all" ]; then
-            for svc in $(list_services); do
+            for svc in $(list_alembic_services); do
                 echo -e "${CYAN}$svc:${NC}"
                 run_alembic "$svc" current 2>/dev/null || echo "  (no version table yet)"
                 echo ""
@@ -111,6 +102,33 @@ case "$COMMAND" in
         [ -z "$SERVICE" ] && usage
         shift
         run_alembic "$SERVICE" revision "$@"
+        ;;
+
+    sql-list)
+        echo -e "${CYAN}Services with tracked raw SQL migrations:${NC}"
+        python scripts/migrate_sql.py list
+        ;;
+
+    sql-upgrade)
+        SERVICE="${1:-all}"
+        echo -e "${CYAN}Running tracked raw SQL migrations for $SERVICE...${NC}"
+        python scripts/migrate_sql.py upgrade "$SERVICE"
+        echo -e "${GREEN}Done.${NC}"
+        ;;
+
+    sql-status)
+        SERVICE="${1:-all}"
+        python scripts/migrate_sql.py status "$SERVICE"
+        ;;
+
+    sql-baseline)
+        SERVICE="${1:-all}"
+        THROUGH_VERSION="${2:-}"
+        if [ -n "$THROUGH_VERSION" ]; then
+            python scripts/migrate_sql.py baseline "$SERVICE" --through-version "$THROUGH_VERSION"
+        else
+            python scripts/migrate_sql.py baseline "$SERVICE"
+        fi
         ;;
 
     *)

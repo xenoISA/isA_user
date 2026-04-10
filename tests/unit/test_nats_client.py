@@ -77,3 +77,20 @@ class TestGetEventBusConcurrency:
 
             assert first is second
             MockBus.assert_called_once()
+
+
+class TestConsumerNameSanitization:
+    def test_sanitizes_wildcard_subject_fragments_for_durable_names(self):
+        from core.nats_client import NATSEventBus
+
+        assert (
+            NATSEventBus._sanitize_consumer_name(
+                "billing-billing-usage-recorded->-consumer-livee2e20260409e"
+            )
+            == "billing-billing-usage-recorded---consumer-livee2e20260409e"
+        )
+
+    def test_falls_back_to_consumer_for_all_invalid_names(self):
+        from core.nats_client import NATSEventBus
+
+        assert NATSEventBus._sanitize_consumer_name(">>>") == "consumer"
