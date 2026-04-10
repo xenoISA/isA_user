@@ -73,3 +73,8 @@ secrets.yaml
 tmp/
 temp/
 *.tmp
+
+# Local agent tooling and generated screenshots
+.claude/
+admin-*.png
+e2e-*.png

@@ -1,1 +1,0 @@
-/Users/xenodennis/Documents/Fun/isA/.claude/rules/tdd-standard.md
