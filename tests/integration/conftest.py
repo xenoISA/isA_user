@@ -303,19 +303,21 @@ async def event_collector(event_bus) -> AsyncGenerator[EventCollector, None]:
     JetStream durable consumer 记录消息投递位置，如果多个测试共享同一个 consumer，
     前一个测试消费的消息不会再投递给后续测试。
 
-    Stream 映射 (定义在 core/nats_client.py._get_stream_name_for_event):
-    - user.* -> user-stream (account_service 事件)
-    - device.* -> device-stream
-    - wallet.* -> wallet-stream
-    - billing.* -> billing-stream
-    - session.* -> session-stream
-    - order.* -> order-stream
-    - organization.* -> organization-stream
-    - notification.* -> notification-stream
-    - file.* -> storage-stream
-    - album.* -> album-stream
-    - task.* -> task-stream
-    - memory.* -> memory-stream
+    Stream 映射遵循 source-prefixed subjects:
+    - account_service.user.*
+    - device_service.device.*
+    - wallet_service.wallet.*
+    - billing_service.billing.*
+    - session_service.session.*
+    - order_service.order.*
+    - organization_service.organization.*
+    - subscription_service.subscription.*
+    - payment_service.payment.*
+    - notification_service.notification.*
+    - storage_service.file.*
+    - album_service.album.*
+    - task_service.task.*
+    - memory_service.memory.*
     """
     collector = EventCollector()
 
@@ -325,21 +327,21 @@ async def event_collector(event_bus) -> AsyncGenerator[EventCollector, None]:
     if event_bus:
         # 订阅各个服务的事件流 (必须分别订阅才能收到对应 stream 的事件)
         event_patterns = [
-            "user.*",           # account_service: user.created, user.updated, user.deleted, user.profile_updated
-            "device.*",         # device_service: device.registered, device.authenticated, etc.
-            "wallet.*",         # wallet_service: wallet.created, wallet.deposited, etc.
-            "billing.*",        # billing_service
-            "session.*",        # session_service
-            "order.*",          # order_service
-            "organization.*",   # organization_service
-            "subscription.*",   # subscription_service
-            "payment.*",        # payment_service
-            "notification.*",   # notification_service
-            "file.*",           # storage_service
-            "album.*",          # album_service
-            "task.*",           # task_service
-            "memory.*",         # memory_service
-            "invitation.*",     # invitation_service
+            "account_service.user.*",
+            "device_service.device.*",
+            "wallet_service.wallet.*",
+            "billing_service.billing.*",
+            "session_service.session.*",
+            "order_service.order.*",
+            "organization_service.organization.*",
+            "subscription_service.subscription.*",
+            "payment_service.payment.*",
+            "notification_service.notification.*",
+            "storage_service.file.*",
+            "album_service.album.*",
+            "task_service.task.*",
+            "memory_service.memory.*",
+            "invitation_service.invitation.*",
         ]
 
         for pattern in event_patterns:

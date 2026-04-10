@@ -172,3 +172,26 @@ class ProductClient:
         except Exception as e:
             logger.error(f"Failed to get product pricing for {product_id}: {e}")
             return None
+
+    async def calculate_price(
+        self,
+        product_id: str,
+        quantity: Decimal,
+        unit_type: Optional[str] = None,
+        tier_code: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Calculate compatibility pricing for a concrete quantity."""
+        try:
+            if not self.client:
+                logger.warning("ProductServiceClient not available")
+                return None
+
+            return await self.client.calculate_price(
+                product_id=product_id,
+                quantity=float(quantity),
+                unit_type=unit_type,
+                tier_code=tier_code,
+            )
+        except Exception as e:
+            logger.error(f"Failed to calculate price for {product_id}: {e}")
+            return None

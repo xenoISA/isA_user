@@ -9,6 +9,7 @@ import logging.handlers
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -130,8 +131,7 @@ class UnifiedLoggingConfig:
 
     def __init__(self, service_name: str, log_dir: str = "logs"):
         self.service_name = service_name
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(exist_ok=True)
+        self.log_dir = self._resolve_log_dir(log_dir)
 
         # 所有日志直接保存在 logs/ 目录，不创建子目录
         self.service_log_dir = self.log_dir
@@ -142,6 +142,66 @@ class UnifiedLoggingConfig:
         self.loki_grpc_port = int(os.getenv("LOKI_GRPC_PORT", "50054"))
         self.loki_url = f"http://{self.loki_grpc_host}:{self.loki_grpc_port}"  # Fallback for HTTP-based handlers
         self.loki_enabled = os.getenv("LOKI_ENABLED", "false").lower() == "true"
+
+    def _resolve_log_dir(self, requested_log_dir: str) -> Path:
+        """Resolve a writable log directory, falling back to /tmp when needed."""
+        configured = os.getenv("LOG_DIR") or os.getenv("ISA_LOG_DIR") or requested_log_dir
+        candidates = [
+            Path(configured),
+            Path(tempfile.gettempdir()) / "isa_logs",
+        ]
+
+        last_error: Optional[Exception] = None
+        for candidate in candidates:
+            try:
+                candidate.mkdir(parents=True, exist_ok=True)
+                if os.access(candidate, os.W_OK):
+                    return candidate
+            except OSError as exc:
+                last_error = exc
+
+        if last_error:
+            logging.getLogger(__name__).warning(
+                "Falling back to console-only logging for %s: cannot use log dir '%s' (%s)",
+                self.service_name,
+                configured,
+                last_error,
+            )
+        return Path(tempfile.gettempdir())
+
+    def _build_file_handler(
+        self,
+        file_path: Path,
+        level: int,
+        formatter: logging.Formatter,
+        *,
+        enable_rotation: bool,
+        max_bytes: int,
+        backup_count: int,
+    ) -> Optional[logging.Handler]:
+        """Create a file-based handler without crashing the process on I/O errors."""
+        try:
+            if enable_rotation:
+                handler: logging.Handler = logging.handlers.RotatingFileHandler(
+                    file_path,
+                    maxBytes=max_bytes,
+                    backupCount=backup_count,
+                    encoding='utf-8'
+                )
+            else:
+                handler = logging.FileHandler(file_path, encoding='utf-8')
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "Skipping file logger for %s at %s: %s",
+                self.service_name,
+                file_path,
+                exc,
+            )
+            return None
+
+        handler.setLevel(level)
+        handler.setFormatter(formatter)
+        return handler
 
     def setup_logging(self,
                      level: LogLevel = LogLevel.INFO,
@@ -190,52 +250,50 @@ class UnifiedLoggingConfig:
         # 文件处理器 - 人类可读格式
         if enable_file:
             file_path = self.service_log_dir / f"{self.service_name}.log"
-            
-            if enable_rotation:
-                file_handler = logging.handlers.RotatingFileHandler(
-                    file_path,
-                    maxBytes=max_bytes,
-                    backupCount=backup_count,
-                    encoding='utf-8'
-                )
-            else:
-                file_handler = logging.FileHandler(file_path, encoding='utf-8')
-            
-            file_handler.setLevel(getattr(logging, level.value))
             file_formatter = HumanReadableFormatter(
                 self.service_name, 
                 use_colors=False
             )
-            file_handler.setFormatter(file_formatter)
-            logger.addHandler(file_handler)
-        
+            file_handler = self._build_file_handler(
+                file_path,
+                getattr(logging, level.value),
+                file_formatter,
+                enable_rotation=enable_rotation,
+                max_bytes=max_bytes,
+                backup_count=backup_count,
+            )
+            if file_handler is not None:
+                logger.addHandler(file_handler)
+
         # JSON文件处理器 - 结构化格式
         if enable_json:
             json_file_path = self.service_log_dir / f"{self.service_name}.json"
-            
-            if enable_rotation:
-                json_handler = logging.handlers.RotatingFileHandler(
-                    json_file_path,
-                    maxBytes=max_bytes,
-                    backupCount=backup_count,
-                    encoding='utf-8'
-                )
-            else:
-                json_handler = logging.FileHandler(json_file_path, encoding='utf-8')
-            
-            json_handler.setLevel(getattr(logging, level.value))
             json_formatter = StructuredFormatter(self.service_name)
-            json_handler.setFormatter(json_formatter)
-            logger.addHandler(json_handler)
-        
+            json_handler = self._build_file_handler(
+                json_file_path,
+                getattr(logging, level.value),
+                json_formatter,
+                enable_rotation=enable_rotation,
+                max_bytes=max_bytes,
+                backup_count=backup_count,
+            )
+            if json_handler is not None:
+                logger.addHandler(json_handler)
+
         # 设置错误处理器
         if enable_file:
             error_file_path = self.service_log_dir / f"{self.service_name}_error.log"
-            error_handler = logging.FileHandler(error_file_path, encoding='utf-8')
-            error_handler.setLevel(logging.ERROR)
             error_formatter = StructuredFormatter(self.service_name)
-            error_handler.setFormatter(error_formatter)
-            logger.addHandler(error_handler)
+            error_handler = self._build_file_handler(
+                error_file_path,
+                logging.ERROR,
+                error_formatter,
+                enable_rotation=False,
+                max_bytes=max_bytes,
+                backup_count=backup_count,
+            )
+            if error_handler is not None:
+                logger.addHandler(error_handler)
 
         # Loki Handler - 中心化日志系统
         if use_loki:

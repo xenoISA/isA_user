@@ -183,6 +183,38 @@ class ProductServiceClient:
             logger.error(f"Error getting product pricing: {e}")
             return None
 
+    async def calculate_price(
+        self,
+        product_id: str,
+        quantity: float,
+        unit_type: Optional[str] = None,
+        tier_code: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Calculate compatibility pricing for a concrete usage quantity."""
+        try:
+            payload: Dict[str, Any] = {
+                "product_id": product_id,
+                "quantity": quantity,
+            }
+            if unit_type:
+                payload["unit_type"] = unit_type
+            if tier_code:
+                payload["tier_code"] = tier_code
+
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/pricing/calculate",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to calculate pricing: {e.response.status_code}")
+            return None
+        except Exception as e:
+            logger.error(f"Error calculating price for {product_id}: {e}")
+            return None
+
     async def get_product_availability(
         self,
         product_id: str,

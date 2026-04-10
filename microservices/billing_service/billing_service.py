@@ -21,6 +21,7 @@ from .protocols import (
     SubscriptionClientProtocol,
 )
 from .models import (
+    BillingAccountType,
     BillingCalculationRequest,
     BillingCalculationResponse,
     BillingEvent,
@@ -74,6 +75,45 @@ class BillingService:
 
         logger.info("✅ BillingService initialized with dependency injection")
 
+    @staticmethod
+    def _resolve_billing_scope(
+        *,
+        user_id: Optional[str],
+        organization_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
+        billing_account_type: Optional[BillingAccountType] = None,
+        billing_account_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Resolve explicit payer identity while keeping legacy user/org inputs compatible."""
+        resolved_actor_user_id = actor_user_id or user_id or billing_account_id or ""
+        resolved_type = billing_account_type
+        resolved_account_id = billing_account_id
+
+        if resolved_type is None:
+            if organization_id:
+                resolved_type = BillingAccountType.ORGANIZATION
+                resolved_account_id = organization_id
+            else:
+                resolved_type = BillingAccountType.USER
+                resolved_account_id = user_id or resolved_actor_user_id
+        elif resolved_account_id is None:
+            if resolved_type == BillingAccountType.ORGANIZATION:
+                resolved_account_id = organization_id
+            else:
+                resolved_account_id = user_id or resolved_actor_user_id
+
+        resolved_organization_id = organization_id
+        if resolved_type == BillingAccountType.ORGANIZATION:
+            resolved_organization_id = resolved_organization_id or resolved_account_id
+
+        return {
+            "user_id": user_id or resolved_actor_user_id,
+            "actor_user_id": resolved_actor_user_id,
+            "organization_id": resolved_organization_id,
+            "billing_account_type": resolved_type,
+            "billing_account_id": resolved_account_id,
+        }
+
     def _get_service_url(self, service_name: str, fallback_port: int) -> str:
         """Get service URL from environment or use fallback"""
         fallback_url = f"http://localhost:{fallback_port}"
@@ -88,6 +128,13 @@ class BillingService:
     ) -> ProcessBillingResponse:
         """记录使用量并立即计费（核心功能）"""
         try:
+            scope = self._resolve_billing_scope(
+                user_id=request.user_id,
+                organization_id=request.organization_id,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
+            )
             # 1. 首先记录使用量到 Product Service (non-blocking, optional)
             usage_record_id = await self._record_usage_to_product_service(request)
             if not usage_record_id:
@@ -98,48 +145,18 @@ class BillingService:
                     f"local_{request.user_id}_{int(datetime.utcnow().timestamp())}"
                 )
 
-            # Publish usage.recorded event
-            if self.event_bus:
-                try:
-                    event = Event(
-                        event_type="billing.usage.recorded",
-                        source="billing_service",
-                        data={
-                            "user_id": request.user_id,
-                            "organization_id": request.organization_id,
-                            "product_id": request.product_id,
-                            "usage_amount": float(request.usage_amount),
-                            "service_type": request.service_type,
-                            "usage_record_id": usage_record_id,
-                            "timestamp": datetime.utcnow().isoformat(),
-                        },
-                    )
-                    await self.event_bus.publish_event(event)
-                except AttributeError:
-                    # Fallback: event_bus might expect dict instead of Event object
-                    await self.event_bus.publish_event({
-                        "event_type": "usage.recorded",
-                        "source": "billing_service",
-                        "data": {
-                            "user_id": request.user_id,
-                            "organization_id": request.organization_id,
-                            "product_id": request.product_id,
-                            "usage_amount": float(request.usage_amount),
-                            "service_type": request.service_type,
-                            "usage_record_id": usage_record_id,
-                            "timestamp": datetime.utcnow().isoformat(),
-                        },
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to publish usage.recorded event: {e}")
-
             # 2. 计算费用
             calc_request = BillingCalculationRequest(
-                user_id=request.user_id,
-                organization_id=request.organization_id,
+                user_id=scope["user_id"],
+                actor_user_id=scope["actor_user_id"],
+                billing_account_type=scope["billing_account_type"],
+                billing_account_id=scope["billing_account_id"],
+                organization_id=scope["organization_id"],
+                agent_id=request.agent_id,
                 subscription_id=request.subscription_id,
                 product_id=request.product_id,
                 usage_amount=request.usage_amount,
+                unit_type=request.unit_type,
             )
             calculation = await self.calculate_billing_cost(calc_request)
 
@@ -153,7 +170,10 @@ class BillingService:
             quota_check = await self.check_quota(
                 QuotaCheckRequest(
                     user_id=request.user_id,
-                    organization_id=request.organization_id,
+                    actor_user_id=scope["actor_user_id"],
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    organization_id=scope["organization_id"],
                     subscription_id=request.subscription_id,
                     service_type=request.service_type,
                     product_id=request.product_id,
@@ -166,8 +186,12 @@ class BillingService:
                 await self._create_billing_event(
                     EventType.QUOTA_EXCEEDED,
                     "billing_service",
-                    user_id=request.user_id,
-                    organization_id=request.organization_id,
+                    user_id=scope["user_id"],
+                    actor_user_id=scope["actor_user_id"],
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    organization_id=scope["organization_id"],
+                    agent_id=request.agent_id,
                     subscription_id=request.subscription_id,
                     service_type=ServiceType(request.service_type)
                     if request.service_type
@@ -190,8 +214,12 @@ class BillingService:
                             event_type="quota.exceeded",
                             source="billing_service",
                             data={
-                                "user_id": request.user_id,
-                                "organization_id": request.organization_id,
+                                "user_id": scope["user_id"],
+                                "actor_user_id": scope["actor_user_id"],
+                                "billing_account_type": scope["billing_account_type"],
+                                "billing_account_id": scope["billing_account_id"],
+                                "organization_id": scope["organization_id"],
+                                "agent_id": request.agent_id,
                                 "subscription_id": request.subscription_id,
                                 "product_id": request.product_id,
                                 "requested_amount": float(request.usage_amount),
@@ -212,7 +240,7 @@ class BillingService:
                     success=False, message=f"Quota exceeded: {quota_check.message}"
                 )
 
-            # 4. 如果是免费层、订阅包含或0成本，直接标记为完成
+            # 4. Free, subscription-included, or zero-cost usage completes immediately
             if (
                 calculation.is_free_tier
                 or calculation.is_included_in_subscription
@@ -223,13 +251,29 @@ class BillingService:
                     calculation=calculation,
                     billing_method=BillingMethod.SUBSCRIPTION_INCLUDED,
                     status=BillingStatus.COMPLETED,
+                    service_type=request.service_type,
+                    actor_user_id=scope["actor_user_id"],
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    organization_id=scope["organization_id"],
+                    agent_id=request.agent_id,
+                    subscription_id=request.subscription_id,
+                    billing_metadata={
+                        "charged_upstream": False,
+                        "credit_consumption_handled": False,
+                        "usage_details": request.usage_details or {},
+                    },
                 )
 
                 await self._create_billing_event(
                     EventType.BILLING_PROCESSED,
                     "billing_service",
-                    user_id=request.user_id,
-                    organization_id=request.organization_id,
+                    user_id=scope["user_id"],
+                    actor_user_id=scope["actor_user_id"],
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    organization_id=scope["organization_id"],
+                    agent_id=request.agent_id,
                     subscription_id=request.subscription_id,
                     billing_record_id=billing_record.billing_id,
                     amount=calculation.total_cost,
@@ -247,10 +291,22 @@ class BillingService:
                     billing_method_used=BillingMethod.SUBSCRIPTION_INCLUDED,
                 )
 
-            # 5. 需要实际扣费，处理计费
+            # 5. A payable usage record needs an actual charge
             process_request = ProcessBillingRequest(
                 usage_record_id=usage_record_id,
                 billing_method=calculation.suggested_billing_method,
+                service_type=request.service_type,
+                actor_user_id=scope["actor_user_id"],
+                billing_account_type=scope["billing_account_type"],
+                billing_account_id=scope["billing_account_id"],
+                organization_id=scope["organization_id"],
+                agent_id=request.agent_id,
+                subscription_id=request.subscription_id,
+                billing_metadata={
+                    "charged_upstream": False,
+                    "credit_consumption_handled": False,
+                    "usage_details": request.usage_details or {},
+                },
             )
 
             return await self.process_billing(process_request, calculation)
@@ -261,21 +317,245 @@ class BillingService:
                 success=False, message=f"Internal error: {str(e)}"
             )
 
+    async def record_usage_with_external_billing(
+        self,
+        request: RecordUsageRequest,
+        *,
+        credits_used: Optional[int] = None,
+        cost_usd: Optional[Decimal] = None,
+        idempotency_key: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+    ) -> ProcessBillingResponse:
+        """Persist usage that was already charged by an upstream service."""
+        try:
+            scope = self._resolve_billing_scope(
+                user_id=request.user_id,
+                organization_id=request.organization_id,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
+            )
+            usage_record_id = await self._record_usage_to_product_service(request)
+            if not usage_record_id:
+                logger.warning(
+                    "Product service unavailable, recording external billing without usage record"
+                )
+                usage_record_id = (
+                    f"external_{request.user_id}_{int(datetime.utcnow().timestamp())}"
+                )
+
+            calc_request = BillingCalculationRequest(
+                user_id=scope["user_id"],
+                actor_user_id=scope["actor_user_id"],
+                billing_account_type=scope["billing_account_type"],
+                billing_account_id=scope["billing_account_id"],
+                organization_id=scope["organization_id"],
+                agent_id=request.agent_id,
+                subscription_id=request.subscription_id,
+                product_id=request.product_id,
+                usage_amount=request.usage_amount,
+                unit_type=request.unit_type,
+            )
+            calculation = await self.calculate_billing_cost(calc_request)
+
+            if not calculation.success:
+                calculation_error = calculation.message
+                calculation = self._build_external_billing_fallback_calculation(
+                    request=request,
+                    user_id=scope["user_id"],
+                    actor_user_id=scope["actor_user_id"],
+                    billing_account_type=scope["billing_account_type"],
+                    billing_account_id=scope["billing_account_id"],
+                    organization_id=scope["organization_id"],
+                    agent_id=request.agent_id,
+                    subscription_id=request.subscription_id,
+                    cost_usd=cost_usd,
+                    credits_used=credits_used,
+                )
+                if calculation is None:
+                    return ProcessBillingResponse(
+                        success=False,
+                        message=(
+                            "Failed to calculate billing cost for externally billed usage: "
+                            f"{calc_request.product_id} ({request.product_id}) -> "
+                            f"{calculation_error or 'Product pricing not found'}"
+                        ),
+                    )
+
+            calculation = self._override_with_upstream_external_cost(
+                calculation=calculation,
+                cost_usd=cost_usd,
+            )
+
+            billing_method = (
+                BillingMethod.SUBSCRIPTION_INCLUDED
+                if (
+                    calculation.is_free_tier
+                    or calculation.is_included_in_subscription
+                    or calculation.total_cost == 0
+                )
+                else BillingMethod.CREDIT_CONSUMPTION
+            )
+
+            billing_record = await self._create_billing_record(
+                usage_record_id=usage_record_id,
+                calculation=calculation,
+                billing_method=billing_method,
+                status=BillingStatus.COMPLETED,
+                service_type=request.service_type,
+                actor_user_id=scope["actor_user_id"],
+                billing_account_type=scope["billing_account_type"],
+                billing_account_id=scope["billing_account_id"],
+                organization_id=scope["organization_id"],
+                agent_id=request.agent_id,
+                subscription_id=request.subscription_id,
+                billing_metadata={
+                    "charged_upstream": True,
+                    "credit_consumption_handled": True,
+                    "source_event_id": source_event_id,
+                    "idempotency_key": idempotency_key,
+                    "upstream_credits_used": credits_used,
+                    "upstream_cost_usd": (
+                        str(cost_usd) if cost_usd is not None else None
+                    ),
+                    "usage_details": request.usage_details or {},
+                },
+            )
+
+            await self._create_billing_event(
+                EventType.BILLING_PROCESSED,
+                "billing_service",
+                user_id=scope["user_id"],
+                actor_user_id=scope["actor_user_id"],
+                billing_account_type=scope["billing_account_type"],
+                billing_account_id=scope["billing_account_id"],
+                organization_id=scope["organization_id"],
+                agent_id=request.agent_id,
+                subscription_id=request.subscription_id,
+                billing_record_id=billing_record.billing_id,
+                amount=calculation.total_cost,
+                service_type=request.service_type,
+                event_data={
+                    "billing_method": billing_method.value,
+                    "charged_upstream": True,
+                    "credit_consumption_handled": True,
+                    "source_event_id": source_event_id,
+                    "idempotency_key": idempotency_key,
+                    "upstream_credits_used": credits_used,
+                    "upstream_cost_usd": (
+                        str(cost_usd) if cost_usd is not None else None
+                    ),
+                },
+            )
+
+            return ProcessBillingResponse(
+                success=True,
+                message="Usage recorded successfully (already billed upstream)",
+                billing_record_id=billing_record.billing_id,
+                amount_charged=calculation.total_cost,
+                billing_method_used=billing_method,
+            )
+        except Exception as e:
+            logger.error("Error recording externally billed usage: %s", e)
+            return ProcessBillingResponse(
+                success=False,
+                message=f"Error recording externally billed usage: {str(e)}",
+            )
+
+    def _override_with_upstream_external_cost(
+        self,
+        *,
+        calculation: BillingCalculationResponse,
+        cost_usd: Optional[Decimal],
+    ) -> BillingCalculationResponse:
+        """Use upstream-reported cost when available for externally billed usage."""
+        if cost_usd is None:
+            return calculation
+
+        upstream_total = Decimal(str(cost_usd))
+        usage_amount = calculation.usage_amount or Decimal("0")
+        unit_price = (
+            upstream_total / usage_amount if usage_amount > 0 else Decimal("0")
+        )
+        return calculation.model_copy(
+            update={
+                "unit_price": unit_price,
+                "total_cost": upstream_total,
+                "currency": Currency.USD,
+            }
+        )
+
+    def _build_external_billing_fallback_calculation(
+        self,
+        *,
+        request: RecordUsageRequest,
+        user_id: str,
+        actor_user_id: Optional[str],
+        billing_account_type: Optional[BillingAccountType],
+        billing_account_id: Optional[str],
+        organization_id: Optional[str],
+        agent_id: Optional[str],
+        subscription_id: Optional[str],
+        cost_usd: Optional[Decimal],
+        credits_used: Optional[int],
+    ) -> Optional[BillingCalculationResponse]:
+        """Build a synthetic calculation when upstream already charged successfully."""
+        if cost_usd is None and credits_used is None:
+            return None
+
+        total_cost = (
+            Decimal(str(cost_usd))
+            if cost_usd is not None
+            else Decimal(str(credits_used or 0))
+        )
+        currency = Currency.USD if cost_usd is not None else Currency.CREDIT
+        usage_amount = request.usage_amount or Decimal("0")
+        unit_price = total_cost / usage_amount if usage_amount > 0 else Decimal("0")
+
+        return BillingCalculationResponse(
+            success=True,
+            message="Using upstream external billing amount",
+            user_id=user_id,
+            actor_user_id=actor_user_id,
+            billing_account_type=billing_account_type,
+            billing_account_id=billing_account_id,
+            organization_id=organization_id,
+            agent_id=agent_id,
+            subscription_id=subscription_id,
+            product_id=request.product_id,
+            usage_amount=request.usage_amount,
+            unit_price=unit_price,
+            total_cost=total_cost,
+            currency=currency,
+            suggested_billing_method=BillingMethod.CREDIT_CONSUMPTION,
+            available_billing_methods=[BillingMethod.CREDIT_CONSUMPTION],
+        )
+
     async def calculate_billing_cost(
         self, request: BillingCalculationRequest
     ) -> BillingCalculationResponse:
         """计算计费费用"""
         try:
-            # 调用 Product Service 获取定价信息
+            # Use the compatibility price-calculation endpoint so token-based
+            # and tiered products resolve to real per-unit prices instead of
+            # legacy catalog base_price fields.
             pricing_info = await self._get_product_pricing(
-                request.product_id, request.user_id, request.subscription_id
+                request.product_id,
+                request.user_id,
+                request.subscription_id,
+                request.usage_amount,
+                request.unit_type,
             )
             if not pricing_info:
                 return BillingCalculationResponse(
                     success=False,
                     message="Product pricing not found",
                     user_id=request.user_id,
+                    actor_user_id=request.actor_user_id,
+                    billing_account_type=request.billing_account_type,
+                    billing_account_id=request.billing_account_id,
                     organization_id=request.organization_id,
+                    agent_id=request.agent_id,
                     subscription_id=request.subscription_id,
                     product_id=request.product_id,
                     usage_amount=request.usage_amount,
@@ -302,9 +582,8 @@ class BillingService:
             # is not skipped in favour of a downstream fallback field.
             candidates = [
                 pricing_info.get("unit_price"),
-                pricing_info.get("base_price"),
-                effective_pricing.get("base_unit_price"),
                 pricing_model.get("base_unit_price"),
+                effective_pricing.get("base_unit_price"),
                 tier_unit_price,
             ]
             raw_price = next((c for c in candidates if c is not None), None)
@@ -320,8 +599,12 @@ class BillingService:
                 )
 
             unit_price = Decimal(str(raw_price or 0))
-
-            total_cost = request.usage_amount * unit_price
+            raw_total_cost = pricing_info.get("total_price") or pricing_info.get("total_cost")
+            total_cost = (
+                Decimal(str(raw_total_cost))
+                if raw_total_cost is not None
+                else request.usage_amount * unit_price
+            )
 
             # Get currency from pricing_model
             currency_str = (
@@ -356,8 +639,17 @@ class BillingService:
                     total_cost = Decimal("0")
 
             # 获取用户余额信息 (subscription_credits, purchased_credits, wallet_balance)
-            subscription_credits, purchased_credits, wallet_balance = await self._get_user_balances(
-                request.user_id, request.organization_id
+            (
+                subscription_credits,
+                purchased_credits,
+                wallet_balance,
+                active_subscription_id,
+            ) = await self._get_user_balances(
+                request.user_id,
+                request.organization_id,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
             )
 
             # Calculate total cost in credits (1 Credit = $0.00001 USD)
@@ -384,7 +676,7 @@ class BillingService:
             if is_free_tier or is_included_in_subscription:
                 available_methods.append(BillingMethod.SUBSCRIPTION_INCLUDED)
             if subscription_credits >= total_cost_credits:
-                available_methods.append(BillingMethod.SUBSCRIPTION_INCLUDED)
+                available_methods.append(BillingMethod.SUBSCRIPTION_CREDIT)
             if purchased_credits >= total_cost_credits:
                 available_methods.append(BillingMethod.CREDIT_CONSUMPTION)
             if wallet_balance and wallet_balance >= Decimal(str(total_cost_credits * 0.00001)):
@@ -401,11 +693,15 @@ class BillingService:
             if self.event_bus:
                 try:
                     event = Event(
-                        event_type="calculated",
+                        event_type="billing.calculated",
                         source="billing_service",
                         data={
                             "user_id": request.user_id,
+                            "actor_user_id": request.actor_user_id,
+                            "billing_account_type": request.billing_account_type,
+                            "billing_account_id": request.billing_account_id,
                             "organization_id": request.organization_id,
+                            "agent_id": request.agent_id,
                             "product_id": request.product_id,
                             "usage_amount": float(request.usage_amount),
                             "unit_price": float(unit_price),
@@ -425,8 +721,12 @@ class BillingService:
                 success=True,
                 message="Billing cost calculated successfully",
                 user_id=request.user_id,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
                 organization_id=request.organization_id,
-                subscription_id=request.subscription_id,
+                agent_id=request.agent_id,
+                subscription_id=request.subscription_id or active_subscription_id,
                 product_id=request.product_id,
                 usage_amount=request.usage_amount,
                 unit_price=unit_price,
@@ -447,8 +747,12 @@ class BillingService:
                 success=False,
                 message=f"Error calculating cost: {str(e)}",
                 user_id=request.user_id,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
                 organization_id=request.organization_id,
-                subscription_id=request.subscription_id,
+                agent_id=request.agent_id,
+                subscription_id=request.subscription_id or active_subscription_id,
                 product_id=request.product_id,
                 usage_amount=request.usage_amount,
                 unit_price=Decimal("0"),
@@ -479,6 +783,14 @@ class BillingService:
                 calculation=calculation,
                 billing_method=request.billing_method,
                 status=BillingStatus.PROCESSING,
+                service_type=request.service_type,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
+                organization_id=request.organization_id,
+                agent_id=request.agent_id,
+                subscription_id=request.subscription_id,
+                billing_metadata=request.billing_metadata,
             )
 
             # 根据计费方式处理扣费
@@ -501,7 +813,12 @@ class BillingService:
                         EventType.BILLING_PROCESSED,
                         "billing_service",
                         user_id=billing_record.user_id,
+                        actor_user_id=billing_record.actor_user_id,
+                        billing_account_type=billing_record.billing_account_type,
+                        billing_account_id=billing_record.billing_account_id,
                         organization_id=billing_record.organization_id,
+                        agent_id=billing_record.agent_id,
+                        subscription_id=billing_record.subscription_id,
                         billing_record_id=billing_record.billing_id,
                         amount=calculation.total_cost,
                         service_type=billing_record.service_type,
@@ -515,15 +832,25 @@ class BillingService:
                     if self.event_bus:
                         try:
                             event = Event(
-                                event_type="processed",
+                                event_type="billing.processed",
                                 source="billing_service",
                                 data={
                                     "billing_record_id": billing_record.billing_id,
                                     "user_id": calculation.user_id
                                     if hasattr(calculation, "user_id")
                                     else None,
+                                    "actor_user_id": billing_record.actor_user_id,
+                                    "billing_account_type": (
+                                        billing_record.billing_account_type
+                                    ),
+                                    "billing_account_id": (
+                                        billing_record.billing_account_id
+                                    ),
                                     "organization_id": calculation.organization_id
                                     if hasattr(calculation, "organization_id")
+                                    else None,
+                                    "agent_id": calculation.agent_id
+                                    if hasattr(calculation, "agent_id")
                                     else None,
                                     "amount_charged": float(calculation.total_cost),
                                     "currency": calculation.currency.value,
@@ -558,7 +885,12 @@ class BillingService:
                         EventType.BILLING_FAILED,
                         "billing_service",
                         user_id=billing_record.user_id,
+                        actor_user_id=billing_record.actor_user_id,
+                        billing_account_type=billing_record.billing_account_type,
+                        billing_account_id=billing_record.billing_account_id,
                         organization_id=billing_record.organization_id,
+                        agent_id=billing_record.agent_id,
+                        subscription_id=billing_record.subscription_id,
                         billing_record_id=billing_record.billing_id,
                         service_type=billing_record.service_type,
                         event_data={
@@ -573,12 +905,27 @@ class BillingService:
                         billing_record_id=billing_record.billing_id,
                     )
 
-            elif request.billing_method == BillingMethod.SUBSCRIPTION_INCLUDED:
+            elif request.billing_method in (
+                BillingMethod.SUBSCRIPTION_INCLUDED,
+                BillingMethod.SUBSCRIPTION_CREDIT,
+            ):
                 credits_to_consume = self._convert_to_credits(
                     calculation.total_cost, calculation.currency
                 )
-                success, transaction_id, error = await self._process_subscription_credit_consumption(
+                (
+                    success,
+                    transaction_id,
+                    error,
+                    consumed_subscription_id,
+                ) = await self._process_subscription_credit_consumption(
                     user_id=billing_record.user_id,
+                    actor_user_id=billing_record.actor_user_id,
+                    billing_account_type=(
+                        billing_record.billing_account_type.value
+                        if billing_record.billing_account_type
+                        else None
+                    ),
+                    billing_account_id=billing_record.billing_account_id,
                     organization_id=billing_record.organization_id,
                     credits_amount=credits_to_consume,
                     service_type=billing_record.service_type.value,
@@ -590,13 +937,17 @@ class BillingService:
                         billing_record.billing_id,
                         BillingStatus.COMPLETED,
                         payment_transaction_id=transaction_id,
+                        subscription_id=(
+                            consumed_subscription_id or billing_record.subscription_id
+                        ),
+                        billing_method=BillingMethod.SUBSCRIPTION_CREDIT,
                     )
                     return ProcessBillingResponse(
                         success=True,
                         message="Billing processed successfully via subscription credits",
                         billing_record_id=billing_record.billing_id,
                         amount_charged=calculation.total_cost,
-                        billing_method_used=BillingMethod.SUBSCRIPTION_INCLUDED,
+                        billing_method_used=BillingMethod.SUBSCRIPTION_CREDIT,
                     )
 
                 await self.repository.update_billing_record_status(
@@ -772,6 +1123,34 @@ class BillingService:
     ) -> Optional[str]:
         """向 Product Service 记录使用量"""
         try:
+            usage_details = dict(request.usage_details or {})
+            if request.agent_id and "agent_id" not in usage_details:
+                usage_details["agent_id"] = request.agent_id
+            scope = self._resolve_billing_scope(
+                user_id=request.user_id,
+                organization_id=request.organization_id,
+                actor_user_id=request.actor_user_id,
+                billing_account_type=request.billing_account_type,
+                billing_account_id=request.billing_account_id,
+            )
+            usage_details.setdefault("actor_user_id", scope["actor_user_id"])
+            usage_details.setdefault("billing_account_type", scope["billing_account_type"].value)
+            usage_details.setdefault("billing_account_id", scope["billing_account_id"])
+            if request.unit_type:
+                usage_details.setdefault("unit_type", request.unit_type)
+            if request.meter_type:
+                usage_details.setdefault("meter_type", request.meter_type)
+            if request.operation_type:
+                usage_details.setdefault("operation_type", request.operation_type)
+            if request.source_service:
+                usage_details.setdefault("source_service", request.source_service)
+            if request.resource_name:
+                usage_details.setdefault("resource_name", request.resource_name)
+            if request.billing_surface:
+                usage_details.setdefault("billing_surface", request.billing_surface)
+            if request.cost_components:
+                usage_details.setdefault("cost_components", request.cost_components)
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self._get_service_url('product_service', 8215)}/api/v1/product/usage/record",
@@ -783,7 +1162,7 @@ class BillingService:
                         "usage_amount": float(request.usage_amount),
                         "session_id": request.session_id,
                         "request_id": request.request_id,
-                        "usage_details": request.usage_details,
+                        "usage_details": usage_details,
                         "usage_timestamp": request.usage_timestamp.isoformat()
                         if request.usage_timestamp
                         else None,
@@ -805,31 +1184,42 @@ class BillingService:
             return None
 
     async def _get_product_pricing(
-        self, product_id: str, user_id: str, subscription_id: Optional[str]
+        self,
+        product_id: str,
+        user_id: str,
+        subscription_id: Optional[str],
+        quantity: Decimal,
+        unit_type: Optional[str],
     ) -> Optional[Dict[str, Any]]:
-        """从 Product Service 获取产品定价"""
-        # Try to use ProductServiceClient first
+        """Get compatibility pricing for a concrete usage quantity."""
         if self.product_client:
             try:
-                pricing = await self.product_client.get_product_pricing(
-                    product_id=product_id,
-                    user_id=user_id,
-                    subscription_id=subscription_id,
+                calculate_price = getattr(self.product_client, "calculate_price", None)
+                if calculate_price is not None:
+                    pricing = await calculate_price(
+                        product_id=product_id,
+                        quantity=quantity,
+                        unit_type=unit_type,
+                    )
+                    if pricing:
+                        return pricing
+                logger.warning(
+                    "ProductServiceClient.calculate_price returned None, falling back to HTTP"
                 )
-                if pricing:
-                    return pricing
-                logger.warning("ProductServiceClient returned None, falling back to HTTP")
             except Exception as e:
                 logger.warning(
-                    f"ProductServiceClient failed: {e}, falling back to HTTP"
+                    f"ProductServiceClient.calculate_price failed: {e}, falling back to HTTP"
                 )
 
-        # Fallback to HTTP if client not available
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self._get_service_url('product_service', 8215)}/api/v1/product/products/{product_id}/pricing",
-                    params={"user_id": user_id, "subscription_id": subscription_id},
+                response = await client.post(
+                    f"{self._get_service_url('product_service', 8215)}/api/v1/pricing/calculate",
+                    json={
+                        "product_id": product_id,
+                        "quantity": str(quantity),
+                        "unit_type": unit_type,
+                    },
                     timeout=10.0,
                 )
 
@@ -837,18 +1227,16 @@ class BillingService:
                     return response.json()
                 else:
                     logger.error(
-                        f"Product service pricing returned {response.status_code}"
+                        f"Product service price calculation returned {response.status_code}"
                     )
 
         except Exception as e:
-            logger.error(f"Error getting product pricing: {e}")
+            logger.error(f"Error calculating product pricing: {e}")
 
-        # All attempts failed - return None so the caller can distinguish
-        # "product has zero price" from "pricing lookup failed entirely"
         logger.error(
             f"Product pricing unavailable for {product_id} — "
-            "all lookup attempts failed.  Returning None to prevent "
-            "zero-cost billing records.  Check product_service connectivity."
+            "compatibility price calculation failed. Returning None to "
+            "prevent incorrect billing records."
         )
         return None
 
@@ -873,8 +1261,14 @@ class BillingService:
             return None
 
     async def _get_user_balances(
-        self, user_id: str, organization_id: Optional[str] = None
-    ) -> Tuple[Optional[int], Optional[int], Optional[Decimal]]:
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        *,
+        actor_user_id: Optional[str] = None,
+        billing_account_type: Optional[BillingAccountType] = None,
+        billing_account_id: Optional[str] = None,
+    ) -> Tuple[Optional[int], Optional[int], Optional[Decimal], Optional[str]]:
         """
         获取用户的各类余额
 
@@ -887,6 +1281,7 @@ class BillingService:
         subscription_credits = 0
         purchased_credits = 0
         wallet_balance = None
+        subscription_id = None
 
         try:
             # 1. 获取订阅信用额度 (highest priority)
@@ -894,10 +1289,18 @@ class BillingService:
                 try:
                     credit_balance = await self.subscription_client.get_credit_balance(
                         user_id=user_id,
-                        organization_id=organization_id
+                        organization_id=organization_id,
+                        billing_account_type=(
+                            billing_account_type.value
+                            if isinstance(billing_account_type, BillingAccountType)
+                            else billing_account_type
+                        ),
+                        billing_account_id=billing_account_id,
+                        actor_user_id=actor_user_id,
                     )
                     if credit_balance and credit_balance.get("success"):
                         subscription_credits = credit_balance.get("subscription_credits_remaining", 0)
+                        subscription_id = credit_balance.get("subscription_id")
                         logger.debug(f"User {user_id} subscription credits: {subscription_credits}")
                 except Exception as e:
                     logger.warning(f"Failed to get subscription credits: {e}")
@@ -933,11 +1336,11 @@ class BillingService:
             except Exception as e:
                 logger.warning(f"Failed to get wallet/credit balance: {e}")
 
-            return subscription_credits, purchased_credits, wallet_balance
+            return subscription_credits, purchased_credits, wallet_balance, subscription_id
 
         except Exception as e:
             logger.error(f"Error getting user balances: {e}")
-            return 0, 0, None
+            return 0, 0, None, None
 
     def _is_usage_included_in_subscription(
         self, product_id: str, usage_amount: Decimal, subscription_info: Dict[str, Any]
@@ -975,7 +1378,7 @@ class BillingService:
 
         # Priority 1: Use subscription credits
         if subscription_credits >= total_cost_credits:
-            return BillingMethod.SUBSCRIPTION_INCLUDED
+            return BillingMethod.SUBSCRIPTION_CREDIT
 
         # Priority 2: Use purchased credits
         if purchased_credits >= total_cost_credits:
@@ -1062,11 +1465,14 @@ class BillingService:
     async def _process_subscription_credit_consumption(
         self,
         user_id: str,
+        actor_user_id: Optional[str],
+        billing_account_type: Optional[str],
+        billing_account_id: Optional[str],
         organization_id: Optional[str],
         credits_amount: int,
         service_type: str,
         reference_id: str
-    ) -> Tuple[bool, Optional[str], Optional[str]]:
+    ) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
         """
         Process subscription credit consumption
 
@@ -1082,7 +1488,7 @@ class BillingService:
         """
         if not self.subscription_client:
             logger.warning("SubscriptionClient not available")
-            return False, None, "Subscription client not available"
+            return False, None, "Subscription client not available", None
 
         try:
             result = await self.subscription_client.consume_credits(
@@ -1091,18 +1497,31 @@ class BillingService:
                 service_type=service_type,
                 description=f"Billing charge for {reference_id}",
                 usage_record_id=reference_id,
-                organization_id=organization_id
+                organization_id=organization_id,
+                billing_account_type=billing_account_type,
+                billing_account_id=billing_account_id,
+                actor_user_id=actor_user_id,
             )
 
             if result and result.get("success"):
-                return True, result.get("transaction_id"), None
+                return (
+                    True,
+                    result.get("transaction_id"),
+                    None,
+                    result.get("subscription_id"),
+                )
             else:
                 error_msg = result.get("message", "Subscription credit consumption failed") if result else "No response"
-                return False, None, error_msg
+                return (
+                    False,
+                    None,
+                    error_msg,
+                    result.get("subscription_id") if result else None,
+                )
 
         except Exception as e:
             logger.error(f"Error consuming subscription credits: {e}")
-            return False, None, str(e)
+            return False, None, str(e), None
 
     async def _process_purchased_credit_consumption(
         self,
@@ -1156,26 +1575,49 @@ class BillingService:
         calculation: BillingCalculationResponse,
         billing_method: BillingMethod,
         status: BillingStatus,
+        service_type: Optional[ServiceType] = None,
+        actor_user_id: Optional[str] = None,
+        billing_account_type: Optional[BillingAccountType] = None,
+        billing_account_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        subscription_id: Optional[str] = None,
+        billing_metadata: Optional[Dict[str, Any]] = None,
     ) -> BillingRecord:
-        """创建计费记录"""
+        """Create a billing record."""
+        resolved_service_type = service_type or ServiceType.OTHER
+        base_metadata = {
+            "is_free_tier": calculation.is_free_tier,
+            "is_included_in_subscription": calculation.is_included_in_subscription,
+        }
+        if billing_metadata:
+            base_metadata.update(billing_metadata)
+
         billing_record = BillingRecord(
             billing_id=f"bill_{uuid.uuid4().hex[:12]}",
             user_id=getattr(calculation, "user_id", ""),
-            organization_id=getattr(calculation, "organization_id", None),
-            subscription_id=getattr(calculation, "subscription_id", None),
+            actor_user_id=getattr(calculation, "actor_user_id", None) or actor_user_id,
+            billing_account_type=(
+                getattr(calculation, "billing_account_type", None) or billing_account_type
+            ),
+            billing_account_id=(
+                getattr(calculation, "billing_account_id", None) or billing_account_id
+            ),
+            organization_id=getattr(calculation, "organization_id", None) or organization_id,
+            agent_id=getattr(calculation, "agent_id", None) or agent_id,
+            subscription_id=(
+                getattr(calculation, "subscription_id", None) or subscription_id
+            ),
             usage_record_id=usage_record_id,
             product_id=calculation.product_id,
-            service_type=ServiceType.OTHER,  # 需要从 Product Service 获取
+            service_type=resolved_service_type,
             usage_amount=calculation.usage_amount,
             unit_price=calculation.unit_price,
             total_amount=calculation.total_cost,
             currency=calculation.currency,
             billing_method=billing_method,
             billing_status=status,
-            billing_metadata={
-                "is_free_tier": calculation.is_free_tier,
-                "is_included_in_subscription": calculation.is_included_in_subscription,
-            },
+            billing_metadata=base_metadata,
         )
 
         created_record = await self.repository.create_billing_record(billing_record)
@@ -1189,7 +1631,11 @@ class BillingService:
                     data={
                         "billing_record_id": created_record.billing_id,
                         "user_id": created_record.user_id,
+                        "actor_user_id": created_record.actor_user_id,
+                        "billing_account_type": created_record.billing_account_type,
+                        "billing_account_id": created_record.billing_account_id,
                         "organization_id": created_record.organization_id,
+                        "agent_id": created_record.agent_id,
                         "product_id": created_record.product_id,
                         "total_amount": float(created_record.total_amount),
                         "currency": created_record.currency.value,
@@ -1209,7 +1655,11 @@ class BillingService:
         event_type: EventType,
         event_source: str,
         user_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
+        billing_account_type: Optional[BillingAccountType] = None,
+        billing_account_id: Optional[str] = None,
         organization_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         subscription_id: Optional[str] = None,
         billing_record_id: Optional[str] = None,
         amount: Optional[Decimal] = None,
@@ -1222,7 +1672,11 @@ class BillingService:
             event_type=event_type,
             event_source=event_source,
             user_id=user_id,
+            actor_user_id=actor_user_id,
+            billing_account_type=billing_account_type,
+            billing_account_id=billing_account_id,
             organization_id=organization_id,
+            agent_id=agent_id,
             subscription_id=subscription_id,
             billing_record_id=billing_record_id,
             amount=amount,

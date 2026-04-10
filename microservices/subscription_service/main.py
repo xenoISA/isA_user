@@ -36,6 +36,10 @@ from .models import (
     CreateSubscriptionRequest, CreateSubscriptionResponse,
     UpdateSubscriptionRequest, CancelSubscriptionRequest, CancelSubscriptionResponse,
     ConsumeCreditsRequest, ConsumeCreditsResponse, CreditBalanceResponse,
+    ReserveCreditsRequest, ReserveCreditsResponse,
+    ReconcileReservationRequest, ReconcileReservationResponse,
+    ReleaseReservationRequest, ReleaseReservationResponse,
+    BillingAccountType,
     SubscriptionResponse, SubscriptionListResponse, SubscriptionHistoryResponse,
     SubscriptionStatus, SubscriptionAction, SubscriptionHistory, InitiatedBy,
     ErrorResponse, HealthResponse
@@ -340,11 +344,22 @@ async def cancel_subscription(
 async def get_user_subscription(
     user_id: str,
     organization_id: Optional[str] = Query(None, description="Organization ID"),
+    billing_account_type: Optional[BillingAccountType] = Query(
+        None, description="Explicit payer type"
+    ),
+    billing_account_id: Optional[str] = Query(None, description="Explicit payer ID"),
+    actor_user_id: Optional[str] = Query(None, description="Human actor ID"),
     subscription_service: SubscriptionService = Depends(get_subscription_service),
 ):
     """Get active subscription for a user"""
     try:
-        return await subscription_service.get_user_subscription(user_id, organization_id)
+        return await subscription_service.get_user_subscription(
+            user_id=user_id,
+            organization_id=organization_id,
+            billing_account_type=billing_account_type,
+            billing_account_id=billing_account_id,
+            actor_user_id=actor_user_id,
+        )
     except SubscriptionServiceError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
@@ -359,11 +374,22 @@ async def get_user_subscription(
 async def get_credit_balance(
     user_id: str = Query(..., description="User ID"),
     organization_id: Optional[str] = Query(None, description="Organization ID"),
+    billing_account_type: Optional[BillingAccountType] = Query(
+        None, description="Explicit payer type"
+    ),
+    billing_account_id: Optional[str] = Query(None, description="Explicit payer ID"),
+    actor_user_id: Optional[str] = Query(None, description="Human actor ID"),
     subscription_service: SubscriptionService = Depends(get_subscription_service),
 ):
     """Get credit balance for a user"""
     try:
-        return await subscription_service.get_credit_balance(user_id, organization_id)
+        return await subscription_service.get_credit_balance(
+            user_id=user_id,
+            organization_id=organization_id,
+            billing_account_type=billing_account_type,
+            billing_account_id=billing_account_id,
+            actor_user_id=actor_user_id,
+        )
     except SubscriptionServiceError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
@@ -386,6 +412,68 @@ async def consume_credits(
         return response
     except InsufficientCreditsError as e:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
+    except SubscriptionServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.post("/api/v1/subscriptions/credits/reserve", response_model=ReserveCreditsResponse)
+async def reserve_credits(
+    request: ReserveCreditsRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service),
+):
+    """Reserve credits for an in-flight inference request."""
+    try:
+        response = await subscription_service.reserve_credits(request)
+        if not response.success:
+            if "Insufficient credits" in response.message:
+                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=response.message)
+            elif "No active subscription" in response.message:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=response.message)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=response.message,
+            )
+        return response
+    except SubscriptionServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.post("/api/v1/subscriptions/credits/reconcile", response_model=ReconcileReservationResponse)
+async def reconcile_reservation(
+    request: ReconcileReservationRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service),
+):
+    """Reconcile a reservation with actual credits used."""
+    try:
+        response = await subscription_service.reconcile_reservation(request)
+        if not response.success:
+            if "not found" in response.message.lower():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=response.message)
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=response.message)
+        return response
+    except SubscriptionServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.post("/api/v1/subscriptions/credits/release", response_model=ReleaseReservationResponse)
+async def release_reservation(
+    request: ReleaseReservationRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service),
+):
+    """Release a pending reservation after a failed inference."""
+    try:
+        response = await subscription_service.release_reservation(request)
+        if not response.success:
+            if "not found" in response.message.lower():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=response.message)
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=response.message)
+        return response
     except SubscriptionServiceError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)

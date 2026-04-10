@@ -7,7 +7,7 @@ Product Service Business Logic
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import uuid
 
 from .product_repository import ProductRepository
@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 class ProductService:
     """产品服务核心业务逻辑"""
+
+    _QUANTIZE_PRICE = Decimal("0.00000001")
 
     def __init__(
         self,
@@ -105,6 +107,317 @@ class ProductService:
         except Exception as e:
             logger.error(f"Error getting product pricing for {product_id}: {e}")
             raise
+
+    async def lookup_cost(
+        self,
+        service_type: str,
+        provider: Optional[str] = None,
+        model_name: Optional[str] = None,
+        operation_type: Optional[str] = None,
+        tool_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lookup an active cost definition in a shape compatible with isa_model."""
+        try:
+            lookup_name = tool_name or model_name
+            cost_definitions = await self.repository.get_cost_definitions(
+                is_active=True,
+                provider=provider,
+                service_type=service_type,
+            )
+
+            if service_type == "model_inference":
+                return self._build_model_inference_cost_lookup(
+                    cost_definitions,
+                    lookup_name,
+                )
+
+            cost_definition = self._select_cost_definition(
+                cost_definitions,
+                lookup_name,
+                operation_type,
+                service_type,
+            )
+            if not cost_definition:
+                return {"success": False, "message": "Cost definition not found"}
+
+            return self._format_cost_lookup_response(cost_definition)
+        except Exception as e:
+            logger.error("Error looking up cost definition: %s", e)
+            raise
+
+    async def calculate_price(
+        self,
+        product_id: str,
+        quantity: Decimal,
+        unit_type: Optional[str] = None,
+        tier_code: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Calculate a compatibility pricing response for isa_model."""
+        try:
+            product = await self.repository.get_product(product_id)
+            if not product or not product.is_active:
+                return {"success": False, "message": "Product not found"}
+
+            pricing_rows = await self.repository.get_product_pricing_rows(product_id)
+            if not pricing_rows:
+                return self._build_fallback_price_response(
+                    product=product,
+                    quantity=quantity,
+                    unit_type=unit_type,
+                    tier_code=tier_code,
+                )
+
+            selected_row = self._select_pricing_row_for_quantity(pricing_rows, quantity)
+            if not selected_row:
+                return {"success": False, "message": "Pricing definition not found"}
+
+            resolved_unit_type = self._resolve_unit_type(
+                requested_unit_type=unit_type,
+                product=product,
+                pricing_row=selected_row,
+            )
+            unit_price = Decimal(str(selected_row.get("unit_price", product.base_price)))
+            total_price = (quantity * unit_price).quantize(self._QUANTIZE_PRICE, rounding=ROUND_HALF_UP)
+
+            tier_breakdown = [
+                {
+                    "tier_name": row.get("tier_name"),
+                    "min_quantity": row.get("min_quantity"),
+                    "max_quantity": row.get("max_quantity"),
+                    "unit_price": float(row.get("unit_price", 0)),
+                    "currency": row.get("currency", product.currency.value),
+                }
+                for row in pricing_rows
+            ]
+
+            return {
+                "success": True,
+                "product_id": product_id,
+                "quantity": quantity,
+                "unit_type": resolved_unit_type,
+                "unit_price": unit_price,
+                "total_price": total_price,
+                "total_cost": total_price,
+                "currency": str(selected_row.get("currency", product.currency.value)),
+                "pricing_found": True,
+                "pricing_model_id": selected_row.get("pricing_id"),
+                "tier_name": selected_row.get("tier_name"),
+                "tier_breakdown": tier_breakdown,
+                "plan_discount_applied": False,
+                "plan_discount_amount": Decimal("0"),
+                "metadata": {
+                    "tier_code": tier_code,
+                    "billing_interval": product.billing_interval,
+                    "product_type": product.product_type.value,
+                    "billing_profile": product.billing_profile.as_metadata(),
+                },
+            }
+        except Exception as e:
+            logger.error("Error calculating price for %s: %s", product_id, e)
+            raise
+
+    @staticmethod
+    def _format_cost_lookup_response(
+        cost_definition: Dict[str, Any],
+        extra_fields: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        response = {
+            "success": True,
+            "message": "Cost definition found",
+            "cost_definition": cost_definition,
+            "cost_per_unit": cost_definition.get("cost_per_unit"),
+            "unit_type": cost_definition.get("unit_type"),
+            "unit_size": cost_definition.get("unit_size"),
+            "free_tier_limit": cost_definition.get("free_tier_limit"),
+            "free_tier_period": cost_definition.get("free_tier_period"),
+        }
+        if extra_fields:
+            response.update(extra_fields)
+        return response
+
+    @staticmethod
+    def _select_cost_definition(
+        cost_definitions: List[Dict[str, Any]],
+        model_name: Optional[str],
+        operation_type: Optional[str],
+        service_type: str,
+    ) -> Optional[Dict[str, Any]]:
+        candidates = cost_definitions
+        if model_name:
+            candidates = [
+                item for item in candidates
+                if item.get("model_name") == model_name
+            ]
+
+        operation_candidates = ProductService._operation_candidates(
+            service_type,
+            operation_type,
+        )
+        if operation_candidates:
+            for candidate in candidates:
+                if candidate.get("operation_type") in operation_candidates:
+                    return candidate
+
+        if model_name and candidates:
+            return candidates[0]
+        if not model_name and not operation_type and candidates:
+            return candidates[0]
+        return None
+
+    @staticmethod
+    def _operation_candidates(service_type: str, operation_type: Optional[str]) -> List[str]:
+        if not operation_type:
+            return []
+        aliases = {
+            ("mcp_service", "tool_call"): ["request", "execution", "minute", "image", "character"],
+            ("storage_minio", "download"): ["egress_gb"],
+            ("storage_minio", "storage_month"): ["storage_gb_month"],
+        }
+        return [operation_type, *aliases.get((service_type, operation_type), [])]
+
+    def _build_model_inference_cost_lookup(
+        self,
+        cost_definitions: List[Dict[str, Any]],
+        model_name: Optional[str],
+    ) -> Dict[str, Any]:
+        candidates = cost_definitions
+        if model_name:
+            candidates = [
+                item for item in candidates
+                if item.get("model_name") == model_name
+            ]
+
+        input_definition = next(
+            (item for item in candidates if item.get("operation_type") == "input"),
+            None,
+        )
+        output_definition = next(
+            (item for item in candidates if item.get("operation_type") == "output"),
+            None,
+        )
+
+        primary = input_definition or output_definition or (candidates[0] if candidates else None)
+        if not primary:
+            return {"success": False, "message": "Cost definition not found"}
+
+        resolved_input = input_definition or primary
+        resolved_output = output_definition
+
+        return self._format_cost_lookup_response(
+            primary,
+            extra_fields={
+                "input_cost_per_unit": (
+                    resolved_input.get("cost_per_unit") if resolved_input else 0
+                ),
+                "output_cost_per_unit": (
+                    resolved_output.get("cost_per_unit") if resolved_output else 0
+                ),
+                "input_unit_size": (
+                    resolved_input.get("unit_size") if resolved_input else primary.get("unit_size")
+                ),
+                "output_unit_size": (
+                    resolved_output.get("unit_size") if resolved_output else 0
+                ),
+                "input_unit_type": (
+                    resolved_input.get("unit_type") if resolved_input else primary.get("unit_type")
+                ),
+                "output_unit_type": (
+                    resolved_output.get("unit_type") if resolved_output else None
+                ),
+            },
+        )
+
+    def _build_fallback_price_response(
+        self,
+        *,
+        product: Product,
+        quantity: Decimal,
+        unit_type: Optional[str],
+        tier_code: Optional[str],
+    ) -> Dict[str, Any]:
+        resolved_unit_type = unit_type or self._infer_unit_type_from_billing_interval(product.billing_interval)
+        unit_price = Decimal(str(product.base_price))
+        total_price = (quantity * unit_price).quantize(self._QUANTIZE_PRICE, rounding=ROUND_HALF_UP)
+        return {
+            "success": True,
+            "product_id": product.product_id,
+            "quantity": quantity,
+            "unit_type": resolved_unit_type,
+            "unit_price": unit_price,
+            "total_price": total_price,
+            "total_cost": total_price,
+            "currency": product.currency.value,
+            "pricing_found": False,
+            "pricing_model_id": None,
+            "tier_name": "base",
+            "tier_breakdown": [],
+            "plan_discount_applied": False,
+            "plan_discount_amount": Decimal("0"),
+            "metadata": {
+                "tier_code": tier_code,
+                "billing_interval": product.billing_interval,
+                "product_type": product.product_type.value,
+                "billing_profile": product.billing_profile.as_metadata(),
+                "fallback": True,
+            },
+        }
+
+    @staticmethod
+    def _select_pricing_row_for_quantity(
+        pricing_rows: List[Dict[str, Any]],
+        quantity: Decimal,
+    ) -> Optional[Dict[str, Any]]:
+        for row in pricing_rows:
+            min_quantity = Decimal(str(row.get("min_quantity", 0)))
+            max_quantity_raw = row.get("max_quantity")
+            if quantity < min_quantity:
+                continue
+            if max_quantity_raw is None:
+                return row
+            max_quantity = Decimal(str(max_quantity_raw))
+            if quantity <= max_quantity:
+                return row
+        return pricing_rows[-1] if pricing_rows else None
+
+    def _resolve_unit_type(
+        self,
+        *,
+        requested_unit_type: Optional[str],
+        product: Product,
+        pricing_row: Dict[str, Any],
+    ) -> str:
+        if requested_unit_type:
+            return requested_unit_type
+
+        metadata = pricing_row.get("metadata")
+        if isinstance(metadata, str):
+            try:
+                import json as _json
+                metadata = _json.loads(metadata)
+            except Exception:
+                metadata = {}
+        if isinstance(metadata, dict) and metadata.get("unit"):
+            return str(metadata["unit"])
+
+        return self._infer_unit_type_from_billing_interval(product.billing_interval)
+
+    @staticmethod
+    def _infer_unit_type_from_billing_interval(billing_interval: Optional[str]) -> str:
+        mapping = {
+            "per_token": "token",
+            "per_character": "character",
+            "per_request": "request",
+            "per_message": "message",
+            "per_execution": "execution",
+            "per_operation": "operation",
+            "per_image": "image",
+            "per_minute": "minute",
+            "per_second": "second",
+            "monthly": "month",
+            "yearly": "year",
+            "per_unit": "unit",
+        }
+        return mapping.get(billing_interval or "", "unit")
 
     # ====================
     # 订阅管理

@@ -32,6 +32,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -233,6 +234,12 @@ class NATSEventBus:
 
         return special_mappings.get(prefix, f"{prefix}-stream")
 
+    @staticmethod
+    def _sanitize_consumer_name(name: str) -> str:
+        """Convert wildcard-heavy subject-derived names into JetStream-safe durable names."""
+        sanitized = re.sub(r"[^A-Za-z0-9_-]+", "-", name).strip("-")
+        return sanitized or "consumer"
+
     async def publish_event(
         self,
         event: Union[Dict[str, Any], Event],
@@ -335,20 +342,39 @@ class NATSEventBus:
         Returns:
             Consumer name if successful
         """
-        consumer_name = durable
+        consumer_name = self._sanitize_consumer_name(durable) if durable else None
         if not self._is_connected or not self._client:
             logger.error("Not connected to NATS")
             return None
 
         try:
             self._subscriptions[pattern] = True
+            ready_event = asyncio.Event()
 
             task = asyncio.create_task(
-                self._consumer_loop(pattern, handler, consumer_name, delivery_policy)
+                self._consumer_loop(
+                    pattern,
+                    handler,
+                    consumer_name,
+                    delivery_policy,
+                    ready_event,
+                )
             )
             self._subscription_tasks.append(task)
 
-            logger.info(f"Subscribed to {pattern}")
+            try:
+                await asyncio.wait_for(ready_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Subscription %s did not report ready within timeout",
+                    pattern,
+                )
+
+            logger.info(
+                "Subscribed to %s with durable %s",
+                pattern,
+                consumer_name or pattern,
+            )
             return consumer_name or pattern
 
         except Exception as e:
@@ -366,6 +392,7 @@ class NATSEventBus:
         handler: Callable,
         consumer_name: Optional[str],
         delivery_policy: str,
+        ready_event: Optional[asyncio.Event] = None,
     ):
         """JetStream pull consumer loop"""
         # Use full pattern to derive stream name (handles wildcards like *.file.>)
@@ -377,7 +404,9 @@ class NATSEventBus:
             prefix = parts[1] if len(parts) > 1 and parts[1] not in ("*", ">") else "events"
         else:
             prefix = parts[0]
-        consumer_name = consumer_name or f"{self.service_name}-{prefix}-consumer"
+        consumer_name = self._sanitize_consumer_name(
+            consumer_name or f"{self.service_name}-{prefix}-consumer"
+        )
 
         logger.info(f"Starting consumer: stream={stream_name}, consumer={consumer_name}")
 
@@ -406,12 +435,18 @@ class NATSEventBus:
 
             # Create consumer
             try:
-                await self._client.create_consumer(
+                consumer_result = await self._client.create_consumer(
                     stream_name=stream_name,
                     consumer_name=consumer_name,
                     filter_subject=filter_subject,
                     delivery_policy=delivery_policy,
                 )
+                if not consumer_result or not consumer_result.get("success"):
+                    raise RuntimeError(
+                        f"Failed to create consumer {consumer_name} for {pattern}"
+                    )
+                if ready_event and not ready_event.is_set():
+                    ready_event.set()
             except Exception as e:
                 logger.debug(f"Consumer creation note: {e}")
 

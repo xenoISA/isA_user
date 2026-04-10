@@ -7,7 +7,7 @@ Billing Service Data Repository
 import logging
 import os
 import sys
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
@@ -19,7 +19,8 @@ from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     BillingRecord, BillingEvent, UsageAggregation, BillingQuota,
-    BillingStatus, BillingMethod, EventType, ServiceType, Currency
+    BillingStatus, BillingMethod, EventType, ServiceType, Currency,
+    BillingAccountType,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,66 @@ class BillingRepository:
         self.billing_quotas_table = "billing_quotas"
 
     async def initialize(self):
-        """初始化数据库连接"""
-        logger.info("Billing repository initialized with PostgreSQL")
+        """Initialize repository and validate required schema."""
+        required_record_columns = {
+            "actor_user_id",
+            "billing_account_type",
+            "billing_account_id",
+            "agent_id",
+        }
+        required_event_columns = {
+            "actor_user_id",
+            "billing_account_type",
+            "billing_account_id",
+            "agent_id",
+        }
+        table_requirements = {
+            self.billing_records_table: required_record_columns,
+            self.billing_events_table: required_event_columns,
+        }
+        query = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = $1
+              AND table_name = $2
+        """
+
+        async with self.db:
+            for table_name, required_columns in table_requirements.items():
+                results = await self.db.query(
+                    query,
+                    params=[self.schema, table_name],
+                )
+                available_columns = {
+                    row["column_name"] if isinstance(row, dict) else row[0]
+                    for row in (results or [])
+                }
+                missing_columns = sorted(required_columns - available_columns)
+                if missing_columns:
+                    raise RuntimeError(
+                        f"billing.{table_name} schema is missing required columns: "
+                        f"{', '.join(missing_columns)}. "
+                        "Apply migrations 003_add_agent_attribution_to_billing.sql "
+                        "and 004_add_canonical_payer_fields.sql."
+                    )
+
+            claim_table_results = await self.db.query(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = $1
+                  AND table_name = $2
+                """,
+                params=[self.schema, "event_processing_claims"],
+            )
+
+        if not claim_table_results:
+            raise RuntimeError(
+                "billing.event_processing_claims table is missing. "
+                "Apply migration 005_add_event_processing_claims.sql."
+            )
+
+        logger.info("Billing repository initialized")
 
     async def close(self):
         """关闭数据库连接"""
@@ -77,21 +136,31 @@ class BillingRepository:
 
             query = f'''
                 INSERT INTO {self.schema}.{self.billing_records_table} (
-                    billing_id, user_id, organization_id, subscription_id, usage_record_id,
+                    billing_id, user_id, actor_user_id, billing_account_type, billing_account_id,
+                    organization_id, agent_id, subscription_id, usage_record_id,
                     product_id, service_type, usage_amount, unit_price, total_amount,
                     currency, billing_method, billing_status,
                     wallet_transaction_id, payment_transaction_id, failure_reason,
                     billing_metadata, billing_period_start, billing_period_end,
                     created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                          $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                          $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+                          $24, $25)
                 RETURNING *
             '''
 
             params = [
                 billing_id,
                 billing_record.user_id,
+                billing_record.actor_user_id,
+                (
+                    billing_record.billing_account_type.value
+                    if billing_record.billing_account_type
+                    else None
+                ),
+                billing_record.billing_account_id,
                 billing_record.organization_id,
+                billing_record.agent_id,
                 billing_record.subscription_id,
                 billing_record.usage_record_id,
                 billing_record.product_id,
@@ -109,7 +178,7 @@ class BillingRepository:
                 billing_record.billing_period_start,
                 billing_record.billing_period_end,
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -149,7 +218,9 @@ class BillingRepository:
         status: BillingStatus,
         failure_reason: Optional[str] = None,
         wallet_transaction_id: Optional[str] = None,
-        payment_transaction_id: Optional[str] = None
+        payment_transaction_id: Optional[str] = None,
+        subscription_id: Optional[str] = None,
+        billing_method: Optional[BillingMethod] = None,
     ) -> Optional[BillingRecord]:
         """更新计费记录状态"""
         try:
@@ -159,8 +230,10 @@ class BillingRepository:
                     failure_reason = $2,
                     wallet_transaction_id = COALESCE($3, wallet_transaction_id),
                     payment_transaction_id = COALESCE($4, payment_transaction_id),
-                    updated_at = $5
-                WHERE billing_id = $6
+                    subscription_id = COALESCE($5, subscription_id),
+                    billing_method = COALESCE($6, billing_method),
+                    updated_at = $7
+                WHERE billing_id = $8
                 RETURNING *
             '''
 
@@ -169,8 +242,10 @@ class BillingRepository:
                 failure_reason,
                 wallet_transaction_id,
                 payment_transaction_id,
+                subscription_id,
+                billing_method.value if billing_method else None,
                 datetime.now(timezone.utc),
-                billing_id
+                billing_id,
             ]
 
             async with self.db:
@@ -187,6 +262,11 @@ class BillingRepository:
     async def get_user_billing_records(
         self,
         user_id: str,
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        product_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         status: Optional[BillingStatus] = None,
@@ -196,9 +276,34 @@ class BillingRepository:
     ) -> List[BillingRecord]:
         """获取用户的计费记录"""
         try:
-            conditions = ["user_id = $1"]
+            conditions = ["COALESCE(actor_user_id, user_id) = $1"]
             params = [user_id]
             param_count = 1
+
+            if organization_id:
+                param_count += 1
+                conditions.append(f"organization_id = ${param_count}")
+                params.append(organization_id)
+
+            if billing_account_type:
+                param_count += 1
+                conditions.append(f"billing_account_type = ${param_count}")
+                params.append(billing_account_type)
+
+            if billing_account_id:
+                param_count += 1
+                conditions.append(f"billing_account_id = ${param_count}")
+                params.append(billing_account_id)
+
+            if agent_id:
+                param_count += 1
+                conditions.append(f"agent_id = ${param_count}")
+                params.append(agent_id)
+
+            if product_id:
+                param_count += 1
+                conditions.append(f"product_id = ${param_count}")
+                params.append(product_id)
 
             if start_date:
                 param_count += 1
@@ -410,9 +515,10 @@ class BillingRepository:
 
             query = f'''
                 INSERT INTO {self.schema}.{self.billing_events_table} (
-                    event_id, event_type, billing_id, user_id, organization_id,
-                    event_data, service_type, amount, event_timestamp, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    event_id, event_type, billing_id, user_id, actor_user_id,
+                    billing_account_type, billing_account_id, organization_id,
+                    agent_id, event_data, service_type, amount, event_timestamp, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 RETURNING *
             '''
 
@@ -421,7 +527,15 @@ class BillingRepository:
                 billing_event.event_type.value,
                 billing_event.billing_record_id,  # Maps to billing_id column
                 billing_event.user_id,
+                billing_event.actor_user_id,
+                (
+                    billing_event.billing_account_type.value
+                    if billing_event.billing_account_type
+                    else None
+                ),
+                billing_event.billing_account_id,
                 billing_event.organization_id,
+                billing_event.agent_id,
                 json.dumps(billing_event.event_data) if billing_event.event_data else "{}",
                 billing_event.service_type.value if billing_event.service_type else None,
                 float(billing_event.amount) if billing_event.amount else None,
@@ -441,6 +555,124 @@ class BillingRepository:
             logger.error(f"Error creating billing event: {e}", exc_info=True)
             raise
 
+    async def claim_event_processing(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        processor_id: str,
+        stale_after_seconds: int = 300,
+    ) -> bool:
+        """Claim a billable event for processing unless it is already active or completed."""
+        try:
+            now = datetime.now(timezone.utc)
+            stale_cutoff = now - timedelta(seconds=max(stale_after_seconds, 1))
+
+            insert_query = f"""
+                INSERT INTO {self.schema}.event_processing_claims (
+                    claim_key,
+                    source_event_id,
+                    processing_status,
+                    processor_id,
+                    claimed_at,
+                    completed_at,
+                    last_error,
+                    created_at,
+                    updated_at
+                ) VALUES ($1, $2, 'processing', $3, $4, NULL, NULL, $4, $4)
+                ON CONFLICT (claim_key) DO NOTHING
+                RETURNING claim_key
+            """
+
+            async with self.db:
+                inserted = await self.db.query_row(
+                    insert_query,
+                    params=[claim_key, source_event_id, processor_id, now],
+                )
+                if inserted:
+                    return True
+
+                reclaim_query = f"""
+                    UPDATE {self.schema}.event_processing_claims
+                    SET source_event_id = $2,
+                        processing_status = 'processing',
+                        processor_id = $3,
+                        claimed_at = $4,
+                        completed_at = NULL,
+                        last_error = NULL,
+                        updated_at = $4
+                    WHERE claim_key = $1
+                      AND processing_status <> 'completed'
+                      AND (
+                          processing_status = 'failed'
+                          OR updated_at < $5
+                      )
+                    RETURNING claim_key
+                """
+                reclaimed = await self.db.query_row(
+                    reclaim_query,
+                    params=[claim_key, source_event_id, processor_id, now, stale_cutoff],
+                )
+
+            return bool(reclaimed)
+
+        except Exception as e:
+            logger.error("Error claiming billing event processing: %s", e, exc_info=True)
+            raise
+
+    async def mark_event_processing_completed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+    ) -> None:
+        """Mark a claimed event as completed."""
+        try:
+            query = f"""
+                UPDATE {self.schema}.event_processing_claims
+                SET source_event_id = $2,
+                    processing_status = 'completed',
+                    completed_at = $3,
+                    last_error = NULL,
+                    updated_at = $3
+                WHERE claim_key = $1
+            """
+
+            completed_at = datetime.now(timezone.utc)
+            async with self.db:
+                await self.db.execute(query, params=[claim_key, source_event_id, completed_at])
+
+        except Exception as e:
+            logger.error("Error marking billing event processing completed: %s", e, exc_info=True)
+            raise
+
+    async def mark_event_processing_failed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        error_message: str,
+    ) -> None:
+        """Mark a claimed event as failed unless it already completed successfully."""
+        try:
+            query = f"""
+                UPDATE {self.schema}.event_processing_claims
+                SET source_event_id = $2,
+                    processing_status = 'failed',
+                    last_error = $3,
+                    updated_at = $4
+                WHERE claim_key = $1
+                  AND processing_status <> 'completed'
+            """
+
+            failed_at = datetime.now(timezone.utc)
+            async with self.db:
+                await self.db.execute(
+                    query,
+                    params=[claim_key, source_event_id, error_message[:2000], failed_at],
+                )
+
+        except Exception as e:
+            logger.error("Error marking billing event processing failed: %s", e, exc_info=True)
+            raise
+
     # ====================
     # 使用量聚合
     # ====================
@@ -449,8 +681,12 @@ class BillingRepository:
         self,
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         subscription_id: Optional[str] = None,
         service_type: Optional[ServiceType] = None,
+        product_id: Optional[str] = None,
         period_start: Optional[datetime] = None,
         period_end: Optional[datetime] = None,
         period_type: Optional[str] = None,
@@ -458,19 +694,35 @@ class BillingRepository:
     ) -> List[UsageAggregation]:
         """获取使用量聚合数据"""
         try:
+            normalized_period_type, granularity = self._normalize_period_type(period_type)
             conditions = []
             params = []
             param_count = 0
 
             if user_id:
                 param_count += 1
-                conditions.append(f"user_id = ${param_count}")
+                conditions.append(f"COALESCE(actor_user_id, user_id) = ${param_count}")
                 params.append(user_id)
 
             if organization_id:
                 param_count += 1
                 conditions.append(f"organization_id = ${param_count}")
                 params.append(organization_id)
+
+            if billing_account_type:
+                param_count += 1
+                conditions.append(f"billing_account_type = ${param_count}")
+                params.append(billing_account_type)
+
+            if billing_account_id:
+                param_count += 1
+                conditions.append(f"billing_account_id = ${param_count}")
+                params.append(billing_account_id)
+
+            if agent_id:
+                param_count += 1
+                conditions.append(f"agent_id = ${param_count}")
+                params.append(agent_id)
 
             if subscription_id:
                 param_count += 1
@@ -482,51 +734,130 @@ class BillingRepository:
                 conditions.append(f"service_type = ${param_count}")
                 params.append(service_type.value)
 
+            if product_id:
+                param_count += 1
+                conditions.append(f"product_id = ${param_count}")
+                params.append(product_id)
+
             if period_start:
                 param_count += 1
-                conditions.append(f"period_start >= ${param_count}")
+                conditions.append(f"created_at >= ${param_count}")
                 params.append(period_start)
 
             if period_end:
                 param_count += 1
-                conditions.append(f"period_end <= ${param_count}")
+                conditions.append(f"created_at <= ${param_count}")
                 params.append(period_end)
-
-            if period_type:
-                param_count += 1
-                conditions.append(f"period_type = ${param_count}")
-                params.append(period_type)
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
             query = f'''
-                SELECT * FROM {self.schema}.{self.usage_aggregations_table}
+                SELECT
+                    date_trunc('{granularity}', created_at) AS period_start,
+                    service_type,
+                    product_id,
+                    COUNT(*) AS total_usage_count,
+                    COALESCE(SUM(usage_amount), 0) AS total_usage_amount,
+                    COALESCE(SUM(total_amount), 0) AS total_cost
+                FROM {self.schema}.{self.billing_records_table}
                 {where_clause}
-                ORDER BY period_start DESC
-                LIMIT ${param_count + 1}
+                GROUP BY 1, service_type, product_id
+                ORDER BY period_start DESC, service_type, product_id
             '''
-
-            params.append(limit)
 
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            # Convert to UsageAggregation objects
+            period_rows: Dict[datetime, Dict[str, Any]] = {}
+            period_order: List[datetime] = []
+
+            for row in results or []:
+                current_period_start = row.get("period_start")
+                if current_period_start not in period_rows:
+                    if len(period_order) >= limit:
+                        break
+                    period_order.append(current_period_start)
+                    period_rows[current_period_start] = {
+                        "total_usage_count": 0,
+                        "total_usage_amount": Decimal("0"),
+                        "total_cost": Decimal("0"),
+                        "service_breakdown": {},
+                    }
+
+                bucket = period_rows[current_period_start]
+                usage_count = int(row.get("total_usage_count") or 0)
+                usage_amount = Decimal(str(row.get("total_usage_amount") or 0))
+                total_cost = Decimal(str(row.get("total_cost") or 0))
+                row_service_type = row.get("service_type") or ServiceType.OTHER.value
+                row_product_id = row.get("product_id")
+
+                bucket["total_usage_count"] += usage_count
+                bucket["total_usage_amount"] += usage_amount
+                bucket["total_cost"] += total_cost
+
+                service_bucket = bucket["service_breakdown"].setdefault(
+                    row_service_type,
+                    {
+                        "usage_count": 0,
+                        "usage_amount": 0.0,
+                        "total_cost": 0.0,
+                        "products": {},
+                    },
+                )
+                service_bucket["usage_count"] += usage_count
+                service_bucket["usage_amount"] += float(usage_amount)
+                service_bucket["total_cost"] += float(total_cost)
+
+                if row_product_id:
+                    product_bucket = service_bucket["products"].setdefault(
+                        row_product_id,
+                        {
+                            "usage_count": 0,
+                            "usage_amount": 0.0,
+                            "total_cost": 0.0,
+                        },
+                    )
+                    product_bucket["usage_count"] += usage_count
+                    product_bucket["usage_amount"] += float(usage_amount)
+                    product_bucket["total_cost"] += float(total_cost)
+
             aggregations = []
-            if results:
-                for row in results:
-                    aggregations.append(UsageAggregation(
-                        aggregation_id=row.get("aggregation_id"),
-                        user_id=row.get("user_id"),
-                        organization_id=row.get("organization_id"),
-                        service_type=ServiceType(row.get("service_type")),
-                        period_start=row.get("period_start"),
-                        period_end=row.get("period_end"),
-                        total_usage=Decimal(str(row.get("total_usage", 0))),
-                        total_cost=Decimal(str(row.get("total_cost", 0))),
-                        currency=Currency(row.get("currency", "USD")),
-                        usage_breakdown=row.get("usage_breakdown", {}) if isinstance(row.get("usage_breakdown"), dict) else json.loads(row.get("usage_breakdown", "{}"))
-                    ))
+            aggregation_account_type = None
+            if billing_account_type:
+                try:
+                    aggregation_account_type = BillingAccountType(billing_account_type)
+                except ValueError:
+                    aggregation_account_type = None
+            for current_period_start in period_order:
+                bucket = period_rows[current_period_start]
+                aggregations.append(
+                    UsageAggregation(
+                        aggregation_id=(
+                            f"agg_{normalized_period_type}_"
+                            f"{current_period_start.strftime('%Y%m%d%H%M%S')}"
+                        ),
+                        user_id=user_id,
+                        actor_user_id=user_id,
+                        organization_id=organization_id,
+                        billing_account_type=aggregation_account_type,
+                        billing_account_id=billing_account_id,
+                        agent_id=agent_id,
+                        subscription_id=subscription_id,
+                        service_type=service_type,
+                        product_id=product_id,
+                        period_start=current_period_start,
+                        period_end=self._get_period_end(
+                            current_period_start,
+                            normalized_period_type,
+                        ),
+                        period_type=normalized_period_type,
+                        total_usage_count=bucket["total_usage_count"],
+                        total_usage_amount=bucket["total_usage_amount"],
+                        total_usage=bucket["total_usage_amount"],
+                        total_cost=bucket["total_cost"],
+                        service_breakdown=bucket["service_breakdown"],
+                    )
+                )
 
             return aggregations
 
@@ -642,6 +973,11 @@ class BillingRepository:
     async def list_billing_records(
         self,
         user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        product_id: Optional[str] = None,
         status: Optional[BillingStatus] = None,
         service_type: Optional[ServiceType] = None,
         start_date: Optional[datetime] = None,
@@ -657,8 +993,33 @@ class BillingRepository:
 
             if user_id:
                 param_count += 1
-                conditions.append(f"user_id = ${param_count}")
+                conditions.append(f"COALESCE(actor_user_id, user_id) = ${param_count}")
                 params.append(user_id)
+
+            if organization_id:
+                param_count += 1
+                conditions.append(f"organization_id = ${param_count}")
+                params.append(organization_id)
+
+            if billing_account_type:
+                param_count += 1
+                conditions.append(f"billing_account_type = ${param_count}")
+                params.append(billing_account_type)
+
+            if billing_account_id:
+                param_count += 1
+                conditions.append(f"billing_account_id = ${param_count}")
+                params.append(billing_account_id)
+
+            if agent_id:
+                param_count += 1
+                conditions.append(f"agent_id = ${param_count}")
+                params.append(agent_id)
+
+            if product_id:
+                param_count += 1
+                conditions.append(f"product_id = ${param_count}")
+                params.append(product_id)
 
             if status:
                 param_count += 1
@@ -825,7 +1186,15 @@ class BillingRepository:
             id=row.get("id"),
             billing_id=row.get("billing_id"),
             user_id=row.get("user_id"),
+            actor_user_id=row.get("actor_user_id") or row.get("user_id"),
+            billing_account_type=(
+                BillingAccountType(row.get("billing_account_type"))
+                if row.get("billing_account_type")
+                else None
+            ),
+            billing_account_id=row.get("billing_account_id"),
             organization_id=row.get("organization_id"),
+            agent_id=row.get("agent_id"),
             subscription_id=row.get("subscription_id"),
             usage_record_id=row.get("usage_record_id"),
             product_id=row.get("product_id"),
@@ -855,7 +1224,15 @@ class BillingRepository:
             event_source="billing_service",  # Default source
             billing_record_id=row.get("billing_id"),  # billing_id maps to billing_record_id in model
             user_id=row.get("user_id"),
+            actor_user_id=row.get("actor_user_id") or row.get("user_id"),
+            billing_account_type=(
+                BillingAccountType(row.get("billing_account_type"))
+                if row.get("billing_account_type")
+                else None
+            ),
+            billing_account_id=row.get("billing_account_id"),
             organization_id=row.get("organization_id"),
+            agent_id=row.get("agent_id"),
             service_type=ServiceType(row.get("service_type")) if row.get("service_type") else None,
             event_data=row.get("event_data", {}) if isinstance(row.get("event_data"), dict) else json.loads(row.get("event_data", "{}")),
             amount=Decimal(str(row.get("amount"))) if row.get("amount") is not None else None,
@@ -882,6 +1259,43 @@ class BillingRepository:
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")
         )
+
+    def _normalize_period_type(self, period_type: Optional[str]) -> Tuple[str, str]:
+        normalized = (period_type or "daily").strip().lower()
+        alias_map = {
+            "hour": "hourly",
+            "hourly": "hourly",
+            "day": "daily",
+            "daily": "daily",
+            "week": "weekly",
+            "weekly": "weekly",
+            "month": "monthly",
+            "monthly": "monthly",
+        }
+        normalized = alias_map.get(normalized)
+        if not normalized:
+            raise ValueError(f"Unsupported period_type: {period_type}")
+
+        granularity_map = {
+            "hourly": "hour",
+            "daily": "day",
+            "weekly": "week",
+            "monthly": "month",
+        }
+        return normalized, granularity_map[normalized]
+
+    def _get_period_end(self, period_start: datetime, period_type: str) -> datetime:
+        if period_type == "hourly":
+            return period_start + timedelta(hours=1)
+        if period_type == "daily":
+            return period_start + timedelta(days=1)
+        if period_type == "weekly":
+            return period_start + timedelta(weeks=1)
+        if period_type == "monthly":
+            if period_start.month == 12:
+                return period_start.replace(year=period_start.year + 1, month=1)
+            return period_start.replace(month=period_start.month + 1)
+        raise ValueError(f"Unsupported period_type: {period_type}")
 
 
 __all__ = ["BillingRepository"]

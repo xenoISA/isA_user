@@ -28,6 +28,107 @@ get_service_port() {
     grep -A1 "^  $service:" config/ports.yaml 2>/dev/null | grep "port:" | awk '{print $2}'
 }
 
+get_consul_url() {
+    local consul_port="${CONSUL_PORT:-8500}"
+    echo "http://127.0.0.1:${consul_port}"
+}
+
+stop_service_on_port() {
+    local service_port=$1
+    local service_name=${2:-service}
+    local pids
+
+    pids=$(lsof -ti:"$service_port" 2>/dev/null | sort -u || true)
+    if [ -z "$pids" ]; then
+        return 0
+    fi
+
+    echo "  Stopping $service_name on port $service_port..."
+    echo "$pids" | xargs kill -TERM 2>/dev/null || true
+
+    local waited=0
+    while [ "$waited" -lt 10 ]; do
+        if ! lsof -ti:"$service_port" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    if lsof -ti:"$service_port" >/dev/null 2>&1; then
+        echo "  Force-stopping $service_name on port $service_port..."
+        lsof -ti:"$service_port" | xargs kill -9 2>/dev/null || true
+        sleep 1
+    fi
+}
+
+cleanup_consul_critical_checks_for_service() {
+    local service_name=$1
+
+    if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local critical_json
+    critical_json=$(curl -fsS -m 5 "$(get_consul_url)/v1/health/state/critical" 2>/dev/null || true)
+    if [ -z "$critical_json" ] || [ "$critical_json" = "[]" ]; then
+        return 0
+    fi
+
+    local stale_ids
+    stale_ids=$(printf '%s' "$critical_json" | python3 -c 'import json, sys
+service_name = sys.argv[1]
+items = json.load(sys.stdin)
+service_ids = sorted(
+    {item.get("ServiceID", "") for item in items if item.get("ServiceName") == service_name and item.get("ServiceID")}
+)
+print("\n".join(service_ids))' "$service_name" 2>/dev/null || true)
+
+    if [ -z "$stale_ids" ]; then
+        return 0
+    fi
+
+    echo "  Cleaning stale Consul registrations for $service_name..."
+    while IFS= read -r service_id; do
+        [ -z "$service_id" ] && continue
+        curl -fsS -m 5 -X PUT "$(get_consul_url)/v1/agent/service/deregister/${service_id}" >/dev/null 2>&1 || true
+        echo "    deregistered $service_id"
+    done <<< "$stale_ids"
+}
+
+show_consul_critical_checks() {
+    if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+        echo "Consul critical checks: unavailable (curl/python3 missing)"
+        return 0
+    fi
+
+    local critical_json
+    critical_json=$(curl -fsS -m 5 "$(get_consul_url)/v1/health/state/critical" 2>/dev/null || true)
+    if [ -z "$critical_json" ]; then
+        echo "Consul critical checks: unavailable"
+        return 0
+    fi
+
+    local critical_lines
+    critical_lines=$(printf '%s' "$critical_json" | python3 -c 'import json, sys
+items = json.load(sys.stdin)
+for item in items:
+    service_name = item.get("ServiceName", "unknown")
+    service_id = item.get("ServiceID", "")
+    output = item.get("Output", "").replace("\n", " ").strip()
+    print(f"{service_name}|{service_id}|{output}")' 2>/dev/null || true)
+
+    if [ -z "$critical_lines" ]; then
+        echo "Consul critical checks: none"
+        return 0
+    fi
+
+    echo "Consul critical checks:"
+    while IFS='|' read -r service_name service_id output; do
+        echo "  ✗ ${service_name} (${service_id}) - ${output}"
+    done <<< "$critical_lines"
+}
+
 case "${1:-}" in
     --setup)
         echo "Setting up $PROJECT_NAME..."
@@ -78,8 +179,9 @@ case "${1:-}" in
             SERVICE_PORT=8200
         fi
 
-        # Kill existing process on port
-        lsof -ti:$SERVICE_PORT | xargs kill -9 2>/dev/null || true
+        # Stop any existing process on the target port so it can deregister cleanly
+        stop_service_on_port "$SERVICE_PORT" "$SERVICE_NAME"
+        cleanup_consul_critical_checks_for_service "$SERVICE_NAME"
 
         # Export all env vars from dev.env
         if [ -f "deployment/environments/dev.env" ]; then
@@ -110,12 +212,8 @@ case "${1:-}" in
 
         echo "Restarting $SERVICE_NAME..."
 
-        # Kill existing process on port
-        if lsof -ti:$SERVICE_PORT >/dev/null 2>&1; then
-            lsof -ti:$SERVICE_PORT | xargs kill -9 2>/dev/null || true
-            echo "  Stopped old process"
-            sleep 1
-        fi
+        stop_service_on_port "$SERVICE_PORT" "$SERVICE_NAME"
+        cleanup_consul_critical_checks_for_service "$SERVICE_NAME"
 
         # Export all env vars from dev.env
         if [ -f "deployment/environments/dev.env" ]; then
@@ -150,8 +248,8 @@ case "${1:-}" in
             if [ -d "microservices/$SERVICE_NAME" ]; then
                 SERVICE_PORT=$(get_service_port "$SERVICE_NAME")
                 if [ -n "$SERVICE_PORT" ]; then
-                    # Kill existing process on port
-                    lsof -ti:$SERVICE_PORT | xargs kill -9 2>/dev/null || true
+                    stop_service_on_port "$SERVICE_PORT" "$SERVICE_NAME"
+                    cleanup_consul_critical_checks_for_service "$SERVICE_NAME"
 
                     echo "  [$((COUNT+1))] Starting $SERVICE_NAME on port $SERVICE_PORT..."
                     SERVICE_PORT_ENV="$(echo "$SERVICE_NAME" | tr '[:lower:]' '[:upper:]')_PORT"
@@ -182,7 +280,8 @@ case "${1:-}" in
             SERVICE_PORT=$(get_service_port "$SERVICE_NAME")
             if [ -n "$SERVICE_PORT" ]; then
                 if lsof -ti:$SERVICE_PORT >/dev/null 2>&1; then
-                    lsof -ti:$SERVICE_PORT | xargs kill -9 2>/dev/null || true
+                    stop_service_on_port "$SERVICE_PORT" "$SERVICE_NAME"
+                    cleanup_consul_critical_checks_for_service "$SERVICE_NAME"
                     echo "  Stopped $SERVICE_NAME (port $SERVICE_PORT)"
                 fi
             fi
@@ -208,13 +307,15 @@ case "${1:-}" in
                 fi
             fi
         done
+        echo ""
+        show_consul_critical_checks
         ;;
 
     *)
         echo "Usage:"
         echo "  $0 --setup                    # Setup venv and port-forwards"
         echo "  $0 --run <service>            # Run a single microservice"
-        echo "  $0 --restart <service>        # Restart a single microservice (kills, clears cache, starts)"
+        echo "  $0 --restart <service>        # Restart a single microservice (graceful stop, clears cache, starts)"
         echo "  $0 --run-all                  # Run ALL microservices"
         echo "  $0 --stop-all                 # Stop ALL microservices"
         echo "  $0 --status                   # Show status of all services"

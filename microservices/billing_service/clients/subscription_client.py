@@ -39,7 +39,10 @@ class SubscriptionClient:
     async def get_credit_balance(
         self,
         user_id: str,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get user's credit balance from subscription
@@ -55,6 +58,12 @@ class SubscriptionClient:
             params = {"user_id": user_id}
             if organization_id:
                 params["organization_id"] = organization_id
+            if billing_account_type:
+                params["billing_account_type"] = billing_account_type
+            if billing_account_id:
+                params["billing_account_id"] = billing_account_id
+            if actor_user_id:
+                params["actor_user_id"] = actor_user_id
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
@@ -80,7 +89,10 @@ class SubscriptionClient:
     async def get_subscription_credits(
         self,
         user_id: str,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
     ) -> int:
         """
         Get available subscription credits
@@ -93,7 +105,13 @@ class SubscriptionClient:
             Available credits (int), 0 if none
         """
         try:
-            balance = await self.get_credit_balance(user_id, organization_id)
+            balance = await self.get_credit_balance(
+                user_id,
+                organization_id,
+                billing_account_type=billing_account_type,
+                billing_account_id=billing_account_id,
+                actor_user_id=actor_user_id,
+            )
             if balance and balance.get("success"):
                 return balance.get("subscription_credits_remaining", 0)
             return 0
@@ -109,7 +127,10 @@ class SubscriptionClient:
         description: Optional[str] = None,
         usage_record_id: Optional[str] = None,
         organization_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        actor_user_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Consume credits from user's subscription
@@ -141,6 +162,12 @@ class SubscriptionClient:
                 payload["organization_id"] = organization_id
             if metadata:
                 payload["metadata"] = metadata
+            if billing_account_type:
+                payload["billing_account_type"] = billing_account_type
+            if billing_account_id:
+                payload["billing_account_id"] = billing_account_id
+            if actor_user_id:
+                payload["actor_user_id"] = actor_user_id
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(

@@ -24,7 +24,7 @@ class BillingEventSubscriber(BaseEventSubscriber):
     Billing service event subscriber.
 
     Subscribes to:
-    - billing.usage.recorded.* (from isA_Model, isA_Agent, isA_MCP, storage, etc.)
+    - billing.usage.recorded.> (from isA_Model, isA_Agent, isA_MCP, storage, etc.)
 
     Publishes:
     - billing.calculated (after cost calculation)
@@ -91,11 +91,12 @@ class BillingEventSubscriber(BaseEventSubscriber):
         """
         logger.info("[billing_service] Starting event subscriptions...")
 
-        # Subscribe to all usage events from billing-stream
-        # Subject must match what isa_model publishes: billing.usage.recorded.{model}
+        # Subscribe to all usage events from billing-stream.
+        # Producers may publish one or more routing tokens after
+        # billing.usage.recorded, so use the recursive wildcard.
         # Queue group ensures load balancing across multiple instances
         await self.subscribe(
-            subject="billing.usage.recorded.*",
+            subject="billing.usage.recorded.>",
             queue="billing-workers",
             durable="billing-consumer"
         )

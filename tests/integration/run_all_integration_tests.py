@@ -155,7 +155,8 @@ class IntegrationTestRunner:
 
         try:
             # 动态导入测试模块 (从当前目录)
-            module = importlib.import_module(module_name)
+            # Integration tests are located under tests/integration/flows
+            module = importlib.import_module(f"flows.{module_name}")
             test_class = getattr(module, class_name)
 
             # 创建测试实例并运行

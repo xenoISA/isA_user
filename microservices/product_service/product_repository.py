@@ -19,6 +19,7 @@ from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     Product,
+    ProductBillingProfile,
     PricingModel,
     ProductType,
     ProductKind,
@@ -116,7 +117,7 @@ class ProductRepository:
                 json.dumps(product.features) if product.features else "[]",
                 json.dumps(product.quota_limits) if product.quota_limits else "{}",
                 product.is_active, product.is_featured, product.display_order,
-                json.dumps(product.metadata) if product.metadata else "{}",
+                json.dumps(product.metadata_for_storage()),
                 product.tags, now, now
             ]
 
@@ -206,7 +207,15 @@ class ProductRepository:
             params = []
             param_count = 0
 
-            for key, value in updates.items():
+            normalized_updates = dict(updates)
+            billing_profile = normalized_updates.pop("billing_profile", None)
+            if billing_profile is not None:
+                profile = ProductBillingProfile.model_validate(billing_profile)
+                metadata = dict(normalized_updates.get("metadata") or {})
+                metadata["billing_profile"] = profile.as_metadata()
+                normalized_updates["metadata"] = metadata
+
+            for key, value in normalized_updates.items():
                 if key in ["features", "quota_limits", "metadata"]:
                     value = json.dumps(value)
                 param_count += 1
@@ -257,6 +266,12 @@ class ProductRepository:
 
     def _row_to_product(self, row: Dict[str, Any]) -> Product:
         """Convert database row to Product model"""
+        metadata = row.get("metadata") or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
         return Product(
             id=int(row.get("id")) if row.get("id") else None,
             product_id=row.get("product_id"),
@@ -281,7 +296,10 @@ class ProductRepository:
             display_order=int(row.get("display_order", 0) or 0),
             tags=row.get("tags"),
             specifications=row.get("specifications", {}),
-            metadata=row.get("metadata") or {},
+            metadata=metadata,
+            billing_profile=ProductBillingProfile.model_validate(
+                metadata.get("billing_profile", {})
+            ),
             is_active=row.get("is_active", True),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")
@@ -612,6 +630,25 @@ class ProductRepository:
         except Exception as e:
             logger.error(f"Error getting product pricing: {e}")
             return None
+
+    async def get_product_pricing_rows(self, product_id: str) -> List[Dict[str, Any]]:
+        """Get raw pricing rows for a product ordered by min_quantity."""
+        try:
+            query = f"""
+                SELECT *
+                FROM {self.schema}.{self.pricing_table}
+                WHERE product_id = $1
+                ORDER BY min_quantity ASC, created_at ASC
+            """
+
+            async with self.db:
+                results = await self.db.query(query, params=[product_id])
+
+            return [dict(row) for row in results] if results else []
+
+        except Exception as e:
+            logger.error(f"Error getting raw product pricing rows for {product_id}: {e}")
+            return []
 
     # ==================== Service Plan Operations ====================
 
