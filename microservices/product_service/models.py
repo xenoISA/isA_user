@@ -909,6 +909,8 @@ class CostLookupRequest(BaseModel):
     provider: Optional[str] = None
     model_name: Optional[str] = None
     operation_type: Optional[str] = None
+    backend: Optional[str] = None
+    engine_used: Optional[str] = None
 
 
 class CostLookupResponse(BaseModel):
