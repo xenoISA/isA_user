@@ -419,6 +419,8 @@ async def lookup_cost_definition(
     provider: Optional[str] = Query(None, description="Provider name"),
     model_name: Optional[str] = Query(None, description="Model identifier"),
     operation_type: Optional[str] = Query(None, description="Operation identifier"),
+    backend: Optional[str] = Query(None, description="Runtime backend identifier"),
+    engine_used: Optional[str] = Query(None, description="Runtime engine identifier"),
     tool_name: Optional[str] = Query(None, description="Tool identifier"),
     service: ProductService = Depends(get_product_service),
 ):
@@ -429,6 +431,8 @@ async def lookup_cost_definition(
             provider=provider,
             model_name=model_name,
             operation_type=operation_type,
+            backend=backend,
+            engine_used=engine_used,
             tool_name=tool_name,
         )
         if not result.get("success"):

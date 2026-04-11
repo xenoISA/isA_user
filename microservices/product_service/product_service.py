@@ -114,14 +114,20 @@ class ProductService:
         provider: Optional[str] = None,
         model_name: Optional[str] = None,
         operation_type: Optional[str] = None,
+        backend: Optional[str] = None,
+        engine_used: Optional[str] = None,
         tool_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lookup an active cost definition in a shape compatible with isa_model."""
         try:
             lookup_name = tool_name or model_name
+            cost_lookup_provider = provider
+            if service_type == "model_inference":
+                cost_lookup_provider = None
+
             cost_definitions = await self.repository.get_cost_definitions(
                 is_active=True,
-                provider=provider,
+                provider=cost_lookup_provider,
                 service_type=service_type,
             )
 
@@ -129,6 +135,9 @@ class ProductService:
                 return self._build_model_inference_cost_lookup(
                     cost_definitions,
                     lookup_name,
+                    provider=provider,
+                    backend=backend,
+                    engine_used=engine_used,
                 )
 
             cost_definition = self._select_cost_definition(
@@ -275,28 +284,171 @@ class ProductService:
         }
         return [operation_type, *aliases.get((service_type, operation_type), [])]
 
+    @staticmethod
+    def _normalize_runtime_value(value: Optional[str]) -> Optional[str]:
+        normalized = (value or "").strip().lower()
+        return normalized or None
+
+    def _normalize_model_inference_runtime(
+        self,
+        provider: Optional[str],
+        backend: Optional[str],
+        engine_used: Optional[str],
+    ):
+        local_gpu_engines = {"vllm", "sglang", "triton", "onnx"}
+        normalized_provider = self._normalize_runtime_value(provider)
+        normalized_backend = self._normalize_runtime_value(backend)
+        normalized_engine = self._normalize_runtime_value(engine_used)
+
+        if normalized_engine is None and normalized_provider in local_gpu_engines:
+            normalized_engine = normalized_provider
+        if normalized_backend is None and normalized_engine in local_gpu_engines:
+            normalized_backend = "local_gpu"
+
+        return normalized_backend, normalized_engine
+
+    def _extract_model_inference_runtime(self, cost_definition: Dict[str, Any]):
+        metadata = cost_definition.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        backend = self._normalize_runtime_value(
+            metadata.get("backend") or metadata.get("runtime_backend")
+        )
+        engine_used = self._normalize_runtime_value(
+            metadata.get("engine_used") or metadata.get("engine")
+        )
+        return backend, engine_used
+
+    def _score_model_inference_definition(
+        self,
+        cost_definition: Dict[str, Any],
+        model_name: Optional[str],
+        provider: Optional[str],
+        backend: Optional[str],
+        engine_used: Optional[str],
+    ) -> Optional[int]:
+        normalized_provider = self._normalize_runtime_value(provider)
+        requested_backend, requested_engine = self._normalize_model_inference_runtime(
+            provider,
+            backend,
+            engine_used,
+        )
+        item_provider = self._normalize_runtime_value(cost_definition.get("provider"))
+        item_model_name = cost_definition.get("model_name")
+        if model_name and item_model_name not in (model_name, None, ""):
+            return None
+
+        if normalized_provider:
+            allowed_providers = {normalized_provider}
+            if requested_engine:
+                allowed_providers.add(requested_engine)
+            if item_provider not in allowed_providers and item_provider is not None:
+                return None
+
+        item_backend, item_engine = self._extract_model_inference_runtime(cost_definition)
+        if requested_engine and item_engine not in (None, requested_engine):
+            return None
+        if requested_backend and item_backend not in (None, requested_backend):
+            return None
+
+        score = 0
+        if model_name:
+            if item_model_name == model_name:
+                score += 100
+            elif item_model_name in (None, ""):
+                score += 10
+        elif item_model_name in (None, ""):
+            score += 5
+
+        if normalized_provider:
+            if item_provider == requested_engine and requested_engine:
+                score += 60
+            elif item_provider == normalized_provider:
+                score += 40
+        elif item_provider is None:
+            score += 5
+
+        if requested_engine:
+            if item_engine == requested_engine:
+                score += 200
+        elif item_engine is not None:
+            score -= 20
+
+        if requested_backend:
+            if item_backend == requested_backend:
+                score += 100
+        elif item_backend is not None:
+            score -= 10
+
+        if cost_definition.get("operation_type") in {"input", "output"}:
+            score += 1
+
+        return score
+
+    def _select_best_model_inference_definition(
+        self,
+        cost_definitions: List[Dict[str, Any]],
+        operation_type: Optional[str],
+        model_name: Optional[str],
+        provider: Optional[str],
+        backend: Optional[str],
+        engine_used: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        best_definition = None
+        best_score = None
+        for item in cost_definitions:
+            if operation_type and item.get("operation_type") != operation_type:
+                continue
+            score = self._score_model_inference_definition(
+                item,
+                model_name=model_name,
+                provider=provider,
+                backend=backend,
+                engine_used=engine_used,
+            )
+            if score is None:
+                continue
+            if best_score is None or score > best_score:
+                best_definition = item
+                best_score = score
+        return best_definition
+
     def _build_model_inference_cost_lookup(
         self,
         cost_definitions: List[Dict[str, Any]],
         model_name: Optional[str],
+        provider: Optional[str] = None,
+        backend: Optional[str] = None,
+        engine_used: Optional[str] = None,
     ) -> Dict[str, Any]:
-        candidates = cost_definitions
-        if model_name:
-            candidates = [
-                item for item in candidates
-                if item.get("model_name") == model_name
-            ]
-
-        input_definition = next(
-            (item for item in candidates if item.get("operation_type") == "input"),
-            None,
+        input_definition = self._select_best_model_inference_definition(
+            cost_definitions,
+            operation_type="input",
+            model_name=model_name,
+            provider=provider,
+            backend=backend,
+            engine_used=engine_used,
         )
-        output_definition = next(
-            (item for item in candidates if item.get("operation_type") == "output"),
-            None,
+        output_definition = self._select_best_model_inference_definition(
+            cost_definitions,
+            operation_type="output",
+            model_name=model_name,
+            provider=provider,
+            backend=backend,
+            engine_used=engine_used,
         )
-
-        primary = input_definition or output_definition or (candidates[0] if candidates else None)
+        primary = (
+            input_definition
+            or output_definition
+            or self._select_best_model_inference_definition(
+                cost_definitions,
+                operation_type=None,
+                model_name=model_name,
+                provider=provider,
+                backend=backend,
+                engine_used=engine_used,
+            )
+        )
         if not primary:
             return {"success": False, "message": "Cost definition not found"}
 
