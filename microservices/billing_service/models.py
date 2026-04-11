@@ -55,6 +55,7 @@ class ServiceType(str, Enum):
     WEB_SERVICE = "web_service"           # Web automation/search service
     PYTHON_REPL = "python_repl"           # Python execution service
     COMPUTE_GENERAL = "compute_general"   # Shared compute infrastructure
+    GPU_TRAINING = "gpu_training"         # Local GPU training and fine-tuning
     VECTOR_STORAGE = "vector_storage"     # Vector storage and retrieval
     NATS_MESSAGING = "nats_messaging"     # Messaging infrastructure
     API_GATEWAY = "api_gateway"           # API网关
