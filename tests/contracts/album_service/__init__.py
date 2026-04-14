@@ -1,0 +1,1 @@
+"""Album service contract tests."""
