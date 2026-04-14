@@ -528,6 +528,79 @@ async def get_billing_record(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+# ====================
+# Unified Billing Status (Story #238/#239)
+# ====================
+
+
+@app.get("/api/v1/billing/user/status")
+async def get_user_billing_status(
+    request: Request,
+    user_id: Optional[str] = None,
+    service: BillingService = Depends(get_billing_service),
+):
+    """Return unified billing status for a user (Story #238/#239).
+
+    Requires authentication via X-User-Id header or query param.
+    Rate limited: 60 req/min per user (enforced at gateway level).
+    """
+    resolved_user_id = user_id or request.headers.get("X-User-Id")
+    if not resolved_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required: X-User-Id header or user_id param")
+
+    try:
+        result = await service.get_user_billing_status(resolved_user_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error getting user billing status: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ====================
+# Invoices / Billing History (Story #241)
+# ====================
+
+
+@app.get("/api/v1/billing/invoices")
+async def get_invoices(
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    status: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    service: BillingService = Depends(get_billing_service),
+):
+    """Return paginated invoice/billing history (Story #241).
+
+    Each invoice covers a billing period with totals for credits used,
+    cost in USD, subscription tier, and payment status.
+    Supports date and status filters.
+    """
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    if page < 1:
+        page = 1
+    if page_size > 100:
+        page_size = 100
+
+    try:
+        result = await service.repository.get_invoices(
+            user_id=user_id,
+            organization_id=organization_id,
+            start_date=start_date,
+            end_date=end_date,
+            status=status,
+            page=page,
+            page_size=page_size,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error getting invoices: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @app.get("/api/v1/billing/usage/aggregations")
 async def get_usage_aggregations(
     user_id: Optional[str] = None,
@@ -541,15 +614,84 @@ async def get_usage_aggregations(
     period_start: Optional[datetime] = None,
     period_end: Optional[datetime] = None,
     period_type: Optional[str] = None,
+    group_by: Optional[str] = None,
     limit: int = 100,
     service: BillingService = Depends(get_billing_service),
 ):
-    """获取使用量聚合数据"""
+    """Get usage aggregations with optional group_by support.
+
+    group_by options (Story #242, #240):
+      - agent_id: per-agent token consumption
+      - service_type: per-service consumption breakdown
+      - agent_id,day: agent + time grouping (combinable)
+      - service_type,day: service + time grouping (combinable)
+    """
     try:
         from .models import ServiceType
 
         billing_service_type = ServiceType(service_type) if service_type else None
 
+        # Handle group_by for agent_id (Story #242) and service_type (Story #240)
+        if group_by:
+            group_fields = [g.strip() for g in group_by.split(",")]
+
+            if "agent_id" in group_fields:
+                time_group = next(
+                    (g for g in group_fields if g in ("hour", "day", "week", "month")),
+                    None,
+                )
+                agent_aggs = await service.repository.get_agent_usage_aggregations(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    agent_id=agent_id,
+                    service_type=billing_service_type,
+                    period_start=period_start,
+                    period_end=period_end,
+                    time_group=time_group,
+                    limit=limit,
+                )
+                return {
+                    "agent_aggregations": agent_aggs,
+                    "total_count": len(agent_aggs),
+                    "group_by": group_by,
+                    "filters": {
+                        "user_id": user_id,
+                        "organization_id": organization_id,
+                        "agent_id": agent_id,
+                        "service_type": service_type,
+                        "period_start": period_start,
+                        "period_end": period_end,
+                    },
+                }
+
+            if "service_type" in group_fields:
+                time_group = next(
+                    (g for g in group_fields if g in ("hour", "day", "week", "month")),
+                    None,
+                )
+                service_aggs = await service.repository.get_service_usage_aggregations(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    agent_id=agent_id,
+                    period_start=period_start,
+                    period_end=period_end,
+                    time_group=time_group,
+                    limit=limit,
+                )
+                return {
+                    "service_aggregations": service_aggs,
+                    "total_count": len(service_aggs),
+                    "group_by": group_by,
+                    "filters": {
+                        "user_id": user_id,
+                        "organization_id": organization_id,
+                        "agent_id": agent_id,
+                        "period_start": period_start,
+                        "period_end": period_end,
+                    },
+                }
+
+        # Default: existing aggregation logic
         aggregations = await service.repository.get_usage_aggregations(
             user_id=user_id,
             organization_id=organization_id,
