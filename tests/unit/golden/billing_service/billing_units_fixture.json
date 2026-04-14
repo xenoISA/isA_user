@@ -1,0 +1,148 @@
+{
+  "_description": "Canonical mapping of service_type -> meter/unit combinations. Source of truth for billing unit validation.",
+  "_updated": "2026-04-14",
+  "service_units": [
+    {
+      "service_type": "model_inference",
+      "meter_type": "tokens",
+      "unit_type": "token",
+      "example_usage_amount": 1500,
+      "example_unit_price": 0.00001,
+      "description": "LLM inference token consumption"
+    },
+    {
+      "service_type": "mcp_service",
+      "meter_type": "tool_calls",
+      "unit_type": "execution",
+      "example_usage_amount": 1,
+      "example_unit_price": 0.005,
+      "description": "MCP tool execution"
+    },
+    {
+      "service_type": "agent_execution",
+      "meter_type": "tokens",
+      "unit_type": "token",
+      "example_usage_amount": 5000,
+      "example_unit_price": 0.00002,
+      "description": "Agent session token consumption"
+    },
+    {
+      "service_type": "agent_runtime",
+      "meter_type": "runtime_minutes",
+      "unit_type": "minute",
+      "example_usage_amount": 30,
+      "example_unit_price": 0.01,
+      "description": "Dedicated agent runtime hosting"
+    },
+    {
+      "service_type": "storage_minio",
+      "meter_type": "storage_gb_month",
+      "unit_type": "gb_month",
+      "example_usage_amount": 5,
+      "example_unit_price": 0.023,
+      "description": "MinIO object storage per GB-month"
+    },
+    {
+      "service_type": "data_service",
+      "meter_type": "requests",
+      "unit_type": "request",
+      "example_usage_amount": 100,
+      "example_unit_price": 0.001,
+      "description": "Data product query requests"
+    },
+    {
+      "service_type": "data_pipeline",
+      "meter_type": "execution_seconds",
+      "unit_type": "second",
+      "example_usage_amount": 120,
+      "example_unit_price": 0.0001,
+      "description": "ETL pipeline execution time"
+    },
+    {
+      "service_type": "web_service",
+      "meter_type": "requests",
+      "unit_type": "request",
+      "example_usage_amount": 10,
+      "example_unit_price": 0.01,
+      "description": "Web automation/search requests"
+    },
+    {
+      "service_type": "python_repl",
+      "meter_type": "execution_seconds",
+      "unit_type": "second",
+      "example_usage_amount": 60,
+      "example_unit_price": 0.0005,
+      "description": "Python execution sandbox time"
+    },
+    {
+      "service_type": "compute_general",
+      "meter_type": "compute_seconds",
+      "unit_type": "second",
+      "example_usage_amount": 300,
+      "example_unit_price": 0.00008,
+      "description": "Shared compute infrastructure"
+    },
+    {
+      "service_type": "gpu_training",
+      "meter_type": "gpu_seconds",
+      "unit_type": "second",
+      "example_usage_amount": 3600,
+      "example_unit_price": 0.0004,
+      "description": "GPU training and fine-tuning"
+    },
+    {
+      "service_type": "vector_storage",
+      "meter_type": "operations",
+      "unit_type": "operation",
+      "example_usage_amount": 1000,
+      "example_unit_price": 0.00001,
+      "description": "Vector storage upsert/query operations"
+    },
+    {
+      "service_type": "nats_messaging",
+      "meter_type": "messages",
+      "unit_type": "request",
+      "example_usage_amount": 5000,
+      "example_unit_price": 0.000001,
+      "description": "NATS message publish/subscribe"
+    },
+    {
+      "service_type": "api_gateway",
+      "meter_type": "requests",
+      "unit_type": "request",
+      "example_usage_amount": 10000,
+      "example_unit_price": 0.000005,
+      "description": "API gateway request passthrough"
+    },
+    {
+      "service_type": "notification",
+      "meter_type": "notifications",
+      "unit_type": "notification",
+      "example_usage_amount": 50,
+      "example_unit_price": 0.002,
+      "description": "Push/email/SMS notifications"
+    },
+    {
+      "service_type": "other",
+      "meter_type": "units",
+      "unit_type": "unit",
+      "example_usage_amount": 1,
+      "example_unit_price": 0.01,
+      "description": "Generic/uncategorized service usage"
+    }
+  ],
+  "billing_methods": [
+    "wallet_deduction",
+    "payment_charge",
+    "credit_consumption",
+    "subscription_credit",
+    "subscription_included"
+  ],
+  "billing_statuses": [
+    "pending",
+    "processing",
+    "completed",
+    "failed",
+    "refunded"
+  ]
+}
