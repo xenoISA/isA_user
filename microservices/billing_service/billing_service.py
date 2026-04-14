@@ -46,6 +46,12 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
+def now_start_of_month() -> datetime:
+    """Return the first instant of the current UTC month."""
+    now = datetime.utcnow()
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
 class BillingService:
     """计费服务核心业务逻辑"""
 
@@ -1078,6 +1084,101 @@ class BillingService:
             return QuotaCheckResponse(
                 allowed=False, message=f"Error checking quota: {str(e)}"
             )
+
+    # ====================
+    # Unified billing status (Story #238)
+    # ====================
+
+    # In-memory cache: {user_id: (timestamp, result)}
+    _billing_status_cache: Dict[str, Tuple[datetime, Dict[str, Any]]] = {}
+    _BILLING_STATUS_TTL = timedelta(minutes=5)
+
+    async def get_user_billing_status(self, user_id: str) -> Dict[str, Any]:
+        """Return a unified billing status view for isA_Console.
+
+        Aggregates subscription tier, credit balance, and current-period
+        usage into a single response object.  Results are cached per-user
+        with a 5-minute TTL.
+
+        Falls back to a free-tier stub with a warning field when the
+        subscription service is unavailable.
+        """
+        # Check cache
+        now = datetime.utcnow()
+        cached = self._billing_status_cache.get(user_id)
+        if cached:
+            cached_at, cached_result = cached
+            if now - cached_at < self._BILLING_STATUS_TTL:
+                return cached_result
+
+        result = await self._build_billing_status(user_id)
+
+        # Store in cache
+        self._billing_status_cache[user_id] = (now, result)
+        return result
+
+    async def _build_billing_status(self, user_id: str) -> Dict[str, Any]:
+        """Build the unified billing status dict."""
+        # Defaults (free tier fallback)
+        subscription_tier = "free"
+        credits_remaining = 0
+        credits_limit = 0
+        next_billing_date = None
+        payment_status = "none"
+        warning = None
+
+        # Try to fetch subscription info
+        if self.subscription_client:
+            try:
+                sub_info = await self.subscription_client.get_user_subscription(user_id)
+                if sub_info:
+                    subscription_tier = sub_info.get("tier_code", "free")
+                    credits_remaining = sub_info.get("credits_remaining", 0)
+                    credits_limit = sub_info.get("credits_limit", 0)
+                    next_billing_date = sub_info.get("next_billing_date")
+                    payment_status = sub_info.get("payment_status", "none")
+                else:
+                    warning = "subscription_service_unavailable"
+            except Exception as e:
+                logger.warning(f"Subscription service unavailable for billing status: {e}")
+                warning = "subscription_service_unavailable"
+        else:
+            warning = "subscription_service_unavailable"
+
+        # Aggregate current-period usage from billing records
+        period_start = now_start_of_month()
+        try:
+            aggregations = await self.repository.get_usage_aggregations(
+                user_id=user_id,
+                period_start=period_start,
+                period_type="monthly",
+                limit=1,
+            )
+            if aggregations:
+                agg = aggregations[0]
+                usage = {
+                    "requests": agg.total_usage_count,
+                    "tokens": int(agg.total_usage_amount),
+                    "cost": float(agg.total_cost),
+                }
+            else:
+                usage = {"requests": 0, "tokens": 0, "cost": 0.0}
+        except Exception as e:
+            logger.warning(f"Failed to get usage aggregations for billing status: {e}")
+            usage = {"requests": 0, "tokens": 0, "cost": 0.0}
+
+        result: Dict[str, Any] = {
+            "user_id": user_id,
+            "subscription_tier": subscription_tier,
+            "credits_remaining": credits_remaining,
+            "credits_limit": credits_limit,
+            "next_billing_date": next_billing_date,
+            "payment_status": payment_status,
+            "current_period_usage": usage,
+        }
+        if warning:
+            result["warning"] = warning
+        return result
 
     # ====================
     # 统计和报告

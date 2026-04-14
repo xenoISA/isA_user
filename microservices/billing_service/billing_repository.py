@@ -866,6 +866,252 @@ class BillingRepository:
             return []
 
     # ====================
+    # Agent / Service grouped aggregations (Stories #242, #240)
+    # ====================
+
+    async def get_agent_usage_aggregations(
+        self,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        service_type: Optional["ServiceType"] = None,
+        period_start: Optional[datetime] = None,
+        period_end: Optional[datetime] = None,
+        time_group: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Aggregate billing records grouped by agent_id."""
+        try:
+            conditions: List[str] = []
+            params: List[Any] = []
+            pc = 0
+
+            if user_id:
+                pc += 1
+                conditions.append(f"COALESCE(actor_user_id, user_id) = ${pc}")
+                params.append(user_id)
+            if organization_id:
+                pc += 1
+                conditions.append(f"organization_id = ${pc}")
+                params.append(organization_id)
+            if agent_id:
+                pc += 1
+                conditions.append(f"agent_id = ${pc}")
+                params.append(agent_id)
+            if service_type:
+                pc += 1
+                conditions.append(f"service_type = ${pc}")
+                params.append(service_type.value)
+            if period_start:
+                pc += 1
+                conditions.append(f"created_at >= ${pc}")
+                params.append(period_start)
+            if period_end:
+                pc += 1
+                conditions.append(f"created_at <= ${pc}")
+                params.append(period_end)
+
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            extra_select = ""
+            extra_group = ""
+            if time_group and time_group in ("hour", "day", "week", "month"):
+                extra_select = f", date_trunc('{time_group}', created_at) AS period"
+                extra_group = ", period"
+
+            query = f"""
+                SELECT
+                    agent_id,
+                    COUNT(*) AS request_count,
+                    COALESCE(SUM(usage_amount), 0) AS total_tokens,
+                    COALESCE(SUM(total_amount), 0) AS total_cost_usd
+                    {extra_select}
+                FROM {self.schema}.{self.billing_records_table}
+                {where}
+                GROUP BY agent_id{extra_group}
+                ORDER BY total_tokens DESC
+                LIMIT {limit}
+            """
+
+            async with self.db:
+                rows = await self.db.query(query, params=params)
+
+            return [
+                {
+                    "agent_id": r.get("agent_id"),
+                    "request_count": int(r.get("request_count") or 0),
+                    "total_tokens": int(r.get("total_tokens") or 0),
+                    "total_cost_usd": float(r.get("total_cost_usd") or 0),
+                    **({"period": r["period"].isoformat()} if "period" in r else {}),
+                }
+                for r in (rows or [])
+            ]
+        except Exception as e:
+            logger.error(f"Error getting agent usage aggregations: {e}")
+            return []
+
+    async def get_service_usage_aggregations(
+        self,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        period_start: Optional[datetime] = None,
+        period_end: Optional[datetime] = None,
+        time_group: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Aggregate billing records grouped by service_type."""
+        try:
+            conditions: List[str] = []
+            params: List[Any] = []
+            pc = 0
+
+            if user_id:
+                pc += 1
+                conditions.append(f"COALESCE(actor_user_id, user_id) = ${pc}")
+                params.append(user_id)
+            if organization_id:
+                pc += 1
+                conditions.append(f"organization_id = ${pc}")
+                params.append(organization_id)
+            if agent_id:
+                pc += 1
+                conditions.append(f"agent_id = ${pc}")
+                params.append(agent_id)
+            if period_start:
+                pc += 1
+                conditions.append(f"created_at >= ${pc}")
+                params.append(period_start)
+            if period_end:
+                pc += 1
+                conditions.append(f"created_at <= ${pc}")
+                params.append(period_end)
+
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            extra_select = ""
+            extra_group = ""
+            if time_group and time_group in ("hour", "day", "week", "month"):
+                extra_select = f", date_trunc('{time_group}', created_at) AS period"
+                extra_group = ", period"
+
+            query = f"""
+                SELECT
+                    service_type,
+                    COUNT(*) AS request_count,
+                    COALESCE(SUM(usage_amount), 0) AS total_tokens,
+                    COALESCE(SUM(total_amount), 0) AS total_cost_usd
+                    {extra_select}
+                FROM {self.schema}.{self.billing_records_table}
+                {where}
+                GROUP BY service_type{extra_group}
+                ORDER BY total_cost_usd DESC
+                LIMIT {limit}
+            """
+
+            async with self.db:
+                rows = await self.db.query(query, params=params)
+
+            return [
+                {
+                    "service_type": r.get("service_type"),
+                    "request_count": int(r.get("request_count") or 0),
+                    "total_tokens": int(r.get("total_tokens") or 0),
+                    "total_cost_usd": float(r.get("total_cost_usd") or 0),
+                    **({"period": r["period"].isoformat()} if "period" in r else {}),
+                }
+                for r in (rows or [])
+            ]
+        except Exception as e:
+            logger.error(f"Error getting service usage aggregations: {e}")
+            return []
+
+    async def get_invoices(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        status: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """Return paginated invoice-like billing period summaries."""
+        try:
+            conditions = []
+            params: List[Any] = []
+            pc = 0
+
+            pc += 1
+            conditions.append(f"COALESCE(actor_user_id, user_id) = ${pc}")
+            params.append(user_id)
+
+            if organization_id:
+                pc += 1
+                conditions.append(f"organization_id = ${pc}")
+                params.append(organization_id)
+            if start_date:
+                pc += 1
+                conditions.append(f"created_at >= ${pc}")
+                params.append(start_date)
+            if end_date:
+                pc += 1
+                conditions.append(f"created_at <= ${pc}")
+                params.append(end_date)
+            if status:
+                pc += 1
+                conditions.append(f"status = ${pc}")
+                params.append(status)
+
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            offset = (page - 1) * page_size
+
+            query = f"""
+                SELECT
+                    date_trunc('month', created_at) AS period,
+                    COUNT(*) AS total_records,
+                    COALESCE(SUM(usage_amount), 0) AS total_credits_used,
+                    COALESCE(SUM(total_amount), 0) AS total_cost_usd
+                FROM {self.schema}.{self.billing_records_table}
+                {where}
+                GROUP BY period
+                ORDER BY period DESC
+                LIMIT {page_size} OFFSET {offset}
+            """
+
+            count_query = f"""
+                SELECT COUNT(DISTINCT date_trunc('month', created_at)) AS cnt
+                FROM {self.schema}.{self.billing_records_table}
+                {where}
+            """
+
+            async with self.db:
+                rows = await self.db.query(query, params=params)
+                count_rows = await self.db.query(count_query, params=params)
+
+            total = int(count_rows[0]["cnt"]) if count_rows else 0
+
+            invoices = [
+                {
+                    "period": r["period"].isoformat() if r.get("period") else None,
+                    "total_records": int(r.get("total_records") or 0),
+                    "total_credits_used": int(r.get("total_credits_used") or 0),
+                    "total_cost_usd": float(r.get("total_cost_usd") or 0),
+                }
+                for r in (rows or [])
+            ]
+
+            return {
+                "invoices": invoices,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+        except Exception as e:
+            logger.error(f"Error getting invoices: {e}")
+            return {"invoices": [], "total": 0, "page": page, "page_size": page_size}
+
+    # ====================
     # 配额管理
     # ====================
 
