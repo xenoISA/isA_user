@@ -42,6 +42,7 @@ from .models import (
     SessionCreateRequest,
     SessionListResponse,
     SessionResponse,
+    SessionSearchResponse,
     SessionServiceStatus,
     SessionStatsResponse,
     SessionSummaryResponse,
@@ -280,6 +281,35 @@ async def get_session_stats(
     """Get session service statistics"""
     try:
         return await session_service.get_service_stats()
+    except SessionServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.get("/api/v1/sessions/search", response_model=SessionSearchResponse)
+async def search_sessions(
+    q: str = Query(..., min_length=1, description="Search query"),
+    user_id: str = Query(..., description="User ID (auth-scoped)"),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    cursor: Optional[str] = Query(None, description="Pagination cursor from previous response"),
+    session_service: SessionService = Depends(get_session_service),
+):
+    """
+    Full-text search across all user sessions and messages.
+
+    Returns matching sessions grouped with highlighted text snippets,
+    sorted by relevance. Supports cursor-based pagination.
+    """
+    try:
+        return await session_service.search_sessions(
+            user_id=user_id,
+            query=q,
+            limit=limit,
+            cursor=cursor,
+        )
+    except SessionValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except SessionServiceError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)

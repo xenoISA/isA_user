@@ -129,6 +129,17 @@ class SessionMessageRepositoryProtocol(Protocol):
         """Delete all messages for a session"""
         ...
 
+    async def search_messages(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+    ) -> tuple:
+        """Full-text search across all messages for a user.
+        Returns (rows, total_count)."""
+        ...
+
 
 # ============================================================================
 # Service Client Protocols

@@ -212,6 +212,40 @@ class SessionStatsResponse(BaseModel):
     average_messages_per_session: float = 0.0
 
 
+class SearchHit(BaseModel):
+    """A single search result with matching message and snippet"""
+    session_id: str
+    message_id: str
+    role: str
+    content: str
+    snippet: str = Field(..., description="Highlighted text snippet around the match")
+    message_type: str = "chat"
+    created_at: Optional[datetime] = None
+
+
+class SearchResultSession(BaseModel):
+    """A session that contains matching messages"""
+    session_id: str
+    user_id: str
+    status: str
+    session_summary: str = ""
+    message_count: int = 0
+    created_at: Optional[datetime] = None
+    last_activity: Optional[datetime] = None
+    hits: List[SearchHit] = Field(default_factory=list, description="Matching messages in this session")
+
+    class Config:
+        from_attributes = True
+
+
+class SessionSearchResponse(BaseModel):
+    """Full-text search response with cursor pagination"""
+    query: str
+    results: List[SearchResultSession] = Field(default_factory=list)
+    total_hits: int = 0
+    next_cursor: Optional[str] = Field(None, description="Cursor for next page, null if no more results")
+
+
 # Service Status Models
 
 class SessionServiceStatus(BaseModel):
@@ -239,5 +273,6 @@ __all__ = [
     'MemoryCreateRequest', 'MemoryUpdateRequest',
     'SessionResponse', 'SessionListResponse', 'MessageResponse',
     'MessageListResponse', 'MemoryResponse', 'SessionSummaryResponse',
-    'SessionStatsResponse', 'SessionServiceStatus', 'ErrorResponse'
+    'SessionStatsResponse', 'SessionServiceStatus', 'ErrorResponse',
+    'SearchHit', 'SearchResultSession', 'SessionSearchResponse'
 ]
