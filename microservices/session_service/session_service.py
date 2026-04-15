@@ -23,12 +23,15 @@ from .models import (
     MessageCreateRequest,
     MessageListResponse,
     MessageResponse,
+    SearchHit,
+    SearchResultSession,
     Session,
     SessionCreateRequest,
     SessionListResponse,
     SessionMemory,
     SessionMessage,
     SessionResponse,
+    SessionSearchResponse,
     SessionStatsResponse,
     SessionSummaryResponse,
     SessionUpdateRequest,
@@ -564,6 +567,97 @@ class SessionService:
 
     # Note: Memory Operations are handled by dedicated memory_service
     # See microservices/memory_service for session memory functionality
+
+    # Search Operations
+
+    async def search_sessions(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+    ) -> SessionSearchResponse:
+        """
+        Full-text search across all sessions and messages for a user.
+
+        Args:
+            user_id: User ID (auth-scoped — users can only search their own data)
+            query: Search query string
+            limit: Max results to return
+            cursor: Opaque cursor (ISO timestamp) for pagination
+
+        Returns:
+            SessionSearchResponse with grouped results per session
+
+        Raises:
+            SessionValidationError: If query is empty
+            SessionServiceError: If search fails
+        """
+        try:
+            if not query or not query.strip():
+                raise SessionValidationError("Search query must not be empty")
+
+            query = query.strip()
+
+            rows, total_hits = await self.message_repo.search_messages(
+                user_id=user_id,
+                query=query,
+                limit=limit,
+                cursor=cursor,
+            )
+
+            # Group hits by session
+            sessions_map: Dict[str, SearchResultSession] = {}
+            last_created_at = None
+
+            for row in rows:
+                sid = row["session_id"]
+                if sid not in sessions_map:
+                    sessions_map[sid] = SearchResultSession(
+                        session_id=sid,
+                        user_id=user_id,
+                        status=row.get("session_status", "unknown"),
+                        session_summary=row.get("session_summary", ""),
+                        message_count=row.get("session_message_count", 0),
+                        created_at=row.get("session_created_at"),
+                        last_activity=row.get("session_last_activity"),
+                        hits=[],
+                    )
+
+                sessions_map[sid].hits.append(
+                    SearchHit(
+                        session_id=sid,
+                        message_id=row.get("message_id", ""),
+                        role=row.get("role", ""),
+                        content=row.get("content", ""),
+                        snippet=row.get("snippet", ""),
+                        message_type=row.get("message_type", "chat"),
+                        created_at=row.get("message_created_at"),
+                    )
+                )
+                last_created_at = row.get("message_created_at")
+
+            # Build next cursor — only present when there may be more results
+            next_cursor = None
+            if len(rows) == limit and last_created_at is not None:
+                next_cursor = (
+                    last_created_at.isoformat()
+                    if hasattr(last_created_at, "isoformat")
+                    else str(last_created_at)
+                )
+
+            return SessionSearchResponse(
+                query=query,
+                results=list(sessions_map.values()),
+                total_hits=total_hits,
+                next_cursor=next_cursor,
+            )
+
+        except SessionValidationError:
+            raise
+        except Exception as e:
+            logger.error(f"Error searching sessions for user {user_id}: {e}", exc_info=True)
+            raise SessionServiceError(f"Failed to search sessions: {str(e)}")
 
     # Utility Methods
 

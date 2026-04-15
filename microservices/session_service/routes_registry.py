@@ -76,6 +76,12 @@ SERVICE_ROUTES = [
         "description": "Get session summary"
     },
     {
+        "path": "/api/v1/sessions/search",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Full-text search across user sessions and messages"
+    },
+    {
         "path": "/api/v1/sessions/stats",
         "methods": ["GET"],
         "auth_required": True,
@@ -138,6 +144,7 @@ SERVICE_METADATA = {
         "message_management",
         "session_analytics",
         "conversation_tracking",
+        "conversation_search",
         "session_persistence",
         "event_driven"
     ]

@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import Session, SessionMessage
+from .models import Session, SessionMessage, SearchHit
 
 logger = logging.getLogger(__name__)
 
@@ -408,3 +408,110 @@ class SessionMessageRepository:
         except Exception as e:
             logger.error(f"Error getting session messages: {e}")
             return []
+
+    async def search_messages(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+    ) -> tuple[List[Dict[str, Any]], int]:
+        """
+        Full-text search across all messages for a user.
+
+        Uses PostgreSQL ts_rank with plainto_tsquery for relevance ranking,
+        falling back to ILIKE for short or special-character queries.
+
+        Returns (rows, total_count) where each row contains message + session
+        columns and a generated snippet.
+        """
+        try:
+            params: list = []
+            param_idx = 0
+
+            # Build the WHERE clause parts
+            param_idx += 1
+            user_param = f"${param_idx}"
+            params.append(user_id)
+
+            # Determine whether to use tsvector or ILIKE
+            # plainto_tsquery ignores punctuation / very short tokens, so
+            # fall back to ILIKE for queries shorter than 3 chars or that
+            # contain only non-word characters.
+            use_fts = len(query.strip()) >= 3
+
+            if use_fts:
+                param_idx += 1
+                query_param = f"${param_idx}"
+                params.append(query)
+
+                search_condition = (
+                    f"to_tsvector('english', m.content) @@ plainto_tsquery('english', {query_param})"
+                )
+                rank_expr = f"ts_rank(to_tsvector('english', m.content), plainto_tsquery('english', {query_param}))"
+                snippet_expr = (
+                    f"ts_headline('english', m.content, plainto_tsquery('english', {query_param}), "
+                    f"'StartSel=<<, StopSel=>>, MaxWords=35, MinWords=15')"
+                )
+            else:
+                param_idx += 1
+                like_param = f"${param_idx}"
+                params.append(f"%{query}%")
+
+                search_condition = f"m.content ILIKE {like_param}"
+                rank_expr = "1"
+                snippet_expr = "substring(m.content from 1 for 200)"
+
+            # Cursor-based pagination: cursor is the ISO timestamp of the
+            # last result's created_at from the previous page.
+            cursor_condition = ""
+            if cursor:
+                param_idx += 1
+                cursor_param = f"${param_idx}"
+                params.append(cursor)
+                cursor_condition = f"AND m.created_at < {cursor_param}::timestamptz"
+
+            # Count total matching messages (without cursor / limit)
+            count_query = f"""
+                SELECT COUNT(*) AS cnt
+                FROM {self.schema}.{self.messages_table} m
+                WHERE m.user_id = {user_param}
+                  AND {search_condition}
+            """
+
+            # Main search query — join with sessions to get session metadata
+            search_query = f"""
+                SELECT
+                    m.id            AS message_id,
+                    m.session_id,
+                    m.role,
+                    m.content,
+                    m.message_type,
+                    m.created_at    AS message_created_at,
+                    s.status        AS session_status,
+                    s.session_summary,
+                    s.message_count AS session_message_count,
+                    s.created_at    AS session_created_at,
+                    s.last_activity AS session_last_activity,
+                    {snippet_expr}  AS snippet,
+                    {rank_expr}     AS rank
+                FROM {self.schema}.{self.messages_table} m
+                JOIN {self.schema}.sessions s ON s.session_id = m.session_id
+                WHERE m.user_id = {user_param}
+                  AND {search_condition}
+                  {cursor_condition}
+                ORDER BY rank DESC, m.created_at DESC
+                LIMIT {limit}
+            """
+
+            async with self.db:
+                count_result = await self.db.query_row(count_query, params[:2], schema=self.schema)
+                total = count_result["cnt"] if count_result else 0
+
+                rows = await self.db.query(search_query, params, schema=self.schema) or []
+
+            return rows, total
+
+        except Exception as e:
+            logger.error(f"Error searching messages: {e}", exc_info=True)
+            return [], 0
