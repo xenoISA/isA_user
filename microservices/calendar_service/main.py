@@ -22,6 +22,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -179,17 +180,14 @@ setup_metrics(app, "calendar_service")
 # =============================================================================
 
 
+health = HealthCheck("calendar_service", version="1.0.0", shutdown_manager=shutdown_manager)
+
+
 @app.get("/api/v1/calendar/health")
 @app.get("/health")
 async def health_check():
-    """健康检查"""
-    return {"status": "healthy", "service": "calendar_service", "version": "1.0.0"}
-
-
-# =============================================================================
-# Calendar Event Endpoints
-# =============================================================================
-
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/calendar/events", response_model=EventResponse, status_code=201)
 async def create_event(request: EventCreateRequest = Body(...)):

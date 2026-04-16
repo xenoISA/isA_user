@@ -23,6 +23,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 
 from .models import (
     Campaign,
@@ -258,87 +259,15 @@ async def get_auth_context(request: Request) -> dict:
 # ====================
 
 
+health = HealthCheck("campaign_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: factory.repository.db if factory and factory.repository else None)
+
+
 @app.get("/api/v1/campaigns/health")
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
+@app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    dependencies = {}
-
-    if factory:
-        try:
-            db_healthy = await factory.repository.health_check()
-            dependencies["postgres"] = "healthy" if db_healthy else "unhealthy"
-        except Exception:
-            dependencies["postgres"] = "unhealthy"
-
-        try:
-            if factory.nats_client:
-                dependencies["nats"] = "healthy" if factory.nats_client.is_connected else "unhealthy"
-            else:
-                dependencies["nats"] = "not_configured"
-        except Exception:
-            dependencies["nats"] = "unhealthy"
-
-    return HealthResponse(
-        status="healthy",
-        service=SERVICE_NAME,
-        port=SERVICE_PORT,
-        version=SERVICE_VERSION,
-        dependencies=dependencies,
-    )
-
-
-@app.get("/health/ready", response_model=ReadinessResponse, tags=["Health"])
-async def readiness_check():
-    """Readiness check endpoint"""
-    checks = {}
-    details = {}
-
-    if factory:
-        try:
-            db_healthy = await factory.repository.health_check()
-            checks["database"] = db_healthy
-            details["database"] = "Connected" if db_healthy else "Connection failed"
-        except Exception as e:
-            checks["database"] = False
-            details["database"] = str(e)
-
-        try:
-            if factory.nats_client:
-                checks["nats"] = factory.nats_client.is_connected
-                details["nats"] = "Connected" if factory.nats_client.is_connected else "Disconnected"
-            else:
-                checks["nats"] = True  # Optional
-                details["nats"] = "Not configured (optional)"
-        except Exception as e:
-            checks["nats"] = False
-            details["nats"] = str(e)
-    else:
-        checks["factory"] = False
-        details["factory"] = "Factory not initialized"
-
-    ready = all(checks.get(k, False) for k in ["database"])
-
-    return ReadinessResponse(
-        ready=ready,
-        checks=checks,
-        details=details,
-    )
-
-
-@app.get("/health/live", response_model=LivenessResponse, tags=["Health"])
-async def liveness_check():
-    """Liveness check endpoint"""
-    return LivenessResponse(
-        alive=True,
-        uptime_seconds=time.time() - startup_time,
-    )
-
-
-# ====================
-# Campaign CRUD Endpoints
-# ====================
-
+    """Service health check"""
+    return await health.check()
 
 @app.post(
     "/api/v1/campaigns",

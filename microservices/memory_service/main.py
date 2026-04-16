@@ -34,6 +34,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
@@ -201,64 +202,16 @@ setup_metrics(app, "memory_service")
 
 # ==================== Health Check ====================
 
+health = HealthCheck("memory_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_neo4j(lambda: graph_client)
+health.add_qdrant(lambda: qdrant_client)
+
+
 @app.get("/api/v1/memories/health")
-@app.get("/health", response_model=Dict[str, Any])
+@app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    try:
-        # Report unhealthy during shutdown so Consul TTL checks fail
-        if shutdown_manager.is_shutting_down:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "shutting_down",
-                    "service": "memory_service",
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
-
-        db_connected = await memory_service.check_connection()
-
-        # Check graph connectivity (non-blocking, graceful degradation)
-        graph_connected = False
-        if graph_client is not None:
-            try:
-                graph_connected = await graph_client.health_check()
-            except Exception:
-                graph_connected = False
-
-        status = MemoryServiceStatus(
-            service="memory_service",
-            status="operational" if db_connected else "degraded",
-            version="1.0.0",
-            database_connected=db_connected,
-            graph_connected=graph_connected,
-            timestamp=datetime.now()
-        )
-
-        return {
-            "status": status.status,
-            "service": status.service,
-            "version": status.version,
-            "database_connected": status.database_connected,
-            "graph_connected": status.graph_connected,
-            "timestamp": status.timestamp.isoformat()
-        }
-
-    except Exception as e:
-        logger.error(f"Health check error: {e}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "unhealthy",
-                "service": "memory_service",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-        )
-
-
-# ==================== AI-Powered Memory Storage ====================
+    """Service health check"""
+    return await health.check()
 
 class StoreFactualMemoryRequest(BaseModel):
     user_id: str

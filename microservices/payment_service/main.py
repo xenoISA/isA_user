@@ -252,6 +252,7 @@ setup_metrics(app, "payment_service")
 
 # Rate limiting
 from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
+from core.health import HealthCheck
 
 app.add_middleware(
     RateLimitMiddleware,
@@ -274,17 +275,14 @@ app.include_router(crypto_router, prefix="/api/v1/payment")
 # 健康检查和服务信息
 # ====================
 
-@app.get("/api/v1/payment/health")
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """健康检查端点"""
-    return HealthResponse(
-        status="healthy",
-        service="payment_service",
-        port=SERVICE_PORT,
-        version="1.0.0"
-    )
+health = HealthCheck("payment_service", version="1.0.0", shutdown_manager=shutdown_manager)
 
+
+@app.get("/api/v1/payments/health")
+@app.get("/health")
+async def health_check():
+    """Service health check"""
+    return await health.check()
 
 @app.get("/api/v1/payment/info", response_model=ServiceInfo)
 async def service_info():

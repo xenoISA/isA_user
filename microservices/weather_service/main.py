@@ -22,6 +22,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -161,17 +162,14 @@ setup_metrics(app, "weather_service")
 # =============================================================================
 
 
+health = HealthCheck("weather_service", version="1.0.0", shutdown_manager=shutdown_manager)
+
+
 @app.get("/api/v1/weather/health")
 @app.get("/health")
 async def health_check():
-    """健康检查"""
-    return {"status": "healthy", "service": "weather_service", "version": "1.0.0"}
-
-
-# =============================================================================
-# Weather Data Endpoints
-# =============================================================================
-
+    """Service health check"""
+    return await health.check()
 
 @app.get("/api/v1/weather/current", response_model=WeatherCurrentResponse)
 async def get_current_weather(

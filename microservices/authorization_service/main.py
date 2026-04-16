@@ -28,6 +28,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 # Import internal modules
@@ -181,38 +182,16 @@ async def global_exception_handler(request, exc):
 # Health Check & Service Information
 # ==========================================
 
-@app.get("/api/v1/authorization/health")
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Basic health check"""
-    return HealthResponse(
-        status="healthy",
-        service=config.service_name, 
-        port=config.service_port,
-        version="1.0.0"
-    )
+health = HealthCheck("authorization_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: authorization_service.repository.db if authorization_service and hasattr(authorization_service, 'repository') and authorization_service.repository else None)
+health.add_nats(lambda: event_bus)
 
-@app.get("/health/detailed")
-async def detailed_health():
-    """Detailed health check with service dependencies"""
-    global authorization_service
-    
-    # Check database connectivity
-    db_connected = False
-    try:
-        if authorization_service:
-            db_connected = await authorization_service.repository.check_connection()
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-    
-    return {
-        "service": config.service_name,
-        "status": "operational" if db_connected else "degraded",
-        "port": config.service_port,
-        "version": "1.0.0",
-        "database_connected": db_connected,
-        "timestamp": datetime.utcnow()
-    }
+
+@app.get("/api/v1/authorization/health")
+@app.get("/health")
+async def health_check():
+    """Service health check"""
+    return await health.check()
 
 @app.get("/api/v1/authorization/info", response_model=ServiceInfo)
 async def service_info():

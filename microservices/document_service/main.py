@@ -26,6 +26,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
@@ -225,16 +226,15 @@ async def root():
     )
 
 
+health = HealthCheck("document_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_nats(lambda: event_bus)
+
+
 @app.get("/api/v1/documents/health")
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    health = await document_service.check_health()
-    status_code = 200 if health.get("status") == "healthy" else 503
-    return JSONResponse(content=health, status_code=status_code)
-
-
-# ==================== Document CRUD Endpoints ====================
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/documents", response_model=DocumentResponse, status_code=201)
 async def create_document(

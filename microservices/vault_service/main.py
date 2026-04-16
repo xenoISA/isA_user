@@ -24,6 +24,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -263,35 +264,16 @@ setup_metrics(app, "vault_service")
 # ============ Health & Info Endpoints ============
 
 
+health = HealthCheck("vault_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: vault_service.repository.db if vault_service and hasattr(vault_service, 'repository') and vault_service.repository else None)
+health.add_nats(lambda: event_bus)
+
+
 @app.get("/api/v1/vault/health")
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health")
 async def health_check():
-    """Health check"""
-    return HealthResponse(
-        status="healthy",
-        service=config.service_name,
-        port=config.service_port,
-        version="1.0.0",
-    )
-
-
-@app.get("/health/detailed")
-async def detailed_health_check(
-    vault_service: VaultService = Depends(get_vault_service),
-):
-    """Detailed health check"""
-    try:
-        health_data = await vault_service.health_check()
-        return {
-            "service": config.service_name,
-            "status": "operational",
-            "port": config.service_port,
-            "version": "1.0.0",
-            **health_data,
-        }
-    except Exception as e:
-        return {"service": config.service_name, "status": "degraded", "error": str(e)}
-
+    """Service health check"""
+    return await health.check()
 
 @app.get("/info", response_model=ServiceInfo)
 async def service_info():

@@ -31,6 +31,7 @@ from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
 
 from core.admin_audit import publish_admin_action
+from core.health import HealthCheck
 
 from .models import (
     CreateSubscriptionRequest, CreateSubscriptionResponse,
@@ -212,48 +213,15 @@ def get_subscription_service() -> SubscriptionService:
 # Health Endpoints
 # ====================
 
+health = HealthCheck("subscription_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: subscription_microservice.subscription_service.repository.db if subscription_microservice.subscription_service and hasattr(subscription_microservice.subscription_service, 'repository') and subscription_microservice.subscription_service.repository else None)
+
+
 @app.get("/api/v1/subscriptions/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-
-@app.get("/health/detailed")
-async def detailed_health_check(
-    subscription_service: SubscriptionService = Depends(get_subscription_service),
-):
-    """Detailed health check"""
-    try:
-        health_data = await subscription_service.health_check()
-        return HealthResponse(
-            status=health_data["status"],
-            service=config.service_name,
-            port=config.service_port,
-            version="1.0.0",
-            timestamp=health_data["timestamp"],
-            database_connected=True
-        )
-    except Exception as e:
-        return HealthResponse(
-            status="unhealthy",
-            service=config.service_name,
-            port=config.service_port,
-            version="1.0.0",
-            timestamp=datetime.utcnow().isoformat(),
-            database_connected=False
-        )
-
-
-# ====================
-# Subscription Endpoints
-# ====================
+    return await health.check()
 
 @app.post("/api/v1/subscriptions", response_model=CreateSubscriptionResponse)
 async def create_subscription(

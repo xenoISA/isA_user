@@ -23,6 +23,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus, Event
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     TelemetryDataPoint, TelemetryBatchRequest, MetricDefinitionRequest,
@@ -170,41 +171,15 @@ setup_metrics(app, "telemetry_service")
 # Health Check Endpoints
 # ======================
 
+health = HealthCheck("telemetry_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: microservice.service.repository.db if microservice.service and hasattr(microservice.service, 'repository') and microservice.service.repository else None)
+
+
 @app.get("/api/v1/telemetry/health")
 @app.get("/health")
 async def health_check():
-    """基础健康检查"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0"
-    }
-
-@app.get("/health/detailed")
-async def detailed_health_check():
-    """详细健康检查"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0",
-        "components": {
-            "data_ingestion": "healthy",
-            "time_series_db": "healthy",
-            "alert_engine": "healthy",
-            "real_time_stream": "healthy"
-        },
-        "performance": {
-            "ingestion_rate": "1250 points/sec",
-            "query_latency": "45ms",
-            "storage_usage": "67%"
-        }
-    }
-
-# ======================
-# Dependencies
-# ======================
+    """Service health check"""
+    return await health.check()
 
 async def get_user_context(
     authorization: Optional[str] = Header(None),

@@ -19,6 +19,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .invitation_service import InvitationService
 from .invitation_repository import InvitationRepository
@@ -204,17 +205,14 @@ setup_metrics(app, "invitation_service")
 
 # ============ Health & Info Endpoints ============
 
-@app.get("/api/v1/invitations/health")
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """健康检查"""
-    return HealthResponse(
-        status="healthy",
-        service=config.service_name,
-        port=config.service_port,
-        version="1.0.0"
-    )
+health = HealthCheck("invitation_service", version="1.0.0", shutdown_manager=shutdown_manager)
 
+
+@app.get("/api/v1/invitations/health")
+@app.get("/health")
+async def health_check():
+    """Service health check"""
+    return await health.check()
 
 @app.get("/info", response_model=ServiceInfo)
 @app.get("/api/v1/invitations/info", response_model=ServiceInfo)

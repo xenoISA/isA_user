@@ -22,6 +22,7 @@ from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.admin_audit import publish_admin_action
+from core.health import HealthCheck
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
 from .product_repository import ProductRepository
@@ -277,31 +278,17 @@ def _normalize_subscription_payload(subscription: Any) -> Any:
 # 健康检查和服务信息
 # ====================
 
-@app.get("/api/v1/product/health")
+health = HealthCheck("product_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: repository.db if repository else None)
+health.add_nats(lambda: event_bus)
+health.add_minio(lambda: s3_client)
+
+
+@app.get("/api/v1/products/health")
 @app.get("/health")
 async def health_check():
-    """健康检查"""
-    dependencies = {}
-
-    # 检查数据库连接
-    try:
-        if repository and repository.db:
-            # Use PostgresClient health check method
-            is_healthy = repository.db.health_check()
-            dependencies["database"] = "healthy" if is_healthy else "unhealthy"
-        else:
-            dependencies["database"] = "unhealthy"
-    except Exception:
-        dependencies["database"] = "unhealthy"
-
-    return {
-        "status": "healthy" if all(v == "healthy" for v in dependencies.values()) else "degraded",
-        "service": "product_service",
-        "port": SERVICE_PORT,
-        "version": "1.0.0",
-        "dependencies": dependencies
-    }
-
+    """Service health check"""
+    return await health.check()
 
 @app.get("/api/v1/product/info")
 async def get_service_info():
