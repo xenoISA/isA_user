@@ -406,6 +406,38 @@ async def update_account_preferences(
         )
 
 
+@app.get("/api/v1/users/me/instructions")
+async def get_custom_instructions(
+    account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
+):
+    """Get profile-level custom instructions (#260)"""
+    try:
+        instructions = await account_service.repository.get_custom_instructions(caller_id)
+        return {"instructions": instructions}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.put("/api/v1/users/me/instructions")
+async def set_custom_instructions(
+    request: dict,
+    account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
+):
+    """Set profile-level custom instructions (max 4000 chars) (#260)"""
+    instructions = request.get("instructions", "")
+    if len(instructions) > 4000:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Instructions exceed 4000 character limit")
+    try:
+        success = await account_service.repository.set_custom_instructions(caller_id, instructions)
+        if success:
+            return {"message": "Custom instructions updated", "instructions": instructions}
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update instructions")
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @app.delete("/api/v1/accounts/profile/{user_id}")
 async def delete_account(
     user_id: str,
