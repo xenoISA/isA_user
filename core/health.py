@@ -111,23 +111,15 @@ class HealthCheck:
         Returns JSONResponse with:
             - HTTP 200 + status "healthy" when all deps are up
             - HTTP 200 + status "degraded" when non-critical deps are down
-            - HTTP 503 + status "unhealthy" when critical deps are down or shutting down
+            - HTTP 503 + status "unhealthy" when critical deps are down
+
+        Note: shutdown-awareness is NOT handled here. The shutdown middleware
+        already rejects non-health requests with 503 during shutdown. The
+        /health endpoint must stay honest about infrastructure status so that
+        uvicorn's hot-reload cycle doesn't get stuck reporting "shutting_down"
+        when the service is actually reloading and deps are still healthy.
         """
         now = datetime.now(tz=timezone.utc).isoformat()
-
-        # Shutdown-awareness
-        if self.shutdown_manager and self.shutdown_manager.is_shutting_down:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "unhealthy",
-                    "service": self.service_name,
-                    "version": self.version,
-                    "reason": "shutting_down",
-                    "dependencies": {},
-                    "timestamp": now,
-                },
-            )
 
         dependencies: Dict[str, Dict[str, Any]] = {}
         has_critical_failure = False

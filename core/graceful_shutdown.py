@@ -146,7 +146,15 @@ class GracefulShutdown:
         logger.info(f"[{self.service_name}] Shutdown complete")
 
     def install_signal_handlers(self) -> None:
-        """Install SIGTERM/SIGINT handlers that initiate graceful shutdown."""
+        """Install SIGTERM/SIGINT handlers that initiate graceful shutdown.
+
+        Also resets shutdown state so that uvicorn's hot-reload cycle
+        (which triggers lifespan shutdown then re-runs lifespan startup)
+        starts fresh rather than staying stuck in shutting_down=True.
+        """
+        self._shutting_down = False
+        self._in_flight = 0
+        self._cleanups = []
         try:
             loop = asyncio.get_running_loop()
             for sig in (signal.SIGTERM, signal.SIGINT):
