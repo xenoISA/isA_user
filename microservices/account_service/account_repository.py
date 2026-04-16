@@ -289,6 +289,18 @@ class AccountRepository:
             logger.error(f"Failed to update account preferences {user_id}: {e}")
             return False
 
+    async def get_custom_instructions(self, user_id: str) -> str:
+        """Get user's custom instructions from preferences (#260)"""
+        account = await self.get_account_by_id(user_id)
+        if not account:
+            raise UserNotFoundError(f"Account not found: {user_id}")
+        prefs = getattr(account, 'preferences', {}) or {}
+        return prefs.get('custom_instructions', '')
+
+    async def set_custom_instructions(self, user_id: str, instructions: str) -> bool:
+        """Set user's custom instructions in preferences (#260)"""
+        return await self.update_account_preferences(user_id, {'custom_instructions': instructions})
+
     async def delete_account(self, user_id: str) -> bool:
         """Delete account (soft delete by deactivating)"""
         return await self.deactivate_account(user_id)
