@@ -40,6 +40,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 
@@ -191,17 +192,16 @@ async def get_nats() -> NATS:
 
 # ==================== API端点 ====================
 
+health = HealthCheck("event_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: repository.db if repository else None)
+health.add_nats(lambda: event_bus)
+
+
 @app.get("/api/v1/events/health")
 @app.get("/health")
 async def health_check():
-    """健康检查"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/events/create", response_model=EventResponse)
 async def create_event(

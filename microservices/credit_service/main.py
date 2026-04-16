@@ -21,6 +21,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -245,57 +246,16 @@ async def get_credit_service() -> CreditService:
 # ====================
 
 
+health = HealthCheck("credit_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: repository.db if repository else None)
+health.add_nats(lambda: event_bus)
+
+
 @app.get("/api/v1/credits/health")
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health")
 async def health_check():
-    """Basic health check"""
-    dependencies = {}
-
-    # Check database connection
-    try:
-        if repository and repository.db:
-            # Use PostgresClient health check method (async, returns dict with 'healthy' key)
-            result = await repository.db.health_check()
-            dependencies["database"] = "healthy" if result and result.get('healthy') else "unhealthy"
-        else:
-            dependencies["database"] = "unhealthy"
-    except Exception:
-        dependencies["database"] = "unhealthy"
-
-    # Check event bus
-    try:
-        if event_bus and hasattr(event_bus, 'is_connected'):
-            # is_connected is a property, not a method
-            dependencies["event_bus"] = "healthy" if event_bus.is_connected else "unhealthy"
-        else:
-            dependencies["event_bus"] = "not_configured"
-    except Exception:
-        dependencies["event_bus"] = "unhealthy"
-
-    # Check scheduler
-    dependencies["scheduler"] = "healthy" if scheduler and scheduler.running else "not_configured"
-
-    status = "healthy" if all(v in ["healthy", "not_configured"] for v in dependencies.values()) else "degraded"
-
-    return HealthResponse(
-        status=status,
-        service="credit_service",
-        port=SERVICE_PORT,
-        version="1.0.0",
-        timestamp=datetime.utcnow().isoformat(),
-    )
-
-
-@app.get("/health/detailed", response_model=HealthResponse)
-async def health_check_detailed():
-    """Detailed health check with full dependencies"""
-    return await health_check()
-
-
-# ====================
-# Credit Account Management
-# ====================
-
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/credits/accounts", response_model=CreditAccountResponse)
 async def create_account(

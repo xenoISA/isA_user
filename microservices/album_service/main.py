@@ -26,6 +26,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -277,23 +278,15 @@ async def root():
     )
 
 
+health = HealthCheck("album_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_mqtt(lambda: mqtt_client)
+
+
 @app.get("/api/v1/albums/health")
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    db_connected = await album_service.check_connection()
-    health = {
-        "status": "healthy" if db_connected else "unhealthy",
-        "service": "album_service",
-        "database": "connected" if db_connected else "disconnected",
-        "timestamp": datetime.now().isoformat(),
-    }
-    status_code = 200 if db_connected else 503
-    return JSONResponse(content=health, status_code=status_code)
-
-
-# ==================== Album Management ====================
-
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/albums", response_model=AlbumResponse, status_code=201)
 async def create_album(

@@ -16,6 +16,7 @@ from core.nats_client import get_event_bus
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .providers.mock import MockTaxProvider
@@ -139,11 +140,15 @@ def _get_service() -> TaxService:
     return service
 
 
+health = HealthCheck("tax_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_nats(lambda: event_bus)
+
+
 @app.get("/api/v1/tax/health")
 @app.get("/health")
-async def health():
-    return {"status": "ok", "service": "tax_service"}
-
+async def health_check():
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/tax/calculate")
 async def calculate_tax(payload: Dict[str, Any]):

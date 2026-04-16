@@ -20,6 +20,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     FirmwareUploadRequest, UpdateCampaignRequest, DeviceUpdateRequest, UpdateApprovalRequest,
@@ -231,49 +232,14 @@ setup_metrics(app, "ota_service")
 # Health Check Endpoints
 # ======================
 
+health = HealthCheck("ota_service", version="1.0.0", shutdown_manager=shutdown_manager)
+
+
 @app.get("/api/v1/ota/health")
 @app.get("/health")
 async def health_check():
-    """基础健康检查"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0"
-    }
-
-@app.get("/health/detailed", response_model=UpdateHealthResponse)
-async def detailed_health_check():
-    """详细健康检查"""
-    return UpdateHealthResponse(
-        service_status="healthy",
-        active_campaigns=3,
-        active_updates=12,
-        storage_usage={
-            "total": "1TB",
-            "used": "450GB",
-            "available": "550GB",
-            "usage_percent": 45
-        },
-        network_status={
-            "cdn_status": "healthy",
-            "download_speed": "100Mbps",
-            "upload_speed": "50Mbps"
-        },
-        last_successful_update=datetime.utcnow(),
-        error_rate=2.1,
-        avg_response_time=150.5
-    )
-
-# ======================
-# Dependencies
-# ======================
-#
-# NOTE: When deployed behind an API Gateway:
-# - External requests: Gateway validates JWT → Service trusts gateway headers
-# - Internal service calls: Can use get_user_context_optional() for no auth
-# - For production: Gateway should handle ALL authentication
-#
+    """Service health check"""
+    return await health.check()
 
 async def get_user_context(
     authorization: Optional[str] = Header(None),

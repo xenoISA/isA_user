@@ -30,6 +30,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -255,41 +256,15 @@ def get_account_service() -> AccountService:
 
 
 # Health check endpoints
+health = HealthCheck("account_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: account_microservice.account_service.account_repo.db if account_microservice.account_service and hasattr(account_microservice.account_service, 'account_repo') and account_microservice.account_service.account_repo else None)
+
+
 @app.get("/api/v1/accounts/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0",
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-    }
-
-
-@app.get("/health/detailed")
-async def detailed_health_check(
-    account_service: AccountService = Depends(get_account_service),
-):
-    """Detailed health check with database connectivity"""
-    try:
-        health_data = await account_service.health_check()
-        return AccountServiceStatus(
-            database_connected=health_data["status"] == "healthy",
-            timestamp=health_data["timestamp"],
-        )
-    except Exception as e:
-        return AccountServiceStatus(
-            database_connected=False,
-            timestamp=health_data.get("timestamp")
-            if "health_data" in locals()
-            else None,
-        )
-
-
-# ==================== Auth Dependency ====================
-
+    return await health.check()
 
 async def get_authenticated_caller(request: Request) -> str:
     """Extract caller ID from verified authentication credentials."""

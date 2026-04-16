@@ -186,6 +186,7 @@ setup_metrics(app, "storage_service")
 
 # Rate limiting
 from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
+from core.health import HealthCheck
 
 app.add_middleware(
     RateLimitMiddleware,
@@ -213,16 +214,16 @@ async def general_exception_handler(request, exc):
 # ==================== 健康检查路由 ====================
 
 
+health = HealthCheck("storage_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_nats(lambda: event_bus)
+health.add_minio(lambda: s3_client)
+
+
 @app.get("/api/v1/storage/health")
 @app.get("/health")
 async def health_check():
-    """健康检查端点"""
-    return {
-        "status": "healthy",
-        "service": "storage_service",
-        "timestamp": datetime.now(tz=__import__('datetime').timezone.utc).isoformat(),
-    }
-
+    """Service health check"""
+    return await health.check()
 
 @app.get("/info")
 async def service_info():

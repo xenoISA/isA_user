@@ -16,6 +16,7 @@ from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.auth_dependencies import get_authenticated_caller
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.health import HealthCheck
 
 from .models import CreateProjectRequest, UpdateProjectRequest, SetInstructionsRequest, ProjectResponse, ProjectListResponse
 from .project_repository import ProjectNotFoundError
@@ -47,10 +48,14 @@ def get_service():
     return project_service
 
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "service": "project_service"}
+health = HealthCheck("project_service", version="1.0.0", shutdown_manager=shutdown_manager)
 
+
+@app.get("/api/v1/projects/health")
+@app.get("/health")
+async def health_check():
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(

@@ -28,6 +28,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -218,36 +219,15 @@ def get_session_service() -> SessionService:
 
 
 # Health check endpoints
+health = HealthCheck("session_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: session_microservice.session_service.session_repo.db if session_microservice.session_service and hasattr(session_microservice.session_service, 'session_repo') and session_microservice.session_service.session_repo else None)
+
+
 @app.get("/api/v1/sessions/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-
-@app.get("/health/detailed")
-async def detailed_health_check(
-    session_service: SessionService = Depends(get_session_service),
-):
-    """Detailed health check"""
-    try:
-        health_data = await session_service.health_check()
-        return SessionServiceStatus(
-            database_connected=health_data["status"] == "healthy",
-            timestamp=health_data["timestamp"],
-        )
-    except Exception as e:
-        return SessionServiceStatus(database_connected=False, timestamp=None)
-
-
-# Session management endpoints
-
+    return await health.check()
 
 @app.post("/api/v1/sessions", response_model=SessionResponse)
 async def create_session(

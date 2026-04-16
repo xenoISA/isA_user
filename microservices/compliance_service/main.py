@@ -33,6 +33,7 @@ from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .compliance_service import ComplianceService
 from .compliance_repository import ComplianceRepository
@@ -211,17 +212,16 @@ def get_compliance_repository() -> ComplianceRepository:
 # 健康检查端点
 # ====================
 
+health = HealthCheck("compliance_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: repository.db if repository else None)
+health.add_nats(lambda: event_bus)
+
+
 @app.get("/api/v1/compliance/health")
 @app.get("/health")
 async def health_check():
-    """健康检查"""
-    return {
-        "status": "healthy",
-        "service": SERVICE_NAME,
-        "version": SERVICE_VERSION,
-        "port": SERVICE_PORT,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    """Service health check"""
+    return await health.check()
 
 @app.get("/status", response_model=ComplianceServiceStatus)
 async def service_status(

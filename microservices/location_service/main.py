@@ -27,6 +27,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -210,50 +211,14 @@ async def get_authenticated_user_id(
 # ==================== Health Check ====================
 
 
-@app.get("/api/v1/locations/health")
+health = HealthCheck("location_service", version="1.0.0", shutdown_manager=shutdown_manager)
+
+
+@app.get("/api/v1/location/health")
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    try:
-        db_connected = await location_service.check_connection()
-
-        status = LocationServiceStatus(
-            service="location_service",
-            status="operational" if db_connected else "degraded",
-            version="1.0.0",
-            database_connected=db_connected,
-            cache_connected=True,  # Placeholder
-            geofencing_enabled=True,
-            route_tracking_enabled=True,
-            timestamp=datetime.now(),
-        )
-
-        return {
-            "status": status.status,
-            "service": status.service,
-            "version": status.version,
-            "database_connected": status.database_connected,
-            "cache_connected": status.cache_connected,
-            "geofencing_enabled": status.geofencing_enabled,
-            "route_tracking_enabled": status.route_tracking_enabled,
-            "timestamp": status.timestamp.isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Health check error: {e}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "unhealthy",
-                "service": "location_service",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat(),
-            },
-        )
-
-
-# ==================== Location Management ====================
-
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/locations")
 async def report_location(request: LocationReportRequest, user_id: str = Depends(get_authenticated_user_id)):

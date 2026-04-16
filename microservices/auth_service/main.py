@@ -425,6 +425,7 @@ setup_metrics(app, "auth_service")
 
 # Rate limiting
 from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
+from core.health import HealthCheck
 
 app.add_middleware(
     RateLimitMiddleware,
@@ -508,41 +509,16 @@ async def require_admin_caller(
 
 # Health Check Endpoints
 
-
-@app.get("/")
-async def root():
-    """Root health check"""
-    return {
-        "service": "auth_microservice",
-        "status": "healthy",
-        "version": "2.0.0",
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-    }
-
-
-@app.get("/health")
-async def health_check():
-    """Service health check"""
-    return {
-        "status": "healthy",
-        "service": "auth_microservice",
-        "port": config.service_port,
-        "version": "2.0.0",
-        "capabilities": [
-            "jwt_verification",
-            "api_key_management",
-            "token_generation",
-            "oauth2_client_credentials",
-            "device_authentication",
-        ],
-        "providers": ["auth0", "isa_user"],
-    }
+health = HealthCheck("auth_service", version="2.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: auth_microservice.auth_service.auth_repository.db if auth_microservice.auth_service and hasattr(auth_microservice.auth_service, 'auth_repository') and auth_microservice.auth_service.auth_repository else None)
+health.add_nats(lambda: event_bus)
 
 
 @app.get("/api/v1/auth/health")
-async def health_check_alias():
-    """Alias for service health check under API prefix"""
-    return await health_check()
+@app.get("/health")
+async def health_check():
+    """Service health check"""
+    return await health.check()
 
 
 @app.get("/api/v1/auth/info")

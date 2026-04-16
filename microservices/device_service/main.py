@@ -21,6 +21,7 @@ from core.service_discovery import get_service_discovery
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     DeviceRegistrationRequest, DeviceUpdateRequest, DeviceAuthRequest,
@@ -170,36 +171,15 @@ setup_metrics(app, "device_service")
 # Health Check Endpoints
 # ======================
 
+health = HealthCheck("device_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_mqtt(lambda: mqtt_client)
+
+
 @app.get("/api/v1/devices/health")
 @app.get("/health")
 async def health_check():
-    """基础健康检查"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-@app.get("/health/detailed")
-async def detailed_health_check():
-    """详细健康检查"""
-    return {
-        "status": "healthy",
-        "service": "device_service",
-        "port": 8220,
-        "version": "1.0.0",
-        "components": {
-            "service": "healthy",
-            "mqtt_broker": "healthy",
-            "device_registry": "healthy"
-        }
-    }
-
-# ======================
-# Dependencies
-# ======================
+    """Service health check"""
+    return await health.check()
 
 async def get_user_context(
     authorization: Optional[str] = Header(None),

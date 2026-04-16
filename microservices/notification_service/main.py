@@ -61,6 +61,7 @@ config = config_manager.get_service_config()
 
 # Import logger after config
 from core.logger import setup_service_logger
+from core.health import HealthCheck
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("notification_service")
@@ -225,17 +226,16 @@ setup_metrics(app, "notification_service")
 # ====================
 
 
-@app.get("/api/v1/notifications/health")
-@app.get("/health", response_model=HealthResponse, tags=["System"])
-async def health_check():
-    """健康检查"""
-    return HealthResponse(
-        status="healthy",
-        service=config.service_name,
-        port=config.service_port,
-        version="1.0.0",
-    )
+health = HealthCheck("notification_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: service.repository.db if service and hasattr(service, 'repository') and service.repository else None)
+health.add_nats(lambda: event_bus)
 
+
+@app.get("/api/v1/notifications/health")
+@app.get("/health")
+async def health_check():
+    """Service health check"""
+    return await health.check()
 
 @app.get("/info", response_model=ServiceInfo, tags=["System"])
 async def service_info():

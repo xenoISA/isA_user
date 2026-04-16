@@ -31,6 +31,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus, Event
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .models import (
     OrderCreateRequest, OrderUpdateRequest, OrderCancelRequest,
@@ -311,38 +312,14 @@ def get_order_service() -> OrderService:
 
 
 # Health check endpoints
+health = HealthCheck("order_service", version="1.0.0", shutdown_manager=shutdown_manager)
+
+
 @app.get("/api/v1/orders/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-
-@app.get("/health/detailed")
-async def detailed_health_check(
-    order_service: OrderService = Depends(get_order_service)
-):
-    """Detailed health check with database connectivity"""
-    try:
-        health_data = await order_service.health_check()
-        return OrderServiceStatus(
-            database_connected=health_data["status"] == "healthy",
-            timestamp=health_data["timestamp"]
-        )
-    except Exception as e:
-        return OrderServiceStatus(
-            database_connected=False,
-            timestamp=datetime.utcnow()
-        )
-
-
-# Core order management endpoints
+    return await health.check()
 
 @app.post("/api/v1/orders", response_model=OrderResponse)
 async def create_order(

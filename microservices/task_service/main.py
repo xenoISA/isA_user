@@ -23,6 +23,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -200,45 +201,14 @@ setup_metrics(app, "task_service")
 # ======================
 
 
+health = HealthCheck("task_service", version="1.0.0", shutdown_manager=shutdown_manager)
+
+
 @app.get("/api/v1/tasks/health")
 @app.get("/health")
 async def health_check():
-    """基础健康检查"""
-    return {
-        "status": "healthy",
-        "service": "task_service",
-        "port": config.service_port,
-        "version": "1.0.0",
-    }
-
-
-@app.get("/health/detailed")
-async def detailed_health_check():
-    """详细健康检查"""
-    db_healthy = False
-    try:
-        # 检查数据库连接
-        test_task = await microservice.repository.get_task_by_id("test_id")
-        db_healthy = True
-    except:
-        pass
-
-    return {
-        "status": "healthy" if db_healthy else "degraded",
-        "service": "task_service",
-        "port": config.service_port,
-        "version": "1.0.0",
-        "components": {
-            "database": "healthy" if db_healthy else "unhealthy",
-            "service": "healthy",
-        },
-    }
-
-
-# ======================
-# Dependencies
-# ======================
-
+    """Service health check"""
+    return await health.check()
 
 async def get_user_context(
     authorization: Optional[str] = Header(None),

@@ -23,6 +23,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 from .audit_service import AuditService
@@ -201,39 +202,16 @@ def get_audit_service() -> AuditService:
 # 健康检查和服务信息
 # ====================
 
+health = HealthCheck("audit_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_check("postgres", lambda: audit_service.repository.check_connection() if audit_service and audit_service.repository else False)
+health.add_nats(lambda: event_bus)
+
+
 @app.get("/api/v1/audit/health")
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health")
 async def health_check():
-    """基础健康检查"""
-    return HealthResponse(
-        status="healthy",
-        service=config.service_name,
-        port=config.service_port,
-        version="1.0.0"
-    )
-
-
-@app.get("/health/detailed")
-async def detailed_health_check():
-    """详细健康检查"""
-    global audit_service
-    
-    db_connected = False
-    try:
-        if audit_service:
-            db_connected = await audit_service.repository.check_connection()
-    except Exception as e:
-        logger.error(f"数据库健康检查失败: {e}")
-    
-    return {
-        "service": config.service_name,
-        "status": "operational" if db_connected else "degraded",
-        "port": config.service_port,
-        "version": "1.0.0",
-        "database_connected": db_connected,
-        "timestamp": datetime.utcnow()
-    }
-
+    """Service health check"""
+    return await health.check()
 
 @app.get("/api/v1/audit/info", response_model=ServiceInfo)
 async def service_info():

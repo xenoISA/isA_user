@@ -33,6 +33,7 @@ from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.auth_dependencies import require_auth_or_internal_service, is_internal_service_request
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .models import (
@@ -233,17 +234,15 @@ def get_family_sharing_service() -> FamilySharingService:
 
 # ============ Health Check Endpoints ============
 
-@app.get("/api/v1/organization/health")
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """健康检查"""
-    return HealthResponse(
-        status="healthy",
-        service=config.service_name,
-        port=config.service_port,
-        version="1.0.0"
-    )
+health = HealthCheck("organization_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: organization_microservice.organization_service.repository.db if organization_microservice.organization_service and hasattr(organization_microservice.organization_service, 'repository') and organization_microservice.organization_service.repository else None)
 
+
+@app.get("/api/v1/organizations/health")
+@app.get("/health")
+async def health_check():
+    """Service health check"""
+    return await health.check()
 
 @app.get("/api/v1/organization/info", response_model=ServiceInfo)
 async def service_info():

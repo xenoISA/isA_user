@@ -31,6 +31,7 @@ from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import Event, get_event_bus
+from core.health import HealthCheck
 
 from .models import (
     ConsumeRequest,
@@ -279,21 +280,15 @@ def get_wallet_service() -> WalletService:
 
 
 # Health check endpoints
-@app.get("/api/v1/wallets/health")
+health = HealthCheck("wallet_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: wallet_microservice.wallet_service.repository.db if wallet_microservice.wallet_service and hasattr(wallet_microservice.wallet_service, 'repository') and wallet_microservice.wallet_service.repository else None)
+
+
+@app.get("/api/v1/wallet/health")
 @app.get("/health")
 async def health_check():
     """Service health check"""
-    return {
-        "status": "healthy",
-        "service": config.service_name,
-        "port": config.service_port,
-        "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-
-# Core wallet management endpoints
-
+    return await health.check()
 
 @app.post("/api/v1/wallets", response_model=WalletResponse)
 async def create_wallet(

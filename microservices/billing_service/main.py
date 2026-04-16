@@ -26,6 +26,7 @@ from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
 
 from core.admin_audit import publish_admin_action
+from core.health import HealthCheck
 
 from .billing_repository import BillingRepository
 from .billing_service import BillingService
@@ -224,35 +225,17 @@ async def get_billing_service() -> BillingService:
 # ====================
 
 
+health = HealthCheck("billing_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: repository.db if repository else None)
+health.add_nats(lambda: event_bus)
+health.add_minio(lambda: s3_client)
+
+
 @app.get("/api/v1/billing/health")
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health")
 async def health_check():
-    """健康检查"""
-    dependencies = {}
-
-    # 检查数据库连接
-    try:
-        if repository and repository.db:
-            # Use PostgresClient health check method
-            is_healthy = repository.db.health_check()
-            if inspect.isawaitable(is_healthy):
-                is_healthy = await is_healthy
-            dependencies["database"] = "healthy" if is_healthy else "unhealthy"
-        else:
-            dependencies["database"] = "unhealthy"
-    except Exception:
-        dependencies["database"] = "unhealthy"
-
-    return HealthResponse(
-        status="healthy"
-        if all(v == "healthy" for v in dependencies.values())
-        else "degraded",
-        service="billing_service",
-        port=SERVICE_PORT,
-        version="1.0.0",
-        dependencies=dependencies,
-    )
-
+    """Service health check"""
+    return await health.check()
 
 @app.get("/api/v1/billing/info", response_model=ServiceInfo)
 async def get_service_info():

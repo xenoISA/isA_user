@@ -26,6 +26,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
@@ -231,16 +232,15 @@ async def root():
     )
 
 
+health = HealthCheck("media_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_nats(lambda: event_bus)
+
+
 @app.get("/api/v1/media/health")
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    health = await media_service.check_health()
-    status_code = 200 if health.get("status") == "healthy" else 503
-    return JSONResponse(content=health, status_code=status_code)
-
-
-# ==================== File Upload (Proxy to Storage Service) ====================
+    """Service health check"""
+    return await health.check()
 
 @app.post("/api/v1/media/files/upload")
 async def upload_file():

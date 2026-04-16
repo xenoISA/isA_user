@@ -22,6 +22,7 @@ from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
+from core.health import HealthCheck
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -211,30 +212,16 @@ async def get_membership_service() -> MembershipService:
 # ====================
 
 
-@app.get("/api/v1/memberships/health")
-@app.get("/health", response_model=HealthResponse)
+health = HealthCheck("membership_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health.add_postgres(lambda: repository.db if repository else None)
+health.add_nats(lambda: event_bus)
+
+
+@app.get("/api/v1/membership/health")
+@app.get("/health")
 async def health_check():
-    """Health check"""
-    dependencies = {}
-
-    # Check database connection
-    try:
-        if repository and repository.db:
-            is_healthy = repository.db.health_check()
-            dependencies["database"] = "healthy" if is_healthy else "unhealthy"
-        else:
-            dependencies["database"] = "unhealthy"
-    except Exception:
-        dependencies["database"] = "unhealthy"
-
-    return HealthResponse(
-        status="healthy" if all(v == "healthy" for v in dependencies.values()) else "degraded",
-        service="membership_service",
-        port=SERVICE_PORT,
-        version="1.0.0",
-        dependencies=dependencies,
-    )
-
+    """Service health check"""
+    return await health.check()
 
 @app.get("/api/v1/memberships/info", response_model=ServiceInfo)
 async def get_service_info():
