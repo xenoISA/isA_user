@@ -193,7 +193,7 @@ async def get_nats() -> NATS:
 # ==================== API端点 ====================
 
 health = HealthCheck("event_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: repository.db if repository else None)
+health.add_postgres(lambda: event_repository.db if event_repository else None)
 health.add_nats(lambda: event_bus)
 
 

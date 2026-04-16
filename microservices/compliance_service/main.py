@@ -213,7 +213,7 @@ def get_compliance_repository() -> ComplianceRepository:
 # ====================
 
 health = HealthCheck("compliance_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: repository.db if repository else None)
+health.add_postgres(lambda: compliance_repository.db if compliance_repository else None)
 health.add_nats(lambda: event_bus)
 
 

@@ -203,12 +203,16 @@ async def _run_probe(probe: _Probe) -> tuple:
 # -- Probe functions for each dependency type --
 
 
-async def _probe_callable(fn) -> bool:
-    """Probe via a simple callable that returns bool."""
-    result = fn()
-    if inspect.isawaitable(result):
-        result = await result
-    return bool(result)
+async def _probe_callable(result_or_awaitable) -> bool:
+    """Probe via a value returned by the add_check lambda.
+
+    The lambda passed to add_check() is called by _run_probe as get_client(),
+    so by the time this function runs, we already have the return value
+    (which may be a coroutine/awaitable or a plain bool).
+    """
+    if inspect.isawaitable(result_or_awaitable):
+        result_or_awaitable = await result_or_awaitable
+    return bool(result_or_awaitable)
 
 
 async def _probe_postgres(client) -> bool:
