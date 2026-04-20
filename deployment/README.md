@@ -272,8 +272,11 @@ Reserved ports for new services from `new_features.md`:
 | Port | Service | Status | Description |
 |------|---------|--------|-------------|
 | 8250 | membership | ✅ Deployed | 会员等级、积分、特权管理 |
-| 8251 | comments | Reserved | 通用评论系统，嵌套回复、点赞 |
-| 8252 | relations | Reserved | 用户关系管理（关注、好友、拉黑）|
+| 8251 | campaign | ✅ Deployed | Campaign management |
+| 8252 | inventory | ✅ Deployed | Inventory management |
+| 8253 | tax | ✅ Deployed | Tax calculation |
+| 8254 | fulfillment | ✅ Deployed | Order fulfillment |
+| 8260 | project | ✅ Deployed | Project workspaces, custom instructions |
 
 > **Note**: Infrastructure services use 50xxx range (gRPC), no conflict with 82xx range.
 
