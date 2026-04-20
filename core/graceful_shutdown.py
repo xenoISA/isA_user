@@ -91,6 +91,34 @@ class GracefulShutdown:
                 f"(grace_period={self.grace_period}s, in_flight={self._in_flight})"
             )
 
+    async def shutdown_with_timeout(self, cleanup_coro=None, timeout: float = 10.0) -> None:
+        """Run the full shutdown sequence (drain + cleanups) with a hard timeout.
+
+        Use this instead of calling wait_for_drain() + run_cleanups() separately
+        in the lifespan. This ensures the old worker always exits promptly during
+        uvicorn hot-reload, preventing the service from getting stuck in
+        'shutting_down' state.
+
+        Args:
+            cleanup_coro: optional coroutine for service-specific cleanup
+                          (e.g., session_microservice.shutdown())
+            timeout: hard timeout in seconds for the entire shutdown sequence.
+        """
+        self.initiate_shutdown()
+        try:
+            async with asyncio.timeout(timeout):
+                await self.wait_for_drain()
+                await self.run_cleanups()
+                if cleanup_coro is not None:
+                    await cleanup_coro
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                f"[{self.service_name}] Shutdown timed out after {timeout}s, "
+                f"forcing exit (in_flight={self._in_flight})"
+            )
+        except Exception as e:
+            logger.error(f"[{self.service_name}] Shutdown error: {e}")
+
     def track_request_start(self) -> None:
         self._in_flight += 1
 
@@ -178,6 +206,24 @@ class GracefulShutdown:
             f"initiating graceful shutdown"
         )
         self.initiate_shutdown()
+
+        # Schedule a hard exit so the process never hangs during shutdown.
+        # This is critical for uvicorn's hot-reload: if the lifespan cleanup
+        # blocks (NATS close, DB disconnect, etc.), the old worker hangs
+        # forever and the reloader can never spawn a new one — leaving the
+        # service permanently stuck in "shutting_down" state.
+        _FORCE_EXIT_TIMEOUT = 10  # seconds — enough for drain + cleanup
+        import threading
+        def _force_exit():
+            logger.warning(
+                f"[{self.service_name}] Shutdown exceeded {_FORCE_EXIT_TIMEOUT}s, "
+                f"forcing process exit"
+            )
+            import os
+            os._exit(1)
+        t = threading.Timer(_FORCE_EXIT_TIMEOUT, _force_exit)
+        t.daemon = True
+        t.start()
 
 
 # Health-check paths that should respond even during shutdown
