@@ -35,6 +35,8 @@ class Session(BaseModel):
     status: str = Field(default="active", description="Session status")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Session metadata")
     is_active: bool = Field(default=True, description="Is session active")
+    is_starred: bool = Field(default=False, description="Is session starred")
+    starred_at: Optional[datetime] = Field(None, description="When session was starred")
     message_count: int = Field(default=0, description="Message count")
     total_tokens: int = Field(default=0, description="Total tokens")
     total_cost: float = Field(default=0.0, description="Total cost")
@@ -129,6 +131,8 @@ class SessionResponse(BaseModel):
     conversation_data: Optional[Dict[str, Any]] = Field(default_factory=dict)
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     is_active: bool
+    is_starred: bool = False
+    starred_at: Optional[datetime] = None
     message_count: int
     total_tokens: int
     total_cost: float

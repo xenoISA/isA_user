@@ -275,6 +275,59 @@ class SessionRepository:
             logger.error(f"Error expiring old sessions: {e}")
             return 0
 
+    async def star_session(self, session_id: str) -> bool:
+        """Star a session (idempotent)"""
+        try:
+            now = datetime.now(timezone.utc)
+            query = f"""
+                UPDATE {self.schema}.{self.sessions_table}
+                SET is_starred = $1, starred_at = $2, updated_at = $3
+                WHERE session_id = $4
+            """
+            params = [True, now, now, session_id]
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
+            return count is not None and count > 0
+        except Exception as e:
+            logger.error(f"Error starring session: {e}")
+            return False
+
+    async def unstar_session(self, session_id: str) -> bool:
+        """Unstar a session (idempotent)"""
+        try:
+            now = datetime.now(timezone.utc)
+            query = f"""
+                UPDATE {self.schema}.{self.sessions_table}
+                SET is_starred = $1, starred_at = $2, updated_at = $3
+                WHERE session_id = $4
+            """
+            params = [False, None, now, session_id]
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
+            return count is not None and count > 0
+        except Exception as e:
+            logger.error(f"Error unstarring session: {e}")
+            return False
+
+    async def get_starred_sessions(
+        self, user_id: str, limit: int = 50, offset: int = 0
+    ) -> List[Session]:
+        """Get starred sessions for a user, ordered by starred_at desc"""
+        try:
+            query = f"""
+                SELECT * FROM {self.schema}.{self.sessions_table}
+                WHERE user_id = $1 AND is_starred = $2
+                ORDER BY starred_at DESC
+                LIMIT $3 OFFSET $4
+            """
+            params = [user_id, True, limit, offset]
+            async with self.db:
+                rows = await self.db.fetch(query, params, schema=self.schema)
+            return [self._row_to_session(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting starred sessions: {e}")
+            return []
+
 
 class SessionMessageRepository:
     """Session消息数据访问层"""

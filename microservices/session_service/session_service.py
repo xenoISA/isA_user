@@ -404,6 +404,98 @@ class SessionService:
             logger.error(f"Error ending session {session_id}: {e}")
             raise SessionServiceError(f"Failed to end session: {str(e)}")
 
+    # Star Operations
+
+    async def star_session(self, session_id: str, user_id: str) -> SessionResponse:
+        """Star a session (idempotent — re-starring returns 200)"""
+        try:
+            session = await self.session_repo.get_by_session_id(session_id)
+            if not session:
+                raise SessionNotFoundError(f"Session not found: {session_id}")
+            if session.user_id != user_id:
+                raise SessionNotFoundError(f"Session not found: {session_id}")
+
+            await self.session_repo.star_session(session_id)
+
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="session.starred",
+                        source="session_service",
+                        data={
+                            "session_id": session_id,
+                            "user_id": user_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish session.starred event: {e}")
+
+            updated = await self.session_repo.get_by_session_id(session_id)
+            return self._session_to_response(updated)
+
+        except SessionNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error starring session {session_id}: {e}")
+            raise SessionServiceError(f"Failed to star session: {str(e)}")
+
+    async def unstar_session(self, session_id: str, user_id: str) -> SessionResponse:
+        """Unstar a session (idempotent — un-starring already unstarred returns 200)"""
+        try:
+            session = await self.session_repo.get_by_session_id(session_id)
+            if not session:
+                raise SessionNotFoundError(f"Session not found: {session_id}")
+            if session.user_id != user_id:
+                raise SessionNotFoundError(f"Session not found: {session_id}")
+
+            await self.session_repo.unstar_session(session_id)
+
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="session.unstarred",
+                        source="session_service",
+                        data={
+                            "session_id": session_id,
+                            "user_id": user_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish session.unstarred event: {e}")
+
+            updated = await self.session_repo.get_by_session_id(session_id)
+            return self._session_to_response(updated)
+
+        except SessionNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error unstarring session {session_id}: {e}")
+            raise SessionServiceError(f"Failed to unstar session: {str(e)}")
+
+    async def get_starred_sessions(
+        self, user_id: str, page: int = 1, page_size: int = 50
+    ) -> SessionListResponse:
+        """Get starred sessions for a user with pagination"""
+        try:
+            offset = (page - 1) * page_size
+            sessions = await self.session_repo.get_starred_sessions(
+                user_id=user_id, limit=page_size, offset=offset
+            )
+            session_responses = [self._session_to_response(s) for s in sessions]
+            return SessionListResponse(
+                sessions=session_responses,
+                total=len(session_responses),
+                page=page,
+                page_size=page_size,
+            )
+        except Exception as e:
+            logger.error(f"Error getting starred sessions for {user_id}: {e}")
+            raise SessionServiceError(f"Failed to get starred sessions: {str(e)}")
+
     # Message Operations
 
     async def add_message(
@@ -755,6 +847,8 @@ class SessionService:
             conversation_data=session.conversation_data,
             metadata=session.metadata,
             is_active=session.is_active,
+            is_starred=getattr(session, "is_starred", False),
+            starred_at=getattr(session, "starred_at", None),
             message_count=session.message_count,
             total_tokens=session.total_tokens,
             total_cost=session.total_cost,

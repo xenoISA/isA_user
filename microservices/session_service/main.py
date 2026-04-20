@@ -393,6 +393,59 @@ async def get_session_summary(
         )
 
 
+# Star management endpoints
+
+
+@app.post("/api/v1/sessions/{session_id}/star", response_model=SessionResponse)
+async def star_session(
+    session_id: str,
+    user_id: str = Query(..., description="User ID for authorization"),
+    session_service: SessionService = Depends(get_session_service),
+):
+    """Star a session (idempotent)"""
+    try:
+        return await session_service.star_session(session_id, user_id)
+    except SessionNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except SessionServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.delete("/api/v1/sessions/{session_id}/star", response_model=SessionResponse)
+async def unstar_session(
+    session_id: str,
+    user_id: str = Query(..., description="User ID for authorization"),
+    session_service: SessionService = Depends(get_session_service),
+):
+    """Unstar a session (idempotent)"""
+    try:
+        return await session_service.unstar_session(session_id, user_id)
+    except SessionNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except SessionServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.get("/api/v1/sessions/starred", response_model=SessionListResponse)
+async def get_starred_sessions(
+    user_id: str = Query(..., description="User ID"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    session_service: SessionService = Depends(get_session_service),
+):
+    """Get starred sessions for a user"""
+    try:
+        return await session_service.get_starred_sessions(user_id, page, page_size)
+    except SessionServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
 # Message management endpoints
 
 

@@ -4,6 +4,7 @@ Session Service - Mock Dependencies
 Mock implementations for component testing.
 These mocks simulate repository and external service behavior.
 """
+
 from unittest.mock import AsyncMock, MagicMock
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -19,9 +20,16 @@ class MockSessionRepository:
         self.get_by_session_id = AsyncMock(side_effect=self._get_by_session_id)
         self.get_user_sessions = AsyncMock(side_effect=self._get_user_sessions)
         self.update_session_status = AsyncMock(side_effect=self._update_session_status)
-        self.update_session_activity = AsyncMock(side_effect=self._update_session_activity)
-        self.increment_message_count = AsyncMock(side_effect=self._increment_message_count)
+        self.update_session_activity = AsyncMock(
+            side_effect=self._update_session_activity
+        )
+        self.increment_message_count = AsyncMock(
+            side_effect=self._increment_message_count
+        )
         self.expire_old_sessions = AsyncMock(return_value=0)
+        self.star_session = AsyncMock(side_effect=self._star_session)
+        self.unstar_session = AsyncMock(side_effect=self._unstar_session)
+        self.get_starred_sessions = AsyncMock(side_effect=self._get_starred_sessions)
 
     async def _create_session(self, session_data: Dict[str, Any]) -> Any:
         """Mock session creation"""
@@ -35,6 +43,8 @@ class MockSessionRepository:
         session.conversation_data = session_data.get("conversation_data", {})
         session.metadata = session_data.get("metadata", {})
         session.is_active = session_data.get("is_active", True)
+        session.is_starred = session_data.get("is_starred", False)
+        session.starred_at = session_data.get("starred_at", None)
         session.message_count = 0
         session.total_tokens = 0
         session.total_cost = 0.0
@@ -50,6 +60,8 @@ class MockSessionRepository:
             "conversation_data": session.conversation_data,
             "metadata": session.metadata,
             "is_active": session.is_active,
+            "is_starred": session.is_starred,
+            "starred_at": session.starred_at,
             "message_count": session.message_count,
             "total_tokens": session.total_tokens,
             "total_cost": session.total_cost,
@@ -73,11 +85,7 @@ class MockSessionRepository:
         return session
 
     async def _get_user_sessions(
-        self,
-        user_id: str,
-        active_only: bool = False,
-        limit: int = 50,
-        offset: int = 0
+        self, user_id: str, active_only: bool = False, limit: int = 50, offset: int = 0
     ) -> List[Any]:
         """Mock user sessions retrieval"""
         sessions = []
@@ -94,7 +102,7 @@ class MockSessionRepository:
         sessions.sort(key=lambda s: s.created_at, reverse=True)
 
         # Apply pagination
-        return sessions[offset:offset + limit]
+        return sessions[offset : offset + limit]
 
     async def _update_session_status(self, session_id: str, status: str) -> bool:
         """Mock session status update"""
@@ -120,10 +128,7 @@ class MockSessionRepository:
         return True
 
     async def _increment_message_count(
-        self,
-        session_id: str,
-        tokens_used: int = 0,
-        cost_usd: float = 0.0
+        self, session_id: str, tokens_used: int = 0, cost_usd: float = 0.0
     ) -> bool:
         """Mock message count increment"""
         if session_id not in self._sessions:
@@ -136,6 +141,40 @@ class MockSessionRepository:
         self._sessions[session_id]["last_activity"] = now
         self._sessions[session_id]["updated_at"] = now
         return True
+
+    async def _star_session(self, session_id: str) -> bool:
+        """Mock star session"""
+        if session_id not in self._sessions:
+            return False
+        now = datetime.now(timezone.utc)
+        self._sessions[session_id]["is_starred"] = True
+        self._sessions[session_id]["starred_at"] = now
+        self._sessions[session_id]["updated_at"] = now
+        return True
+
+    async def _unstar_session(self, session_id: str) -> bool:
+        """Mock unstar session"""
+        if session_id not in self._sessions:
+            return False
+        now = datetime.now(timezone.utc)
+        self._sessions[session_id]["is_starred"] = False
+        self._sessions[session_id]["starred_at"] = None
+        self._sessions[session_id]["updated_at"] = now
+        return True
+
+    async def _get_starred_sessions(
+        self, user_id: str, limit: int = 50, offset: int = 0
+    ) -> List[Any]:
+        """Mock starred sessions retrieval"""
+        sessions = []
+        for data in self._sessions.values():
+            if data["user_id"] == user_id and data.get("is_starred"):
+                session = MagicMock()
+                for key, value in data.items():
+                    setattr(session, key, value)
+                sessions.append(session)
+        sessions.sort(key=lambda s: s.starred_at or s.created_at, reverse=True)
+        return sessions[offset : offset + limit]
 
     def reset(self):
         """Reset mock state"""
@@ -189,10 +228,7 @@ class MockSessionMessageRepository:
         return message
 
     async def _get_session_messages(
-        self,
-        session_id: str,
-        limit: int = 100,
-        offset: int = 0
+        self, session_id: str, limit: int = 100, offset: int = 0
     ) -> List[Any]:
         """Mock message retrieval for session"""
         message_ids = self._message_by_session.get(session_id, [])
@@ -210,7 +246,7 @@ class MockSessionMessageRepository:
         messages.sort(key=lambda m: m.created_at)
 
         # Apply pagination
-        return messages[offset:offset + limit]
+        return messages[offset : offset + limit]
 
     def reset(self):
         """Reset mock state"""
@@ -238,10 +274,10 @@ class MockEventBus:
         result = []
         for e in self.published_events:
             # Event objects from nats_client use 'type' attribute, not 'event_type'
-            if hasattr(e, 'type'):
+            if hasattr(e, "type"):
                 if str(e.type) == event_type or str(e.type.value) == event_type:
                     result.append(e)
-            elif hasattr(e, 'event_type'):
+            elif hasattr(e, "event_type"):
                 if str(e.event_type) == event_type:
                     result.append(e)
         return result
