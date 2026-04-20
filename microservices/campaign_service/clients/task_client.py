@@ -25,7 +25,7 @@ class TaskClient:
         host, port = config.discover_service(
             service_name='task_service',
             default_host='localhost',
-            default_port=8260,
+            default_port=8211,
             env_host_key='TASK_SERVICE_HOST',
             env_port_key='TASK_SERVICE_PORT'
         )
