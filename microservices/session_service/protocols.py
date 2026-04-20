@@ -98,6 +98,20 @@ class SessionRepositoryProtocol(Protocol):
         """Expire sessions older than specified hours"""
         ...
 
+    async def star_session(self, session_id: str) -> bool:
+        """Set is_starred=True and starred_at=now"""
+        ...
+
+    async def unstar_session(self, session_id: str) -> bool:
+        """Set is_starred=False and starred_at=null"""
+        ...
+
+    async def get_starred_sessions(
+        self, user_id: str, limit: int = 50, offset: int = 0
+    ) -> List[Session]:
+        """Get starred sessions for a user, ordered by starred_at desc"""
+        ...
+
 
 @runtime_checkable
 class SessionMessageRepositoryProtocol(Protocol):
