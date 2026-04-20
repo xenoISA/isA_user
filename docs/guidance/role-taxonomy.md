@@ -126,7 +126,32 @@ Follow top to bottom, stop at the first match.
 4. JWT has `org_id` and org role ∈ `{member, viewer, guest}`? → **Org user** (read-only if `viewer` or `guest`).
 5. None of the above? → Unauthenticated, or user without an org context. Default: **Org user** with no `org_id` (personal account).
 
-A visual Mermaid flowchart is added by #279.
+```mermaid
+flowchart TD
+    start([Request arrives with JWT]) --> hasAdmin{scope == 'admin'<br/>and admin_roles[] non-empty?}
+    hasAdmin -->|yes| platformAdmin[**Platform admin**<br/>super_admin / billing_admin /<br/>product_admin / support_admin /<br/>compliance_admin]
+    hasAdmin -->|no| hasApp{scope == 'app'<br/>and app_id present?}
+    hasApp -->|yes| cUser[**c-user**<br/>consumer end-user of the<br/>app identified by app_id]
+    hasApp -->|no| hasOrg{org_id present?}
+    hasOrg -->|no| personal[**Org user, no org**<br/>personal account<br/>read/write own resources]
+    hasOrg -->|yes| orgRole{org role in<br/>org_id?}
+    orgRole -->|owner or admin| orgAdmin[**Org admin**<br/>manages members, billing,<br/>settings, audit, compliance,<br/>rate limits for this org]
+    orgRole -->|member| orgUser[**Org user**<br/>read/write within org scope]
+    orgRole -->|viewer or guest| orgViewer[**Org user read-only**<br/>read within org scope]
+
+    classDef archetype fill:#1f2937,stroke:#60a5fa,color:#f3f4f6
+    class platformAdmin,cUser,orgAdmin,orgUser,orgViewer,personal archetype
+```
+
+### Reading the diagram
+
+- Each leaf is one of the four archetypes (platform admin, org admin, org user, c-user) or a documented sub-case (personal account, read-only viewer).
+- The branch order matches the prose list above — platform admin is evaluated first because admin JWTs may also carry `org_id` (a platform admin can be a member of a tenant), and the admin role wins.
+- A single human can route to different leaves under different JWTs. The taxonomy is per-request, not per-person.
+
+### When to extend the tree
+
+Adding a new archetype requires an epic — update this diagram and #270 together. Adding a new *scoped admin* (e.g. a new `marketing_admin`) only requires extending `PlatformAdminRole` and the permission matrix; the tree is unchanged because it resolves by scope, not by specific admin role.
 
 ## Edge cases
 
