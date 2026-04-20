@@ -1,5 +1,7 @@
 # Organization Service - Product Requirements Document (PRD)
 
+> **Role taxonomy**: see [`docs/guidance/role-taxonomy.md`](../guidance/role-taxonomy.md) for the canonical definition of platform-admin / org-admin / org-user / c-user archetypes that this service validates against. Tracked by epic #270.
+
 ## Product Overview
 
 The Organization Service provides multi-tenancy and group management capabilities for the isA_user platform. It enables users to create and manage organizations (businesses, families, teams), invite and manage members, control access permissions, and share resources like subscriptions, devices, storage, and wallets among organization members.
