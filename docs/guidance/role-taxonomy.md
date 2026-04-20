@@ -46,7 +46,57 @@ Regular member of a tenant — uses the platform but has no administrative autho
 
 The person using an app **built on** isA. They do not log into isA_Console; they authenticate via the consuming app's SDK. They are bound to the org that owns the consuming app for billing, rate limits, and data scoping, but they have zero administrative capability anywhere. A single human can simultaneously be an org member of org B and a c-user of app A owned by org C — the JWT scope disambiguates.
 
-Detailed semantics are expanded in #281.
+#### c-user details
+
+**Identity**. A c-user is authenticated by the consuming app, not by isA directly. Their JWT is minted by whichever identity provider the app uses (typically the app's own auth_service instance, or a third-party IdP the app integrated). The JWT is then either (a) exchanged for an isA-scoped app token, or (b) passed directly if the app is using isA's auth SDK.
+
+**JWT claim shape** (c-user tokens):
+
+| Claim | Type | Required | Meaning |
+|---|---|:-:|---|
+| `sub` | string | yes | c-user's user_id (unique within the app) |
+| `scope` | `'app'` | yes | Distinguishes from `scope: admin` (platform admin) and the default (org-scoped) |
+| `app_id` | string | yes | The app this c-user belongs to |
+| `org_id` | string | yes | The org that owns `app_id`. Used for billing attribution and rate-limit scoping. |
+| `exp` | number | yes | Expiry (seconds since epoch) |
+| `email` | string | optional | Only if the app collects email during auth |
+| `name` | string | optional | Display name |
+
+c-user tokens do **not** carry `admin_roles[]`, and they do **not** carry an `org` role string — their org membership is implicit through the app's ownership. A request with a c-user JWT is allowed on c-user-scoped endpoints only; any attempt to hit isA_Console middleware is rejected at the route layer.
+
+**Billing attribution**. All usage by a c-user is billed to the org that owns the app (via `org_id` in the token), never to the c-user personally. The org sees per-app and per-c-user usage in its usage dashboard and can set per-app + per-c-user rate limits. The c-user has no payment relationship with isA.
+
+**Rate-limit scoping**. Three levels compose (most restrictive wins):
+
+1. **Per-c-user** — configured by the org admin on the app (e.g. 100 messages/day per c-user).
+2. **Per-app** — configured by the org admin (e.g. 1M tokens/month for this app).
+3. **Per-org** — the org's global quota from its subscription tier.
+
+**Seat caps**. c-users do **not** count against the org's internal seat cap (which is scoped to users with `org_id` + a role string in `{owner, admin, member, viewer, guest}`). They count against separate limits:
+
+- **c-user cap** — a soft limit per app, tied to the app's plan (e.g. free app plan allows 1,000 c-users; growth plan allows 50,000).
+- **Active c-user cap** — enforced at runtime; the app can have any number of registered c-users but only N simultaneously active in a billing period.
+
+Concrete example: an org on the Enterprise tier with an internal seat cap of 50 members can own an app with 250,000 c-users. The c-users don't take up member seats.
+
+**Simultaneous archetypes**. One human can hold multiple archetypes in parallel, each with its own JWT:
+
+- Alice is an org `member` of the "Acme" org (she develops apps there).
+- Acme owns an app called "Atlas".
+- Alice is also a c-user of Atlas (she uses her own product).
+
+Alice has two JWTs: a regular one for isA_Console (`org_id: acme`, role `member`) and an app-scoped one for Atlas (`scope: app`, `app_id: atlas`, `org_id: acme`). The two never mix; a request uses exactly one.
+
+**Lifecycle**.
+
+- *Created* when the consuming app's signup flow completes. The app calls `POST /api/v1/apps/{app_id}/c-users` on isA to register the c-user.
+- *Updated* when the app updates the c-user's email, name, or metadata.
+- *Revoked* when (a) the app deletes the c-user, (b) the owning org suspends the app, or (c) the owning org is suspended — all active c-user tokens for that `app_id` are rejected.
+- *Orphaned* if the app is deleted but c-user records remain — org admin can either re-home them to a replacement app or hard-delete.
+
+**c-user vs. authenticated org user in the same app**. An org member can sometimes use an app they themselves build for dogfooding. In that case, the member still holds their regular JWT (org member) and separately authenticates as a c-user of the app. These are two logical identities, not one — the system does not auto-merge them.
+
+**SDK surface** (app-side). How c-user auth is triggered from the app SDK is documented alongside the SDK's auth flows; see the isA_App_SDK README under "App authentication". Once the canonical types from #272 land, the SDK will export a `consumer` role type that apps can use to gate UI the same way consoles do.
 
 ## Permission matrix
 
