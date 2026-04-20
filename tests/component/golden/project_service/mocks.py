@@ -3,6 +3,7 @@ Mock implementations for Project Service component testing.
 
 Implements ProjectRepositoryProtocol — no real I/O.
 """
+
 import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -21,7 +22,9 @@ class MockProjectRepository:
     def clear_failure(self):
         self._should_fail = None
 
-    def seed_project(self, project_id: str, user_id: str, name: str, **kwargs) -> Dict[str, Any]:
+    def seed_project(
+        self, project_id: str, user_id: str, name: str, **kwargs
+    ) -> Dict[str, Any]:
         now = datetime.now(tz=timezone.utc)
         project = {
             "id": project_id,
@@ -35,12 +38,26 @@ class MockProjectRepository:
         self._projects[project_id] = project
         return project
 
-    async def create_project(self, user_id: str, name: str, description: str = None, custom_instructions: str = None) -> Dict[str, Any]:
+    async def create_project(
+        self,
+        user_id: str,
+        name: str,
+        description: str = None,
+        custom_instructions: str = None,
+    ) -> Dict[str, Any]:
         if self._should_fail:
             raise self._should_fail
         project_id = str(uuid.uuid4())
         now = datetime.now(tz=timezone.utc)
-        project = {"id": project_id, "user_id": user_id, "name": name, "description": description, "custom_instructions": custom_instructions, "created_at": now, "updated_at": now}
+        project = {
+            "id": project_id,
+            "user_id": user_id,
+            "name": name,
+            "description": description,
+            "custom_instructions": custom_instructions,
+            "created_at": now,
+            "updated_at": now,
+        }
         self._projects[project_id] = project
         return project
 
@@ -49,14 +66,18 @@ class MockProjectRepository:
             raise self._should_fail
         return self._projects.get(project_id)
 
-    async def list_projects(self, user_id: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    async def list_projects(
+        self, user_id: str, limit: int = 50, offset: int = 0
+    ) -> List[Dict[str, Any]]:
         if self._should_fail:
             raise self._should_fail
         user_projects = [p for p in self._projects.values() if p["user_id"] == user_id]
         user_projects.sort(key=lambda p: p["updated_at"], reverse=True)
-        return user_projects[offset:offset + limit]
+        return user_projects[offset : offset + limit]
 
-    async def update_project(self, project_id: str, **updates) -> Optional[Dict[str, Any]]:
+    async def update_project(
+        self, project_id: str, **updates
+    ) -> Optional[Dict[str, Any]]:
         if self._should_fail:
             raise self._should_fail
         project = self._projects.get(project_id)

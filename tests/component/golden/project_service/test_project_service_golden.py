@@ -4,9 +4,13 @@ Project Service Component Tests (Golden Tests)
 Tests ProjectService business logic with mocked repository and event bus.
 No real I/O — uses dependency injection.
 """
+
 import pytest
 
-from microservices.project_service.project_service import ProjectService, MAX_PROJECTS_PER_USER
+from microservices.project_service.project_service import (
+    ProjectService,
+    MAX_PROJECTS_PER_USER,
+)
 from microservices.project_service.protocols import (
     ProjectNotFoundError,
     ProjectPermissionError,
@@ -38,7 +42,9 @@ class TestProjectServiceCRUD:
         assert result["name"] == "My Project"
         assert result["user_id"] == "user1"
         assert result["id"]
-        event_bus.assert_event_published("project.create", {"user_id": "user1", "success": True})
+        event_bus.assert_event_published(
+            "project.create", {"user_id": "user1", "success": True}
+        )
 
     @pytest.mark.asyncio
     async def test_get_project(self, service, repository):
@@ -105,7 +111,9 @@ class TestProjectServiceOwnership:
             await service.delete_project("proj1", "user2")
 
     @pytest.mark.asyncio
-    async def test_set_instructions_other_users_project_raises_permission_error(self, service):
+    async def test_set_instructions_other_users_project_raises_permission_error(
+        self, service
+    ):
         with pytest.raises(ProjectPermissionError):
             await service.set_instructions("proj1", "user2", "hack")
 

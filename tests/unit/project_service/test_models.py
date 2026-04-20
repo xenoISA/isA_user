@@ -1,4 +1,5 @@
 """L1 Unit — Project service Pydantic models"""
+
 import pytest
 from pydantic import ValidationError
 
@@ -20,7 +21,9 @@ class TestCreateProjectRequest:
         assert req.custom_instructions is None
 
     def test_valid_full(self):
-        req = CreateProjectRequest(name="Proj", description="desc", custom_instructions="do X")
+        req = CreateProjectRequest(
+            name="Proj", description="desc", custom_instructions="do X"
+        )
         assert req.custom_instructions == "do X"
 
     def test_name_required(self):

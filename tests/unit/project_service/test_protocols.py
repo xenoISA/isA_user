@@ -1,4 +1,5 @@
 """L1 Unit — Project service protocols and exceptions"""
+
 import pytest
 
 from microservices.project_service.protocols import (
@@ -14,13 +15,16 @@ from microservices.project_service.protocols import (
 class TestExceptionHierarchy:
     """All domain exceptions inherit from ProjectServiceException."""
 
-    @pytest.mark.parametrize("exc_cls", [
-        ProjectNotFoundError,
-        ProjectPermissionError,
-        ProjectLimitExceeded,
-        InvalidProjectUpdate,
-        RepositoryError,
-    ])
+    @pytest.mark.parametrize(
+        "exc_cls",
+        [
+            ProjectNotFoundError,
+            ProjectPermissionError,
+            ProjectLimitExceeded,
+            InvalidProjectUpdate,
+            RepositoryError,
+        ],
+    )
     def test_inherits_from_base(self, exc_cls):
         assert issubclass(exc_cls, ProjectServiceException)
 
