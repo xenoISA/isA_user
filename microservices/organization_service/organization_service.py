@@ -463,6 +463,34 @@ class OrganizationService:
                 except Exception as e:
                     logger.error(f"Failed to publish organization.member_added event: {e}")
 
+                # Canonical role.assigned audit event (epic #270, story #280).
+                # Emitted alongside the domain-specific member_added event so
+                # audit consumers can subscribe to a single role.* stream.
+                try:
+                    from core.role_events import (
+                        ROLE_ASSIGNED,
+                        build_role_assigned_event,
+                    )
+
+                    role_payload = build_role_assigned_event(
+                        actor_user_id=requesting_user_id,
+                        target_user_id=request.user_id,
+                        scope="organization",
+                        new_role=target_role,
+                        old_role=None,
+                        org_id=organization_id,
+                        extra={"permissions": request.permissions or []},
+                    )
+                    await self.event_bus.publish_event(
+                        Event(
+                            event_type=ROLE_ASSIGNED,
+                            source="organization_service",
+                            data=role_payload,
+                        )
+                    )
+                except Exception as e:  # pragma: no cover — best-effort audit
+                    logger.error(f"Failed to publish role.assigned event: {e}")
+
             return member
 
         except Exception as e:
@@ -607,6 +635,30 @@ class OrganizationService:
                         logger.info(f"Published organization.member_removed event for user {member_user_id}")
                     except Exception as e:
                         logger.error(f"Failed to publish organization.member_removed event: {e}")
+
+                    # Canonical role.revoked audit event (epic #270, #280).
+                    try:
+                        from core.role_events import (
+                            ROLE_REVOKED,
+                            build_role_revoked_event,
+                        )
+
+                        role_payload = build_role_revoked_event(
+                            actor_user_id=requesting_user_id,
+                            target_user_id=member_user_id,
+                            scope="organization",
+                            old_role=target_role["role"] if isinstance(target_role, dict) else str(target_role),
+                            org_id=organization_id,
+                        )
+                        await self.event_bus.publish_event(
+                            Event(
+                                event_type=ROLE_REVOKED,
+                                source="organization_service",
+                                data=role_payload,
+                            )
+                        )
+                    except Exception as e:  # pragma: no cover — best-effort audit
+                        logger.error(f"Failed to publish role.revoked event: {e}")
 
             return success
             

@@ -942,6 +942,34 @@ class AuthorizationService:
                 "scope": scope,
             },
         )
+
+        # Emit canonical role.assigned audit event (epic #270, story #280).
+        # Wrapped in try/except so a transient NATS failure never breaks the
+        # user-visible success path; the denial paths above are log-only.
+        if self.event_bus:
+            try:
+                from core.role_events import (
+                    ROLE_ASSIGNED,
+                    build_role_assigned_event,
+                )
+
+                payload = build_role_assigned_event(
+                    actor_user_id=request.assigner_user_id,
+                    target_user_id=request.assignee_user_id,
+                    scope=scope,  # type: ignore[arg-type]
+                    new_role=normalized,
+                    old_role=getattr(request, "previous_role", None),
+                    org_id=getattr(request, "org_id", None),
+                )
+                event = Event(
+                    event_type=ROLE_ASSIGNED,
+                    source="authorization_service",
+                    data=payload,
+                )
+                await self.event_bus.publish_event(event)
+            except Exception as e:  # pragma: no cover — best-effort audit
+                logger.error(f"Failed to publish role.assigned event: {e}")
+
         return {
             "success": True,
             "rule": None,

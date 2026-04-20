@@ -745,6 +745,15 @@ async def admin_update_roles(
 
     try:
         repo = account_microservice.account_service.account_repo
+        # Capture prior admin_roles so the audit event records the delta
+        # as individual role.assigned / role.revoked emissions. Best-effort:
+        # repo lookup failures fall back to treating this as a fresh assignment.
+        try:
+            existing = await repo.get_account(user_id)
+            previous_roles = list(getattr(existing, "admin_roles", None) or [])
+        except Exception:
+            previous_roles = []
+
         updated = await repo.update_admin_roles(user_id, request.admin_roles)
 
         if not updated:
@@ -752,6 +761,51 @@ async def admin_update_roles(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Account not found: {user_id}",
             )
+
+        # Canonical role.assigned / role.revoked audit events — emit one
+        # per role added and one per role removed (epic #270, story #280).
+        event_bus = account_microservice.event_bus
+        if event_bus is not None:
+            try:
+                from core.nats_client import Event
+                from core.role_events import (
+                    ROLE_ASSIGNED,
+                    ROLE_REVOKED,
+                    build_role_assigned_event,
+                    build_role_revoked_event,
+                )
+
+                new_set = set(request.admin_roles)
+                old_set = set(previous_roles)
+                for granted in sorted(new_set - old_set):
+                    await event_bus.publish_event(
+                        Event(
+                            event_type=ROLE_ASSIGNED,
+                            source="account_service",
+                            data=build_role_assigned_event(
+                                actor_user_id=caller_id,
+                                target_user_id=user_id,
+                                scope="platform",
+                                new_role=granted,
+                                old_role=None,
+                            ),
+                        )
+                    )
+                for revoked in sorted(old_set - new_set):
+                    await event_bus.publish_event(
+                        Event(
+                            event_type=ROLE_REVOKED,
+                            source="account_service",
+                            data=build_role_revoked_event(
+                                actor_user_id=caller_id,
+                                target_user_id=user_id,
+                                scope="platform",
+                                old_role=revoked,
+                            ),
+                        )
+                    )
+            except Exception as e:  # pragma: no cover — best-effort audit
+                logger.error(f"Failed to publish role.* audit events: {e}")
 
         return AdminAccountResponse(
             user_id=updated.user_id,
