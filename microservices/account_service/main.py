@@ -69,6 +69,11 @@ from .models import (
     AdminRolesUpdateRequest,
     AdminStatusUpdateRequest,
 )
+from .role_validator import (
+    PLATFORM_ADMIN_ROLES,
+    can_assign_platform_role,
+    is_valid_platform_role,
+)
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Database connection now handled by repositories directly
@@ -660,13 +665,83 @@ async def admin_update_roles(
     request: AdminRolesUpdateRequest,
     admin: Dict[str, Any] = Depends(require_admin_token),
 ):
-    """Assign admin roles to a user account (admin only)."""
-    # Only super_admin can assign roles
-    if "super_admin" not in (admin.get("admin_roles") or []):
+    """Assign admin roles to a user account (admin only).
+
+    Authorization rules (see ``docs/guidance/role-taxonomy.md``):
+
+    - Every element in ``admin_roles`` must be a canonical platform-admin role
+      (``role_validator.is_valid_platform_role``). Otherwise → 400.
+    - The caller must hold ``super_admin`` to grant any platform-admin role
+      (``role_validator.can_assign_platform_role``). Otherwise → 403.
+
+    Denials are logged as structured ``role_validator_denied`` entries carrying
+    the rule name, caller id, and target user id.
+    """
+    caller_admin_roles = admin.get("admin_roles") or []
+    caller_id = admin.get("user_id")
+
+    # Rule 1: every requested role must be a canonical platform-admin role.
+    invalid_roles = [
+        r for r in request.admin_roles if not is_valid_platform_role(r)
+    ]
+    if invalid_roles:
+        logger.warning(
+            "role_validator_denied rule=invalid_platform_role "
+            "caller_id=%s target_user_id=%s invalid_roles=%s valid_roles=%s",
+            caller_id,
+            user_id,
+            invalid_roles,
+            PLATFORM_ADMIN_ROLES,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid admin roles: {invalid_roles}. "
+                f"Valid roles: {PLATFORM_ADMIN_ROLES}"
+            ),
+        )
+
+    # Rule 2: only super_admin can mutate platform-admin roles — for every
+    # requested grant, and also for a clearing request (empty list), since
+    # revocation is just as privileged as granting.
+    if "super_admin" not in caller_admin_roles:
+        logger.warning(
+            "role_validator_denied rule=only_super_admin_can_assign "
+            "caller_id=%s caller_admin_roles=%s target_user_id=%s "
+            "requested_roles=%s",
+            caller_id,
+            caller_admin_roles,
+            user_id,
+            request.admin_roles,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super_admin can assign admin roles",
+            detail=(
+                "only_super_admin_can_assign: only super_admin can assign or "
+                "revoke platform admin roles"
+            ),
         )
+
+    # Defensive: even when the caller is super_admin, every role must still
+    # pass the canonical validator (already enforced above, but re-check keeps
+    # the invariant local to the critical path).
+    for role in request.admin_roles:
+        if not can_assign_platform_role(caller_admin_roles, role):
+            logger.warning(
+                "role_validator_denied rule=invariant_can_assign "
+                "caller_id=%s caller_admin_roles=%s target_user_id=%s "
+                "assignee_role=%s",
+                caller_id,
+                caller_admin_roles,
+                user_id,
+                role,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "only_super_admin_can_assign: role assignment rejected"
+                ),
+            )
 
     try:
         repo = account_microservice.account_service.account_repo

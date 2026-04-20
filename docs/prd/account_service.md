@@ -1,5 +1,7 @@
 # Account Service - Product Requirements Document (PRD)
 
+> **Role taxonomy**: see [`docs/guidance/role-taxonomy.md`](../guidance/role-taxonomy.md) for the canonical definition of platform-admin / org-admin / org-user / c-user archetypes. Account service owns the `admin_roles` JSONB column on `accounts` and enforces platform-admin role validation via [`microservices/account_service/role_validator.py`](../../microservices/account_service/role_validator.py). Tracked by epic #270, story #275.
+
 ## Product Overview
 
 **Product Name**: Account Service

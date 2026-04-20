@@ -152,26 +152,43 @@ class AccountSearchParams(BaseModel):
 
 
 # Admin Operations Models
+#
+# Canonical platform-admin role strings live in ``role_validator`` — see
+# ``docs/guidance/role-taxonomy.md``. ``ADMIN_ROLES`` is preserved as an
+# alias for backwards compatibility with callers importing it from this
+# module.
 
-ADMIN_ROLES = [
-    "super_admin",
-    "billing_admin",
-    "product_admin",
-    "support_admin",
-    "compliance_admin",
-]
+from .role_validator import PLATFORM_ADMIN_ROLES, is_valid_platform_role
+
+ADMIN_ROLES = PLATFORM_ADMIN_ROLES
 
 
 class AdminRolesUpdateRequest(BaseModel):
-    """Admin roles update request"""
+    """Admin roles update request.
+
+    Note: strict role-string validation lives in the route handler in
+    ``main.py`` (using ``role_validator.is_valid_platform_role``) so that
+    invalid role strings surface as ``400 Bad Request`` instead of the 422
+    FastAPI would emit from a Pydantic field validator. This keeps the HTTP
+    contract aligned with ``docs/guidance/role-taxonomy.md`` and issue #275.
+    The class-level validator below is still exposed for direct (non-HTTP)
+    callers that want a model-level semantic check.
+    """
     admin_roles: List[str] = Field(..., description="List of admin roles to assign")
 
-    @field_validator('admin_roles')
     @classmethod
     def validate_admin_roles(cls, v):
-        invalid = [r for r in v if r not in ADMIN_ROLES]
+        """Programmatic validator — not a Pydantic field validator.
+
+        Returns the input unchanged on success, raises ``ValueError`` on any
+        unknown role string. Used by tests and any non-HTTP caller that wants
+        to assert the invariant without going through the FastAPI route.
+        """
+        invalid = [r for r in v if not is_valid_platform_role(r)]
         if invalid:
-            raise ValueError(f"Invalid admin roles: {invalid}. Valid roles: {ADMIN_ROLES}")
+            raise ValueError(
+                f"Invalid admin roles: {invalid}. Valid roles: {PLATFORM_ADMIN_ROLES}"
+            )
         return v
 
 

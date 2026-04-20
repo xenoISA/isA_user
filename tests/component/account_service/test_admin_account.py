@@ -294,3 +294,191 @@ class TestAdminAddNote:
             created_at=result.created_at,
         )
         assert resp.note_id == result.note_id
+
+
+# =============================================================================
+# Admin role-assignment endpoint (#275)
+# =============================================================================
+#
+# PUT /api/v1/account/admin/accounts/{user_id}/roles
+# Verifies the role_validator wire-in:
+#   - invalid role string  → 400 + structured "role_validator_denied" log
+#   - non-super_admin caller → 403 + structured "role_validator_denied" log
+#   - super_admin caller + valid roles → 200 + repo.update_admin_roles called
+# =============================================================================
+
+
+from contextlib import asynccontextmanager
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def admin_roles_client():
+    """TestClient with a stubbed account_service and overridden admin token.
+
+    - Bypasses the real FastAPI lifespan (no Consul / NATS / DB).
+    - Injects a MagicMock repo with ``update_admin_roles`` we can assert on.
+    - Overrides ``require_admin_token`` so we can set arbitrary caller roles
+      per test via ``client.app.state.caller_admin_roles``.
+    """
+    import microservices.account_service.main as account_main
+
+    @asynccontextmanager
+    async def noop_lifespan(app):
+        yield
+
+    orig_lifespan = account_main.app.router.lifespan_context
+    account_main.app.router.lifespan_context = noop_lifespan
+
+    # Stub out account_service with a repo that has update_admin_roles.
+    orig_service = account_main.account_microservice.account_service
+    fake_service = MagicMock()
+
+    async def _fake_update_admin_roles(user_id, admin_roles):
+        from microservices.account_service.models import User
+
+        return User(
+            user_id=user_id,
+            email="target@example.com",
+            name="Target User",
+            is_active=True,
+            admin_roles=admin_roles,
+            preferences={},
+            created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
+        )
+
+    fake_service.account_repo = MagicMock()
+    fake_service.account_repo.update_admin_roles = AsyncMock(
+        side_effect=_fake_update_admin_roles
+    )
+    account_main.account_microservice.account_service = fake_service
+
+    # Override require_admin_token so tests can flip caller roles.
+    from microservices.account_service.main import require_admin_token
+
+    state = {"caller_admin_roles": ["super_admin"], "caller_id": "admin_001"}
+
+    async def _override_admin():
+        return {
+            "user_id": state["caller_id"],
+            "email": "admin@example.com",
+            "admin_roles": state["caller_admin_roles"],
+            "scope": "admin",
+        }
+
+    account_main.app.dependency_overrides[require_admin_token] = _override_admin
+
+    with TestClient(account_main.app, raise_server_exceptions=False) as c:
+        c.state_dict = state  # type: ignore[attr-defined]
+        c.fake_service = fake_service  # type: ignore[attr-defined]
+        yield c
+
+    account_main.app.dependency_overrides.pop(require_admin_token, None)
+    account_main.account_microservice.account_service = orig_service
+    account_main.app.router.lifespan_context = orig_lifespan
+
+
+class TestAdminUpdateRolesEndpoint:
+    """Component tests for PUT /api/v1/account/admin/accounts/{user_id}/roles."""
+
+    def test_invalid_role_returns_400(self, admin_roles_client, caplog):
+        """Unknown role string is rejected with 400 (not 422)."""
+        admin_roles_client.state_dict["caller_admin_roles"] = ["super_admin"]
+
+        with caplog.at_level("WARNING"):
+            resp = admin_roles_client.put(
+                "/api/v1/account/admin/accounts/usr_target/roles",
+                json={"admin_roles": ["totally_made_up"]},
+            )
+
+        assert resp.status_code == 400
+        body = resp.json()
+        assert "Invalid admin roles" in body["detail"]
+        assert "totally_made_up" in body["detail"]
+        # Structured denial log emitted with the rule name.
+        assert any(
+            "role_validator_denied" in rec.getMessage()
+            and "rule=invalid_platform_role" in rec.getMessage()
+            for rec in caplog.records
+        )
+        # Repo must NOT have been called.
+        admin_roles_client.fake_service.account_repo.update_admin_roles.assert_not_called()
+
+    def test_mixed_valid_and_invalid_returns_400(self, admin_roles_client):
+        """If any role is invalid, the whole request is rejected."""
+        admin_roles_client.state_dict["caller_admin_roles"] = ["super_admin"]
+
+        resp = admin_roles_client.put(
+            "/api/v1/account/admin/accounts/usr_target/roles",
+            json={"admin_roles": ["super_admin", "totally_made_up"]},
+        )
+
+        assert resp.status_code == 400
+        assert "totally_made_up" in resp.json()["detail"]
+
+    def test_non_super_admin_granting_returns_403(
+        self, admin_roles_client, caplog
+    ):
+        """A scoped admin cannot grant platform-admin roles."""
+        admin_roles_client.state_dict["caller_admin_roles"] = ["billing_admin"]
+
+        with caplog.at_level("WARNING"):
+            resp = admin_roles_client.put(
+                "/api/v1/account/admin/accounts/usr_target/roles",
+                json={"admin_roles": ["support_admin"]},
+            )
+
+        assert resp.status_code == 403
+        assert "only_super_admin_can_assign" in resp.json()["detail"]
+        assert any(
+            "role_validator_denied" in rec.getMessage()
+            and "rule=only_super_admin_can_assign" in rec.getMessage()
+            for rec in caplog.records
+        )
+        admin_roles_client.fake_service.account_repo.update_admin_roles.assert_not_called()
+
+    def test_no_admin_roles_returns_403(self, admin_roles_client):
+        """Caller with an empty admin_roles list is also denied."""
+        admin_roles_client.state_dict["caller_admin_roles"] = []
+
+        resp = admin_roles_client.put(
+            "/api/v1/account/admin/accounts/usr_target/roles",
+            json={"admin_roles": ["billing_admin"]},
+        )
+
+        # Note: require_admin_token would normally 403 on empty admin_roles at
+        # the dependency layer, but we override it here to specifically test
+        # that the endpoint-level can_assign_platform_role check also rejects.
+        assert resp.status_code == 403
+
+    def test_super_admin_granting_succeeds(self, admin_roles_client):
+        """super_admin can grant any valid platform-admin role."""
+        admin_roles_client.state_dict["caller_admin_roles"] = ["super_admin"]
+
+        resp = admin_roles_client.put(
+            "/api/v1/account/admin/accounts/usr_target/roles",
+            json={"admin_roles": ["billing_admin", "support_admin"]},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["user_id"] == "usr_target"
+        assert body["admin_roles"] == ["billing_admin", "support_admin"]
+        admin_roles_client.fake_service.account_repo.update_admin_roles.assert_awaited_once_with(
+            "usr_target", ["billing_admin", "support_admin"]
+        )
+
+    def test_super_admin_can_clear_roles_with_empty_list(self, admin_roles_client):
+        """Empty list is valid — no elements to validate, assignment passes."""
+        admin_roles_client.state_dict["caller_admin_roles"] = ["super_admin"]
+
+        resp = admin_roles_client.put(
+            "/api/v1/account/admin/accounts/usr_target/roles",
+            json={"admin_roles": []},
+        )
+
+        assert resp.status_code == 200
+        admin_roles_client.fake_service.account_repo.update_admin_roles.assert_awaited_once_with(
+            "usr_target", []
+        )
