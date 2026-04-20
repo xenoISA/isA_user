@@ -44,7 +44,7 @@ isA_Admin (Next.js 16) → @isa/core SDK → 37 microservices (isA_user)
 - Scaffold isA_Admin project
 - Unified admin authentication (admin JWT scope)
 - Admin action audit trail
-- Admin role hierarchy (super_admin, billing_admin, product_admin, support_admin, compliance_admin)
+- Admin role hierarchy (super_admin, billing_admin, product_admin, support_admin, compliance_admin) — role-management UI spec: [`admin_dashboard_role_management.md`](./admin_dashboard_role_management.md)
 
 ### Phase 2: Product Admin UI (P1)
 - Product catalog management (wires to existing Epic #174 endpoints)
