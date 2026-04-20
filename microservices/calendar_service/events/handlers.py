@@ -22,7 +22,7 @@ class CalendarEventHandlers:
             calendar_service: CalendarService 实例
         """
         self.service = calendar_service
-        self.repository = calendar_service.repo
+        self.repository = calendar_service.repository
 
     def get_event_handler_map(self) -> Dict[str, Callable]:
         """

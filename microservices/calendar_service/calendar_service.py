@@ -67,7 +67,7 @@ class CalendarService:
             repository: Repository (inject mock for testing)
             event_bus: Event bus for publishing events
         """
-        self.repo = repository  # Will be set by factory if None
+        self.repository = repository  # Will be set by factory if None
         self.event_bus = event_bus
         self._event_publishers_loaded = False
         self._event_publisher = None
@@ -96,7 +96,7 @@ class CalendarService:
             event_data = request.dict()
 
             # Create event
-            event = await self.repo.create_event(event_data)
+            event = await self.repository.create_event(event_data)
 
             if event:
                 logger.info(
@@ -136,12 +136,12 @@ class CalendarService:
         self, event_id: str, user_id: str = None
     ) -> Optional[EventResponse]:
         """获取事件详情"""
-        return await self.repo.get_event_by_id(event_id, user_id)
+        return await self.repository.get_event_by_id(event_id, user_id)
 
     async def query_events(self, request: EventQueryRequest) -> EventListResponse:
         """查询事件列表"""
         try:
-            events = await self.repo.get_events_by_user(
+            events = await self.repository.get_events_by_user(
                 user_id=request.user_id,
                 start_date=request.start_date,
                 end_date=request.end_date,
@@ -166,11 +166,11 @@ class CalendarService:
         self, user_id: str, days: int = 7
     ) -> List[EventResponse]:
         """获取即将到来的事件"""
-        return await self.repo.get_upcoming_events(user_id, days)
+        return await self.repository.get_upcoming_events(user_id, days)
 
     async def get_today_events(self, user_id: str) -> List[EventResponse]:
         """获取今天的事件"""
-        return await self.repo.get_today_events(user_id)
+        return await self.repository.get_today_events(user_id)
 
     async def update_event(
         self, event_id: str, request: EventUpdateRequest, user_id: str = None
@@ -178,7 +178,7 @@ class CalendarService:
         """更新事件"""
         try:
             # Get existing event
-            existing = await self.repo.get_event_by_id(event_id, user_id)
+            existing = await self.repository.get_event_by_id(event_id, user_id)
             if not existing:
                 return None
 
@@ -191,7 +191,7 @@ class CalendarService:
                     raise CalendarServiceValidationError("End time must be after start time")
 
             # Update event
-            updated = await self.repo.update_event(event_id, updates)
+            updated = await self.repository.update_event(event_id, updates)
 
             if updated:
                 logger.info(f"Updated event {event_id}")
@@ -202,8 +202,8 @@ class CalendarService:
                         self._lazy_load_event_publishers()
                         if self.Event:
                             nats_event = self.Event(
-                                event_type=".event.updated",
-                                source="_service",
+                                event_type="calendar.event.updated",
+                                source="calendar_service",
                                 data={
                                     "event_id": event_id,
                                     "user_id": user_id,
@@ -226,15 +226,15 @@ class CalendarService:
     async def delete_event(self, event_id: str, user_id: str = None) -> bool:
         """删除事件"""
         try:
-            result = await self.repo.delete_event(event_id, user_id)
+            result = await self.repository.delete_event(event_id, user_id)
 
             if result and self.event_bus:
                 try:
                     self._lazy_load_event_publishers()
                     if self.Event:
                         nats_event = self.Event(
-                            event_type=".event.deleted",
-                            source="_service",
+                            event_type="calendar.event.deleted",
+                            source="calendar_service",
                             data={
                                 "event_id": event_id,
                                 "user_id": user_id,
@@ -273,7 +273,7 @@ class CalendarService:
                 raise ValueError(f"Unsupported provider: {provider}")
 
             # Update sync status
-            await self.repo.update_sync_status(
+            await self.repository.update_sync_status(
                 user_id=user_id,
                 provider=provider,
                 status="active",
@@ -292,7 +292,7 @@ class CalendarService:
             logger.error(f"Failed to sync {provider} calendar: {e}")
 
             # Update sync status with error
-            await self.repo.update_sync_status(
+            await self.repository.update_sync_status(
                 user_id=user_id, provider=provider, status="error", error_message=str(e)
             )
 
@@ -309,7 +309,7 @@ class CalendarService:
     ) -> Optional[SyncStatusResponse]:
         """获取同步状态"""
         try:
-            status = await self.repo.get_sync_status(user_id, provider)
+            status = await self.repository.get_sync_status(user_id, provider)
 
             if status:
                 return SyncStatusResponse(

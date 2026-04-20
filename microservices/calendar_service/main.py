@@ -66,11 +66,16 @@ class CalendarMicroservice:
             self.event_bus = None
 
         # Create service with real dependencies using factory
-        self.service = create_calendar_service(
-            config=config_manager,
-            event_bus=self.event_bus
-        )
-        logger.info("Calendar service initialized")
+        try:
+            self.service = create_calendar_service(
+                config=config_manager,
+                event_bus=self.event_bus
+            )
+            logger.info("Calendar service initialized")
+        except Exception as e:
+            logger.error("Failed to create calendar service: %s", e, exc_info=True)
+            self.service = None
+            return
 
         # Subscribe to events
         if self.event_bus and self.service:
