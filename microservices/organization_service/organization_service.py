@@ -27,6 +27,13 @@ from .models import (
     OrganizationContextResponse, OrganizationStatsResponse,
     OrganizationUsageResponse, OrganizationRole, MemberStatus
 )
+from .role_validator import (
+    RoleAssignmentRule,
+    can_assign_org_role,
+    is_valid_org_role,
+    sorted_valid_roles,
+    violated_assignment_rule,
+)
 # Import event bus components
 from core.nats_client import Event
 
@@ -282,27 +289,141 @@ class OrganizationService:
             raise OrganizationServiceError(f"Failed to get user organizations: {str(e)}")
     
     # ============ Member Management ============
-    
+
+    def _role_to_string(self, role) -> Optional[str]:
+        """Normalize a role value (enum or string) to the canonical string form."""
+        if role is None:
+            return None
+        if hasattr(role, "value"):
+            return role.value
+        return str(role)
+
+    def _enforce_role_assignment(
+        self,
+        *,
+        organization_id: str,
+        assigner_role: Optional[str],
+        target_role: str,
+        actor_user_id: str,
+        action: str,
+    ) -> None:
+        """Run the canonical role-validation rules and raise on failure.
+
+        * Invalid ``target_role`` → :class:`OrganizationValidationError` (→ HTTP 400).
+        * Scope violation (admin→owner, member→any, …) →
+          :class:`OrganizationAccessDeniedError` (→ HTTP 403).
+
+        Emits a structured log line on every denial so downstream alerting can
+        key off ``role_assignment_denied`` + the rule name.
+        """
+        # 1. Target role must be a canonical org role string.
+        if not is_valid_org_role(target_role):
+            logger.warning(
+                "role_assignment_denied",
+                extra={
+                    "event": "role_assignment_denied",
+                    "rule": RoleAssignmentRule.INVALID_ROLE,
+                    "action": action,
+                    "organization_id": organization_id,
+                    "actor_user_id": actor_user_id,
+                    "assigner_role": assigner_role,
+                    "target_role": target_role,
+                },
+            )
+            raise OrganizationValidationError(
+                f"Invalid org role '{target_role}'. Valid roles: "
+                f"{', '.join(sorted_valid_roles())}"
+            )
+
+        # 2. Assigner must themselves hold a known org role. ``None`` happens
+        #    when an admin-access check passed but the role row later vanished —
+        #    treat that as an access violation, not an input validation error.
+        if assigner_role is None:
+            logger.warning(
+                "role_assignment_denied",
+                extra={
+                    "event": "role_assignment_denied",
+                    "rule": RoleAssignmentRule.UNKNOWN_ASSIGNER_ROLE,
+                    "action": action,
+                    "organization_id": organization_id,
+                    "actor_user_id": actor_user_id,
+                    "assigner_role": assigner_role,
+                    "target_role": target_role,
+                },
+            )
+            raise OrganizationAccessDeniedError(
+                f"Cannot determine caller role in organization {organization_id}"
+            )
+
+        # 3. Scope rule.
+        if not can_assign_org_role(assigner_role, target_role):
+            rule = violated_assignment_rule(assigner_role, target_role)
+            logger.warning(
+                "role_assignment_denied",
+                extra={
+                    "event": "role_assignment_denied",
+                    "rule": rule,
+                    "action": action,
+                    "organization_id": organization_id,
+                    "actor_user_id": actor_user_id,
+                    "assigner_role": assigner_role,
+                    "target_role": target_role,
+                },
+            )
+            raise OrganizationAccessDeniedError(
+                f"Role '{assigner_role}' cannot assign role '{target_role}' "
+                f"(rule: {rule})"
+            )
+
     async def add_organization_member(
         self,
         organization_id: str,
         request: OrganizationMemberAddRequest,
         requesting_user_id: str
     ) -> OrganizationMemberResponse:
-        """添加组织成员（需要管理员权限）"""
+        """添加组织成员（需要管理员权限）
+
+        Enforces the canonical role-assignment matrix from the unified role
+        taxonomy (``docs/guidance/role-taxonomy.md``, epic #270):
+
+        * owner can assign any role.
+        * admin can assign member / viewer / guest only.
+        * member / viewer / guest cannot assign any role.
+        """
         try:
-            # 检查权限
-            is_admin = await self.check_admin_access(organization_id, requesting_user_id)
-            if not is_admin:
-                raise OrganizationAccessDeniedError(f"User {requesting_user_id} does not have admin access")
+            # Look up the caller's role once — we need the specific string
+            # (not just "is admin") to enforce the assignment matrix.
+            assigner_role_data = await self.repository.get_user_organization_role(
+                organization_id, requesting_user_id
+            )
+            assigner_role = (
+                assigner_role_data.get("role") if assigner_role_data else None
+            )
+            assigner_active = (
+                assigner_role_data is not None
+                and assigner_role_data.get("status") == MemberStatus.ACTIVE.value
+            )
+
+            # Basic admin gate (keeps parity with other endpoints + legacy tests).
+            if not assigner_active or assigner_role not in ("owner", "admin"):
+                raise OrganizationAccessDeniedError(
+                    f"User {requesting_user_id} does not have admin access"
+                )
 
             # 验证请求
-            if not request.user_id and not request.email:
-                raise OrganizationValidationError("Either user_id or email must be provided")
-
-            # 如果只有邮箱，需要先创建邀请（暂不实现）
             if not request.user_id:
-                raise OrganizationServiceError("User invitation not implemented yet. Please provide user_id of existing user.")
+                raise OrganizationValidationError("user_id must be provided")
+
+            target_role = self._role_to_string(request.role) or "member"
+
+            # Canonical taxonomy enforcement (valid string + scope matrix).
+            self._enforce_role_assignment(
+                organization_id=organization_id,
+                assigner_role=assigner_role,
+                target_role=target_role,
+                actor_user_id=requesting_user_id,
+                action="add_member",
+            )
 
             # Validate member user exists in account service (fail-open for eventual consistency)
             # Note: For synchronous validation in async context, we'd need to refactor.
@@ -313,7 +434,7 @@ class OrganizationService:
             member = await self.repository.add_organization_member(
                 organization_id,
                 request.user_id,
-                request.role,
+                target_role,
                 request.permissions
             )
 
@@ -331,7 +452,7 @@ class OrganizationService:
                         data={
                             "organization_id": organization_id,
                             "user_id": request.user_id,
-                            "role": request.role.value if hasattr(request.role, 'value') else request.role,
+                            "role": target_role,
                             "added_by": requesting_user_id,
                             "permissions": request.permissions or [],
                             "timestamp": datetime.now(timezone.utc).isoformat()
@@ -357,23 +478,58 @@ class OrganizationService:
         request: OrganizationMemberUpdateRequest,
         requesting_user_id: str
     ) -> OrganizationMemberResponse:
-        """更新组织成员（需要管理员权限）"""
+        """更新组织成员（需要管理员权限）
+
+        Enforces the canonical role-assignment matrix — see
+        :meth:`add_organization_member`.
+        """
         try:
             # 检查权限
             is_admin = await self.check_admin_access(organization_id, requesting_user_id)
             if not is_admin:
                 raise OrganizationAccessDeniedError(f"User {requesting_user_id} does not have admin access")
-            
+
             # 获取目标用户当前角色
             target_role = await self.repository.get_user_organization_role(organization_id, member_user_id)
             if not target_role:
                 raise OrganizationNotFoundError(f"Member {member_user_id} not found in organization")
-            
-            # 检查权限规则
+
+            # Caller's role — needed for the canonical assignment matrix.
             requesting_role = await self.repository.get_user_organization_role(organization_id, requesting_user_id)
-            if requesting_role['role'] == 'admin' and target_role['role'] in ['owner', 'admin']:
-                raise OrganizationAccessDeniedError("Admins cannot modify owners or other admins")
-            
+            assigner_role = requesting_role["role"] if requesting_role else None
+
+            # Legacy rule: admins can't modify owners or other admins even if they
+            # aren't changing the role. Keep this for endpoint parity.
+            if assigner_role == "admin" and target_role["role"] in ("owner", "admin"):
+                logger.warning(
+                    "role_assignment_denied",
+                    extra={
+                        "event": "role_assignment_denied",
+                        "rule": RoleAssignmentRule.ADMIN_CANNOT_ASSIGN_ADMIN_OR_OWNER,
+                        "action": "update_member",
+                        "organization_id": organization_id,
+                        "actor_user_id": requesting_user_id,
+                        "assigner_role": assigner_role,
+                        "target_role": target_role["role"],
+                        "target_user_id": member_user_id,
+                    },
+                )
+                raise OrganizationAccessDeniedError(
+                    "Admins cannot modify owners or other admins "
+                    f"(rule: {RoleAssignmentRule.ADMIN_CANNOT_ASSIGN_ADMIN_OR_OWNER})"
+                )
+
+            # If the caller is trying to change the role, run the canonical matrix.
+            new_role = self._role_to_string(request.role)
+            if new_role is not None:
+                self._enforce_role_assignment(
+                    organization_id=organization_id,
+                    assigner_role=assigner_role,
+                    target_role=new_role,
+                    actor_user_id=requesting_user_id,
+                    action="update_member",
+                )
+
             # 更新成员
             member = await self.repository.update_organization_member(
                 organization_id,

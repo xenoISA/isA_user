@@ -10,6 +10,10 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
+# Canonical org role validation — see role_validator.py and
+# docs/guidance/role-taxonomy.md (tracked by epic #270).
+from .role_validator import is_valid_org_role, sorted_valid_roles
+
 
 # Enums
 class OrganizationPlan(str, Enum):
@@ -77,24 +81,50 @@ class OrganizationUpdateRequest(BaseModel):
 
 
 class OrganizationMemberAddRequest(BaseModel):
-    """添加组织成员请求"""
+    """添加组织成员请求
+
+    ``role`` is a plain ``str`` (not the ``OrganizationRole`` enum) so that
+    invalid-but-human-readable values reach the service layer, where they
+    are rejected with a 400 response naming the invalid string and listing
+    the valid options. See ``role_validator.py`` and
+    ``docs/guidance/role-taxonomy.md``.
+    """
     user_id: str = Field(..., description="用户ID")
-    role: OrganizationRole = Field(default=OrganizationRole.MEMBER, description="成员角色")
+    role: str = Field(default="member", description="成员角色")
     permissions: Optional[List[str]] = Field(default_factory=list, description="自定义权限")
 
     @validator('role')
     def validate_role(cls, v):
-        # 不能直接添加 owner
-        if v == OrganizationRole.OWNER:
+        # Reject unknown role strings up-front so the API layer can return a 400.
+        if not is_valid_org_role(v):
+            raise ValueError(
+                f"Invalid org role '{v}'. Valid roles: {', '.join(sorted_valid_roles())}"
+            )
+        # 不能直接添加 owner (legacy guard — owner transfer uses a separate endpoint).
+        if v == OrganizationRole.OWNER.value:
             raise ValueError('Cannot directly add owner role')
         return v
 
 
 class OrganizationMemberUpdateRequest(BaseModel):
-    """更新组织成员请求"""
-    role: Optional[OrganizationRole] = None
+    """更新组织成员请求
+
+    ``role`` is a plain ``str`` — see ``OrganizationMemberAddRequest`` for
+    rationale. A ``None`` value means "do not change the role".
+    """
+    role: Optional[str] = None
     status: Optional[MemberStatus] = None
     permissions: Optional[List[str]] = None
+
+    @validator('role')
+    def validate_role(cls, v):
+        if v is None:
+            return v
+        if not is_valid_org_role(v):
+            raise ValueError(
+                f"Invalid org role '{v}'. Valid roles: {', '.join(sorted_valid_roles())}"
+            )
+        return v
 
 
 class OrganizationSwitchRequest(BaseModel):

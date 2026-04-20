@@ -5,7 +5,9 @@ Organization Microservice
 Port: 8212
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status, Query, Path, Header
+from fastapi import FastAPI, HTTPException, Depends, status, Query, Path, Header, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 import uvicorn
 import logging
 from contextlib import asynccontextmanager
@@ -203,6 +205,48 @@ app = FastAPI(
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "organization_service")
+
+
+# ---------------------------------------------------------------------------
+# Validation exception handler
+# ---------------------------------------------------------------------------
+# The member add/update request models reject unknown role strings at the
+# Pydantic layer (see models.py > OrganizationMemberAddRequest.validate_role).
+# FastAPI returns those as 422 by default, but the role taxonomy contract
+# (docs/guidance/role-taxonomy.md, epic #270) requires that invalid role
+# strings surface as a 400 with an actionable message. This handler rewrites
+# role-field validation errors to 400 while preserving 422 for every other
+# shape violation.
+_ROLE_FIELD_ERROR_MARKERS = ("role",)
+
+
+def _is_role_field_error(err: dict) -> bool:
+    loc = err.get("loc") or ()
+    return any(part in _ROLE_FIELD_ERROR_MARKERS for part in loc)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    role_errors = [e for e in errors if _is_role_field_error(e)]
+    if role_errors:
+        # Prefer the validator's own message (already lists valid options).
+        msg = role_errors[0].get("msg") or "Invalid org role"
+        # Strip the Pydantic v1 "Value error, " / v2 prefix if present.
+        if msg.lower().startswith("value error, "):
+            msg = msg[len("Value error, "):]
+        logger.warning(
+            "role_assignment_denied",
+            extra={
+                "event": "role_assignment_denied",
+                "rule": "invalid_org_role",
+                "action": "request_validation",
+                "path": str(request.url.path),
+                "errors": role_errors,
+            },
+        )
+        return JSONResponse(status_code=400, content={"detail": msg})
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 # CORS handled by Gateway
 
