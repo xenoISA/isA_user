@@ -50,6 +50,7 @@ grpc_services:
         - payment
         - product
         - session
+        - sharing
         - storage
         - subscription
         - task
@@ -139,6 +140,11 @@ grpc_services:
           subjects: ["payment.>"]
           retention: "limits"
           max_age_hours: 720  # 30 days
+
+        - name: "SHARING"
+          subjects: ["share.>"]
+          retention: "limits"
+          max_age_hours: 168
 
         - name: "STORAGE"
           subjects: ["storage.>"]
