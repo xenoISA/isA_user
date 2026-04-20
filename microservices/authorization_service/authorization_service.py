@@ -32,7 +32,15 @@ from .models import (
     GrantPermissionRequest, RevokePermissionRequest,
     UserPermissionSummary, BulkPermissionRequest,
     BatchOperationResult, BatchOperationSummary,
-    PermissionAuditLog, AuthorizationError
+    PermissionAuditLog, AuthorizationError,
+    AssignRoleRequest,
+)
+from .role_validator import (
+    can_assign_role,
+    is_valid_org_role,
+    is_valid_platform_role,
+    log_assignment_denied,
+    normalize_org_role,
 )
 
 # Type checking imports (not executed at runtime)
@@ -808,6 +816,141 @@ class AuthorizationService:
             logger.error(f"Error cleaning up expired permissions: {e}")
             return 0
     
+    # ====================
+    # Role Assignment (canonical taxonomy)
+    # ====================
+
+    async def assign_role(self, request: AssignRoleRequest) -> Dict[str, Any]:
+        """
+        Validate and apply a role assignment using the canonical taxonomy.
+
+        Enforces:
+          1. The assignee role string is valid for the stated scope
+             (is_valid_org_role / is_valid_platform_role).
+          2. The assigner is allowed to grant that role at that scope
+             (can_assign_role).
+
+        Returns a dict with keys:
+          - success (bool)
+          - rule (str | None): violated rule name on denial
+          - normalized_role (str | None): canonical role persisted
+          - reason (str): human-readable outcome
+        """
+        scope = request.scope
+        assigner = request.assigner_role
+        assignee = request.assignee_role
+
+        # 1) Validate the assignee role string for the scope.
+        if scope == "organization":
+            if not is_valid_org_role(assignee):
+                log_assignment_denied(
+                    rule="invalid_org_role",
+                    assigner=request.assigner_user_id,
+                    assignee=request.assignee_user_id,
+                    scope=scope,
+                )
+                return {
+                    "success": False,
+                    "rule": "invalid_org_role",
+                    "normalized_role": None,
+                    "reason": (
+                        f"{assignee!r} is not a valid org role — see "
+                        "docs/guidance/role-taxonomy.md"
+                    ),
+                }
+        elif scope == "platform":
+            if not is_valid_platform_role(assignee):
+                log_assignment_denied(
+                    rule="invalid_platform_role",
+                    assigner=request.assigner_user_id,
+                    assignee=request.assignee_user_id,
+                    scope=scope,
+                )
+                return {
+                    "success": False,
+                    "rule": "invalid_platform_role",
+                    "normalized_role": None,
+                    "reason": (
+                        f"{assignee!r} is not a valid platform-admin role — "
+                        "see docs/guidance/role-taxonomy.md"
+                    ),
+                }
+        elif scope == "app":
+            # c-users are minted by the consuming app's signup flow.
+            log_assignment_denied(
+                rule="app_scope_not_assignable",
+                assigner=request.assigner_user_id,
+                assignee=request.assignee_user_id,
+                scope=scope,
+            )
+            return {
+                "success": False,
+                "rule": "app_scope_not_assignable",
+                "normalized_role": None,
+                "reason": (
+                    "c-user roles are provisioned via the consuming app's "
+                    "signup flow and cannot be assigned through "
+                    "authorization_service."
+                ),
+            }
+        else:
+            log_assignment_denied(
+                rule="unknown_scope",
+                assigner=request.assigner_user_id,
+                assignee=request.assignee_user_id,
+                scope=scope,
+            )
+            return {
+                "success": False,
+                "rule": "unknown_scope",
+                "normalized_role": None,
+                "reason": f"unknown scope {scope!r}",
+            }
+
+        # 2) Validate the assigner can grant this role at this scope.
+        if not can_assign_role(assigner, assignee, scope):
+            log_assignment_denied(
+                rule="assigner_not_authorized",
+                assigner=request.assigner_user_id,
+                assignee=request.assignee_user_id,
+                scope=scope,
+            )
+            return {
+                "success": False,
+                "rule": "assigner_not_authorized",
+                "normalized_role": None,
+                "reason": (
+                    f"role {assigner!r} cannot assign {assignee!r} at "
+                    f"{scope} scope per the canonical taxonomy"
+                ),
+            }
+
+        # Successful assignment — resolve any legacy alias so downstream
+        # storage sees only canonical strings.
+        normalized = (
+            normalize_org_role(assignee) if scope == "organization" else assignee
+        )
+
+        logger.info(
+            "role assignment allowed: %s -> %s (scope=%s)",
+            assigner,
+            normalized,
+            scope,
+            extra={
+                "assigner_user_id": request.assigner_user_id,
+                "assignee_user_id": request.assignee_user_id,
+                "scope": scope,
+            },
+        )
+        return {
+            "success": True,
+            "rule": None,
+            "normalized_role": normalized,
+            "reason": (
+                f"{assigner!r} may assign {normalized!r} at {scope} scope"
+            ),
+        }
+
     async def cleanup(self) -> None:
         """Service cleanup on shutdown"""
         try:

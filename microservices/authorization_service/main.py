@@ -38,7 +38,13 @@ from .models import (
     HealthResponse, ServiceInfo, ServiceStats,
     ResourceAccessRequest, ResourceAccessResponse,
     GrantPermissionRequest, RevokePermissionRequest,
-    UserPermissionSummary, BulkPermissionRequest
+    UserPermissionSummary, BulkPermissionRequest,
+    AssignRoleRequest,
+)
+from .role_validator import (
+    is_valid_org_role,
+    is_valid_platform_role,
+    log_assignment_denied,
 )
 
 # Initialize configuration
@@ -408,6 +414,99 @@ async def bulk_revoke_permissions(request: BulkPermissionRequest):
     except Exception as e:
         logger.error(f"Bulk revoke permissions failed: {e}")
         raise HTTPException(status_code=500, detail=f"Bulk revoke permissions failed: {str(e)}")
+
+# ==========================================
+# Role Assignment (canonical taxonomy)
+# ==========================================
+
+@app.post("/api/v1/authorization/assign-role")
+async def assign_role(request: AssignRoleRequest):
+    """
+    Assign a role to a user using the canonical role taxonomy.
+
+    Validates the role string and the assigner/assignee relationship
+    against docs/guidance/role-taxonomy.md via role_validator. Invalid
+    role strings return HTTP 400 with the violated rule name; denied
+    assignments (valid strings but assigner lacks authority) return HTTP
+    403. Denials emit a structured warning log line.
+    """
+    global authorization_service
+
+    if not authorization_service:
+        raise HTTPException(status_code=503, detail="Service not available")
+
+    # 1) Up-front validation of the role *string* for the scope so we
+    #    return HTTP 400 (not 403) when the input shape is bogus.
+    scope = request.scope
+    if scope == "organization":
+        if not is_valid_org_role(request.assignee_role):
+            log_assignment_denied(
+                rule="invalid_org_role",
+                assigner=request.assigner_user_id,
+                assignee=request.assignee_user_id,
+                scope=scope,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "rule": "invalid_org_role",
+                    "message": (
+                        f"{request.assignee_role!r} is not a valid org role — "
+                        "see docs/guidance/role-taxonomy.md"
+                    ),
+                },
+            )
+    elif scope == "platform":
+        if not is_valid_platform_role(request.assignee_role):
+            log_assignment_denied(
+                rule="invalid_platform_role",
+                assigner=request.assigner_user_id,
+                assignee=request.assignee_user_id,
+                scope=scope,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "rule": "invalid_platform_role",
+                    "message": (
+                        f"{request.assignee_role!r} is not a valid "
+                        "platform-admin role — see "
+                        "docs/guidance/role-taxonomy.md"
+                    ),
+                },
+            )
+    elif scope != "app":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "rule": "unknown_scope",
+                "message": f"unknown scope {scope!r}",
+            },
+        )
+
+    # 2) Delegate to the service, which re-runs validation and applies
+    #    the can_assign_role lattice.
+    result = await authorization_service.assign_role(request)
+
+    if not result.get("success"):
+        rule = result.get("rule", "denied")
+        # Invalid-shape failures = 400; authority failures = 403.
+        if rule in {"invalid_org_role", "invalid_platform_role", "unknown_scope"}:
+            raise HTTPException(
+                status_code=400,
+                detail={"rule": rule, "message": result.get("reason", "")},
+            )
+        raise HTTPException(
+            status_code=403,
+            detail={"rule": rule, "message": result.get("reason", "")},
+        )
+
+    return {
+        "message": "Role assigned successfully",
+        "normalized_role": result.get("normalized_role"),
+        "scope": scope,
+    }
+
 
 # ==========================================
 # Administrative Endpoints
