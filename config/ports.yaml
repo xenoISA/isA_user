@@ -394,6 +394,11 @@ microservices:
     k8s_service: "fulfillment"
     description: "Shipping and fulfillment"
 
+  sharing_service:
+    port: 8255
+    k8s_service: "sharing"
+    description: "Session share links"
+
 # =============================================================================
 # Port Ranges Summary
 # =============================================================================
