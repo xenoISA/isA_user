@@ -198,6 +198,23 @@ class BulkPermissionRequest(BaseModel):
     batch_reason: Optional[str] = None
 
 
+class AssignRoleRequest(BaseModel):
+    """
+    Request to assign a role to a user at a given scope.
+
+    Role strings and assignment rules are validated against the canonical
+    role taxonomy. See docs/guidance/role-taxonomy.md and
+    microservices/authorization_service/role_validator.py.
+    """
+    assigner_user_id: str
+    assigner_role: str
+    assignee_user_id: str
+    assignee_role: str
+    scope: str = "organization"  # "organization" | "platform" | "app"
+    organization_id: Optional[str] = None
+    reason: Optional[str] = None
+
+
 # ====================
 # Summary and Analytics Models
 # ====================

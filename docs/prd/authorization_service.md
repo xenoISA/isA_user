@@ -103,6 +103,65 @@
 
 ---
 
+## Roles
+
+This service validates every role-assignment and permission-check input
+against the **unified role hierarchy** defined in
+[`docs/guidance/role-taxonomy.md`](../guidance/role-taxonomy.md). The
+implementation lives in
+[`microservices/authorization_service/role_validator.py`](../../microservices/authorization_service/role_validator.py).
+
+### Recognized role strings (scope = `organization`)
+
+| Role string | Archetype | Notes |
+|---|---|---|
+| `owner` | Org admin | Exactly one per org. Can assign any org role. |
+| `admin` | Org admin | Can assign `member`, `viewer`, `guest`. |
+| `member` | Org user | Read/write within org scope. Cannot assign roles. |
+| `viewer` | Org user (read-only) | Cannot assign roles. |
+| `guest` | Org user (read-only, legacy) | Treated as `viewer` for new code. |
+| `editor` *(legacy)* | Org user | Legacy `authorization_service.RoleEnum.editor`; normalized to `member` on ingest. |
+
+### Recognized role strings (scope = `platform`)
+
+Only `super_admin` may assign platform-admin roles. See
+`role-taxonomy.md` §Platform admin.
+
+### Assignment rules (org scope)
+
+| Assigner | May assign |
+|---|---|
+| `owner` | `owner`, `admin`, `member`, `viewer`, `guest` |
+| `admin` | `member`, `viewer`, `guest` |
+| `member` / `viewer` / `guest` | *(nothing)* |
+| `service` (machine principal) | *(nothing)* |
+
+### Enforcement surface
+
+- `POST /api/v1/authorization/assign-role` validates both the role string
+  and the assigner's authority. Invalid role strings return **HTTP 400**
+  with the violated rule name; valid strings from an unauthorized
+  assigner return **HTTP 403**.
+- Every denial emits a structured `logger.warning("role assignment denied")`
+  line carrying `{rule, assigner, assignee, scope}` so aggregators can
+  count violations per rule.
+- Internal callers (other services invoking the grant logic in-process)
+  reach the same lattice via
+  `AuthorizationService.assign_role(...)`.
+
+### Out of scope
+
+- `service` is a machine principal, not a human archetype — it never
+  grants or receives human roles.
+- `consumer` (c-user) roles are provisioned by the consuming app's
+  signup flow (see `role-taxonomy.md` §c-user Lifecycle), not through
+  this service.
+
+Related: epic [#270](https://github.com/xenoISA/isA_user/issues/270),
+story [#273](https://github.com/xenoISA/isA_user/issues/273).
+
+---
+
 ## Epics and User Stories
 
 ### Epic 1: Resource Access Validation
