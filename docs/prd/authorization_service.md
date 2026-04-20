@@ -1,5 +1,7 @@
 # Authorization Service - Product Requirements Document (PRD)
 
+> **Role taxonomy**: see [`docs/guidance/role-taxonomy.md`](../guidance/role-taxonomy.md) for the canonical definition of platform-admin / org-admin / org-user / c-user archetypes that this service validates against. Tracked by epic #270.
+
 ## Product Overview
 
 **Service Name**: authorization_service
