@@ -41,15 +41,18 @@ def create_billing_service(
     product_client = None
     wallet_client = None
     subscription_client = None
+    agent_client = None
 
     try:
-        from .clients import ProductClient, WalletClient, SubscriptionClient
+        from .clients import ProductClient, WalletClient, SubscriptionClient, AgentClient
 
         wallet_client = WalletClient()
         product_client = ProductClient()
         subscription_client = SubscriptionClient()
+        agent_client = AgentClient()
         logger.info(
-            "✅ Service clients initialized for billing service (including SubscriptionClient)"
+            "✅ Service clients initialized for billing service "
+            "(SubscriptionClient + AgentClient)"
         )
 
     except Exception as e:
@@ -63,6 +66,7 @@ def create_billing_service(
         product_client=product_client,
         wallet_client=wallet_client,
         subscription_client=subscription_client,
+        agent_client=agent_client,
     )
 
 

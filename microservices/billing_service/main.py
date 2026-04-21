@@ -583,6 +583,39 @@ async def get_invoices(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+@app.get("/api/v1/billing/usage/overview")
+async def get_usage_overview(
+    request: Request,
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    period_days: int = Query(30, ge=1, le=365),
+    service: BillingService = Depends(get_billing_service),
+):
+    """Cross-service usage overview for the console Usage page (Story #458).
+
+    Combines billing aggregations (requests/tokens/cost daily series) with
+    counts from agent_service (active agents). Returns ``warnings`` for any
+    upstream that was unavailable instead of failing the request.
+    """
+    resolved_user_id = user_id or request.headers.get("X-User-Id")
+    if not resolved_user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required: X-User-Id header or user_id param",
+        )
+    resolved_org_id = organization_id or request.headers.get("X-Organization-Id")
+
+    try:
+        return await service.get_usage_overview(
+            user_id=resolved_user_id,
+            period_days=period_days,
+            organization_id=resolved_org_id,
+        )
+    except Exception as e:
+        logger.error(f"Error getting usage overview: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @app.get("/api/v1/billing/usage/aggregations")
 async def get_usage_aggregations(
     user_id: Optional[str] = None,

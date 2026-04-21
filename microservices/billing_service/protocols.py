@@ -263,6 +263,19 @@ class SubscriptionClientProtocol(Protocol):
         ...
 
 
+class AgentClientProtocol(Protocol):
+    """Protocol for agent service client (read-only counts for overview aggregator)."""
+
+    async def count_agents(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return number of agent configs for a user/org, or None on failure."""
+        ...
+
+
 # ====================
 # Custom Exceptions (no I/O operations)
 # ====================
