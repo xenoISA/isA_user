@@ -511,7 +511,7 @@ async def require_admin_caller(
 
 health = HealthCheck("auth_service", version="2.0.0", shutdown_manager=shutdown_manager)
 health.add_postgres(lambda: auth_microservice.auth_service.auth_repository.db if auth_microservice.auth_service and hasattr(auth_microservice.auth_service, 'auth_repository') and auth_microservice.auth_service.auth_repository else None)
-health.add_nats(lambda: event_bus)
+health.add_nats(lambda: auth_microservice.event_bus)
 
 
 @app.get("/api/v1/auth/health")
