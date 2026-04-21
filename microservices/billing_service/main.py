@@ -228,7 +228,6 @@ async def get_billing_service() -> BillingService:
 health = HealthCheck("billing_service", version="1.0.0", shutdown_manager=shutdown_manager)
 health.add_postgres(lambda: repository.db if repository else None)
 health.add_nats(lambda: event_bus)
-health.add_minio(lambda: s3_client)
 
 
 @app.get("/api/v1/billing/health")
