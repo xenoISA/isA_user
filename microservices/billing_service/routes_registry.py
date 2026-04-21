@@ -82,6 +82,12 @@ SERVICE_ROUTES = [
         "description": "Get usage aggregations"
     },
     {
+        "path": "/api/v1/billing/usage/overview",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Cross-service usage overview (Story #458)"
+    },
+    {
         "path": "/api/v1/billing/stats",
         "methods": ["GET"],
         "auth_required": True,

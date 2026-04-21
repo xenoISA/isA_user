@@ -14,6 +14,7 @@ import httpx
 from core.nats_client import Event
 
 from .protocols import (
+    AgentClientProtocol,
     BillingRepositoryProtocol,
     EventBusProtocol,
     ProductClientProtocol,
@@ -62,6 +63,7 @@ class BillingService:
         product_client: Optional[ProductClientProtocol] = None,
         wallet_client: Optional[WalletClientProtocol] = None,
         subscription_client: Optional[SubscriptionClientProtocol] = None,
+        agent_client: Optional[AgentClientProtocol] = None,
     ):
         """
         Initialize billing service with injected dependencies
@@ -72,12 +74,14 @@ class BillingService:
             product_client: Optional client for product service communication
             wallet_client: Optional client for wallet service communication
             subscription_client: Optional client for subscription service communication
+            agent_client: Optional client for agent service (used by usage overview)
         """
         self.repository = repository
         self.event_bus = event_bus
         self.product_client = product_client
         self.wallet_client = wallet_client
         self.subscription_client = subscription_client
+        self.agent_client = agent_client
 
         logger.info("✅ BillingService initialized with dependency injection")
 
@@ -1179,6 +1183,108 @@ class BillingService:
         if warning:
             result["warning"] = warning
         return result
+
+    # ====================
+    # Usage Overview Aggregator (Story #458)
+    # ====================
+
+    async def get_usage_overview(
+        self,
+        user_id: str,
+        period_days: int = 30,
+        organization_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Cross-service usage overview for the console Usage page.
+
+        Combines billing-side aggregations (requests, tokens, cost) with
+        agent_service counts. Each upstream is independent — failure of one
+        does not fail the whole response; instead the failed source produces a
+        ``warnings`` entry and a null/zero value.
+        """
+        period_end = datetime.utcnow()
+        period_start = period_end - timedelta(days=period_days)
+        warnings: List[str] = []
+
+        # --- billing aggregations: daily series + totals ---
+        daily: List[Dict[str, Any]] = []
+        totals = {"requests": 0, "tokens": 0, "cost": 0.0}
+        try:
+            aggregations = await self.repository.get_usage_aggregations(
+                user_id=user_id,
+                organization_id=organization_id,
+                period_start=period_start,
+                period_end=period_end,
+                period_type="daily",
+                limit=period_days,
+            )
+            # repository returns one row per (period_start, service_type, product_id);
+            # collapse to a single row per day for the chart.
+            by_day: Dict[str, Dict[str, float]] = {}
+            for agg in aggregations or []:
+                day_key = agg.period_start.strftime("%Y-%m-%d")
+                row = by_day.setdefault(day_key, {"requests": 0, "tokens": 0, "cost": 0.0})
+                row["requests"] += int(agg.total_usage_count or 0)
+                row["tokens"] += int(agg.total_usage_amount or 0)
+                row["cost"] += float(agg.total_cost or 0)
+
+            for day_key in sorted(by_day.keys()):
+                row = by_day[day_key]
+                daily.append({
+                    "date": day_key,
+                    "requests": int(row["requests"]),
+                    "tokens": int(row["tokens"]),
+                    "cost": round(float(row["cost"]), 4),
+                })
+                totals["requests"] += int(row["requests"])
+                totals["tokens"] += int(row["tokens"])
+                totals["cost"] += float(row["cost"])
+        except Exception as e:
+            logger.warning(f"get_usage_overview: billing aggregations failed: {e}")
+            warnings.append("billing_aggregations_unavailable")
+
+        totals["cost"] = round(float(totals["cost"]), 4)
+
+        # --- agent count ---
+        active_agents: Optional[int] = 0
+        if self.agent_client:
+            try:
+                active_agents = await self.agent_client.count_agents(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    status="active",
+                )
+                if active_agents is None:
+                    warnings.append("agent_service_unavailable")
+                    active_agents = 0
+            except Exception as e:
+                logger.warning(f"get_usage_overview: agent_client failed: {e}")
+                warnings.append("agent_service_unavailable")
+                active_agents = 0
+        else:
+            warnings.append("agent_service_unavailable")
+
+        return {
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "period": {
+                "start": period_start.isoformat(),
+                "end": period_end.isoformat(),
+                "days": period_days,
+            },
+            "totals": {
+                "requests": totals["requests"],
+                "tokens": totals["tokens"],
+                "cost": totals["cost"],
+                "currency": "USD",
+            },
+            "counts": {
+                "active_agents": active_agents,
+                "model_deployments": None,
+                "prompt_versions": None,
+            },
+            "daily": daily,
+            "warnings": warnings,
+        }
 
     # ====================
     # 统计和报告
