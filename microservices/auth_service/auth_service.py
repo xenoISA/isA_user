@@ -11,6 +11,7 @@ This service uses dependency injection for all external dependencies:
 - Event bus is injected (optional)
 """
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Dict, Any, Optional, List
 from datetime import datetime, timedelta, timezone
@@ -568,18 +569,22 @@ class AuthenticationService:
             if not self.jwt_manager:
                 return {"success": False, "error": "JWT manager not available"}
 
-            # Validate user exists in Account Service (optional)
+            # Validate user via Account Service — fire-and-forget (xenoISA/isA_user#317).
+            # Result was only used for logging, but the awaited call added a full
+            # service roundtrip (~hundreds of ms) to the login hot path.
             if self.account_client:
-                try:
-                    user_account = await self.account_client.get_account_profile(user_id)
-                    if user_account:
-                        logger.info(f"User {user_id} validated via Account Service")
-                    else:
-                        logger.warning(
-                            f"User {user_id} not found in Account Service - proceeding anyway (dev/test mode)"
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to validate user via Account Service: {e}")
+                async def _validate_user_bg() -> None:
+                    try:
+                        user_account = await self.account_client.get_account_profile(user_id)
+                        if user_account:
+                            logger.info(f"User {user_id} validated via Account Service")
+                        else:
+                            logger.warning(
+                                f"User {user_id} not found in Account Service (dev/test mode)"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to validate user via Account Service: {e}")
+                asyncio.create_task(_validate_user_bg())
 
             # Import TokenClaims from core.jwt_manager
             from core.jwt_manager import TokenClaims, TokenScope, TokenType
@@ -636,10 +641,18 @@ class AuthenticationService:
                             },
                         }
 
-                    await self.event_bus.publish_event(event)
-                    logger.info(f"Published user.logged_in event for user {user_id}")
+                    # Fire-and-forget NATS publish (xenoISA/isA_user#317).
+                    # The login response must not wait for event-bus RTT —
+                    # downstream consumers handle their own retries/backpressure.
+                    async def _publish_login_event() -> None:
+                        try:
+                            await self.event_bus.publish_event(event)
+                            logger.info(f"Published user.logged_in event for user {user_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to publish user.logged_in event: {e}")
+                    asyncio.create_task(_publish_login_event())
                 except Exception as e:
-                    logger.error(f"Failed to publish user.logged_in event: {e}")
+                    logger.error(f"Failed to schedule user.logged_in publish: {e}")
                     # Don't fail the login if event publishing fails
 
             return {
