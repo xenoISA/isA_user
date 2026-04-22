@@ -319,6 +319,86 @@ class ApiKeyRepository:
             logger.error(f"Error deleting API key: {str(e)}")
             return False
 
+    # ------------------------------------------------------------------
+    # Per-key Rate Limits (Story xenoISA/isA_Console#461)
+    # ------------------------------------------------------------------
+
+    async def get_api_key_rate_limits(
+        self, organization_id: str, key_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Return the rate_limits sub-field on a specific api-key entry.
+
+        Returns ``{}`` when the key exists but has no rate-limit override,
+        and ``None`` when the org or key is missing.
+        """
+        try:
+            async with self.db:
+                result = await self.db.query_row(
+                    f"SELECT api_keys FROM {self.schema}.{self.organizations_table} "
+                    "WHERE organization_id = $1",
+                    params=[organization_id],
+                )
+            if not result:
+                return None
+            api_keys = self._parse_api_keys(result.get("api_keys", []))
+            for key_data in api_keys:
+                if key_data.get("key_id") == key_id:
+                    raw = key_data.get("rate_limits")
+                    if raw is None:
+                        return {}
+                    if isinstance(raw, str):
+                        try:
+                            return json.loads(raw)
+                        except Exception:
+                            return {}
+                    return raw
+            return None
+        except Exception as e:
+            logger.error(f"Error reading api-key rate_limits {key_id}: {e}")
+            return None
+
+    async def update_api_key_rate_limits(
+        self,
+        organization_id: str,
+        key_id: str,
+        rate_limits: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Upsert rate_limits on a specific api-key entry.
+
+        Returns the saved value, or ``None`` if the org / key is missing.
+        """
+        try:
+            async with self.db:
+                result = await self.db.query_row(
+                    f"SELECT api_keys FROM {self.schema}.{self.organizations_table} "
+                    "WHERE organization_id = $1",
+                    params=[organization_id],
+                )
+            if not result:
+                return None
+            api_keys = self._parse_api_keys(result.get("api_keys", []))
+
+            updated = False
+            for key_data in api_keys:
+                if key_data.get("key_id") == key_id:
+                    key_data["rate_limits"] = rate_limits
+                    updated = True
+                    break
+            if not updated:
+                return None
+
+            now = datetime.now(timezone.utc)
+            async with self.db:
+                await self.db.execute(
+                    f"UPDATE {self.schema}.{self.organizations_table} "
+                    "SET api_keys = $1, updated_at = $2 WHERE organization_id = $3",
+                    params=[api_keys, now, organization_id],
+                )
+            return rate_limits
+        except Exception as e:
+            logger.error(f"Error updating api-key rate_limits {key_id}: {e}")
+            return None
+
     async def cleanup_expired_keys(self) -> int:
         """Clean up expired API keys across all organizations"""
         try:

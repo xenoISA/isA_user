@@ -45,7 +45,8 @@ from .models import (
     OrganizationMemberResponse, OrganizationListResponse,
     OrganizationMemberListResponse, OrganizationContextResponse,
     OrganizationStatsResponse, OrganizationUsageResponse,
-    OrganizationRole, HealthResponse, ServiceInfo, ServiceStats
+    OrganizationRole, HealthResponse, ServiceInfo, ServiceStats,
+    RateLimits, RateLimitsEnvelope,
 )
 from .family_sharing_models import (
     CreateSharingRequest, UpdateSharingRequest,
@@ -388,6 +389,77 @@ async def get_user_organizations(
         return await service.get_user_organizations(user_id)
     except OrganizationServiceError as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ============ Rate Limits (Story xenoISA/isA_Console#461) ============
+
+
+@app.get(
+    "/api/v1/organization/organizations/{organization_id}/rate-limits",
+    response_model=RateLimitsEnvelope,
+)
+async def get_org_rate_limits(
+    organization_id: str = Path(..., description="组织ID"),
+    user_id: str = Depends(require_auth_or_internal_service),
+    service: OrganizationService = Depends(get_organization_service),
+):
+    """Return the org-level rate-limit defaults.
+
+    v1: limits are stored but not yet enforced — APISIX sync is a follow-up.
+    """
+    # Verify caller is at least a member; admin gating happens on PUT.
+    has_access = await service.check_user_access(organization_id, user_id)
+    if not has_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Caller is not a member of this organization",
+        )
+
+    raw = await service.repository.get_org_rate_limits(organization_id)
+    if raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    if not raw:
+        return RateLimitsEnvelope(rate_limits=RateLimits(), source="unset")
+    return RateLimitsEnvelope(rate_limits=RateLimits(**raw), source="configured")
+
+
+@app.put(
+    "/api/v1/organization/organizations/{organization_id}/rate-limits",
+    response_model=RateLimitsEnvelope,
+)
+async def update_org_rate_limits(
+    organization_id: str = Path(..., description="组织ID"),
+    request: RateLimits = ...,
+    user_id: str = Depends(require_auth_or_internal_service),
+    service: OrganizationService = Depends(get_organization_service),
+):
+    """Upsert the org-level rate-limit defaults. Requires admin in the org.
+
+    v1: limits are stored but not yet enforced — APISIX sync is a follow-up.
+    """
+    has_admin = await service.check_admin_access(organization_id, user_id)
+    if not has_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required to update rate limits",
+        )
+
+    payload = request.model_dump(exclude_none=False)
+    saved = await service.repository.update_org_rate_limits(
+        organization_id, payload
+    )
+    if saved is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+    return RateLimitsEnvelope(
+        rate_limits=RateLimits(**saved), source="configured"
+    )
 
 
 # ============ Member Management Endpoints ============
