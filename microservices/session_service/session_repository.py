@@ -322,8 +322,8 @@ class SessionRepository:
             """
             params = [user_id, True, limit, offset]
             async with self.db:
-                rows = await self.db.fetch(query, params, schema=self.schema)
-            return [self._row_to_session(row) for row in rows]
+                rows = await self.db.query(query, params, schema=self.schema)
+            return [self._row_to_session(row) for row in (rows or [])]
         except Exception as e:
             logger.error(f"Error getting starred sessions: {e}")
             return []
