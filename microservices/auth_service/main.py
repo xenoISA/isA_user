@@ -157,6 +157,31 @@ class ApiKeyCreateRequest(BaseModel):
     expires_days: Optional[int] = Field(None, description="Expiration days")
 
 
+class RateLimitsRequest(BaseModel):
+    """Rate-limit override for an api-key (Story xenoISA/isA_Console#461).
+
+    Each field is optional; null = no limit on that dimension.
+    """
+
+    requests_per_second: Optional[int] = Field(None, ge=0)
+    requests_per_minute: Optional[int] = Field(None, ge=0)
+    requests_per_day: Optional[int] = Field(None, ge=0)
+    tokens_per_day: Optional[int] = Field(None, ge=0)
+
+
+class RateLimitsResponse(BaseModel):
+    """Wrapper returned by api-key rate-limit endpoints."""
+
+    rate_limits: RateLimitsRequest
+    source: str = Field(
+        "configured",
+        description=(
+            "How the override was resolved. v1 returns 'configured' if any "
+            "fields are set, 'unset' otherwise."
+        ),
+    )
+
+
 class DeviceRegistrationRequest(BaseModel):
     """Device registration request"""
 
@@ -1448,6 +1473,80 @@ async def revoke_api_key(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API key revocation failed",
         )
+
+
+# Rate Limits per API Key (Story xenoISA/isA_Console#461)
+
+
+@app.get(
+    "/api/v1/auth/api-keys/{key_id}/rate-limits", response_model=RateLimitsResponse
+)
+async def get_api_key_rate_limits(
+    key_id: str,
+    organization_id: str,
+    api_key_service: ApiKeyService = Depends(get_api_key_service),
+    caller: Dict[str, Any] = Depends(get_current_caller),
+):
+    """Read the rate-limit override on a specific api-key.
+
+    Authorization mirrors the other api-key routes: callers may read keys
+    in their own org; admins may read any.
+    """
+    if not _is_admin_caller(caller):
+        caller_org = caller.get("organization_id")
+        if caller_org and caller_org != organization_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only read rate limits for your own organization",
+            )
+
+    result = await api_key_service.get_rate_limits(organization_id, key_id)
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.get("error", "API key not found"),
+        )
+    return RateLimitsResponse(
+        rate_limits=RateLimitsRequest(**(result.get("rate_limits") or {})),
+        source=result.get("source", "unset"),
+    )
+
+
+@app.put(
+    "/api/v1/auth/api-keys/{key_id}/rate-limits", response_model=RateLimitsResponse
+)
+async def update_api_key_rate_limits(
+    key_id: str,
+    organization_id: str,
+    request: RateLimitsRequest,
+    api_key_service: ApiKeyService = Depends(get_api_key_service),
+    caller: Dict[str, Any] = Depends(get_current_caller),
+):
+    """Upsert the rate-limit override on a specific api-key (admin-only).
+
+    v1: limits are stored but not yet enforced — APISIX sync follow-up.
+    """
+    if not _is_admin_caller(caller):
+        caller_org = caller.get("organization_id")
+        if caller_org and caller_org != organization_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only update rate limits for your own organization",
+            )
+
+    payload = request.model_dump(exclude_none=False)
+    result = await api_key_service.update_rate_limits(
+        organization_id, key_id, payload
+    )
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.get("error", "API key not found"),
+        )
+    return RateLimitsResponse(
+        rate_limits=RateLimitsRequest(**(result.get("rate_limits") or {})),
+        source=result.get("source", "configured"),
+    )
 
 
 # Device Authentication Endpoints

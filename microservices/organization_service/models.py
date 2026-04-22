@@ -279,3 +279,49 @@ class ServiceStats(BaseModel):
     total_members: int = 0
     requests_today: int = 0
     average_response_time_ms: float = 0.0
+
+
+# ============================================================================
+# Rate Limits (Story xenoISA/isA_Console#461)
+# ============================================================================
+
+
+class RateLimits(BaseModel):
+    """Managed rate-limit configuration for an org or api-key.
+
+    All fields are optional integers; ``null`` (or omitted) on a field means
+    no limit on that dimension. v1 stores these values but APISIX
+    enforcement is wired separately — see PR description for the deferred
+    sync follow-up.
+    """
+
+    requests_per_second: Optional[int] = Field(
+        None, ge=0, description="Max requests per second; null = no limit"
+    )
+    requests_per_minute: Optional[int] = Field(
+        None, ge=0, description="Max requests per minute; null = no limit"
+    )
+    requests_per_day: Optional[int] = Field(
+        None, ge=0, description="Max requests per day; null = no limit"
+    )
+    tokens_per_day: Optional[int] = Field(
+        None, ge=0, description="Max LLM tokens per day; null = no limit"
+    )
+
+
+class RateLimitsEnvelope(BaseModel):
+    """Wrapper used by the management endpoints.
+
+    ``source`` distinguishes whether the limits were explicitly configured
+    or derived from defaults — useful for the console to render an
+    ``inherited`` badge once we add tier-based defaults.
+    """
+
+    rate_limits: RateLimits
+    source: str = Field(
+        "configured",
+        description=(
+            "How the limits were resolved. v1 always returns 'configured' "
+            "for explicitly-set values or 'unset' when the row has no overrides."
+        ),
+    )

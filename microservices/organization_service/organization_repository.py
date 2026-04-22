@@ -194,6 +194,70 @@ class OrganizationRepository:
             logger.error(f"Error updating organization {organization_id}: {e}")
             return None
     
+    # ------------------------------------------------------------------
+    # Rate Limits (Story xenoISA/isA_Console#461)
+    # ------------------------------------------------------------------
+
+    async def get_org_rate_limits(
+        self, organization_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Return the org's rate_limits JSONB column. None if row missing.
+
+        An empty dict (or null in Postgres) means "no managed limits set" —
+        the API layer treats both as 'unset' source.
+        """
+        try:
+            query = (
+                f"SELECT rate_limits FROM {self.schema}.{self.organizations_table} "
+                "WHERE organization_id = $1"
+            )
+            async with self.db:
+                row = await self.db.query_row(query, params=[organization_id])
+            if row is None:
+                return None
+            raw = row.get("rate_limits")
+            if raw is None:
+                return {}
+            if isinstance(raw, str):
+                try:
+                    import json as _json
+
+                    return _json.loads(raw)
+                except Exception:
+                    return {}
+            return raw
+        except Exception as e:
+            logger.error(f"Error getting org rate_limits {organization_id}: {e}")
+            return None
+
+    async def update_org_rate_limits(
+        self,
+        organization_id: str,
+        rate_limits: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Upsert the org's rate_limits JSONB column. Returns the new value
+        on success or None if the org doesn't exist.
+        """
+        try:
+            query = (
+                f"UPDATE {self.schema}.{self.organizations_table} "
+                "SET rate_limits = $1, updated_at = $2 "
+                "WHERE organization_id = $3"
+            )
+            now = datetime.now(timezone.utc)
+            async with self.db:
+                count = await self.db.execute(
+                    query, params=[rate_limits, now, organization_id]
+                )
+            if count is None or count == 0:
+                return None
+            return rate_limits
+        except Exception as e:
+            logger.error(
+                f"Error updating org rate_limits {organization_id}: {e}"
+            )
+            return None
+
     async def delete_organization(self, organization_id: str) -> bool:
         """删除组织（软删除）"""
         try:

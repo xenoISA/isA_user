@@ -121,15 +121,61 @@ class ApiKeyService:
         """Delete API key permanently"""
         try:
             success = await self.repository.delete_api_key(organization_id, key_id)
-            
+
             if success:
                 return {"success": True, "message": "API key deleted"}
             else:
                 return {"success": False, "error": "API key not found"}
-                
+
         except Exception as e:
             logger.error(f"Failed to delete API key: {e}")
             return {
                 "success": False,
                 "error": str(e)
             }
+
+    # ------------------------------------------------------------------
+    # Per-key Rate Limits (Story xenoISA/isA_Console#461)
+    # ------------------------------------------------------------------
+
+    async def get_rate_limits(
+        self, organization_id: str, key_id: str
+    ) -> Dict[str, Any]:
+        """Read the rate-limit override on a specific api-key.
+
+        v1: limits are stored but not yet enforced — APISIX sync is a
+        separate follow-up issue.
+        """
+        try:
+            raw = await self.repository.get_api_key_rate_limits(
+                organization_id, key_id
+            )
+            if raw is None:
+                return {"success": False, "error": "API key not found"}
+            # Empty dict means "no override configured" — distinguish via source.
+            return {
+                "success": True,
+                "rate_limits": raw,
+                "source": "configured" if raw else "unset",
+            }
+        except Exception as e:
+            logger.error(f"Failed to read api-key rate_limits: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def update_rate_limits(
+        self,
+        organization_id: str,
+        key_id: str,
+        rate_limits: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Upsert the rate-limit override on a specific api-key."""
+        try:
+            saved = await self.repository.update_api_key_rate_limits(
+                organization_id, key_id, rate_limits
+            )
+            if saved is None:
+                return {"success": False, "error": "API key not found"}
+            return {"success": True, "rate_limits": saved, "source": "configured"}
+        except Exception as e:
+            logger.error(f"Failed to update api-key rate_limits: {e}")
+            return {"success": False, "error": str(e)}
