@@ -408,12 +408,14 @@ async def get_org_rate_limits(
     v1: limits are stored but not yet enforced — APISIX sync is a follow-up.
     """
     # Verify caller is at least a member; admin gating happens on PUT.
-    has_access = await service.check_user_access(organization_id, user_id)
-    if not has_access:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Caller is not a member of this organization",
-        )
+    # Internal-service callers (e.g. APISIX sync worker) bypass membership.
+    if user_id != "internal-service":
+        has_access = await service.check_user_access(organization_id, user_id)
+        if not has_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Caller is not a member of this organization",
+            )
 
     raw = await service.repository.get_org_rate_limits(organization_id)
     if raw is None:
@@ -441,12 +443,14 @@ async def update_org_rate_limits(
 
     v1: limits are stored but not yet enforced — APISIX sync is a follow-up.
     """
-    has_admin = await service.check_admin_access(organization_id, user_id)
-    if not has_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required to update rate limits",
-        )
+    # Internal-service callers bypass admin check (they're trusted upstream).
+    if user_id != "internal-service":
+        has_admin = await service.check_admin_access(organization_id, user_id)
+        if not has_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required to update rate limits",
+            )
 
     payload = request.model_dump(exclude_none=False)
     saved = await service.repository.update_org_rate_limits(
