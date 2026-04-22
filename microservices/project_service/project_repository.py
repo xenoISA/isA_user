@@ -43,7 +43,7 @@ class ProjectRepository:
     async def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
         try:
             async with self.db:
-                rows = await self.db.fetch(f"SELECT * FROM {self.schema}.{self.table} WHERE id = $1", params=[project_id])
+                rows = await self.db.query(f"SELECT * FROM {self.schema}.{self.table} WHERE id = $1", params=[project_id])
             return dict(rows[0]) if rows else None
         except Exception as e:
             raise RepositoryError("Failed to fetch project", cause=e) from e
@@ -51,11 +51,11 @@ class ProjectRepository:
     async def list_projects(self, user_id: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
         try:
             async with self.db:
-                rows = await self.db.fetch(
+                rows = await self.db.query(
                     f"SELECT * FROM {self.schema}.{self.table} WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
                     params=[user_id, limit, offset]
                 )
-            return [dict(r) for r in rows]
+            return [dict(r) for r in (rows or [])]
         except Exception as e:
             raise RepositoryError("Failed to list projects", cause=e) from e
 
@@ -93,7 +93,7 @@ class ProjectRepository:
     async def count_projects(self, user_id: str) -> int:
         try:
             async with self.db:
-                rows = await self.db.fetch(f"SELECT COUNT(*) as cnt FROM {self.schema}.{self.table} WHERE user_id = $1", params=[user_id])
+                rows = await self.db.query(f"SELECT COUNT(*) as cnt FROM {self.schema}.{self.table} WHERE user_id = $1", params=[user_id])
             return rows[0]["cnt"] if rows else 0
         except Exception as e:
             raise RepositoryError("Failed to count projects", cause=e) from e
