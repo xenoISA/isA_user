@@ -1,12 +1,13 @@
 """Component tests for auth-side effective limit resolution and usage bars."""
 
+import sys
+import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
 
 from microservices.auth_service.api_key_service import ApiKeyService
-from microservices.auth_service.main import ApiKeyVerificationRequest, verify_api_key
 from microservices.auth_service.rate_limit_state import RequestRateLimiter
 
 pytestmark = [pytest.mark.component, pytest.mark.tdd, pytest.mark.asyncio]
@@ -27,7 +28,18 @@ def _make_service(repo, org_client=None, billing_response=None):
 
 
 class TestVerifyApiKeyRateLimits:
-    async def test_verify_api_key_endpoint_propagates_rate_limit_response(self):
+    async def test_verify_api_key_endpoint_propagates_rate_limit_response(
+        self, monkeypatch
+    ):
+        observability = types.ModuleType("isa_common.observability")
+        observability.setup_observability = lambda *args, **kwargs: {}
+        monkeypatch.setitem(sys.modules, "isa_common.observability", observability)
+
+        from microservices.auth_service.main import (
+            ApiKeyVerificationRequest,
+            verify_api_key,
+        )
+
         api_key_service = AsyncMock()
         api_key_service.verify_api_key.return_value = {
             "rate_limited": True,
