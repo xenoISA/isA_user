@@ -296,6 +296,30 @@ class AuthServiceClient:
                 f"{self.base_url}/api/v1/auth/verify-api-key",
                 json={"api_key": api_key}
             )
+            if response.status_code == 429:
+                try:
+                    payload = response.json()
+                    detail = payload.get("detail", payload)
+                except Exception:
+                    detail = response.text or "Rate limit exceeded"
+                headers = {
+                    key: value
+                    for key, value in response.headers.items()
+                    if key.lower()
+                    in {
+                        "retry-after",
+                        "x-ratelimit-limit",
+                        "x-ratelimit-remaining",
+                        "x-ratelimit-field",
+                        "x-ratelimit-source",
+                    }
+                }
+                return {
+                    "valid": False,
+                    "rate_limited": True,
+                    "detail": detail,
+                    "headers": headers,
+                }
             response.raise_for_status()
             return response.json()
 

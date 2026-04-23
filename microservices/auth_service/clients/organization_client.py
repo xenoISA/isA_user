@@ -55,6 +55,19 @@ class OrganizationServiceClient:
             logger.error(f"Failed to get organization {organization_id}: {e}")
             return None
 
+    async def get_org_rate_limits(self, organization_id: str):
+        """Get the stored org-level rate-limit defaults."""
+        try:
+            if not self.client:
+                logger.warning("OrganizationServiceClient not available")
+                return None
+            return await self.client.get_org_rate_limits(organization_id)
+        except Exception as e:
+            logger.error(
+                f"Failed to get rate limits for organization {organization_id}: {e}"
+            )
+            return None
+
     async def close(self):
         """Close HTTP client"""
         if self.client:

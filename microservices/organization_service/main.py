@@ -405,7 +405,8 @@ async def get_org_rate_limits(
 ):
     """Return the org-level rate-limit defaults.
 
-    v1: limits are stored but not yet enforced — APISIX sync is a follow-up.
+    Request limits are enforced during API-key validation. APISIX-native
+    synchronization remains a follow-up.
     """
     # Verify caller is at least a member; admin gating happens on PUT.
     # Internal-service callers (e.g. APISIX sync worker) bypass membership.
@@ -441,7 +442,8 @@ async def update_org_rate_limits(
 ):
     """Upsert the org-level rate-limit defaults. Requires admin in the org.
 
-    v1: limits are stored but not yet enforced — APISIX sync is a follow-up.
+    Request limits are enforced during API-key validation. APISIX-native
+    synchronization remains a follow-up.
     """
     # Internal-service callers bypass admin check (they're trusted upstream).
     if user_id != "internal-service":

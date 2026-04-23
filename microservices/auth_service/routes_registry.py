@@ -138,6 +138,18 @@ AUTH_SERVICE_ROUTES = [
         "description": "Revoke API key (user or admin)"
     },
     {
+        "path": "/api/v1/auth/api-keys/{key_id}/rate-limits",
+        "methods": ["GET", "PUT"],
+        "auth_required": True,
+        "description": "Read or update API key rate limits"
+    },
+    {
+        "path": "/api/v1/auth/rate-limits/usage-vs-limit",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Live org usage vs configured rate limits"
+    },
+    {
         "path": "/api/v1/auth/oauth/clients",
         "methods": ["POST", "GET"],
         "auth_required": True,

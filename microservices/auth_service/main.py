@@ -101,6 +101,7 @@ class ApiKeyVerificationResponse(BaseModel):
     organization_id: Optional[str] = None
     name: Optional[str] = None
     permissions: Optional[List[str]] = []
+    effective_rate_limits: Optional[Dict[str, Optional[int]]] = None
     error: Optional[str] = None
 
 
@@ -180,6 +181,26 @@ class RateLimitsResponse(BaseModel):
             "fields are set, 'unset' otherwise."
         ),
     )
+
+
+class RateLimitUsageItem(BaseModel):
+    """Current usage against a configured rate-limit field."""
+
+    limit: Optional[int] = None
+    used: int = 0
+    remaining: Optional[int] = None
+    source: str = "unset"
+    window_seconds: int
+    percentage: Optional[float] = None
+
+
+class RateLimitUsageResponse(BaseModel):
+    """Usage vs configured limits for the console quota bars."""
+
+    organization_id: str
+    rate_limits: RateLimitsRequest
+    usage: Dict[str, RateLimitUsageItem]
+    warnings: List[str] = Field(default_factory=list)
 
 
 class DeviceRegistrationRequest(BaseModel):
@@ -382,7 +403,10 @@ class AuthMicroservice:
             self.auth_service = create_auth_service(
                 config=config_manager, event_bus=self.event_bus
             )
-            self.api_key_service = ApiKeyService(self.api_key_repository)
+            self.api_key_service = ApiKeyService(
+                self.api_key_repository,
+                organization_service_client=self.organization_service_client,
+            )
             self.device_auth_service = DeviceAuthService(
                 self.device_auth_repository, event_bus=self.event_bus
             )
@@ -415,6 +439,8 @@ class AuthMicroservice:
             await self.event_bus.close()
         if self.organization_service_client:
             await self.organization_service_client.close()
+        if self.api_key_service:
+            await self.api_key_service.close()
         logger.info("Authentication microservice shutdown completed")
 
 
@@ -1339,12 +1365,20 @@ async def verify_api_key(
     try:
         result = await api_key_service.verify_api_key(request.api_key)
 
+        if result.get("rate_limited"):
+            raise HTTPException(
+                status_code=result.get("status_code", 429),
+                detail=result.get("detail"),
+                headers=result.get("headers"),
+            )
+
         return ApiKeyVerificationResponse(
             valid=result.get("valid", False),
             key_id=result.get("key_id"),
             organization_id=result.get("organization_id"),
             name=result.get("name"),
             permissions=result.get("permissions", []),
+            effective_rate_limits=result.get("effective_rate_limits"),
             error=result.get("error") if not result.get("valid") else None,
         )
 
@@ -1524,7 +1558,8 @@ async def update_api_key_rate_limits(
 ):
     """Upsert the rate-limit override on a specific api-key (admin-only).
 
-    v1: limits are stored but not yet enforced — APISIX sync follow-up.
+    Request limits are enforced during API-key validation. APISIX-native
+    synchronization remains a follow-up.
     """
     if not _is_admin_caller(caller):
         caller_org = caller.get("organization_id")
@@ -1546,6 +1581,43 @@ async def update_api_key_rate_limits(
     return RateLimitsResponse(
         rate_limits=RateLimitsRequest(**(result.get("rate_limits") or {})),
         source=result.get("source", "configured"),
+    )
+
+
+@app.get(
+    "/api/v1/auth/rate-limits/usage-vs-limit",
+    response_model=RateLimitUsageResponse,
+)
+async def get_rate_limit_usage_vs_limit(
+    organization_id: str,
+    api_key_service: ApiKeyService = Depends(get_api_key_service),
+    caller: Dict[str, Any] = Depends(get_current_caller),
+):
+    """Return live org usage vs configured limits for the console page."""
+    if not _is_admin_caller(caller):
+        caller_org = caller.get("organization_id")
+        if caller_org and caller_org != organization_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only read usage for your own organization",
+            )
+
+    result = await api_key_service.get_org_usage_vs_limit(organization_id)
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.get("error", "Organization not found"),
+        )
+
+    return RateLimitUsageResponse(
+        organization_id=organization_id,
+        rate_limits=RateLimitsRequest(**(result.get("rate_limits") or {})),
+        usage={
+            key: RateLimitUsageItem(**value)
+            for key, value in (result.get("usage") or {}).items()
+            if value is not None
+        },
+        warnings=result.get("warnings", []),
     )
 
 

@@ -25,6 +25,29 @@ if not INTERNAL_SERVICE_SECRET:
 # Auth service URL for JWT verification
 AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:8201")
 
+# Shared HTTP client with connection pooling + keepalive.
+# Reusing a single AsyncClient avoids per-request TCP handshakes against the auth
+# service, which otherwise dominate localhost latency for verify-token.
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(5.0, connect=2.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+        )
+    return _http_client
+
+
+async def aclose_http_client() -> None:
+    """Close the shared client. Hook into FastAPI lifespan shutdown if desired."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+
 
 async def _extract_user_id_from_bearer(authorization: str) -> Optional[str]:
     """Extract user_id from a Bearer JWT token by calling auth service verify-token."""
@@ -32,17 +55,15 @@ async def _extract_user_id_from_bearer(authorization: str) -> Optional[str]:
         return None
     token = authorization[7:]
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{AUTH_SERVICE_URL}/api/v1/auth/verify-token",
-                json={"token": token},
-                timeout=5.0,
-            )
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("valid"):
-                    return result.get("user_id")
-            return None
+        response = await _get_http_client().post(
+            f"{AUTH_SERVICE_URL}/api/v1/auth/verify-token",
+            json={"token": token},
+        )
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("valid"):
+                return result.get("user_id")
+        return None
     except Exception as e:
         logger.warning(f"Failed to verify Bearer token via auth service: {e}")
         return None
@@ -51,18 +72,41 @@ async def _extract_user_id_from_bearer(authorization: str) -> Optional[str]:
 async def _extract_user_id_from_api_key(api_key: str) -> Optional[str]:
     """Verify an API key by calling auth service and return the associated user/org ID."""
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{AUTH_SERVICE_URL}/api/v1/auth/verify-api-key",
-                json={"api_key": api_key},
-                timeout=5.0,
+        response = await _get_http_client().post(
+            f"{AUTH_SERVICE_URL}/api/v1/auth/verify-api-key",
+            json={"api_key": api_key},
+        )
+        if response.status_code == 429:
+            try:
+                payload = response.json()
+                detail = payload.get("detail", payload)
+            except Exception:
+                detail = response.text or "Rate limit exceeded"
+            headers = {
+                key: value
+                for key, value in response.headers.items()
+                if key.lower()
+                in {
+                    "retry-after",
+                    "x-ratelimit-limit",
+                    "x-ratelimit-remaining",
+                    "x-ratelimit-field",
+                    "x-ratelimit-source",
+                }
+            }
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=detail,
+                headers=headers,
             )
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("valid"):
-                    # Return organization_id as the caller identity
-                    return result.get("organization_id")
-            return None
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("valid"):
+                # Return organization_id as the caller identity
+                return result.get("organization_id")
+        return None
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Failed to verify API key via auth service: {e}")
         return None
@@ -176,5 +220,6 @@ def is_internal_service_request(user_id: str) -> bool:
 __all__ = [
     "require_auth_or_internal_service",
     "optional_auth_or_internal_service",
-    "is_internal_service_request"
+    "is_internal_service_request",
+    "aclose_http_client",
 ]
