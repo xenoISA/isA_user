@@ -27,13 +27,32 @@ def _make_service(repo, org_client=None, billing_response=None):
     )
 
 
+class _NoopMetric:
+    def labels(self, *args, **kwargs):
+        return self
+
+    def inc(self, *args, **kwargs):
+        return None
+
+    def observe(self, *args, **kwargs):
+        return None
+
+
+def _install_isa_common_observability_stubs(monkeypatch):
+    observability = types.ModuleType("isa_common.observability")
+    observability.setup_observability = lambda *args, **kwargs: {}
+    metrics = types.ModuleType("isa_common.metrics")
+    metrics.create_counter = lambda *args, **kwargs: _NoopMetric()
+    metrics.create_histogram = lambda *args, **kwargs: _NoopMetric()
+    monkeypatch.setitem(sys.modules, "isa_common.observability", observability)
+    monkeypatch.setitem(sys.modules, "isa_common.metrics", metrics)
+
+
 class TestVerifyApiKeyRateLimits:
     async def test_verify_api_key_endpoint_propagates_rate_limit_response(
         self, monkeypatch
     ):
-        observability = types.ModuleType("isa_common.observability")
-        observability.setup_observability = lambda *args, **kwargs: {}
-        monkeypatch.setitem(sys.modules, "isa_common.observability", observability)
+        _install_isa_common_observability_stubs(monkeypatch)
 
         from microservices.auth_service.main import (
             ApiKeyVerificationRequest,
