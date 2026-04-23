@@ -42,7 +42,7 @@ from core.nats_client import NATSEventBus, get_event_bus
 from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
 
 from .api_key_repository import ApiKeyRepository
-from .api_key_service import ApiKeyService
+from .api_key_service import ApiKeyService, raise_api_key_rate_limit_if_present
 from .auth_repository import AuthRepository
 from .auth_service import AuthenticationService
 from .device_auth_repository import DeviceAuthRepository
@@ -1386,13 +1386,7 @@ async def verify_api_key(
     """Verify API key"""
     try:
         result = await api_key_service.verify_api_key(request.api_key)
-
-        if result.get("rate_limited"):
-            raise HTTPException(
-                status_code=result.get("status_code", 429),
-                detail=result.get("detail"),
-                headers=result.get("headers"),
-            )
+        raise_api_key_rate_limit_if_present(result)
 
         return ApiKeyVerificationResponse(
             valid=result.get("valid", False),

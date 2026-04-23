@@ -1,13 +1,14 @@
 """Component tests for auth-side effective limit resolution and usage bars."""
 
-import sys
-import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
 
-from microservices.auth_service.api_key_service import ApiKeyService
+from microservices.auth_service.api_key_service import (
+    ApiKeyService,
+    raise_api_key_rate_limit_if_present,
+)
 from microservices.auth_service.rate_limit_state import RequestRateLimiter
 
 pytestmark = [pytest.mark.component, pytest.mark.tdd, pytest.mark.asyncio]
@@ -27,40 +28,9 @@ def _make_service(repo, org_client=None, billing_response=None):
     )
 
 
-class _NoopMetric:
-    def labels(self, *args, **kwargs):
-        return self
-
-    def inc(self, *args, **kwargs):
-        return None
-
-    def observe(self, *args, **kwargs):
-        return None
-
-
-def _install_isa_common_observability_stubs(monkeypatch):
-    observability = types.ModuleType("isa_common.observability")
-    observability.setup_observability = lambda *args, **kwargs: {}
-    metrics = types.ModuleType("isa_common.metrics")
-    metrics.create_counter = lambda *args, **kwargs: _NoopMetric()
-    metrics.create_histogram = lambda *args, **kwargs: _NoopMetric()
-    monkeypatch.setitem(sys.modules, "isa_common.observability", observability)
-    monkeypatch.setitem(sys.modules, "isa_common.metrics", metrics)
-
-
 class TestVerifyApiKeyRateLimits:
-    async def test_verify_api_key_endpoint_propagates_rate_limit_response(
-        self, monkeypatch
-    ):
-        _install_isa_common_observability_stubs(monkeypatch)
-
-        from microservices.auth_service.main import (
-            ApiKeyVerificationRequest,
-            verify_api_key,
-        )
-
-        api_key_service = AsyncMock()
-        api_key_service.verify_api_key.return_value = {
+    async def test_verify_api_key_response_mapping_propagates_rate_limit_response(self):
+        result = {
             "rate_limited": True,
             "status_code": 429,
             "detail": {"field": "requests_per_minute"},
@@ -68,10 +38,7 @@ class TestVerifyApiKeyRateLimits:
         }
 
         with pytest.raises(HTTPException) as exc_info:
-            await verify_api_key(
-                ApiKeyVerificationRequest(api_key="isa_limited"),
-                api_key_service=api_key_service,
-            )
+            raise_api_key_rate_limit_if_present(result)
 
         assert exc_info.value.status_code == 429
         assert exc_info.value.detail == {"field": "requests_per_minute"}

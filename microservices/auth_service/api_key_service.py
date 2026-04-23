@@ -8,6 +8,7 @@ import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 
+from fastapi import HTTPException, status
 import httpx
 
 from .api_key_repository import ApiKeyRepository
@@ -18,6 +19,18 @@ from .rate_limit_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def raise_api_key_rate_limit_if_present(result: Dict[str, Any]) -> None:
+    """Raise the HTTP response expected by callers when API-key quota is exhausted."""
+    if not result.get("rate_limited"):
+        return
+
+    raise HTTPException(
+        status_code=result.get("status_code", status.HTTP_429_TOO_MANY_REQUESTS),
+        detail=result.get("detail"),
+        headers=result.get("headers"),
+    )
 
 
 class ApiKeyService:
