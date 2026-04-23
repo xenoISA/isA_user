@@ -203,7 +203,9 @@ class OrganizationServiceClient:
             logger.error(f"Error getting user organizations: {e}")
             return None
 
-    async def get_org_rate_limits(self, organization_id: str) -> Optional[Dict[str, Any]]:
+    async def get_org_rate_limits(
+        self, organization_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Get organization-level rate limits."""
         try:
             response = await self.client.get(
@@ -674,7 +676,7 @@ class OrganizationServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

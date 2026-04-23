@@ -13,7 +13,6 @@ Uses custom self-issued JWT tokens (isA_user provider) as primary authentication
 Note: Authorization/permission control is handled by separate Authorization microservice
 """
 
-import logging
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -27,7 +26,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # FastAPI imports
 from fastapi import FastAPI, HTTPException, Depends, status, Query, Form, Security
-from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # 导入新实现的服务
@@ -37,9 +35,11 @@ from isa_common.consul_client import ConsulRegistry
 # Database connection now handled by repositories directly
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.health import HealthCheck
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import NATSEventBus, get_event_bus
+from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
 
 from .api_key_repository import ApiKeyRepository
 from .api_key_service import ApiKeyService
@@ -342,11 +342,11 @@ class AuthMicroservice:
                         consul_port=config.consul_port,
                         tags=SERVICE_METADATA["tags"],
                         meta=consul_meta,
-                        health_check_type="ttl"  # Use TTL for reliable health checks,
+                        health_check_type="ttl",  # Use TTL for reliable health checks,
                     )
                     self.consul_registry.register()
                     self.consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
+                    # Start TTL heartbeat - added for consistency with isA_Model
                     logger.info(
                         f"Service registered with Consul: {len(route_meta.get('all_routes', '').split('|'))} routes registered"
                     )
@@ -374,7 +374,6 @@ class AuthMicroservice:
             # Initialize organization service client for microservice communication
             try:
                 from clients import OrganizationServiceClient
-
 
                 self.organization_service_client = OrganizationServiceClient()
                 logger.info("Organization service client initialized")
@@ -474,10 +473,6 @@ app = FastAPI(
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "auth_service")
 
-# Rate limiting
-from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
-from core.health import HealthCheck
-
 app.add_middleware(
     RateLimitMiddleware,
     default_limit=RateLimitConfig(requests=60, window_seconds=60),
@@ -530,7 +525,9 @@ async def get_current_caller(
             detail="Missing bearer token",
         )
 
-    result = await auth_service.verify_access_token_for_resource(credentials.credentials)
+    result = await auth_service.verify_access_token_for_resource(
+        credentials.credentials
+    )
     if not result.get("valid"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -561,7 +558,13 @@ async def require_admin_caller(
 # Health Check Endpoints
 
 health = HealthCheck("auth_service", version="2.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: auth_microservice.auth_service.auth_repository.db if auth_microservice.auth_service and hasattr(auth_microservice.auth_service, 'auth_repository') and auth_microservice.auth_service.auth_repository else None)
+health.add_postgres(
+    lambda: auth_microservice.auth_service.auth_repository.db
+    if auth_microservice.auth_service
+    and hasattr(auth_microservice.auth_service, "auth_repository")
+    and auth_microservice.auth_service.auth_repository
+    else None
+)
 health.add_nats(lambda: auth_microservice.event_bus)
 
 
@@ -599,7 +602,9 @@ async def get_auth_info():
 
 # OAuth Authorization Server Metadata (RFC 8414)
 
-AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", f"http://localhost:{config.service_port}")
+AUTH_SERVICE_URL = os.getenv(
+    "AUTH_SERVICE_URL", f"http://localhost:{config.service_port}"
+)
 
 
 @app.get("/.well-known/oauth-authorization-server")
@@ -730,7 +735,9 @@ async def oauth_token(
     if not result.get("success"):
         error_code = result.get("error_code", "invalid_client")
         status_code = (
-            status.HTTP_401_UNAUTHORIZED if error_code == "invalid_client" else status.HTTP_400_BAD_REQUEST
+            status.HTTP_401_UNAUTHORIZED
+            if error_code == "invalid_client"
+            else status.HTTP_400_BAD_REQUEST
         )
         raise HTTPException(status_code=status_code, detail=error_code)
 
@@ -765,9 +772,13 @@ async def oauth_authorize(
     scope: str = Query("", description="Space-separated scopes"),
     state: str = Query("", description="Opaque state for CSRF protection"),
     code_challenge: Optional[str] = Query(None, description="PKCE code challenge"),
-    code_challenge_method: Optional[str] = Query(None, description="PKCE method (S256)"),
+    code_challenge_method: Optional[str] = Query(
+        None, description="PKCE method (S256)"
+    ),
     resource: Optional[str] = Query(None, description="RFC 8707 resource indicator"),
-    authz_code_service: AuthorizationCodeService = Depends(get_authorization_code_service),
+    authz_code_service: AuthorizationCodeService = Depends(
+        get_authorization_code_service
+    ),
     oauth_repo: OAuthClientRepository = Depends(get_oauth_client_repository),
 ):
     """OAuth 2.0 Authorization endpoint (RFC 6749 / RFC 7636).
@@ -829,7 +840,9 @@ async def oauth_authorize(
 async def oauth_consent_approval(
     request: ConsentApprovalRequest,
     caller: Dict[str, Any] = Depends(get_current_caller),
-    authz_code_service: AuthorizationCodeService = Depends(get_authorization_code_service),
+    authz_code_service: AuthorizationCodeService = Depends(
+        get_authorization_code_service
+    ),
 ):
     """Process user consent and generate an authorization code.
 
@@ -910,7 +923,9 @@ async def get_oauth_client(
     """Get OAuth client metadata."""
     client = await oauth_repo.get_client(client_id)
     if not client:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+        )
     return {"success": True, "client": client}
 
 
@@ -923,7 +938,9 @@ async def rotate_oauth_client_secret(
     """Rotate OAuth client secret."""
     rotated = await oauth_repo.rotate_client_secret(client_id)
     if not rotated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+        )
     return {
         "success": True,
         "client_id": rotated["client_id"],
@@ -941,7 +958,9 @@ async def deactivate_oauth_client(
     """Deactivate OAuth client."""
     success = await oauth_repo.deactivate_client(client_id)
     if not success:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+        )
     return {"success": True, "client_id": client_id}
 
 
@@ -1313,6 +1332,7 @@ async def refresh_token(
 
 class UserInfoRequest(BaseModel):
     """Request model for user info extraction"""
+
     token: str = Field(..., description="JWT token to extract user info from")
 
 
@@ -1570,9 +1590,7 @@ async def update_api_key_rate_limits(
             )
 
     payload = request.model_dump(exclude_none=False)
-    result = await api_key_service.update_rate_limits(
-        organization_id, key_id, payload
-    )
+    result = await api_key_service.update_rate_limits(organization_id, key_id, payload)
     if not result.get("success"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1805,6 +1823,7 @@ _ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 class AdminBootstrapRequest(BaseModel):
     """Admin bootstrap request"""
+
     user_id: str = Field(..., description="User ID to grant admin privileges")
     bootstrap_secret: str = Field(..., description="Bootstrap secret for authorization")
 
@@ -1896,6 +1915,7 @@ async def get_auth_stats():
 # Development/Testing Endpoints — only registered in debug mode
 _ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 if config.debug and _ENVIRONMENT == "development":
+
     @app.get("/api/v1/auth/dev/pending-registration/{pending_id}")
     async def get_pending_registration(
         pending_id: str, auth_service: AuthenticationService = Depends(get_auth_service)

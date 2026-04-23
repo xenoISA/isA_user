@@ -19,9 +19,10 @@ from .rate_limit_state import (
 
 logger = logging.getLogger(__name__)
 
+
 class ApiKeyService:
     """API key service - compatible with main project structure"""
-    
+
     def __init__(
         self,
         repository: ApiKeyRepository,
@@ -40,56 +41,62 @@ class ApiKeyService:
                 f"{os.getenv('BILLING_SERVICE_PORT', '8216')}"
             )
         ).rstrip("/")
-        self._billing_http_client = billing_http_client or httpx.AsyncClient(timeout=10.0)
+        self._billing_http_client = billing_http_client or httpx.AsyncClient(
+            timeout=10.0
+        )
 
     async def close(self) -> None:
         await self._billing_http_client.aclose()
-    
-    async def create_api_key(self, 
-                           organization_id: str,
-                           name: str,
-                           permissions: List[str] = None,
-                           expires_days: Optional[int] = None,
-                           created_by: str = None) -> Dict[str, Any]:
+
+    async def create_api_key(
+        self,
+        organization_id: str,
+        name: str,
+        permissions: List[str] = None,
+        expires_days: Optional[int] = None,
+        created_by: str = None,
+    ) -> Dict[str, Any]:
         """Create new API key"""
         try:
             # Calculate expiration time
             expires_at = None
             if expires_days:
-                expires_at = datetime.now(tz=timezone.utc) + timedelta(days=expires_days)
-            
+                expires_at = datetime.now(tz=timezone.utc) + timedelta(
+                    days=expires_days
+                )
+
             # Create API key using repository
             result_data = await self.repository.create_api_key(
                 organization_id=organization_id,
                 name=name,
                 permissions=permissions or [],
                 expires_at=expires_at,
-                created_by=created_by
+                created_by=created_by,
             )
-            
+
             return {
                 "success": True,
                 "api_key": result_data["api_key"],  # Only returned during creation
                 "key_id": result_data["key_id"],
                 "name": name,
-                "expires_at": expires_at
+                "expires_at": expires_at,
             }
-            
+
         except Exception as e:
             logger.error(f"Failed to create API key: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
+            return {"success": False, "error": str(e)}
+
     async def verify_api_key(self, api_key: str) -> Dict[str, Any]:
         """Verify API key"""
         try:
             # Use repository validation method
             result = await self.repository.validate_api_key(api_key)
-            
+
             if result.get("valid"):
-                effective_limits, field_sources = await self._resolve_effective_rate_limits(
+                (
+                    effective_limits,
+                    field_sources,
+                ) = await self._resolve_effective_rate_limits(
                     result.get("organization_id"),
                     result.get("key_id"),
                 )
@@ -119,17 +126,11 @@ class ApiKeyService:
                     "rate_limit_sources": field_sources,
                 }
             else:
-                return {
-                    "valid": False,
-                    "error": result.get("error", "Invalid API key")
-                }
-            
+                return {"valid": False, "error": result.get("error", "Invalid API key")}
+
         except Exception as e:
             logger.error(f"API key verification failed: {e}")
-            return {
-                "valid": False,
-                "error": str(e)
-            }
+            return {"valid": False, "error": str(e)}
 
     async def get_effective_rate_limits(
         self, organization_id: str, key_id: str
@@ -144,42 +145,32 @@ class ApiKeyService:
             "rate_limits": effective_limits,
             "field_sources": field_sources,
         }
-    
+
     async def revoke_api_key(self, key_id: str, organization_id: str) -> Dict[str, Any]:
         """Revoke API key"""
         try:
             success = await self.repository.revoke_api_key(organization_id, key_id)
-            
+
             if success:
                 return {"success": True, "message": "API key revoked"}
             else:
                 return {"success": False, "error": "API key not found"}
-                
+
         except Exception as e:
             logger.error(f"Failed to revoke API key: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
+            return {"success": False, "error": str(e)}
+
     async def list_api_keys(self, organization_id: str) -> Dict[str, Any]:
         """List all API keys for organization"""
         try:
             keys = await self.repository.get_organization_api_keys(organization_id)
-            
-            return {
-                "success": True,
-                "api_keys": keys,
-                "total": len(keys)
-            }
-            
+
+            return {"success": True, "api_keys": keys, "total": len(keys)}
+
         except Exception as e:
             logger.error(f"Failed to list API keys: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
+            return {"success": False, "error": str(e)}
+
     async def delete_api_key(self, organization_id: str, key_id: str) -> Dict[str, Any]:
         """Delete API key permanently"""
         try:
@@ -192,10 +183,7 @@ class ApiKeyService:
 
         except Exception as e:
             logger.error(f"Failed to delete API key: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # ------------------------------------------------------------------
     # Per-key Rate Limits (Story xenoISA/isA_Console#461)
@@ -210,9 +198,7 @@ class ApiKeyService:
         synchronization remains a separate follow-up issue.
         """
         try:
-            raw = await self.repository.get_api_key_rate_limits(
-                organization_id, key_id
-            )
+            raw = await self.repository.get_api_key_rate_limits(organization_id, key_id)
             if raw is None:
                 return {"success": False, "error": "API key not found"}
             # Empty dict means "no override configured" — distinguish via source.
@@ -291,7 +277,9 @@ class ApiKeyService:
         org_limits = await self._get_org_rate_limits(organization_id)
         key_limits: Optional[Dict[str, Any]] = {}
         if organization_id and key_id:
-            key_limits = await self.repository.get_api_key_rate_limits(organization_id, key_id)
+            key_limits = await self.repository.get_api_key_rate_limits(
+                organization_id, key_id
+            )
         return merge_rate_limits(org_limits, key_limits)
 
     async def _get_org_rate_limits(
@@ -301,7 +289,9 @@ class ApiKeyService:
             return {}
         if not self.organization_service_client:
             return {}
-        return await self.organization_service_client.get_org_rate_limits(organization_id)
+        return await self.organization_service_client.get_org_rate_limits(
+            organization_id
+        )
 
     async def _enforce_request_limits(
         self,
@@ -344,12 +334,19 @@ class ApiKeyService:
             payload = response.json()
             aggregations = payload.get("aggregations") or []
             return {
-                "requests": sum(int(row.get("total_usage_count") or 0) for row in aggregations),
-                "tokens": sum(int(float(row.get("total_usage_amount") or 0)) for row in aggregations),
+                "requests": sum(
+                    int(row.get("total_usage_count") or 0) for row in aggregations
+                ),
+                "tokens": sum(
+                    int(float(row.get("total_usage_amount") or 0))
+                    for row in aggregations
+                ),
                 "warnings": warnings,
             }
         except Exception as e:
-            logger.warning(f"Failed to fetch daily usage totals for {organization_id}: {e}")
+            logger.warning(
+                f"Failed to fetch daily usage totals for {organization_id}: {e}"
+            )
             warnings.append("billing_usage_unavailable")
             return {"requests": 0, "tokens": 0, "warnings": warnings}
 

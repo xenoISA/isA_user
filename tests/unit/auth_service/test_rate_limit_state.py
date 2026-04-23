@@ -44,8 +44,16 @@ class TestMergeRateLimits:
 class TestRequestRateLimiter:
     async def test_org_scoped_limits_are_shared_across_keys(self):
         limiter = RequestRateLimiter()
-        effective = {"requests_per_second": None, "requests_per_minute": 1, "requests_per_day": None}
-        sources = {"requests_per_second": "unset", "requests_per_minute": "organization", "requests_per_day": "unset"}
+        effective = {
+            "requests_per_second": None,
+            "requests_per_minute": 1,
+            "requests_per_day": None,
+        }
+        sources = {
+            "requests_per_second": "unset",
+            "requests_per_minute": "organization",
+            "requests_per_day": "unset",
+        }
 
         await limiter.enforce(
             organization_id="org-1",
@@ -68,8 +76,16 @@ class TestRequestRateLimiter:
 
     async def test_key_scoped_limits_do_not_collide_with_other_keys(self):
         limiter = RequestRateLimiter()
-        effective = {"requests_per_second": None, "requests_per_minute": 1, "requests_per_day": None}
-        sources = {"requests_per_second": "unset", "requests_per_minute": "api_key", "requests_per_day": "unset"}
+        effective = {
+            "requests_per_second": None,
+            "requests_per_minute": 1,
+            "requests_per_day": None,
+        }
+        sources = {
+            "requests_per_second": "unset",
+            "requests_per_minute": "api_key",
+            "requests_per_day": "unset",
+        }
 
         await limiter.enforce(
             organization_id="org-1",
@@ -126,8 +142,16 @@ class TestRequestRateLimiter:
             "from_url",
             lambda url, decode_responses=True: fake_redis,
         )
-        effective = {"requests_per_second": None, "requests_per_minute": 1, "requests_per_day": None}
-        sources = {"requests_per_second": "unset", "requests_per_minute": "organization", "requests_per_day": "unset"}
+        effective = {
+            "requests_per_second": None,
+            "requests_per_minute": 1,
+            "requests_per_day": None,
+        }
+        sources = {
+            "requests_per_second": "unset",
+            "requests_per_minute": "organization",
+            "requests_per_day": "unset",
+        }
 
         limiter_a = RequestRateLimiter()
         limiter_b = RequestRateLimiter()
@@ -147,7 +171,9 @@ class TestRequestRateLimiter:
                 field_sources=sources,
             )
 
-    async def test_default_counter_falls_back_to_memory_when_redis_fails(self, monkeypatch):
+    async def test_default_counter_falls_back_to_memory_when_redis_fails(
+        self, monkeypatch
+    ):
         import redis.asyncio as redis_asyncio
 
         monkeypatch.setenv("AUTH_RATE_LIMIT_REDIS_URL", "redis://down-rate-limits/1")
@@ -158,8 +184,16 @@ class TestRequestRateLimiter:
             lambda url, decode_responses=True: _FakeRedis(fail=True),
         )
         limiter = RequestRateLimiter()
-        effective = {"requests_per_second": None, "requests_per_minute": 1, "requests_per_day": None}
-        sources = {"requests_per_second": "unset", "requests_per_minute": "organization", "requests_per_day": "unset"}
+        effective = {
+            "requests_per_second": None,
+            "requests_per_minute": 1,
+            "requests_per_day": None,
+        }
+        sources = {
+            "requests_per_second": "unset",
+            "requests_per_minute": "organization",
+            "requests_per_day": "unset",
+        }
 
         await limiter.enforce(
             organization_id="org-fallback",

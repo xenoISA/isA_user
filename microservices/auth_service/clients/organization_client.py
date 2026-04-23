@@ -20,7 +20,9 @@ class OrganizationServiceClient:
             # Add parent directory to path to import organization_service client
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-            from microservices.organization_service.client import OrganizationServiceClient as OrgClient
+            from microservices.organization_service.client import (
+                OrganizationServiceClient as OrgClient,
+            )
 
             self.client = OrgClient()
             logger.info("✅ OrganizationServiceClient initialized")
@@ -45,8 +47,7 @@ class OrganizationServiceClient:
                 return None
 
             result = await self.client.get_organization(
-                organization_id=organization_id,
-                user_id=user_id or "internal-service"
+                organization_id=organization_id, user_id=user_id or "internal-service"
             )
 
             return result

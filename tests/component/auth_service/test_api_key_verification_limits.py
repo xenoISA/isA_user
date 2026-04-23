@@ -1,6 +1,5 @@
 """Component tests for auth-side effective limit resolution and usage bars."""
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
