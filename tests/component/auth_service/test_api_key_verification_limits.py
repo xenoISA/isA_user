@@ -3,10 +3,11 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from microservices.auth_service.api_key_service import ApiKeyService
+from microservices.auth_service.main import ApiKeyVerificationRequest, verify_api_key
 from microservices.auth_service.rate_limit_state import RequestRateLimiter
-
 
 pytestmark = [pytest.mark.component, pytest.mark.tdd, pytest.mark.asyncio]
 
@@ -26,6 +27,25 @@ def _make_service(repo, org_client=None, billing_response=None):
 
 
 class TestVerifyApiKeyRateLimits:
+    async def test_verify_api_key_endpoint_propagates_rate_limit_response(self):
+        api_key_service = AsyncMock()
+        api_key_service.verify_api_key.return_value = {
+            "rate_limited": True,
+            "status_code": 429,
+            "detail": {"field": "requests_per_minute"},
+            "headers": {"Retry-After": "60"},
+        }
+
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_api_key(
+                ApiKeyVerificationRequest(api_key="isa_limited"),
+                api_key_service=api_key_service,
+            )
+
+        assert exc_info.value.status_code == 429
+        assert exc_info.value.detail == {"field": "requests_per_minute"}
+        assert exc_info.value.headers == {"Retry-After": "60"}
+
     async def test_org_defaults_are_enforced_when_key_has_no_override(self):
         repo = AsyncMock()
         repo.validate_api_key.return_value = {
