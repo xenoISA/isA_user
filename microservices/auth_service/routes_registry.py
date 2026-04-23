@@ -4,6 +4,7 @@ Defines all API routes for Consul service registration and discovery.
 This ensures route metadata is centralized and easy to maintain.
 """
 from typing import List, Dict, Any
+
 # Route definitions for auth_service
 AUTH_SERVICE_ROUTES = [
     # Health & Info endpoints
@@ -11,188 +12,202 @@ AUTH_SERVICE_ROUTES = [
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/auth/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/auth/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/api/v1/auth/info",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Authentication service information"
+        "description": "Authentication service information",
     },
     {
         "path": "/api/v1/auth/stats",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Authentication service statistics"
+        "description": "Authentication service statistics",
     },
     # Token verification & management
     {
         "path": "/api/v1/auth/verify-token",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Verify JWT token"
+        "description": "Verify JWT token",
     },
     {
         "path": "/api/v1/auth/dev-token",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Generate development token"
+        "description": "Generate development token",
     },
     {
         "path": "/api/v1/auth/token-pair",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Generate token pair (access + refresh)"
+        "description": "Generate token pair (access + refresh)",
     },
     {
         "path": "/oauth/token",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "OAuth2 client credentials token endpoint"
+        "description": "OAuth2 client credentials token endpoint",
     },
     {
         "path": "/api/v1/auth/refresh",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Refresh access token"
+        "description": "Refresh access token",
     },
     {
         "path": "/api/v1/auth/user-info",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Extract user info from token"
+        "description": "Extract user info from token",
     },
     # User registration & login
     {
         "path": "/api/v1/auth/register",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Start user registration"
+        "description": "Start user registration",
     },
     {
         "path": "/api/v1/auth/verify",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Verify registration code"
+        "description": "Verify registration code",
     },
     {
         "path": "/api/v1/auth/login",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Authenticate user with email and password"
+        "description": "Authenticate user with email and password",
     },
     # Admin authentication
     {
         "path": "/api/v1/auth/admin/login",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Authenticate admin user with email and password"
+        "description": "Authenticate admin user with email and password",
     },
     {
         "path": "/api/v1/auth/admin/verify",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Verify admin JWT token and return admin user info"
+        "description": "Verify admin JWT token and return admin user info",
     },
     {
         "path": "/api/v1/auth/dev/pending-registration/{pending_id}",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Get pending registration (dev only)"
+        "description": "Get pending registration (dev only)",
     },
     # API Key management (authenticated users can manage own org keys, admins any org)
     {
         "path": "/api/v1/auth/verify-api-key",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Verify API key"
+        "description": "Verify API key",
     },
     {
         "path": "/api/v1/auth/api-keys",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create API key (user or admin)"
+        "description": "Create API key (user or admin)",
     },
     {
         "path": "/api/v1/auth/api-keys/{organization_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List organization API keys (user or admin)"
+        "description": "List organization API keys (user or admin)",
     },
     {
         "path": "/api/v1/auth/api-keys/{key_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Revoke API key (user or admin)"
+        "description": "Revoke API key (user or admin)",
+    },
+    {
+        "path": "/api/v1/auth/api-keys/{key_id}/rate-limits",
+        "methods": ["GET", "PUT"],
+        "auth_required": True,
+        "description": "Read or update API key rate limits",
+    },
+    {
+        "path": "/api/v1/auth/rate-limits/usage-vs-limit",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Live org usage vs configured rate limits",
     },
     {
         "path": "/api/v1/auth/oauth/clients",
         "methods": ["POST", "GET"],
         "auth_required": True,
-        "description": "Create/list OAuth clients"
+        "description": "Create/list OAuth clients",
     },
     {
         "path": "/api/v1/auth/oauth/clients/{client_id}",
         "methods": ["GET", "DELETE"],
         "auth_required": True,
-        "description": "Get/deactivate OAuth client"
+        "description": "Get/deactivate OAuth client",
     },
     {
         "path": "/api/v1/auth/oauth/clients/{client_id}/rotate-secret",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Rotate OAuth client secret"
+        "description": "Rotate OAuth client secret",
     },
     # Device authentication
     {
         "path": "/api/v1/auth/device/register",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Register device"
+        "description": "Register device",
     },
     {
         "path": "/api/v1/auth/device/authenticate",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Authenticate device"
+        "description": "Authenticate device",
     },
     {
         "path": "/api/v1/auth/device/verify-token",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Verify device token"
+        "description": "Verify device token",
     },
     {
         "path": "/api/v1/auth/device/{device_id}/refresh-secret",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Refresh device secret"
+        "description": "Refresh device secret",
     },
     {
         "path": "/api/v1/auth/device/{device_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Revoke device"
+        "description": "Revoke device",
     },
     {
         "path": "/api/v1/auth/device/list",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List organization devices"
+        "description": "List organization devices",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Get formatted route metadata for Consul service registration
@@ -213,9 +228,18 @@ def get_routes_for_consul() -> Dict[str, Any]:
         compact_path = path.replace("/api/v1/auth/", "").replace("/api/v1/auth", "root")
         if path in ["/", "/health", "/api/v1/auth/info", "/api/v1/auth/stats"]:
             health_routes.append(compact_path)
-        elif "token" in path or "verify" in path or "user-info" in path or "refresh" in path:
+        elif (
+            "token" in path
+            or "verify" in path
+            or "user-info" in path
+            or "refresh" in path
+        ):
             token_routes.append(compact_path)
-        elif "register" in path or "pending-registration" in path or path == "/api/v1/auth/login":
+        elif (
+            "register" in path
+            or "pending-registration" in path
+            or path == "/api/v1/auth/login"
+        ):
             registration_routes.append(compact_path)
         elif "api-key" in path or "oauth/clients" in path:
             api_key_routes.append(compact_path)
@@ -228,18 +252,24 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "base_path": "/api/v1/auth",
         # Category summaries (under 512 chars each)
         "health": ",".join(health_routes),  # /,/health,info,stats
-        "token": ",".join(token_routes),     # verify-token,dev-token,etc
+        "token": ",".join(token_routes),  # verify-token,dev-token,etc
         "registration": ",".join(registration_routes),
         "api_key": ",".join(api_key_routes),
         "device": ",".join(device_routes),
         # Methods and auth summary
         "methods": "GET,POST,DELETE",
-        "public_count": str(sum(1 for r in AUTH_SERVICE_ROUTES if not r["auth_required"])),
-        "protected_count": str(sum(1 for r in AUTH_SERVICE_ROUTES if r["auth_required"])),
+        "public_count": str(
+            sum(1 for r in AUTH_SERVICE_ROUTES if not r["auth_required"])
+        ),
+        "protected_count": str(
+            sum(1 for r in AUTH_SERVICE_ROUTES if r["auth_required"])
+        ),
         # Endpoint for full route details
-        "routes_endpoint": "/api/v1/auth/info"
+        "routes_endpoint": "/api/v1/auth/info",
     }
     return route_meta
+
+
 def get_all_routes() -> List[Dict[str, Any]]:
     """
     Get all route definitions
@@ -247,6 +277,8 @@ def get_all_routes() -> List[Dict[str, Any]]:
         List of all route definitions
     """
     return AUTH_SERVICE_ROUTES
+
+
 def get_routes_by_category() -> Dict[str, List[Dict[str, Any]]]:
     """
     Get routes grouped by category
@@ -258,13 +290,18 @@ def get_routes_by_category() -> Dict[str, List[Dict[str, Any]]]:
         "token_management": [],
         "user_registration": [],
         "api_key_management": [],
-        "device_authentication": []
+        "device_authentication": [],
     }
     for route in AUTH_SERVICE_ROUTES:
         path = route["path"]
         if path in ["/", "/health", "/api/v1/auth/info", "/api/v1/auth/stats"]:
             categories["health"].append(route)
-        elif "token" in path or "verify-token" in path or "user-info" in path or "refresh" in path:
+        elif (
+            "token" in path
+            or "verify-token" in path
+            or "user-info" in path
+            or "refresh" in path
+        ):
             categories["token_management"].append(route)
         elif "register" in path or "pending-registration" in path:
             categories["user_registration"].append(route)
@@ -273,6 +310,8 @@ def get_routes_by_category() -> Dict[str, List[Dict[str, Any]]]:
         elif "device" in path:
             categories["device_authentication"].append(route)
     return categories
+
+
 # Service metadata for Consul registration
 SERVICE_METADATA = {
     "service_name": "auth_service",
@@ -286,6 +325,6 @@ SERVICE_METADATA = {
         "device_authentication",
         "user_registration",
         "user_login",
-        "admin_authentication"
-    ]
+        "admin_authentication",
+    ],
 }

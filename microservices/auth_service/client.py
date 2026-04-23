@@ -23,7 +23,7 @@ class AuthServiceClient:
             base_url: Auth service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -50,9 +50,7 @@ class AuthServiceClient:
     # =============================================================================
 
     async def verify_token(
-        self,
-        token: str,
-        provider: Optional[str] = None
+        self, token: str, provider: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Verify JWT token
@@ -76,8 +74,7 @@ class AuthServiceClient:
                 payload["provider"] = provider
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/auth/verify-token",
-                json=payload
+                f"{self.base_url}/api/v1/auth/verify-token", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -96,7 +93,7 @@ class AuthServiceClient:
         expires_in: int = 3600,
         organization_id: Optional[str] = None,
         permissions: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Generate development token
@@ -121,11 +118,7 @@ class AuthServiceClient:
             >>> print(f"Token: {token_data['access_token']}")
         """
         try:
-            payload = {
-                "user_id": user_id,
-                "email": email,
-                "expires_in": expires_in
-            }
+            payload = {"user_id": user_id, "email": email, "expires_in": expires_in}
 
             if organization_id:
                 payload["organization_id"] = organization_id
@@ -135,8 +128,7 @@ class AuthServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/auth/dev-token",
-                json=payload
+                f"{self.base_url}/api/v1/auth/dev-token", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -154,7 +146,7 @@ class AuthServiceClient:
         email: str,
         organization_id: Optional[str] = None,
         permissions: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Generate access and refresh token pair
@@ -178,10 +170,7 @@ class AuthServiceClient:
             >>> print(f"Refresh: {tokens['refresh_token']}")
         """
         try:
-            payload = {
-                "user_id": user_id,
-                "email": email
-            }
+            payload = {"user_id": user_id, "email": email}
 
             if organization_id:
                 payload["organization_id"] = organization_id
@@ -191,8 +180,7 @@ class AuthServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/auth/token-pair",
-                json=payload
+                f"{self.base_url}/api/v1/auth/token-pair", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -205,8 +193,7 @@ class AuthServiceClient:
             return None
 
     async def refresh_access_token(
-        self,
-        refresh_token: str
+        self, refresh_token: str
     ) -> Optional[Dict[str, Any]]:
         """
         Refresh access token using refresh token
@@ -224,7 +211,7 @@ class AuthServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/auth/refresh",
-                json={"refresh_token": refresh_token}
+                json={"refresh_token": refresh_token},
             )
             response.raise_for_status()
             return response.json()
@@ -236,10 +223,7 @@ class AuthServiceClient:
             logger.error(f"Error refreshing token: {e}")
             return None
 
-    async def get_user_info(
-        self,
-        token: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_user_info(self, token: str) -> Optional[Dict[str, Any]]:
         """
         Get user information from token
 
@@ -255,8 +239,7 @@ class AuthServiceClient:
         """
         try:
             response = await self.client.post(
-                f"{self.base_url}/api/v1/auth/user-info",
-                json={"token": token}
+                f"{self.base_url}/api/v1/auth/user-info", json={"token": token}
             )
             response.raise_for_status()
             return response.json()
@@ -272,10 +255,7 @@ class AuthServiceClient:
     # API Key Management
     # =============================================================================
 
-    async def verify_api_key(
-        self,
-        api_key: str
-    ) -> Optional[Dict[str, Any]]:
+    async def verify_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:
         """
         Verify API key
 
@@ -293,9 +273,32 @@ class AuthServiceClient:
         """
         try:
             response = await self.client.post(
-                f"{self.base_url}/api/v1/auth/verify-api-key",
-                json={"api_key": api_key}
+                f"{self.base_url}/api/v1/auth/verify-api-key", json={"api_key": api_key}
             )
+            if response.status_code == 429:
+                try:
+                    payload = response.json()
+                    detail = payload.get("detail", payload)
+                except Exception:
+                    detail = response.text or "Rate limit exceeded"
+                headers = {
+                    key: value
+                    for key, value in response.headers.items()
+                    if key.lower()
+                    in {
+                        "retry-after",
+                        "x-ratelimit-limit",
+                        "x-ratelimit-remaining",
+                        "x-ratelimit-field",
+                        "x-ratelimit-source",
+                    }
+                }
+                return {
+                    "valid": False,
+                    "rate_limited": True,
+                    "detail": detail,
+                    "headers": headers,
+                }
             response.raise_for_status()
             return response.json()
 
@@ -311,7 +314,7 @@ class AuthServiceClient:
         organization_id: str,
         name: str,
         permissions: Optional[List[str]] = None,
-        expires_in_days: Optional[int] = None
+        expires_in_days: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create new API key
@@ -337,15 +340,14 @@ class AuthServiceClient:
             payload = {
                 "organization_id": organization_id,
                 "name": name,
-                "permissions": permissions or []
+                "permissions": permissions or [],
             }
 
             if expires_in_days:
                 payload["expires_in_days"] = expires_in_days
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/auth/api-keys",
-                json=payload
+                f"{self.base_url}/api/v1/auth/api-keys", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -358,8 +360,7 @@ class AuthServiceClient:
             return None
 
     async def list_api_keys(
-        self,
-        organization_id: str
+        self, organization_id: str
     ) -> Optional[List[Dict[str, Any]]]:
         """
         List organization's API keys
@@ -389,10 +390,7 @@ class AuthServiceClient:
             logger.error(f"Error listing API keys: {e}")
             return None
 
-    async def revoke_api_key(
-        self,
-        key_id: str
-    ) -> bool:
+    async def revoke_api_key(self, key_id: str) -> bool:
         """
         Revoke/delete API key
 
@@ -429,7 +427,7 @@ class AuthServiceClient:
         user_id: str,
         device_name: str,
         device_type: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Register new device
@@ -458,15 +456,14 @@ class AuthServiceClient:
                 "device_id": device_id,
                 "user_id": user_id,
                 "device_name": device_name,
-                "device_type": device_type
+                "device_type": device_type,
             }
 
             if metadata:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/auth/device/register",
-                json=payload
+                f"{self.base_url}/api/v1/auth/device/register", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -479,9 +476,7 @@ class AuthServiceClient:
             return None
 
     async def authenticate_device(
-        self,
-        device_id: str,
-        device_secret: str
+        self, device_id: str, device_secret: str
     ) -> Optional[Dict[str, Any]]:
         """
         Authenticate device and get token
@@ -503,10 +498,7 @@ class AuthServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/auth/device/authenticate",
-                json={
-                    "device_id": device_id,
-                    "device_secret": device_secret
-                }
+                json={"device_id": device_id, "device_secret": device_secret},
             )
             response.raise_for_status()
             return response.json()
@@ -518,10 +510,7 @@ class AuthServiceClient:
             logger.error(f"Error authenticating device: {e}")
             return None
 
-    async def verify_device_token(
-        self,
-        device_token: str
-    ) -> Optional[Dict[str, Any]]:
+    async def verify_device_token(self, device_token: str) -> Optional[Dict[str, Any]]:
         """
         Verify device token
 
@@ -539,7 +528,7 @@ class AuthServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/auth/device/verify-token",
-                json={"device_token": device_token}
+                json={"device_token": device_token},
             )
             response.raise_for_status()
             return response.json()
@@ -551,10 +540,7 @@ class AuthServiceClient:
             logger.error(f"Error verifying device token: {e}")
             return None
 
-    async def refresh_device_secret(
-        self,
-        device_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def refresh_device_secret(self, device_id: str) -> Optional[Dict[str, Any]]:
         """
         Refresh device secret
 
@@ -582,10 +568,7 @@ class AuthServiceClient:
             logger.error(f"Error refreshing device secret: {e}")
             return None
 
-    async def deregister_device(
-        self,
-        device_id: str
-    ) -> bool:
+    async def deregister_device(self, device_id: str) -> bool:
         """
         Deregister device
 
@@ -612,10 +595,7 @@ class AuthServiceClient:
             logger.error(f"Error deregistering device: {e}")
             return False
 
-    async def list_user_devices(
-        self,
-        user_id: str
-    ) -> Optional[List[Dict[str, Any]]]:
+    async def list_user_devices(self, user_id: str) -> Optional[List[Dict[str, Any]]]:
         """
         List user's registered devices
 
@@ -632,8 +612,7 @@ class AuthServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/auth/device/list",
-                params={"user_id": user_id}
+                f"{self.base_url}/api/v1/auth/device/list", params={"user_id": user_id}
             )
             response.raise_for_status()
             return response.json()
@@ -686,7 +665,7 @@ class AuthServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

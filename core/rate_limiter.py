@@ -74,12 +74,13 @@ class RedisBackend:
     async def increment(self, key: str, window: float) -> int:
         """Increment counter using Redis sorted set with timestamp scores."""
         import time as _time
+        import uuid
 
         now = _time.time()
         cutoff = now - window
         pipe = self._redis.pipeline()
         pipe.zremrangebyscore(key, 0, cutoff)
-        pipe.zadd(key, {str(now): now})
+        pipe.zadd(key, {f"{now}:{uuid.uuid4().hex}": now})
         pipe.zcard(key)
         pipe.expire(key, int(window) + 1)
         results = await pipe.execute()
@@ -88,6 +89,19 @@ class RedisBackend:
     async def get_ttl(self, key: str) -> float:
         ttl = await self._redis.ttl(key)
         return max(0, ttl)
+
+    async def get_count(self, key: str, window: float) -> int:
+        """Get current request count without incrementing."""
+        import time as _time
+
+        now = _time.time()
+        cutoff = now - window
+        pipe = self._redis.pipeline()
+        pipe.zremrangebyscore(key, 0, cutoff)
+        pipe.zcard(key)
+        pipe.expire(key, int(window) + 1)
+        results = await pipe.execute()
+        return results[1]
 
 
 class SlidingWindowCounter:

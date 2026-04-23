@@ -20,7 +20,9 @@ class OrganizationServiceClient:
             # Add parent directory to path to import organization_service client
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-            from microservices.organization_service.client import OrganizationServiceClient as OrgClient
+            from microservices.organization_service.client import (
+                OrganizationServiceClient as OrgClient,
+            )
 
             self.client = OrgClient()
             logger.info("✅ OrganizationServiceClient initialized")
@@ -45,14 +47,26 @@ class OrganizationServiceClient:
                 return None
 
             result = await self.client.get_organization(
-                organization_id=organization_id,
-                user_id=user_id or "internal-service"
+                organization_id=organization_id, user_id=user_id or "internal-service"
             )
 
             return result
 
         except Exception as e:
             logger.error(f"Failed to get organization {organization_id}: {e}")
+            return None
+
+    async def get_org_rate_limits(self, organization_id: str):
+        """Get the stored org-level rate-limit defaults."""
+        try:
+            if not self.client:
+                logger.warning("OrganizationServiceClient not available")
+                return None
+            return await self.client.get_org_rate_limits(organization_id)
+        except Exception as e:
+            logger.error(
+                f"Failed to get rate limits for organization {organization_id}: {e}"
+            )
             return None
 
     async def close(self):

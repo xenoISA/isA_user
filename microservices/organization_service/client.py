@@ -203,6 +203,28 @@ class OrganizationServiceClient:
             logger.error(f"Error getting user organizations: {e}")
             return None
 
+    async def get_org_rate_limits(
+        self, organization_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get organization-level rate limits."""
+        try:
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/organization/organizations/{organization_id}/rate-limits"
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return payload.get("rate_limits") or {}
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "Failed to get org rate limits for %s: %s",
+                organization_id,
+                e.response.status_code,
+            )
+            return None
+        except Exception as e:
+            logger.error(f"Error getting org rate limits for {organization_id}: {e}")
+            return None
+
     # =============================================================================
     # Organization Members
     # =============================================================================
@@ -654,7 +676,7 @@ class OrganizationServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

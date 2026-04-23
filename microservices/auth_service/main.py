@@ -13,7 +13,6 @@ Uses custom self-issued JWT tokens (isA_user provider) as primary authentication
 Note: Authorization/permission control is handled by separate Authorization microservice
 """
 
-import logging
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -27,7 +26,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # FastAPI imports
 from fastapi import FastAPI, HTTPException, Depends, status, Query, Form, Security
-from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # 导入新实现的服务
@@ -37,12 +35,14 @@ from isa_common.consul_client import ConsulRegistry
 # Database connection now handled by repositories directly
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.health import HealthCheck
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import NATSEventBus, get_event_bus
+from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
 
 from .api_key_repository import ApiKeyRepository
-from .api_key_service import ApiKeyService
+from .api_key_service import ApiKeyService, raise_api_key_rate_limit_if_present
 from .auth_repository import AuthRepository
 from .auth_service import AuthenticationService
 from .device_auth_repository import DeviceAuthRepository
@@ -101,6 +101,7 @@ class ApiKeyVerificationResponse(BaseModel):
     organization_id: Optional[str] = None
     name: Optional[str] = None
     permissions: Optional[List[str]] = []
+    effective_rate_limits: Optional[Dict[str, Optional[int]]] = None
     error: Optional[str] = None
 
 
@@ -180,6 +181,26 @@ class RateLimitsResponse(BaseModel):
             "fields are set, 'unset' otherwise."
         ),
     )
+
+
+class RateLimitUsageItem(BaseModel):
+    """Current usage against a configured rate-limit field."""
+
+    limit: Optional[int] = None
+    used: int = 0
+    remaining: Optional[int] = None
+    source: str = "unset"
+    window_seconds: int
+    percentage: Optional[float] = None
+
+
+class RateLimitUsageResponse(BaseModel):
+    """Usage vs configured limits for the console quota bars."""
+
+    organization_id: str
+    rate_limits: RateLimitsRequest
+    usage: Dict[str, RateLimitUsageItem]
+    warnings: List[str] = Field(default_factory=list)
 
 
 class DeviceRegistrationRequest(BaseModel):
@@ -321,11 +342,11 @@ class AuthMicroservice:
                         consul_port=config.consul_port,
                         tags=SERVICE_METADATA["tags"],
                         meta=consul_meta,
-                        health_check_type="ttl"  # Use TTL for reliable health checks,
+                        health_check_type="ttl",  # Use TTL for reliable health checks,
                     )
                     self.consul_registry.register()
                     self.consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
+                    # Start TTL heartbeat - added for consistency with isA_Model
                     logger.info(
                         f"Service registered with Consul: {len(route_meta.get('all_routes', '').split('|'))} routes registered"
                     )
@@ -354,7 +375,6 @@ class AuthMicroservice:
             try:
                 from clients import OrganizationServiceClient
 
-
                 self.organization_service_client = OrganizationServiceClient()
                 logger.info("Organization service client initialized")
             except Exception as e:
@@ -382,7 +402,10 @@ class AuthMicroservice:
             self.auth_service = create_auth_service(
                 config=config_manager, event_bus=self.event_bus
             )
-            self.api_key_service = ApiKeyService(self.api_key_repository)
+            self.api_key_service = ApiKeyService(
+                self.api_key_repository,
+                organization_service_client=self.organization_service_client,
+            )
             self.device_auth_service = DeviceAuthService(
                 self.device_auth_repository, event_bus=self.event_bus
             )
@@ -415,6 +438,8 @@ class AuthMicroservice:
             await self.event_bus.close()
         if self.organization_service_client:
             await self.organization_service_client.close()
+        if self.api_key_service:
+            await self.api_key_service.close()
         logger.info("Authentication microservice shutdown completed")
 
 
@@ -447,10 +472,6 @@ app = FastAPI(
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "auth_service")
-
-# Rate limiting
-from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
-from core.health import HealthCheck
 
 app.add_middleware(
     RateLimitMiddleware,
@@ -504,7 +525,9 @@ async def get_current_caller(
             detail="Missing bearer token",
         )
 
-    result = await auth_service.verify_access_token_for_resource(credentials.credentials)
+    result = await auth_service.verify_access_token_for_resource(
+        credentials.credentials
+    )
     if not result.get("valid"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -535,7 +558,15 @@ async def require_admin_caller(
 # Health Check Endpoints
 
 health = HealthCheck("auth_service", version="2.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: auth_microservice.auth_service.auth_repository.db if auth_microservice.auth_service and hasattr(auth_microservice.auth_service, 'auth_repository') and auth_microservice.auth_service.auth_repository else None)
+health.add_postgres(
+    lambda: (
+        auth_microservice.auth_service.auth_repository.db
+        if auth_microservice.auth_service
+        and hasattr(auth_microservice.auth_service, "auth_repository")
+        and auth_microservice.auth_service.auth_repository
+        else None
+    )
+)
 health.add_nats(lambda: auth_microservice.event_bus)
 
 
@@ -573,7 +604,9 @@ async def get_auth_info():
 
 # OAuth Authorization Server Metadata (RFC 8414)
 
-AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", f"http://localhost:{config.service_port}")
+AUTH_SERVICE_URL = os.getenv(
+    "AUTH_SERVICE_URL", f"http://localhost:{config.service_port}"
+)
 
 
 @app.get("/.well-known/oauth-authorization-server")
@@ -704,7 +737,9 @@ async def oauth_token(
     if not result.get("success"):
         error_code = result.get("error_code", "invalid_client")
         status_code = (
-            status.HTTP_401_UNAUTHORIZED if error_code == "invalid_client" else status.HTTP_400_BAD_REQUEST
+            status.HTTP_401_UNAUTHORIZED
+            if error_code == "invalid_client"
+            else status.HTTP_400_BAD_REQUEST
         )
         raise HTTPException(status_code=status_code, detail=error_code)
 
@@ -739,9 +774,13 @@ async def oauth_authorize(
     scope: str = Query("", description="Space-separated scopes"),
     state: str = Query("", description="Opaque state for CSRF protection"),
     code_challenge: Optional[str] = Query(None, description="PKCE code challenge"),
-    code_challenge_method: Optional[str] = Query(None, description="PKCE method (S256)"),
+    code_challenge_method: Optional[str] = Query(
+        None, description="PKCE method (S256)"
+    ),
     resource: Optional[str] = Query(None, description="RFC 8707 resource indicator"),
-    authz_code_service: AuthorizationCodeService = Depends(get_authorization_code_service),
+    authz_code_service: AuthorizationCodeService = Depends(
+        get_authorization_code_service
+    ),
     oauth_repo: OAuthClientRepository = Depends(get_oauth_client_repository),
 ):
     """OAuth 2.0 Authorization endpoint (RFC 6749 / RFC 7636).
@@ -803,7 +842,9 @@ async def oauth_authorize(
 async def oauth_consent_approval(
     request: ConsentApprovalRequest,
     caller: Dict[str, Any] = Depends(get_current_caller),
-    authz_code_service: AuthorizationCodeService = Depends(get_authorization_code_service),
+    authz_code_service: AuthorizationCodeService = Depends(
+        get_authorization_code_service
+    ),
 ):
     """Process user consent and generate an authorization code.
 
@@ -884,7 +925,9 @@ async def get_oauth_client(
     """Get OAuth client metadata."""
     client = await oauth_repo.get_client(client_id)
     if not client:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+        )
     return {"success": True, "client": client}
 
 
@@ -897,7 +940,9 @@ async def rotate_oauth_client_secret(
     """Rotate OAuth client secret."""
     rotated = await oauth_repo.rotate_client_secret(client_id)
     if not rotated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+        )
     return {
         "success": True,
         "client_id": rotated["client_id"],
@@ -915,7 +960,9 @@ async def deactivate_oauth_client(
     """Deactivate OAuth client."""
     success = await oauth_repo.deactivate_client(client_id)
     if not success:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+        )
     return {"success": True, "client_id": client_id}
 
 
@@ -1287,6 +1334,7 @@ async def refresh_token(
 
 class UserInfoRequest(BaseModel):
     """Request model for user info extraction"""
+
     token: str = Field(..., description="JWT token to extract user info from")
 
 
@@ -1338,6 +1386,7 @@ async def verify_api_key(
     """Verify API key"""
     try:
         result = await api_key_service.verify_api_key(request.api_key)
+        raise_api_key_rate_limit_if_present(result)
 
         return ApiKeyVerificationResponse(
             valid=result.get("valid", False),
@@ -1345,9 +1394,12 @@ async def verify_api_key(
             organization_id=result.get("organization_id"),
             name=result.get("name"),
             permissions=result.get("permissions", []),
+            effective_rate_limits=result.get("effective_rate_limits"),
             error=result.get("error") if not result.get("valid") else None,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"API key verification failed: {e}")
         return ApiKeyVerificationResponse(
@@ -1524,7 +1576,8 @@ async def update_api_key_rate_limits(
 ):
     """Upsert the rate-limit override on a specific api-key (admin-only).
 
-    v1: limits are stored but not yet enforced — APISIX sync follow-up.
+    Request limits are enforced during API-key validation. APISIX-native
+    synchronization remains a follow-up.
     """
     if not _is_admin_caller(caller):
         caller_org = caller.get("organization_id")
@@ -1535,9 +1588,7 @@ async def update_api_key_rate_limits(
             )
 
     payload = request.model_dump(exclude_none=False)
-    result = await api_key_service.update_rate_limits(
-        organization_id, key_id, payload
-    )
+    result = await api_key_service.update_rate_limits(organization_id, key_id, payload)
     if not result.get("success"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1546,6 +1597,43 @@ async def update_api_key_rate_limits(
     return RateLimitsResponse(
         rate_limits=RateLimitsRequest(**(result.get("rate_limits") or {})),
         source=result.get("source", "configured"),
+    )
+
+
+@app.get(
+    "/api/v1/auth/rate-limits/usage-vs-limit",
+    response_model=RateLimitUsageResponse,
+)
+async def get_rate_limit_usage_vs_limit(
+    organization_id: str,
+    api_key_service: ApiKeyService = Depends(get_api_key_service),
+    caller: Dict[str, Any] = Depends(get_current_caller),
+):
+    """Return live org usage vs configured limits for the console page."""
+    if not _is_admin_caller(caller):
+        caller_org = caller.get("organization_id")
+        if caller_org and caller_org != organization_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only read usage for your own organization",
+            )
+
+    result = await api_key_service.get_org_usage_vs_limit(organization_id)
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.get("error", "Organization not found"),
+        )
+
+    return RateLimitUsageResponse(
+        organization_id=organization_id,
+        rate_limits=RateLimitsRequest(**(result.get("rate_limits") or {})),
+        usage={
+            key: RateLimitUsageItem(**value)
+            for key, value in (result.get("usage") or {}).items()
+            if value is not None
+        },
+        warnings=result.get("warnings", []),
     )
 
 
@@ -1733,6 +1821,7 @@ _ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 class AdminBootstrapRequest(BaseModel):
     """Admin bootstrap request"""
+
     user_id: str = Field(..., description="User ID to grant admin privileges")
     bootstrap_secret: str = Field(..., description="Bootstrap secret for authorization")
 
@@ -1824,6 +1913,7 @@ async def get_auth_stats():
 # Development/Testing Endpoints — only registered in debug mode
 _ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 if config.debug and _ENVIRONMENT == "development":
+
     @app.get("/api/v1/auth/dev/pending-registration/{pending_id}")
     async def get_pending_registration(
         pending_id: str, auth_service: AuthenticationService = Depends(get_auth_service)
