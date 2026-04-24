@@ -6,7 +6,10 @@ import pytest
 from starlette.datastructures import UploadFile
 
 from microservices.project_service.project_service import ProjectService
-from microservices.project_service.protocols import ProjectNotFoundError, ProjectServiceException
+from microservices.project_service.protocols import (
+    ProjectNotFoundError,
+    ProjectServiceException,
+)
 from tests.component.golden.project_service.mocks import (
     MockProjectRepository,
     MockStorageServiceClient,
@@ -56,7 +59,9 @@ class TestProjectKnowledgeFiles:
         persisted = await repository.get_project_file("proj1", result["id"])
         assert persisted == result
 
-    async def test_list_project_files_returns_associated_files(self, service, repository):
+    async def test_list_project_files_returns_associated_files(
+        self, service, repository
+    ):
         await repository.create_project_file(
             "proj1",
             "file_1",
@@ -94,7 +99,9 @@ class TestProjectKnowledgeFiles:
         with pytest.raises(ProjectNotFoundError):
             await service.delete_project_file("proj1", "missing", "user1")
 
-    async def test_upload_failure_raises_service_exception(self, service, storage_client):
+    async def test_upload_failure_raises_service_exception(
+        self, service, storage_client
+    ):
         storage_client.should_fail_upload = True
         upload = UploadFile(
             filename="knowledge.md",

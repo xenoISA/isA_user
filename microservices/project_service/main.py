@@ -139,7 +139,10 @@ async def _repository(request: Request, exc: RepositoryError):
 @app.exception_handler(ProjectStorageError)
 async def _storage(request: Request, exc: ProjectStorageError):
     logger.error("Storage error: %s", exc)
-    return JSONResponse(status_code=502, content={"status": "error", "error": "storage_error", "detail": str(exc)})
+    return JSONResponse(
+        status_code=502,
+        content={"status": "error", "error": "storage_error", "detail": str(exc)},
+    )
 
 
 # =============================================================================
@@ -161,7 +164,10 @@ async def get_authenticated_caller(request: Request) -> str:
 
     x_internal_service = request.headers.get("X-Internal-Service")
     x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
-    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+    if (
+        x_internal_service == "true"
+        and x_internal_service_secret == INTERNAL_SERVICE_SECRET
+    ):
         return "internal-service"
 
     authorization = request.headers.get("authorization")
@@ -294,7 +300,10 @@ async def upload_project_file(
     return await svc.upload_project_file(project_id, caller_id, file)
 
 
-@app.delete("/api/v1/projects/{project_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/api/v1/projects/{project_id}/files/{file_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
 async def delete_project_file(
     project_id: str,
     file_id: str,

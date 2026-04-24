@@ -11,6 +11,7 @@ Usage:
         )
         projects = await client.list_projects(user_id="user123", auth_token="Bearer ...")
 """
+
 from io import BytesIO
 
 import httpx
@@ -54,8 +55,11 @@ class ProjectServiceClient:
     # ── CRUD ─────────────────────────────────────────────────────────────
 
     async def create_project(
-        self, auth_token: str, name: str,
-        description: str = None, custom_instructions: str = None,
+        self,
+        auth_token: str,
+        name: str,
+        description: str = None,
+        custom_instructions: str = None,
     ) -> Optional[Dict[str, Any]]:
         try:
             payload: Dict[str, Any] = {"name": name}
@@ -65,7 +69,8 @@ class ProjectServiceClient:
                 payload["custom_instructions"] = custom_instructions
             resp = await self.client.post(
                 f"{self.base_url}/api/v1/projects",
-                json=payload, headers=self._headers(auth_token),
+                json=payload,
+                headers=self._headers(auth_token),
             )
             resp.raise_for_status()
             return resp.json()
@@ -76,7 +81,9 @@ class ProjectServiceClient:
             logger.error("create_project error: %s", e)
             return None
 
-    async def get_project(self, auth_token: str, project_id: str) -> Optional[Dict[str, Any]]:
+    async def get_project(
+        self, auth_token: str, project_id: str
+    ) -> Optional[Dict[str, Any]]:
         try:
             resp = await self.client.get(
                 f"{self.base_url}/api/v1/projects/{project_id}",
@@ -92,7 +99,10 @@ class ProjectServiceClient:
             return None
 
     async def list_projects(
-        self, auth_token: str, limit: int = 50, offset: int = 0,
+        self,
+        auth_token: str,
+        limit: int = 50,
+        offset: int = 0,
     ) -> Optional[List[Dict[str, Any]]]:
         try:
             resp = await self.client.get(
@@ -110,12 +120,16 @@ class ProjectServiceClient:
             return None
 
     async def update_project(
-        self, auth_token: str, project_id: str, **updates,
+        self,
+        auth_token: str,
+        project_id: str,
+        **updates,
     ) -> Optional[Dict[str, Any]]:
         try:
             resp = await self.client.put(
                 f"{self.base_url}/api/v1/projects/{project_id}",
-                json=updates, headers=self._headers(auth_token),
+                json=updates,
+                headers=self._headers(auth_token),
             )
             resp.raise_for_status()
             return resp.json()
@@ -142,7 +156,10 @@ class ProjectServiceClient:
             return False
 
     async def set_instructions(
-        self, auth_token: str, project_id: str, instructions: str,
+        self,
+        auth_token: str,
+        project_id: str,
+        instructions: str,
     ) -> bool:
         try:
             resp = await self.client.put(

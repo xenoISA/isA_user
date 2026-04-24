@@ -1,4 +1,5 @@
 """Project Service Pydantic Models (#258, #296, #297)"""
+
 from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -12,6 +13,7 @@ class ProjectRole(str, Enum):
 
 
 # ── Requests ─────────────────────────────────────────────────────────────
+
 
 class CreateProjectRequest(BaseModel):
     name: str = Field(..., max_length=255)
@@ -29,6 +31,7 @@ class SetInstructionsRequest(BaseModel):
 
 
 # ── Responses ────────────────────────────────────────────────────────────
+
 
 class ProjectResponse(BaseModel):
     id: str

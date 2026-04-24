@@ -1,77 +1,151 @@
-# Project Service - System Contract (Layer 6)
+# Project Service - System Contract
 
 ## Overview
 
-This document defines HOW `project_service` implements the standard service
-patterns.
+This document describes how `project_service` implements the required system patterns for project CRUD and project knowledge file management.
 
 **Service**: `project_service`  
 **Port**: `8260`  
-**Version**: `1.0.0`
+**Category**: User Microservice
+
+---
 
 ## 1. Architecture Pattern
 
-```text
+```
 microservices/project_service/
 ├── main.py
-├── factory.py
-├── models.py
 ├── project_service.py
 ├── project_repository.py
 ├── protocols.py
+├── factory.py
 ├── client.py
-└── routes_registry.py
+├── models.py
+├── routes_registry.py
+└── migrations/
+    └── 001_create_project_schema.sql
 ```
 
-- `main.py` owns FastAPI routing, health checks, and exception handlers.
-- `ProjectService` owns limits, ownership checks, and event publication.
-- `ProjectRepository` owns persistence.
+### Layer responsibilities
+
+- `main.py`: FastAPI routes, auth dependency, exception mapping, lifespan
+- `project_service.py`: ownership validation, storage orchestration, audit publishing
+- `project_repository.py`: PostgreSQL persistence for projects and `project_files`
+- `factory.py`: wires repository + storage client + optional event bus
+- `client.py`: inter-service client for project CRUD and project file operations
+
+---
 
 ## 2. Dependency Injection Pattern
 
-- `ProjectService(repository, event_bus=None)` is the unit under test.
-- `create_project_service(config_manager, repository=None, event_bus=None)`
-  wires production dependencies.
-- `get_service()` returns the singleton from the FastAPI layer only.
+`ProjectService` accepts:
 
-## 3. API Contract
+- `ProjectRepositoryProtocol`
+- `StorageServiceProtocol`
+- optional `EventBusProtocol`
 
-| Method | Path | Auth |
-|--------|------|------|
-| `GET` | `/health` | no |
-| `GET` | `/api/v1/projects/health` | no |
-| `POST` | `/api/v1/projects` | yes |
-| `GET` | `/api/v1/projects` | yes |
-| `GET` | `/api/v1/projects/{project_id}` | yes |
-| `PUT` | `/api/v1/projects/{project_id}` | yes |
-| `DELETE` | `/api/v1/projects/{project_id}` | yes |
-| `PUT` | `/api/v1/projects/{project_id}/instructions` | yes |
+This allows service-layer component tests to swap in in-memory/mocked repository and storage implementations.
 
-## 4. Error Handling Contract
+---
+
+## 3. Auth Contract
+
+`main.py` defines `get_authenticated_caller(request)` and supports:
+
+- internal service headers
+- bearer token verification helpers
+- API key verification helpers
+
+Failure to resolve the caller returns `401 User authentication required`.
+
+---
+
+## 4. Persistence Contract
+
+### Schema
+
+- `project.projects`
+- `project.project_files`
+
+### Migration
+
+- `microservices/project_service/migrations/001_create_project_schema.sql`
+
+The migration is idempotent and safe for new environments.
+
+---
+
+## 5. Route Contract
+
+Protected routes:
+
+- `POST /api/v1/projects`
+- `GET /api/v1/projects`
+- `GET /api/v1/projects/{project_id}`
+- `PUT /api/v1/projects/{project_id}`
+- `DELETE /api/v1/projects/{project_id}`
+- `PUT /api/v1/projects/{project_id}/instructions`
+- `GET /api/v1/projects/{project_id}/files`
+- `POST /api/v1/projects/{project_id}/files`
+- `DELETE /api/v1/projects/{project_id}/files/{file_id}`
+
+Health routes:
+
+- `/health`
+- `/api/v1/projects/health`
+
+---
+
+## 6. External Dependency Contract
+
+### PostgreSQL
+- primary system of record for projects and project file associations
+
+### storage_service
+- stores uploaded file bytes
+- deletes underlying file objects on project-file removal
+
+### NATS
+- optional audit event publishing
+
+---
+
+## 7. Error Handling Contract
+
+Mapped exceptions:
 
 - `ProjectNotFoundError` -> `404`
 - `ProjectPermissionError` -> `403`
 - `ProjectLimitExceeded` -> `400`
 - `InvalidProjectUpdate` -> `422`
 - `RepositoryError` -> `500`
+- `ProjectStorageError` -> `502`
 
-All error payloads use `{status, error, detail}`.
+Error response shape:
 
-## 5. Event Contract
+```json
+{
+  "status": "error",
+  "error": "storage_error",
+  "detail": "Failed to upload project file"
+}
+```
 
-When an event bus is configured, the service publishes:
-- `project.create`
-- `project.read`
-- `project.update`
-- `project.delete`
-- `project.set_instructions`
+---
 
-Event publication is best-effort and must not fail the HTTP request path.
+## 8. Testing Contract
 
-## 6. Lifecycle Contract
+Minimum coverage expected for this service slice:
 
-1. Install graceful-shutdown handlers.
-2. Attempt NATS event-bus initialization.
-3. Create `ProjectService` through the factory.
-4. Serve requests and health checks.
-5. Log clean shutdown on process exit.
+- unit tests for project models/exceptions
+- component tests for service-layer file upload/list/delete flows
+- component endpoint tests for multipart upload and list/delete routes
+- existing golden CRUD tests remain green alongside the new file behaviors
+
+---
+
+## 9. Operational Notes
+
+- route metadata is declared in `routes_registry.py`
+- graceful shutdown uses the shared shutdown middleware
+- project file associations are metadata only; blob lifecycle remains delegated to `storage_service`

@@ -1,4 +1,5 @@
 """Project Service Factory (#258, #295, #298)"""
+
 import logging
 from typing import Optional
 
@@ -6,7 +7,11 @@ from core.config_manager import ConfigManager
 
 from microservices.storage_service.client import StorageServiceClient
 
-from .protocols import ProjectRepositoryProtocol, EventBusProtocol, StorageServiceProtocol
+from .protocols import (
+    ProjectRepositoryProtocol,
+    EventBusProtocol,
+    StorageServiceProtocol,
+)
 from .project_repository import ProjectRepository
 from .project_service import ProjectService
 
