@@ -8,11 +8,9 @@ Responsibilities:
 Note: Session memory is handled by dedicated memory_service
 """
 
-import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional
 
 import httpx
 import uvicorn
@@ -30,10 +28,6 @@ from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
-    ErrorResponse,
-    MemoryCreateRequest,
-    MemoryResponse,
-    MemoryUpdateRequest,
     MessageCreateRequest,
     MessageListResponse,
     MessageResponse,
@@ -41,7 +35,6 @@ from .models import (
     SessionListResponse,
     SessionResponse,
     SessionSearchResponse,
-    SessionServiceStatus,
     SessionStatsResponse,
     SessionSummaryResponse,
     SessionUpdateRequest,
@@ -51,8 +44,6 @@ from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 # Import local components
 from .session_service import SessionService
 from .protocols import (
-    MemoryNotFoundError,
-    MessageNotFoundError,
     SessionNotFoundError,
     SessionServiceError,
     SessionValidationError,
@@ -147,7 +138,9 @@ async def lifespan(app: FastAPI):
                 )
                 logger.info(f"Subscribed to {event_pattern} events")
 
-            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+            logger.info(
+                f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to subscribe to events: {e}")
 
@@ -216,8 +209,16 @@ def get_session_service() -> SessionService:
 
 
 # Health check endpoints
-health = HealthCheck("session_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: session_microservice.session_service.session_repo.db if session_microservice.session_service and hasattr(session_microservice.session_service, 'session_repo') and session_microservice.session_service.session_repo else None)
+health = HealthCheck(
+    "session_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
+health.add_postgres(
+    lambda: session_microservice.session_service.session_repo.db
+    if session_microservice.session_service
+    and hasattr(session_microservice.session_service, "session_repo")
+    and session_microservice.session_service.session_repo
+    else None
+)
 
 
 @app.get("/api/v1/sessions/health")
@@ -225,6 +226,7 @@ health.add_postgres(lambda: session_microservice.session_service.session_repo.db
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post("/api/v1/sessions", response_model=SessionResponse)
 async def create_session(
@@ -269,7 +271,9 @@ async def search_sessions(
     q: str = Query(..., min_length=1, description="Search query"),
     user_id: str = Query(..., description="User ID (auth-scoped)"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
-    cursor: Optional[str] = Query(None, description="Pagination cursor from previous response"),
+    cursor: Optional[str] = Query(
+        None, description="Pagination cursor from previous response"
+    ),
     session_service: SessionService = Depends(get_session_service),
 ):
     """
@@ -504,7 +508,10 @@ async def store_session_memory(
     try:
         await session_service.get_session(session_id)
     except SessionNotFoundError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session {session_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found",
+        )
 
     # Forward to memory service
     try:
@@ -540,7 +547,10 @@ async def get_session_memory(
     try:
         await session_service.get_session(session_id)
     except SessionNotFoundError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session {session_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found",
+        )
 
     # Forward to memory service
     try:

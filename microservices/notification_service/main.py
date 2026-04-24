@@ -10,15 +10,16 @@ import os
 
 # Import ConsulRegistry and ConfigManager
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from core.config_manager import ConfigManager
-from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
+from core.health import HealthCheck
+from core.logger import setup_service_logger
 from core.metrics import setup_metrics
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from core.nats_client import get_event_bus
+from fastapi import FastAPI, HTTPException, Query
 
 from isa_common.consul_client import ConsulRegistry
 
@@ -26,7 +27,6 @@ from .events.handlers import get_event_handlers
 from .models import (
     BatchResponse,
     CreateTemplateRequest,
-    HealthResponse,
     InAppNotification,
     Notification,
     NotificationBatch,
@@ -54,10 +54,6 @@ from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 # Initialize configuration
 config_manager = ConfigManager("notification_service")
 config = config_manager.get_service_config()
-
-# Import logger after config
-from core.logger import setup_service_logger
-from core.health import HealthCheck
 
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("notification_service")
@@ -108,7 +104,9 @@ async def lifespan(app: FastAPI):
 
     # Initialize service with event bus and config_manager (using factory pattern)
     logger.info("Starting Notification Service...")
-    service = create_notification_service(event_bus=event_bus, config_manager=config_manager)
+    service = create_notification_service(
+        event_bus=event_bus, config_manager=config_manager
+    )
 
     # Initialize event handlers if event bus is available
     if event_bus:
@@ -155,7 +153,7 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -222,8 +220,14 @@ setup_metrics(app, "notification_service")
 # ====================
 
 
-health = HealthCheck("notification_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: service.repository.db if service and hasattr(service, 'repository') and service.repository else None)
+health = HealthCheck(
+    "notification_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
+health.add_postgres(
+    lambda: service.repository.db
+    if service and hasattr(service, "repository") and service.repository
+    else None
+)
 health.add_nats(lambda: event_bus)
 
 
@@ -232,6 +236,7 @@ health.add_nats(lambda: event_bus)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.get("/info", response_model=ServiceInfo, tags=["System"])
 async def service_info():
@@ -625,6 +630,7 @@ _DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 _ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 if _DEBUG and _ENVIRONMENT == "development":
+
     @app.post("/api/v1/notifications/test/email", tags=["Test"])
     async def test_email(
         to: str, subject: str = "Test Email", user_id: str = "test_user_email"
@@ -659,7 +665,9 @@ if _DEBUG and _ENVIRONMENT == "development":
             return await service.send_notification(request)
         except Exception as e:
             logger.error(f"Failed to send test in-app notification: {e}")
-            raise HTTPException(status_code=500, detail="Failed to send test notification")
+            raise HTTPException(
+                status_code=500, detail="Failed to send test notification"
+            )
 
 
 if __name__ == "__main__":

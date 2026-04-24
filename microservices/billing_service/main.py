@@ -4,13 +4,10 @@ Billing Microservice API
 专注于使用量跟踪、费用计算和计费处理的REST API服务
 """
 
-import asyncio
-import inspect
-import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
@@ -33,7 +30,6 @@ from .models import (
     BillingCalculationResponse,
     BillingRecordsListResponse,
     BillingStats,
-    HealthResponse,
     ProcessBillingRequest,
     ProcessBillingResponse,
     QuotaCheckRequest,
@@ -41,8 +37,6 @@ from .models import (
     RecordUsageRequest,
     ServiceInfo,
     UserQuotaResponse,
-    UsageStatsRequest,
-    UsageStatsResponse,
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
@@ -104,9 +98,10 @@ async def lifespan(app: FastAPI):
                 # Get event handlers
                 handler_map = get_event_handlers(billing_service, event_bus)
                 consumer_suffix = os.getenv("BILLING_CONSUMER_SUFFIX", "").strip()
-                delivery_policy = os.getenv(
-                    "BILLING_CONSUMER_DELIVERY_POLICY", "new"
-                ).strip().lower() or "all"
+                delivery_policy = (
+                    os.getenv("BILLING_CONSUMER_DELIVERY_POLICY", "new").strip().lower()
+                    or "all"
+                )
 
                 # Subscribe to events
                 for pattern, handler_func in handler_map.items():
@@ -152,11 +147,11 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type="ttl"  # Use TTL for reliable health checks,
+                    health_check_type="ttl",  # Use TTL for reliable health checks,
                 )
                 consul_registry.register()
                 consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
+                # Start TTL heartbeat - added for consistency with isA_Model
                 logger.info(
                     f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
                 )
@@ -222,7 +217,9 @@ async def get_billing_service() -> BillingService:
 # ====================
 
 
-health = HealthCheck("billing_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "billing_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_postgres(lambda: repository.db if repository else None)
 health.add_nats(lambda: event_bus)
 
@@ -232,6 +229,7 @@ health.add_nats(lambda: event_bus)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.get("/api/v1/billing/info", response_model=ServiceInfo)
 async def get_service_info():
@@ -525,7 +523,10 @@ async def get_user_billing_status(
     """
     resolved_user_id = user_id or request.headers.get("X-User-Id")
     if not resolved_user_id:
-        raise HTTPException(status_code=401, detail="Authentication required: X-User-Id header or user_id param")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required: X-User-Id header or user_id param",
+        )
 
     try:
         result = await service.get_user_billing_status(resolved_user_id)
@@ -828,7 +829,10 @@ async def admin_list_billing_records(
     """[Admin] List all billing records with filters (paginated)"""
     await require_admin(request)
     try:
-        from .models import BillingStatus as BillingStatusEnum, ServiceType as ServiceTypeEnum
+        from .models import (
+            BillingStatus as BillingStatusEnum,
+            ServiceType as ServiceTypeEnum,
+        )
 
         billing_status = BillingStatusEnum(status) if status else None
         billing_service_type = ServiceTypeEnum(service_type) if service_type else None
@@ -881,7 +885,9 @@ async def admin_issue_refund(
             raise HTTPException(status_code=404, detail="Billing record not found")
 
         if record.billing_status == BillingStatusEnum.REFUNDED:
-            raise HTTPException(status_code=400, detail="Billing record already refunded")
+            raise HTTPException(
+                status_code=400, detail="Billing record already refunded"
+            )
 
         # Update status to refunded
         updated_record = await service.repository.update_billing_record_status(
@@ -891,11 +897,15 @@ async def admin_issue_refund(
         )
 
         if not updated_record:
-            raise HTTPException(status_code=500, detail="Failed to update billing record")
+            raise HTTPException(
+                status_code=500, detail="Failed to update billing record"
+            )
 
         # Audit
         await _audit_admin_action(
-            request, action="issue_refund", resource_type="billing_record",
+            request,
+            action="issue_refund",
+            resource_type="billing_record",
             resource_id=billing_id,
             changes={
                 "before": {"status": record.billing_status.value},

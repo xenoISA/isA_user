@@ -11,9 +11,7 @@ Responsibilities:
 Note: Authentication is handled by auth_service, credits by credit_service
 """
 
-import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import uvicorn
@@ -52,7 +50,6 @@ from .models import (
     AccountProfileResponse,
     AccountSearchParams,
     AccountSearchResponse,
-    AccountServiceStatus,
     AccountStatsResponse,
     AccountStatusChangeRequest,
     AccountSummaryResponse,
@@ -120,11 +117,11 @@ class AccountMicroservice:
                         consul_port=config.consul_port,
                         tags=SERVICE_METADATA["tags"],
                         meta=consul_meta,
-                        health_check_type="ttl"  # Use TTL for reliable health checks,
+                        health_check_type="ttl",  # Use TTL for reliable health checks,
                     )
                     self.consul_registry.register()
                     self.consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
+                    # Start TTL heartbeat - added for consistency with isA_Model
                     logger.info(
                         f"Service registered with Consul: {route_meta.get('route_count', 0)} routes"
                     )
@@ -148,7 +145,7 @@ class AccountMicroservice:
             self.account_service = create_account_service(
                 config=config_manager,
                 event_bus=event_bus,
-                subscription_client=self.subscription_client
+                subscription_client=self.subscription_client,
             )
             logger.info("Account microservice initialized successfully")
         except Exception as e:
@@ -257,8 +254,16 @@ def get_account_service() -> AccountService:
 
 
 # Health check endpoints
-health = HealthCheck("account_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: account_microservice.account_service.account_repo.db if account_microservice.account_service and hasattr(account_microservice.account_service, 'account_repo') and account_microservice.account_service.account_repo else None)
+health = HealthCheck(
+    "account_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
+health.add_postgres(
+    lambda: account_microservice.account_service.account_repo.db
+    if account_microservice.account_service
+    and hasattr(account_microservice.account_service, "account_repo")
+    and account_microservice.account_service.account_repo
+    else None
+)
 
 
 @app.get("/api/v1/accounts/health")
@@ -266,6 +271,7 @@ health.add_postgres(lambda: account_microservice.account_service.account_repo.db
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 async def get_authenticated_caller(request: Request) -> str:
     """Extract caller ID from verified authentication credentials."""
@@ -277,7 +283,10 @@ async def get_authenticated_caller(request: Request) -> str:
 
     x_internal_service = request.headers.get("X-Internal-Service")
     x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
-    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+    if (
+        x_internal_service == "true"
+        and x_internal_service_secret == INTERNAL_SERVICE_SECRET
+    ):
         return "internal-service"
 
     authorization = request.headers.get("authorization")
@@ -321,7 +330,8 @@ async def ensure_account(
 
 @app.get("/api/v1/accounts/profile/{user_id}", response_model=AccountProfileResponse)
 async def get_account_profile(
-    user_id: str, account_service: AccountService = Depends(get_account_service),
+    user_id: str,
+    account_service: AccountService = Depends(get_account_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
     """
@@ -389,10 +399,14 @@ async def get_custom_instructions(
 ):
     """Get profile-level custom instructions (#260)"""
     try:
-        instructions = await account_service.repository.get_custom_instructions(caller_id)
+        instructions = await account_service.repository.get_custom_instructions(
+            caller_id
+        )
         return {"instructions": instructions}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.put("/api/v1/users/me/instructions")
@@ -404,14 +418,27 @@ async def set_custom_instructions(
     """Set profile-level custom instructions (max 4000 chars) (#260)"""
     instructions = request.get("instructions", "")
     if len(instructions) > 4000:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Instructions exceed 4000 character limit")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Instructions exceed 4000 character limit",
+        )
     try:
-        success = await account_service.repository.set_custom_instructions(caller_id, instructions)
+        success = await account_service.repository.set_custom_instructions(
+            caller_id, instructions
+        )
         if success:
-            return {"message": "Custom instructions updated", "instructions": instructions}
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update instructions")
+            return {
+                "message": "Custom instructions updated",
+                "instructions": instructions,
+            }
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update instructions",
+        )
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.delete("/api/v1/accounts/profile/{user_id}")
@@ -491,7 +518,8 @@ async def search_accounts(
 
 @app.get("/api/v1/accounts/by-email/{email}", response_model=AccountProfileResponse)
 async def get_account_by_email(
-    email: str, account_service: AccountService = Depends(get_account_service),
+    email: str,
+    account_service: AccountService = Depends(get_account_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
     """Get account by email address"""
@@ -561,8 +589,6 @@ async def require_admin_token(request: Request) -> Dict[str, Any]:
     Returns the verified admin payload including admin_roles.
     Calls auth_service admin verify internally.
     """
-    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-    import httpx
 
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -571,11 +597,12 @@ async def require_admin_token(request: Request) -> Dict[str, Any]:
             detail="Missing admin bearer token",
         )
 
-    token = auth_header[len("Bearer "):]
+    token = auth_header[len("Bearer ") :]
 
     # Decode and validate token locally using JWT
     try:
         import jwt as pyjwt
+
         payload = pyjwt.decode(token, options={"verify_signature": False})
 
         # Check scope is admin
@@ -655,7 +682,10 @@ async def admin_list_accounts(
         )
 
 
-@app.put("/api/v1/account/admin/accounts/{user_id}/roles", response_model=AdminAccountResponse)
+@app.put(
+    "/api/v1/account/admin/accounts/{user_id}/roles",
+    response_model=AdminAccountResponse,
+)
 async def admin_update_roles(
     user_id: str,
     request: AdminRolesUpdateRequest,
@@ -677,9 +707,7 @@ async def admin_update_roles(
     caller_id = admin.get("user_id")
 
     # Rule 1: every requested role must be a canonical platform-admin role.
-    invalid_roles = [
-        r for r in request.admin_roles if not is_valid_platform_role(r)
-    ]
+    invalid_roles = [r for r in request.admin_roles if not is_valid_platform_role(r)]
     if invalid_roles:
         logger.warning(
             "role_validator_denied rule=invalid_platform_role "
@@ -734,9 +762,7 @@ async def admin_update_roles(
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "only_super_admin_can_assign: role assignment rejected"
-                ),
+                detail=("only_super_admin_can_assign: role assignment rejected"),
             )
 
     try:
@@ -822,7 +848,10 @@ async def admin_update_roles(
         )
 
 
-@app.get("/api/v1/account/admin/accounts/{user_id}", response_model=AdminAccountDetailResponse)
+@app.get(
+    "/api/v1/account/admin/accounts/{user_id}",
+    response_model=AdminAccountDetailResponse,
+)
 async def admin_get_account_detail(
     user_id: str,
     admin: Dict[str, Any] = Depends(require_admin_token),
@@ -890,7 +919,11 @@ async def admin_update_account_status(
         )
 
 
-@app.post("/api/v1/account/admin/accounts/{user_id}/note", response_model=AdminNoteResponse, status_code=201)
+@app.post(
+    "/api/v1/account/admin/accounts/{user_id}/note",
+    response_model=AdminNoteResponse,
+    status_code=201,
+)
 async def admin_add_note(
     user_id: str,
     request: AdminNoteRequest,

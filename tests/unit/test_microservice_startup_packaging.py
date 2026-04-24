@@ -59,14 +59,22 @@ def test_microservice_main_modules_do_not_mutate_sys_path():
         for mutation in mutations:
             offenders.append(f"{path.relative_to(PROJECT_ROOT)} {mutation}")
 
-    assert not offenders, "Found unsupported sys.path mutations:\n" + "\n".join(offenders)
+    assert not offenders, "Found unsupported sys.path mutations:\n" + "\n".join(
+        offenders
+    )
 
 
 def test_local_dev_uses_repo_root_pythonpath():
     local_dev = LOCAL_DEV_SCRIPT.read_text()
 
-    assert 'PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/microservices/$SERVICE_NAME"' not in local_dev
-    assert 'export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/microservices/$SERVICE_NAME"' not in local_dev
+    assert (
+        'PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/microservices/$SERVICE_NAME"'
+        not in local_dev
+    )
+    assert (
+        'export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/microservices/$SERVICE_NAME"'
+        not in local_dev
+    )
     assert 'PYTHONPATH="$PROJECT_ROOT"' in local_dev
     assert 'export PYTHONPATH="$PROJECT_ROOT"' in local_dev
     assert "python -m uvicorn microservices.$SERVICE_NAME.main:app" in local_dev
@@ -86,7 +94,10 @@ def test_readme_documents_supported_local_startup():
     assert "start_user_service.sh" not in readme
     assert "./deployment/local-dev.sh --run-all" in readme
     assert "./deployment/local-dev.sh --run payment_service" in readme
-    assert 'PYTHONPATH="$PWD" python -m uvicorn microservices.auth_service.main:app' in readme
+    assert (
+        'PYTHONPATH="$PWD" python -m uvicorn microservices.auth_service.main:app'
+        in readme
+    )
 
 
 def test_container_entrypoints_use_module_startup():

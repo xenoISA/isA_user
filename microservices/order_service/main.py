@@ -11,11 +11,9 @@ Responsibilities:
 
 from fastapi import FastAPI, HTTPException, Depends, status, Query, Path, Body
 import uvicorn
-import logging
 from contextlib import asynccontextmanager
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
-from decimal import Decimal
 
 
 # Import local components
@@ -24,17 +22,23 @@ from .protocols import OrderServiceError, OrderValidationError, OrderNotFoundErr
 from .factory import create_order_service
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.nats_client import get_event_bus, Event
+from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .models import (
-    OrderCreateRequest, OrderUpdateRequest, OrderCancelRequest,
-    OrderCompleteRequest, OrderResponse, OrderListResponse,
-    OrderSummaryResponse, OrderStatistics, OrderFilter,
-    OrderSearchParams, Order, OrderStatus, OrderType, PaymentStatus,
-    OrderServiceStatus
+    OrderCreateRequest,
+    OrderUpdateRequest,
+    OrderCancelRequest,
+    OrderCompleteRequest,
+    OrderResponse,
+    OrderListResponse,
+    OrderFilter,
+    OrderSearchParams,
+    OrderStatus,
+    OrderType,
+    PaymentStatus,
 )
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
@@ -127,7 +131,9 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("order_service")
         logger.info("✅ Event bus initialized successfully")
     except Exception as e:
-        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
+        )
         event_bus = None
 
     # Initialize service clients
@@ -193,7 +199,9 @@ async def lifespan(app: FastAPI):
                 )
                 logger.info(f"Subscribed to {event_pattern} events")
 
-            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+            logger.info(
+                f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register event handlers: {e}")
 
@@ -205,23 +213,25 @@ async def lifespan(app: FastAPI):
 
             # 合并服务元数据
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
             }
 
             consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=config.service_port,
                 consul_host=config.consul_host,
                 consul_port=config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='ttl'  # Use TTL for reliable health checks
+                health_check_type="ttl",  # Use TTL for reliable health checks
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
-            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             consul_registry = None
@@ -288,7 +298,7 @@ app = FastAPI(
     title="Order Service",
     description="Order management and transaction recording microservice",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "order_service")
@@ -302,13 +312,15 @@ def get_order_service() -> OrderService:
     if not order_microservice.order_service:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Order service not initialized"
+            detail="Order service not initialized",
         )
     return order_microservice.order_service
 
 
 # Health check endpoints
-health = HealthCheck("order_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "order_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/orders/health")
@@ -317,16 +329,19 @@ async def health_check():
     """Service health check"""
     return await health.check()
 
+
 @app.post("/api/v1/orders", response_model=OrderResponse)
 async def create_order(
     request: OrderCreateRequest,
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Create a new order"""
     try:
         return await order_service.create_order(request)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.get("/api/v1/orders/search")
@@ -335,7 +350,7 @@ async def search_orders(
     limit: int = Query(50, ge=1, le=100, description="Maximum results"),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     include_cancelled: bool = Query(False, description="Include cancelled orders"),
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Search orders"""
     try:
@@ -343,21 +358,19 @@ async def search_orders(
             query=query,
             user_id=user_id,
             limit=limit,
-            include_cancelled=include_cancelled
+            include_cancelled=include_cancelled,
         )
         orders = await order_service.search_orders(search_params)
-        return {
-            "orders": orders,
-            "count": len(orders),
-            "query": query
-        }
+        return {"orders": orders, "count": len(orders), "query": query}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.get("/api/v1/orders/statistics")
 async def get_order_statistics(
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Get order service statistics"""
     try:
@@ -365,50 +378,65 @@ async def get_order_statistics(
         result = await order_service.get_order_statistics()
         logger.info(f"Statistics result: {result}")
         # Convert to dict for JSON response
-        return result.dict() if hasattr(result, 'dict') else result
+        return result.dict() if hasattr(result, "dict") else result
     except OrderServiceError as e:
         logger.error(f"OrderServiceError in get_order_statistics: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Service error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Service error: {str(e)}",
+        )
     except Exception as e:
-        logger.error(f"Unexpected error in get_order_statistics: {type(e).__name__}: {e}")
+        logger.error(
+            f"Unexpected error in get_order_statistics: {type(e).__name__}: {e}"
+        )
         import traceback
+
         traceback.print_exc()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal error: {str(e)}",
+        )
 
 
 @app.get("/api/v1/orders/{order_id}")
 async def get_order(
     order_id: str = Path(..., description="Order ID"),
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Get order details"""
     try:
         order = await order_service.get_order(order_id)
         if not order:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
+            )
         return order
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.put("/api/v1/orders/{order_id}", response_model=OrderResponse)
 async def update_order(
     order_id: str = Path(..., description="Order ID"),
     request: OrderUpdateRequest = Body(...),
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Update order"""
     try:
         return await order_service.update_order(order_id, request)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.post("/api/v1/orders/{order_id}/cancel", response_model=OrderResponse)
 async def cancel_order(
     order_id: str = Path(..., description="Order ID"),
     request: OrderCancelRequest = Body(...),
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Cancel an order"""
     try:
@@ -421,7 +449,7 @@ async def cancel_order(
 async def complete_order(
     order_id: str = Path(..., description="Order ID"),
     request: OrderCompleteRequest = Body(...),
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Complete an order"""
     try:
@@ -432,17 +460,22 @@ async def complete_order(
 
 # Order query endpoints
 
+
 @app.get("/api/v1/orders", response_model=OrderListResponse)
 async def list_orders(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     order_type: Optional[OrderType] = Query(None, description="Filter by order type"),
-    order_status: Optional[OrderStatus] = Query(None, alias="status", description="Filter by status"),
-    payment_status: Optional[PaymentStatus] = Query(None, description="Filter by payment status"),
+    order_status: Optional[OrderStatus] = Query(
+        None, alias="status", description="Filter by status"
+    ),
+    payment_status: Optional[PaymentStatus] = Query(
+        None, description="Filter by payment status"
+    ),
     start_date: Optional[datetime] = Query(None, description="Start date filter"),
     end_date: Optional[datetime] = Query(None, description="End date filter"),
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """List orders with filtering and pagination"""
     try:
@@ -454,7 +487,7 @@ async def list_orders(
             start_date=start_date,
             end_date=end_date,
             limit=page_size,
-            offset=(page - 1) * page_size
+            offset=(page - 1) * page_size,
         )
         return await order_service.list_orders(filter_params)
     except Exception as e:
@@ -468,42 +501,52 @@ async def list_orders(
 
 # Integration endpoints
 
+
 @app.get("/api/v1/payments/{payment_intent_id}/orders")
 async def get_orders_by_payment(
     payment_intent_id: str = Path(..., description="Payment intent ID"),
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Get orders associated with a payment intent"""
     try:
         # This would be implemented in the repository layer
-        orders = await order_service.order_repo.get_orders_by_payment_intent(payment_intent_id)
+        orders = await order_service.order_repo.get_orders_by_payment_intent(
+            payment_intent_id
+        )
         return {
             "orders": orders,
             "payment_intent_id": payment_intent_id,
-            "count": len(orders)
+            "count": len(orders),
         }
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.get("/api/v1/subscriptions/{subscription_id}/orders")
 async def get_orders_by_subscription(
     subscription_id: str = Path(..., description="Subscription ID"),
-    order_service: OrderService = Depends(get_order_service)
+    order_service: OrderService = Depends(get_order_service),
 ):
     """Get orders associated with a subscription"""
     try:
-        orders = await order_service.order_repo.get_orders_by_subscription(subscription_id)
+        orders = await order_service.order_repo.get_orders_by_subscription(
+            subscription_id
+        )
         return {
             "orders": orders,
             "subscription_id": subscription_id,
-            "count": len(orders)
+            "count": len(orders),
         }
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 # Service info endpoints
+
 
 @app.get("/api/v1/order/info")
 async def get_service_info():
@@ -518,12 +561,12 @@ async def get_service_info():
             "payment_integration": True,
             "wallet_integration": True,
             "transaction_recording": True,
-            "order_analytics": True
+            "order_analytics": True,
         },
         "integrations": {
             "payment_service": "http://localhost:8207",
-            "wallet_service": "http://localhost:8209"
-        }
+            "wallet_service": "http://localhost:8209",
+        },
     }
 
 
@@ -531,38 +574,38 @@ async def get_service_info():
 @app.exception_handler(OrderValidationError)
 async def validation_error_handler(request, exc):
     from fastapi.responses import JSONResponse
+
     return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content={"detail": str(exc)}
+        status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)}
     )
 
 
 @app.exception_handler(OrderNotFoundError)
 async def not_found_error_handler(request, exc):
     from fastapi.responses import JSONResponse
+
     return JSONResponse(
-        status_code=status.HTTP_404_NOT_FOUND,
-        content={"detail": str(exc)}
+        status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc)}
     )
 
 
 @app.exception_handler(OrderServiceError)
 async def service_error_handler(request, exc):
     from fastapi.responses import JSONResponse
+
     return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": str(exc)}
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": str(exc)}
     )
 
 
 if __name__ == "__main__":
     # Print configuration summary for debugging
     config_manager.print_config_summary()
-    
+
     uvicorn.run(
         "microservices.order_service.main:app",
         host=config.service_host,
         port=config.service_port,
         reload=config.debug,
-        log_level=config.log_level.lower()
+        log_level=config.log_level.lower(),
     )

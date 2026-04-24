@@ -4,7 +4,6 @@ Invitation Microservice
 邀请管理微服务主入口
 """
 
-import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -23,10 +22,12 @@ from .invitation_repository import InvitationRepository
 from .events import InvitationEventHandler
 from .factory import create_invitation_service
 from .models import (
-    HealthResponse, ServiceInfo,
-    InvitationCreateRequest, AcceptInvitationRequest,
-    InvitationDetailResponse, InvitationListResponse, AcceptInvitationResponse,
-    OrganizationRole
+    ServiceInfo,
+    InvitationCreateRequest,
+    AcceptInvitationRequest,
+    InvitationDetailResponse,
+    InvitationListResponse,
+    AcceptInvitationResponse,
 )
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
@@ -43,6 +44,7 @@ invitation_service = None
 consul_registry: Optional[ConsulRegistry] = None
 shutdown_manager = GracefulShutdown("invitation_service")
 
+
 async def get_user_id(request: Request) -> str:
     """Extract user ID from verified authentication credentials (JWT, API Key, or internal service)."""
     from core.auth_dependencies import (
@@ -54,7 +56,10 @@ async def get_user_id(request: Request) -> str:
     # 1. Internal service auth
     x_internal_service = request.headers.get("X-Internal-Service")
     x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
-    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+    if (
+        x_internal_service == "true"
+        and x_internal_service_secret == INTERNAL_SERVICE_SECRET
+    ):
         return "internal-service"
 
     # 2. Bearer JWT auth
@@ -98,11 +103,15 @@ async def lifespan(app: FastAPI):
             event_bus = await get_event_bus("invitation_service")
             logger.info("✅ Event bus initialized successfully")
         except Exception as e:
-            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+            logger.warning(
+                f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
+            )
             event_bus = None
 
         # 初始化服务 (使用工厂模式)
-        invitation_service = create_invitation_service(config=config_manager, event_bus=event_bus)
+        invitation_service = create_invitation_service(
+            config=config_manager, event_bus=event_bus
+        )
         logger.info("Invitation microservice initialized successfully")
 
         # Set up event subscriptions if event bus is available
@@ -114,14 +123,14 @@ async def lifespan(app: FastAPI):
                 # Subscribe to organization.deleted events
                 await event_bus.subscribe(
                     pattern="events.organization.deleted",
-                    handler=lambda msg: event_handler.handle_event(msg)
+                    handler=lambda msg: event_handler.handle_event(msg),
                 )
                 logger.info("✅ Subscribed to organization.deleted events")
 
                 # Subscribe to user.deleted events
                 await event_bus.subscribe(
                     pattern="events.user.deleted",
-                    handler=lambda msg: event_handler.handle_event(msg)
+                    handler=lambda msg: event_handler.handle_event(msg),
                 )
                 logger.info("✅ Subscribed to user.deleted events")
 
@@ -136,29 +145,31 @@ async def lifespan(app: FastAPI):
 
                 # 合并服务元数据
                 consul_meta = {
-                    'version': SERVICE_METADATA['version'],
-                    'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                    **route_meta
+                    "version": SERVICE_METADATA["version"],
+                    "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                    **route_meta,
                 }
 
                 consul_registry = ConsulRegistry(
-                    service_name=SERVICE_METADATA['service_name'],
+                    service_name=SERVICE_METADATA["service_name"],
                     service_port=config.service_port,
                     consul_host=config.consul_host,
                     consul_port=config.consul_port,
-                    tags=SERVICE_METADATA['tags'],
+                    tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type='ttl'  # Use TTL for reliable health checks
+                    health_check_type="ttl",  # Use TTL for reliable health checks
                 )
                 consul_registry.register()
                 consul_registry.start_maintenance()  # Start TTL heartbeat
-                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+                logger.info(
+                    f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+                )
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
                 consul_registry = None
 
         yield
-        
+
     except Exception as e:
         logger.error(f"Error during service startup: {e}")
         raise
@@ -191,7 +202,7 @@ app = FastAPI(
     title="Invitation Service",
     description="Organization invitation management microservice",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "invitation_service")
@@ -202,7 +213,9 @@ setup_metrics(app, "invitation_service")
 
 # ============ Health & Info Endpoints ============
 
-health = HealthCheck("invitation_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "invitation_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/invitations/health")
@@ -210,6 +223,7 @@ health = HealthCheck("invitation_service", version="1.0.0", shutdown_manager=shu
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.get("/info", response_model=ServiceInfo)
 @app.get("/api/v1/invitations/info", response_model=ServiceInfo)
@@ -220,12 +234,13 @@ async def service_info():
 
 # ============ Invitation Management Endpoints ============
 
+
 @app.post("/api/v1/invitations/organizations/{organization_id}", response_model=dict)
 async def create_invitation(
     organization_id: str,
     request_data: InvitationCreateRequest,
     request: Request,
-    invitation_service: InvitationService = Depends(get_invitation_service)
+    invitation_service: InvitationService = Depends(get_invitation_service),
 ):
     """创建邀请"""
     try:
@@ -235,22 +250,24 @@ async def create_invitation(
             inviter_user_id=user_id,
             email=request_data.email,
             role=request_data.role,
-            message=request_data.message
+            message=request_data.message,
         )
-        
+
         if not success:
             raise HTTPException(status_code=400, detail=message)
-        
+
         return {
             "invitation_id": invitation.invitation_id,
             "invitation_token": invitation.invitation_token,
             "email": invitation.email,
             "role": invitation.role.value,
             "status": invitation.status.value,
-            "expires_at": invitation.expires_at.isoformat() if invitation.expires_at else None,
-            "message": message
+            "expires_at": invitation.expires_at.isoformat()
+            if invitation.expires_at
+            else None,
+            "message": message,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -258,23 +275,29 @@ async def create_invitation(
         raise HTTPException(status_code=500, detail="Failed to create invitation")
 
 
-@app.get("/api/v1/invitations/{invitation_token}", response_model=InvitationDetailResponse)
+@app.get(
+    "/api/v1/invitations/{invitation_token}", response_model=InvitationDetailResponse
+)
 async def get_invitation(
     invitation_token: str,
-    invitation_service: InvitationService = Depends(get_invitation_service)
+    invitation_service: InvitationService = Depends(get_invitation_service),
 ):
     """根据令牌获取邀请信息"""
     try:
-        success, invitation_detail, message = await invitation_service.get_invitation_by_token(invitation_token)
-        
+        (
+            success,
+            invitation_detail,
+            message,
+        ) = await invitation_service.get_invitation_by_token(invitation_token)
+
         if not success:
             if "not found" in message.lower():
                 raise HTTPException(status_code=404, detail=message)
             else:
                 raise HTTPException(status_code=400, detail=message)
-        
+
         return invitation_detail
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -286,27 +309,26 @@ async def get_invitation(
 async def accept_invitation(
     request_data: AcceptInvitationRequest,
     request: Request,
-    invitation_service: InvitationService = Depends(get_invitation_service)
+    invitation_service: InvitationService = Depends(get_invitation_service),
 ):
     """接受邀请"""
     try:
         user_id = await get_user_id(request)
         # 如果请求中有user_id，使用它，否则使用header中的
         actual_user_id = request_data.user_id if request_data.user_id else user_id
-        
+
         success, accept_response, message = await invitation_service.accept_invitation(
-            invitation_token=request_data.invitation_token,
-            user_id=actual_user_id
+            invitation_token=request_data.invitation_token, user_id=actual_user_id
         )
-        
+
         if not success:
             if "not found" in message.lower():
                 raise HTTPException(status_code=404, detail=message)
             else:
                 raise HTTPException(status_code=400, detail=message)
-        
+
         return accept_response
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -314,32 +336,36 @@ async def accept_invitation(
         raise HTTPException(status_code=500, detail="Failed to accept invitation")
 
 
-@app.get("/api/v1/invitations/organizations/{organization_id}", response_model=InvitationListResponse)
+@app.get(
+    "/api/v1/invitations/organizations/{organization_id}",
+    response_model=InvitationListResponse,
+)
 async def get_organization_invitations(
     organization_id: str,
     request: Request,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    invitation_service: InvitationService = Depends(get_invitation_service)
+    invitation_service: InvitationService = Depends(get_invitation_service),
 ):
     """获取组织邀请列表"""
     try:
         user_id = await get_user_id(request)
-        success, invitation_list, message = await invitation_service.get_organization_invitations(
-            organization_id=organization_id,
-            user_id=user_id,
-            limit=limit,
-            offset=offset
+        (
+            success,
+            invitation_list,
+            message,
+        ) = await invitation_service.get_organization_invitations(
+            organization_id=organization_id, user_id=user_id, limit=limit, offset=offset
         )
-        
+
         if not success:
             if "permission" in message.lower():
                 raise HTTPException(status_code=403, detail=message)
             else:
                 raise HTTPException(status_code=400, detail=message)
-        
+
         return invitation_list
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -351,16 +377,15 @@ async def get_organization_invitations(
 async def cancel_invitation(
     invitation_id: str,
     request: Request,
-    invitation_service: InvitationService = Depends(get_invitation_service)
+    invitation_service: InvitationService = Depends(get_invitation_service),
 ):
     """取消邀请"""
     try:
         user_id = await get_user_id(request)
         success, message = await invitation_service.cancel_invitation(
-            invitation_id=invitation_id,
-            user_id=user_id
+            invitation_id=invitation_id, user_id=user_id
         )
-        
+
         if not success:
             if "not found" in message.lower():
                 raise HTTPException(status_code=404, detail=message)
@@ -368,9 +393,9 @@ async def cancel_invitation(
                 raise HTTPException(status_code=403, detail=message)
             else:
                 raise HTTPException(status_code=400, detail=message)
-        
+
         return {"message": message}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -382,16 +407,15 @@ async def cancel_invitation(
 async def resend_invitation(
     invitation_id: str,
     request: Request,
-    invitation_service: InvitationService = Depends(get_invitation_service)
+    invitation_service: InvitationService = Depends(get_invitation_service),
 ):
     """重发邀请"""
     try:
         user_id = await get_user_id(request)
         success, message = await invitation_service.resend_invitation(
-            invitation_id=invitation_id,
-            user_id=user_id
+            invitation_id=invitation_id, user_id=user_id
         )
-        
+
         if not success:
             if "not found" in message.lower():
                 raise HTTPException(status_code=404, detail=message)
@@ -399,9 +423,9 @@ async def resend_invitation(
                 raise HTTPException(status_code=403, detail=message)
             else:
                 raise HTTPException(status_code=400, detail=message)
-        
+
         return {"message": message}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -411,22 +435,24 @@ async def resend_invitation(
 
 # ============ Admin Endpoints ============
 
+
 @app.post("/api/v1/invitations/admin/expire-invitations")
 async def expire_old_invitations(
-    invitation_service: InvitationService = Depends(get_invitation_service)
+    invitation_service: InvitationService = Depends(get_invitation_service),
 ):
     """过期旧邀请（管理员端点）"""
     try:
-        success, expired_count, message = await invitation_service.expire_old_invitations()
-        
+        (
+            success,
+            expired_count,
+            message,
+        ) = await invitation_service.expire_old_invitations()
+
         if not success:
             raise HTTPException(status_code=500, detail=message)
-        
-        return {
-            "expired_count": expired_count,
-            "message": message
-        }
-        
+
+        return {"expired_count": expired_count, "message": message}
+
     except HTTPException:
         raise
     except Exception as e:
@@ -436,12 +462,13 @@ async def expire_old_invitations(
 
 if __name__ == "__main__":
     import uvicorn
+
     # Print configuration summary for debugging
     config_manager.print_config_summary()
-    
+
     uvicorn.run(
-        app, 
-        host=config.service_host, 
+        app,
+        host=config.service_host,
         port=config.service_port,
-        log_level=config.log_level.lower()
+        log_level=config.log_level.lower(),
     )

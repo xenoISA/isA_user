@@ -8,8 +8,6 @@ Port: 8227
 """
 
 import os
-import asyncio
-import logging
 from typing import Optional, List
 from datetime import datetime
 
@@ -81,7 +79,9 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("document_service")
         logger.info("✅ Event bus initialized successfully")
     except Exception as e:
-        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
+        )
         event_bus = None
 
     # Initialize service using factory
@@ -93,13 +93,14 @@ async def lifespan(app: FastAPI):
     if event_bus:
         try:
             from .events import DocumentEventHandler
+
             event_handler = DocumentEventHandler(document_service)
 
             # Subscribe to file events (file.deleted from storage_service)
             await event_bus.subscribe_to_events(
                 pattern="*.file.>",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="document-file-consumer-v1"
+                durable="document-file-consumer-v1",
             )
             logger.info("✅ Subscribed to file events (*.file.>)")
 
@@ -107,14 +108,14 @@ async def lifespan(app: FastAPI):
             await event_bus.subscribe_to_events(
                 pattern="*.user.>",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="document-user-consumer-v1"
+                durable="document-user-consumer-v1",
             )
             logger.info("✅ Subscribed to user events (*.user.>)")
 
             await event_bus.subscribe_to_events(
                 pattern="*.organization.>",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="document-org-consumer-v1"
+                durable="document-org-consumer-v1",
             )
             logger.info("✅ Subscribed to organization events (*.organization.>)")
 
@@ -124,7 +125,9 @@ async def lifespan(app: FastAPI):
     # Check database connection (non-fatal — service starts in degraded mode)
     health = await document_service.check_health()
     if health.get("status") != "healthy":
-        logger.warning("Database not available at startup — service running in degraded mode")
+        logger.warning(
+            "Database not available at startup — service running in degraded mode"
+        )
 
     # Consul service registration
     if service_config.consul_enabled:
@@ -134,23 +137,25 @@ async def lifespan(app: FastAPI):
 
             # Merge service metadata
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
             }
 
             consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=service_config.service_port,
                 consul_host=service_config.consul_host,
                 consul_port=service_config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='ttl'  # Use TTL for reliable health checks
+                health_check_type="ttl",  # Use TTL for reliable health checks
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
-            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             consul_registry = None
@@ -185,13 +190,14 @@ app = FastAPI(
     title="Document Service",
     description="Knowledge base document management with RAG and authorization",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "document_service")
 
 
 # ==================== Dependency Injection ====================
+
 
 def get_document_service() -> DocumentService:
     """Get document service instance"""
@@ -209,6 +215,7 @@ def get_user_id(user_id: str = Query(..., description="User ID")) -> str:
 
 # ==================== Health Check ====================
 
+
 @app.get("/", response_model=DocumentServiceStatus)
 async def root():
     """Root endpoint - service status"""
@@ -219,11 +226,13 @@ async def root():
         port=service_config.service_port,
         version="1.0.0",
         database_connected=health.get("database") == "connected",
-        timestamp=datetime.fromisoformat(health.get("timestamp"))
+        timestamp=datetime.fromisoformat(health.get("timestamp")),
     )
 
 
-health = HealthCheck("document_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "document_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_nats(lambda: event_bus)
 
 
@@ -233,12 +242,13 @@ async def health_check():
     """Service health check"""
     return await health.check()
 
+
 @app.post("/api/v1/documents", response_model=DocumentResponse, status_code=201)
 async def create_document(
     request: DocumentCreateRequest,
     user_id: str = Depends(get_user_id),
     organization_id: Optional[str] = Query(None),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     Create a new knowledge document and index it
@@ -258,7 +268,7 @@ async def create_document(
 async def get_user_stats(
     user_id: str = Depends(get_user_id),
     organization_id: Optional[str] = Query(None),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     Get user's document statistics
@@ -273,7 +283,7 @@ async def get_user_stats(
 async def get_document(
     doc_id: str,
     user_id: str = Depends(get_user_id),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     Get document by ID (with permission check)
@@ -296,7 +306,7 @@ async def list_documents(
     doc_type: Optional[DocumentType] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     List user's documents with filters
@@ -313,8 +323,10 @@ async def list_documents(
 async def delete_document(
     doc_id: str,
     user_id: str = Depends(get_user_id),
-    permanent: bool = Query(False, description="Permanent delete (including Qdrant points)"),
-    service: DocumentService = Depends(get_document_service)
+    permanent: bool = Query(
+        False, description="Permanent delete (including Qdrant points)"
+    ),
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     Delete document
@@ -335,12 +347,13 @@ async def delete_document(
 
 # ==================== RAG Incremental Update Endpoints ====================
 
+
 @app.put("/api/v1/documents/{doc_id}/update", response_model=DocumentResponse)
 async def update_document_incremental(
     doc_id: str,
     request: DocumentUpdateRequest,
     user_id: str = Depends(get_user_id),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     RAG incremental update
@@ -364,12 +377,15 @@ async def update_document_incremental(
 
 # ==================== Permission Management Endpoints ====================
 
-@app.put("/api/v1/documents/{doc_id}/permissions", response_model=DocumentPermissionResponse)
+
+@app.put(
+    "/api/v1/documents/{doc_id}/permissions", response_model=DocumentPermissionResponse
+)
 async def update_document_permissions(
     doc_id: str,
     request: DocumentPermissionUpdateRequest,
     user_id: str = Depends(get_user_id),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     Update document permissions
@@ -386,11 +402,13 @@ async def update_document_permissions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/documents/{doc_id}/permissions", response_model=DocumentPermissionResponse)
+@app.get(
+    "/api/v1/documents/{doc_id}/permissions", response_model=DocumentPermissionResponse
+)
 async def get_document_permissions(
     doc_id: str,
     user_id: str = Depends(get_user_id),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     Get document permissions
@@ -407,12 +425,13 @@ async def get_document_permissions(
 
 # ==================== RAG Query Endpoints (Permission-Filtered) ====================
 
+
 @app.post("/api/v1/documents/rag/query", response_model=RAGQueryResponse)
 async def rag_query(
     request: RAGQueryRequest,
     user_id: str = Depends(get_user_id),
     organization_id: Optional[str] = Query(None),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     RAG query with automatic permission filtering
@@ -430,7 +449,7 @@ async def semantic_search(
     request: SemanticSearchRequest,
     user_id: str = Depends(get_user_id),
     organization_id: Optional[str] = Query(None),
-    service: DocumentService = Depends(get_document_service)
+    service: DocumentService = Depends(get_document_service),
 ):
     """
     Semantic search with permission filtering
@@ -445,12 +464,13 @@ async def semantic_search(
 
 # ==================== Error Handlers ====================
 
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """Handle HTTP exceptions"""
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": exc.detail, "status_code": exc.status_code}
+        content={"error": exc.detail, "status_code": exc.status_code},
     )
 
 
@@ -459,8 +479,7 @@ async def general_exception_handler(request, exc):
     """Handle general exceptions"""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "status_code": 500}
+        status_code=500, content={"error": "Internal server error", "status_code": 500}
     )
 
 
@@ -476,5 +495,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port,
         reload=os.getenv("DEBUG", "false").lower() == "true",
-        log_level="info"
+        log_level="info",
     )

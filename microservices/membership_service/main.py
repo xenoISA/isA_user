@@ -4,11 +4,8 @@ Membership Microservice API
 Loyalty engine with points management, tier progression, and benefits tracking.
 """
 
-import asyncio
-import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
@@ -26,7 +23,6 @@ from .membership_repository import MembershipRepository
 from .membership_service import MembershipService
 from .factory import create_membership_service
 from .models import (
-    HealthResponse,
     ServiceInfo,
     MembershipStatus,
     MembershipTier,
@@ -138,11 +134,11 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type="ttl"  # Use TTL for reliable health checks,
+                    health_check_type="ttl",  # Use TTL for reliable health checks,
                 )
                 consul_registry.register()
                 consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
+                # Start TTL heartbeat - added for consistency with isA_Model
                 logger.info(
                     f"Service registered with Consul: {route_meta.get('route_count')} routes"
                 )
@@ -199,7 +195,9 @@ setup_metrics(app, "membership_service")
 async def get_membership_service() -> MembershipService:
     """Get membership service instance"""
     if not membership_service:
-        raise HTTPException(status_code=503, detail="Membership service not initialized")
+        raise HTTPException(
+            status_code=503, detail="Membership service not initialized"
+        )
     return membership_service
 
 
@@ -208,7 +206,9 @@ async def get_membership_service() -> MembershipService:
 # ====================
 
 
-health = HealthCheck("membership_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "membership_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_postgres(lambda: repository.db if repository else None)
 health.add_nats(lambda: event_bus)
 
@@ -218,6 +218,7 @@ health.add_nats(lambda: event_bus)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.get("/api/v1/memberships/info", response_model=ServiceInfo)
 async def get_service_info():
@@ -231,7 +232,7 @@ async def get_service_info():
             "points_management",
             "tier_progression",
             "benefits_tracking",
-            "history"
+            "history",
         ],
     )
 
@@ -244,7 +245,7 @@ async def get_service_info():
 @app.post("/api/v1/memberships", response_model=EnrollMembershipResponse)
 async def enroll_membership(
     request: EnrollMembershipRequest,
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Enroll a new membership"""
     try:
@@ -253,7 +254,7 @@ async def enroll_membership(
             organization_id=request.organization_id,
             enrollment_source=request.enrollment_source,
             promo_code=request.promo_code,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
 
         if not result.success:
@@ -283,7 +284,7 @@ async def list_memberships(
     tier_code: Optional[MembershipTier] = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """List memberships"""
     try:
@@ -293,7 +294,7 @@ async def list_memberships(
             status=status,
             tier_code=tier_code,
             page=page,
-            page_size=page_size
+            page_size=page_size,
         )
         return result
 
@@ -304,8 +305,7 @@ async def list_memberships(
 
 @app.get("/api/v1/memberships/{membership_id}", response_model=MembershipResponse)
 async def get_membership(
-    membership_id: str,
-    service: MembershipService = Depends(get_membership_service)
+    membership_id: str, service: MembershipService = Depends(get_membership_service)
 ):
     """Get membership by ID"""
     try:
@@ -327,13 +327,12 @@ async def get_membership(
 async def get_membership_by_user(
     user_id: str,
     organization_id: Optional[str] = Query(default=None),
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Get membership by user ID"""
     try:
         result = await service.get_membership_by_user(
-            user_id=user_id,
-            organization_id=organization_id
+            user_id=user_id, organization_id=organization_id
         )
 
         if not result.success:
@@ -348,11 +347,13 @@ async def get_membership_by_user(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.post("/api/v1/memberships/{membership_id}/cancel", response_model=MembershipResponse)
+@app.post(
+    "/api/v1/memberships/{membership_id}/cancel", response_model=MembershipResponse
+)
 async def cancel_membership(
     membership_id: str,
     request: CancelMembershipRequest,
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Cancel membership"""
     try:
@@ -360,7 +361,7 @@ async def cancel_membership(
             membership_id=membership_id,
             reason=request.reason,
             forfeit_points=request.forfeit_points,
-            feedback=request.feedback
+            feedback=request.feedback,
         )
 
         if not result.success:
@@ -377,18 +378,20 @@ async def cancel_membership(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.put("/api/v1/memberships/{membership_id}/suspend", response_model=MembershipResponse)
+@app.put(
+    "/api/v1/memberships/{membership_id}/suspend", response_model=MembershipResponse
+)
 async def suspend_membership(
     membership_id: str,
     request: SuspendMembershipRequest,
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Suspend membership"""
     try:
         result = await service.suspend_membership(
             membership_id=membership_id,
             reason=request.reason,
-            duration_days=request.duration_days
+            duration_days=request.duration_days,
         )
 
         if not result.success:
@@ -405,10 +408,11 @@ async def suspend_membership(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.put("/api/v1/memberships/{membership_id}/reactivate", response_model=MembershipResponse)
+@app.put(
+    "/api/v1/memberships/{membership_id}/reactivate", response_model=MembershipResponse
+)
 async def reactivate_membership(
-    membership_id: str,
-    service: MembershipService = Depends(get_membership_service)
+    membership_id: str, service: MembershipService = Depends(get_membership_service)
 ):
     """Reactivate suspended membership"""
     try:
@@ -436,7 +440,7 @@ async def reactivate_membership(
 @app.post("/api/v1/memberships/points/earn", response_model=EarnPointsResponse)
 async def earn_points(
     request: EarnPointsRequest,
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Earn points"""
     try:
@@ -447,7 +451,7 @@ async def earn_points(
             organization_id=request.organization_id,
             reference_id=request.reference_id,
             description=request.description,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
 
         if not result.success:
@@ -471,7 +475,7 @@ async def earn_points(
 @app.post("/api/v1/memberships/points/redeem", response_model=RedeemPointsResponse)
 async def redeem_points(
     request: RedeemPointsRequest,
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Redeem points"""
     try:
@@ -481,7 +485,7 @@ async def redeem_points(
             reward_code=request.reward_code,
             organization_id=request.organization_id,
             description=request.description,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
 
         if not result.success:
@@ -508,13 +512,12 @@ async def redeem_points(
 async def get_points_balance(
     user_id: str = Query(...),
     organization_id: Optional[str] = Query(default=None),
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Get points balance"""
     try:
         result = await service.get_points_balance(
-            user_id=user_id,
-            organization_id=organization_id
+            user_id=user_id, organization_id=organization_id
         )
 
         if not result.success:
@@ -536,8 +539,7 @@ async def get_points_balance(
 
 @app.get("/api/v1/memberships/{membership_id}/tier", response_model=TierStatusResponse)
 async def get_tier_status(
-    membership_id: str,
-    service: MembershipService = Depends(get_membership_service)
+    membership_id: str, service: MembershipService = Depends(get_membership_service)
 ):
     """Get tier status and progress"""
     try:
@@ -560,10 +562,11 @@ async def get_tier_status(
 # ====================
 
 
-@app.get("/api/v1/memberships/{membership_id}/benefits", response_model=BenefitListResponse)
+@app.get(
+    "/api/v1/memberships/{membership_id}/benefits", response_model=BenefitListResponse
+)
 async def get_benefits(
-    membership_id: str,
-    service: MembershipService = Depends(get_membership_service)
+    membership_id: str, service: MembershipService = Depends(get_membership_service)
 ):
     """Get available benefits"""
     try:
@@ -581,18 +584,21 @@ async def get_benefits(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.post("/api/v1/memberships/{membership_id}/benefits/use", response_model=UseBenefitResponse)
+@app.post(
+    "/api/v1/memberships/{membership_id}/benefits/use",
+    response_model=UseBenefitResponse,
+)
 async def use_benefit(
     membership_id: str,
     request: UseBenefitRequest,
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Use a benefit"""
     try:
         result = await service.use_benefit(
             membership_id=membership_id,
             benefit_code=request.benefit_code,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
 
         if not result.success:
@@ -624,15 +630,12 @@ async def get_history(
     action: Optional[PointAction] = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
-    service: MembershipService = Depends(get_membership_service)
+    service: MembershipService = Depends(get_membership_service),
 ):
     """Get membership history"""
     try:
         result = await service.get_history(
-            membership_id=membership_id,
-            action=action,
-            page=page,
-            page_size=page_size
+            membership_id=membership_id, action=action, page=page, page_size=page_size
         )
 
         return result
@@ -648,9 +651,7 @@ async def get_history(
 
 
 @app.get("/api/v1/memberships/stats", response_model=MembershipStats)
-async def get_statistics(
-    service: MembershipService = Depends(get_membership_service)
-):
+async def get_statistics(service: MembershipService = Depends(get_membership_service)):
     """Get membership statistics"""
     try:
         return await service.get_stats()
@@ -670,7 +671,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception in {request.url}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"success": False, "error": "Internal server error occurred"}
+        content={"success": False, "error": "Internal server error occurred"},
     )
 
 

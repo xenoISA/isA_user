@@ -7,31 +7,37 @@ Device Management Service - Main Application
 from fastapi import FastAPI, HTTPException, Depends, Query, Path, Body, Header
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
-import logging
 
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
-from core.service_discovery import get_service_discovery
 from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 from .models import (
-    DeviceRegistrationRequest, DeviceUpdateRequest, DeviceAuthRequest,
-    DeviceCommandRequest, BulkCommandRequest, DeviceGroupRequest,
-    DevicePairingRequest, DevicePairingResponse,
-    DeviceResponse, DeviceAuthResponse, DeviceStatsResponse,
-    DeviceHealthResponse, DeviceGroupResponse, DeviceListResponse,
-    DeviceStatus, DeviceType, ConnectivityType
+    DeviceRegistrationRequest,
+    DeviceUpdateRequest,
+    DeviceAuthRequest,
+    DeviceCommandRequest,
+    BulkCommandRequest,
+    DeviceGroupRequest,
+    DevicePairingRequest,
+    DevicePairingResponse,
+    DeviceResponse,
+    DeviceAuthResponse,
+    DeviceStatsResponse,
+    DeviceGroupResponse,
+    DeviceListResponse,
+    DeviceStatus,
+    DeviceType,
+    ConnectivityType,
 )
 from .factory import create_device_service
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from microservices.organization_service.clients import OrganizationServiceClient
 from microservices.auth_service.client import AuthServiceClient
-from microservices.telemetry_service.clients import TelemetryServiceClient
 
 # Initialize configuration
 config_manager = ConfigManager("device_service")
@@ -40,6 +46,7 @@ config = config_manager.get_service_config()
 # Setup loggers (use actual service name)
 app_logger = setup_service_logger("device_service")
 logger = app_logger  # for backward compatibility
+
 
 # Service instance
 class DeviceMicroservice:
@@ -54,10 +61,14 @@ class DeviceMicroservice:
             self.event_bus = await get_event_bus("device_service")
             logger.info("Event bus initialized successfully")
         except Exception as e:
-            logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+            logger.warning(
+                f"Failed to initialize event bus: {e}. Continuing without event publishing."
+            )
             self.event_bus = None
 
-        self.service = create_device_service(config=config_manager, event_bus=self.event_bus)
+        self.service = create_device_service(
+            config=config_manager, event_bus=self.event_bus
+        )
         logger.info("Device service initialized")
 
     async def shutdown(self):
@@ -73,11 +84,13 @@ class DeviceMicroservice:
             await self.event_bus.close()
         logger.info("Device service shutting down")
 
+
 # Global instance
 microservice = DeviceMicroservice()
 
 # Graceful shutdown manager
 shutdown_manager = GracefulShutdown("device_service")
+
 
 # Lifespan management
 @asynccontextmanager
@@ -91,26 +104,27 @@ async def lifespan(app: FastAPI):
     if microservice.event_bus:
         try:
             from .events import DeviceEventHandler
+
             event_handler = DeviceEventHandler(microservice.service)
 
             # Subscribe to firmware.uploaded events - notify devices of updates
             await microservice.event_bus.subscribe(
                 pattern="events.firmware.uploaded",
-                handler=lambda msg: event_handler.handle_event(msg)
+                handler=lambda msg: event_handler.handle_event(msg),
             )
             logger.info("✅ Subscribed to firmware.uploaded events")
 
             # Subscribe to update.completed events - update device firmware version
             await microservice.event_bus.subscribe(
                 pattern="events.update.completed",
-                handler=lambda msg: event_handler.handle_event(msg)
+                handler=lambda msg: event_handler.handle_event(msg),
             )
             logger.info("✅ Subscribed to update.completed events")
 
             # Subscribe to telemetry.data.received events - update device health
             await microservice.event_bus.subscribe(
                 pattern="events.telemetry.data.received",
-                handler=lambda msg: event_handler.handle_event(msg)
+                handler=lambda msg: event_handler.handle_event(msg),
             )
             logger.info("✅ Subscribed to telemetry.data.received events")
 
@@ -125,23 +139,25 @@ async def lifespan(app: FastAPI):
 
             # Merge service metadata
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
             }
 
             microservice.consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=config.service_port,
                 consul_host=config.consul_host,
                 consul_port=config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='ttl'  # Use TTL for reliable health checks
+                health_check_type="ttl",  # Use TTL for reliable health checks
             )
             microservice.consul_registry.register()
             microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
-            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             microservice.consul_registry = None
@@ -153,12 +169,13 @@ async def lifespan(app: FastAPI):
     await shutdown_manager.wait_for_drain()
     await microservice.shutdown()
 
+
 # Create FastAPI application
 app = FastAPI(
     title="Device Management Service",
     description="IoT设备管理微服务 - 设备注册、认证、生命周期管理",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "device_service")
@@ -167,8 +184,9 @@ setup_metrics(app, "device_service")
 # Health Check Endpoints
 # ======================
 
-health = HealthCheck("device_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_mqtt(lambda: mqtt_client)
+health = HealthCheck(
+    "device_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/devices/health")
@@ -177,11 +195,14 @@ async def health_check():
     """Service health check"""
     return await health.check()
 
+
 async def get_user_context(
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None),
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
-    x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
+    x_internal_service_secret: Optional[str] = Header(
+        None, alias="X-Internal-Service-Secret"
+    ),
 ) -> Dict[str, Any]:
     """
     Get user context with authentication using AuthServiceClient
@@ -190,11 +211,12 @@ async def get_user_context(
     """
     # Allow internal service-to-service calls with verified secret
     from core.auth_dependencies import INTERNAL_SERVICE_SECRET as internal_secret
+
     if x_internal_service == "true" and x_internal_service_secret == internal_secret:
         return {
             "user_id": "internal_service",
             "organization_id": None,
-            "role": "service"
+            "role": "service",
         }
 
     if not authorization and not x_api_key:
@@ -205,18 +227,24 @@ async def get_user_context(
         async with AuthServiceClient() as auth_client:
             if authorization:
                 # Verify JWT token
-                token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+                token = (
+                    authorization.replace("Bearer ", "")
+                    if authorization.startswith("Bearer ")
+                    else authorization
+                )
                 logger.info("Verifying token with AuthServiceClient")
 
                 result = await auth_client.verify_token(token)
 
                 if not result or not result.get("valid"):
-                    raise HTTPException(status_code=401, detail="Token verification failed")
+                    raise HTTPException(
+                        status_code=401, detail="Token verification failed"
+                    )
 
                 return {
                     "user_id": result.get("user_id", "unknown"),
                     "organization_id": result.get("organization_id"),
-                    "role": result.get("role", "user")
+                    "role": result.get("role", "user"),
                 }
 
             elif x_api_key:
@@ -224,36 +252,41 @@ async def get_user_context(
                 result = await auth_client.verify_api_key(x_api_key)
 
                 if not result or not result.get("valid"):
-                    raise HTTPException(status_code=401, detail="API key verification failed")
+                    raise HTTPException(
+                        status_code=401, detail="API key verification failed"
+                    )
 
                 return {
                     "user_id": result.get("user_id", "unknown"),
                     "organization_id": result.get("organization_id"),
-                    "role": result.get("role", "user")
+                    "role": result.get("role", "user"),
                 }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Auth service communication error: {e}")
-        raise HTTPException(status_code=503, detail="Authentication service unavailable")
+        raise HTTPException(
+            status_code=503, detail="Authentication service unavailable"
+        )
 
     raise HTTPException(status_code=401, detail="Authentication required")
+
 
 # ======================
 # Device CRUD Endpoints
 # ======================
 
+
 @app.post("/api/v1/devices", response_model=DeviceResponse)
 async def register_device(
     request: DeviceRegistrationRequest = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """注册新设备"""
     try:
         device = await microservice.service.register_device(
-            user_context["user_id"],
-            request.model_dump()
+            user_context["user_id"], request.model_dump()
         )
         if device:
             return device
@@ -262,10 +295,9 @@ async def register_device(
         logger.error(f"Error registering device: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @app.get("/api/v1/devices/stats", response_model=DeviceStatsResponse)
-async def get_device_stats(
-    user_context: Dict[str, Any] = Depends(get_user_context)
-):
+async def get_device_stats(user_context: Dict[str, Any] = Depends(get_user_context)):
     """获取设备统计信息"""
     try:
         stats = await microservice.service.get_device_stats(user_context["user_id"])
@@ -276,11 +308,12 @@ async def get_device_stats(
         logger.error(f"Error getting device stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @app.get("/api/v1/devices/frames")
 async def list_smart_frames(
     limit: int = Query(100, ge=1, le=500, description="Max items to return"),
     offset: int = Query(0, ge=0, description="Number of items to skip"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取智能相框列表 - 过滤现有设备API，包含家庭共享权限"""
     try:
@@ -289,7 +322,7 @@ async def list_smart_frames(
             device_type=DeviceType.SMART_FRAME,
             limit=limit,
             offset=offset,
-            user_context=user_context
+            user_context=user_context,
         )
 
         # Get organization service client for access checks
@@ -315,16 +348,17 @@ async def list_smart_frames(
         return {
             "frames": accessible_frames,
             "count": len(accessible_frames),
-            "message": "Smart frames retrieved with family sharing permissions"
+            "message": "Smart frames retrieved with family sharing permissions",
         }
     except Exception as e:
         logger.error(f"Error listing smart frames: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @app.get("/api/v1/devices/{device_id}", response_model=DeviceResponse)
 async def get_device(
     device_id: str = Path(..., description="Device ID"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取设备详情"""
     try:
@@ -338,11 +372,12 @@ async def get_device(
         logger.error(f"Error getting device {device_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @app.put("/api/v1/devices/{device_id}", response_model=DeviceResponse)
 async def update_device(
     device_id: str = Path(..., description="Device ID"),
     request: DeviceUpdateRequest = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """更新设备信息"""
     try:
@@ -364,7 +399,9 @@ async def update_device(
             update_data["tags"] = request.tags
 
         # Call service layer to update device
-        updated_device = await microservice.service.update_device(device_id, update_data)
+        updated_device = await microservice.service.update_device(
+            device_id, update_data
+        )
 
         if updated_device:
             return updated_device
@@ -376,10 +413,11 @@ async def update_device(
         logger.error(f"Error updating device {device_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @app.delete("/api/v1/devices/{device_id}")
 async def decommission_device(
     device_id: str = Path(..., description="Device ID"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """停用设备"""
     try:
@@ -391,15 +429,18 @@ async def decommission_device(
         logger.error(f"Error decommissioning device: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @app.get("/api/v1/devices", response_model=DeviceListResponse)
 async def list_devices(
     status: Optional[DeviceStatus] = Query(None, description="Filter by status"),
     device_type: Optional[DeviceType] = Query(None, description="Filter by type"),
-    connectivity: Optional[ConnectivityType] = Query(None, description="Filter by connectivity"),
+    connectivity: Optional[ConnectivityType] = Query(
+        None, description="Filter by connectivity"
+    ),
     group_id: Optional[str] = Query(None, description="Filter by group"),
     limit: int = Query(100, ge=1, le=500, description="Max items to return"),
     offset: int = Query(0, ge=0, description="Number of items to skip"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取设备列表"""
     try:
@@ -409,13 +450,15 @@ async def list_devices(
             device_type=device_type.value if device_type else None,
             status=status.value if status else None,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
 
         # Filter by connectivity and group_id if provided (repository doesn't support these yet)
         filtered_devices = devices
         if connectivity:
-            filtered_devices = [d for d in filtered_devices if d.connectivity_type == connectivity]
+            filtered_devices = [
+                d for d in filtered_devices if d.connectivity_type == connectivity
+            ]
         if group_id:
             filtered_devices = [d for d in filtered_devices if d.group_id == group_id]
 
@@ -428,16 +471,18 @@ async def list_devices(
                 "status": status,
                 "device_type": device_type,
                 "connectivity": connectivity,
-                "group_id": group_id
-            }
+                "group_id": group_id,
+            },
         )
     except Exception as e:
         logger.error(f"Error listing devices: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 # ======================
 # Device Authentication
 # ======================
+
 
 @app.post("/api/v1/devices/auth", response_model=DeviceAuthResponse)
 async def authenticate_device(
@@ -449,41 +494,47 @@ async def authenticate_device(
 
         async with AuthServiceClient() as auth_client:
             auth_result = await auth_client.authenticate_device(
-                device_id=request.device_id,
-                device_secret=request.device_secret
+                device_id=request.device_id, device_secret=request.device_secret
             )
 
             if not auth_result or not auth_result.get("authenticated"):
-                raise HTTPException(status_code=401, detail="Device authentication failed")
+                raise HTTPException(
+                    status_code=401, detail="Device authentication failed"
+                )
 
             # 更新设备状态为活跃
-            device_update = await microservice.service.update_device_status(
-                request.device_id,
-                DeviceStatus.ACTIVE
+            await microservice.service.update_device_status(
+                request.device_id, DeviceStatus.ACTIVE
             )
 
             return DeviceAuthResponse(
                 device_id=auth_result["device_id"],
-                access_token=auth_result.get("access_token") or auth_result.get("token") or auth_result.get("device_token"),
+                access_token=auth_result.get("access_token")
+                or auth_result.get("token")
+                or auth_result.get("device_token"),
                 token_type=auth_result.get("token_type", "Bearer"),
-                expires_in=auth_result.get("expires_in", 86400)
+                expires_in=auth_result.get("expires_in", 86400),
             )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error authenticating device: {e}")
-        raise HTTPException(status_code=503, detail="Authentication service unavailable")
+        raise HTTPException(
+            status_code=503, detail="Authentication service unavailable"
+        )
+
 
 # ======================
 # Device Commands
 # ======================
 
+
 @app.post("/api/v1/devices/{device_id}/commands")
 async def send_command(
     device_id: str = Path(..., description="Device ID"),
     request: DeviceCommandRequest = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """向设备发送命令"""
     try:
@@ -494,9 +545,7 @@ async def send_command(
 
         # Send command to device
         result = await microservice.service.send_command(
-            device_id,
-            user_context["user_id"],
-            request.model_dump()
+            device_id, user_context["user_id"], request.model_dump()
         )
         return result
     except HTTPException:
@@ -505,13 +554,15 @@ async def send_command(
         logger.error(f"Error sending command: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 # ======================
 # Device Health & Monitoring
 # ======================
 
+
 async def get_device_health(
     device_id: str = Path(..., description="Device ID"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取设备健康状态"""
     try:
@@ -523,20 +574,21 @@ async def get_device_health(
         logger.error(f"Error getting device health: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 # ======================
 # Device Groups
 # ======================
 
+
 @app.post("/api/v1/groups", response_model=DeviceGroupResponse)
 async def create_device_group(
     request: DeviceGroupRequest = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """创建设备组"""
     try:
         group = await microservice.service.create_device_group(
-            user_context["user_id"],
-            request.model_dump()
+            user_context["user_id"], request.model_dump()
         )
         if group:
             return group
@@ -545,82 +597,92 @@ async def create_device_group(
         logger.error(f"Error creating device group: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @app.get("/api/v1/groups/{group_id}", response_model=DeviceGroupResponse)
 async def get_device_group(
     group_id: str = Path(..., description="Group ID"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """获取设备组详情"""
     # 返回设备组信息
     pass
 
+
 @app.put("/api/v1/groups/{group_id}/devices/{device_id}")
 async def add_device_to_group(
     group_id: str = Path(..., description="Group ID"),
     device_id: str = Path(..., description="Device ID"),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """将设备添加到组"""
     return {"message": f"Device {device_id} added to group {group_id}"}
+
 
 # ======================
 # Bulk Operations
 # ======================
 
+
 @app.post("/api/v1/devices/bulk/register")
 async def bulk_register_devices(
     devices: List[DeviceRegistrationRequest] = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """批量注册设备"""
     results = []
     for device_request in devices:
         try:
             device = await microservice.service.register_device(
-                user_context["user_id"],
-                device_request.model_dump()
+                user_context["user_id"], device_request.model_dump()
             )
-            results.append({"success": True, "device_id": device.device_id if device else None})
+            results.append(
+                {"success": True, "device_id": device.device_id if device else None}
+            )
         except Exception as e:
             results.append({"success": False, "error": str(e)})
-    
+
     return {"results": results, "total": len(devices)}
+
 
 @app.post("/api/v1/devices/bulk/commands")
 async def bulk_send_commands(
     request: BulkCommandRequest = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """批量发送命令"""
     results = []
-    
+
     # Create DeviceCommandRequest from flattened BulkCommandRequest
     command_obj = DeviceCommandRequest(
         command=request.command_name,
         parameters=request.parameters,
         timeout=request.timeout,
         priority=request.priority,
-        require_ack=request.require_ack
+        require_ack=request.require_ack,
     )
-    
+
     for device_id in request.device_ids:
         try:
-            result = await microservice.service.send_command(device_id, user_context["user_id"], command_obj.model_dump())
+            result = await microservice.service.send_command(
+                device_id, user_context["user_id"], command_obj.model_dump()
+            )
             results.append({"device_id": device_id, **result})
         except Exception as e:
             results.append({"device_id": device_id, "success": False, "error": str(e)})
-    
+
     return {"results": results, "total": len(request.device_ids)}
+
 
 # ======================
 # Smart Frame Convenience Endpoints (using existing device infrastructure)
 # ======================
 
+
 @app.post("/api/v1/devices/frames/{frame_id}/display")
 async def control_frame_display(
     frame_id: str = Path(..., description="Frame Device ID"),
     command_data: Dict[str, Any] = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """控制相框显示 - 使用现有设备命令API，包含权限检查"""
     try:
@@ -637,14 +699,17 @@ async def control_frame_display(
             # await org_client.close()
             # if not has_access:
             #     raise HTTPException(status_code=403, detail="Insufficient permissions")
-            raise HTTPException(status_code=403, detail="Insufficient permissions to control this smart frame")
+            raise HTTPException(
+                status_code=403,
+                detail="Insufficient permissions to control this smart frame",
+            )
 
         # Use existing device command infrastructure
         display_command = DeviceCommandRequest(
             command="display_control",
             parameters=command_data,
             timeout=command_data.get("timeout", 30),
-            priority=5  # default medium priority
+            priority=5,  # default medium priority
         )
 
         result = await send_command(frame_id, display_command, user_context)
@@ -661,7 +726,7 @@ async def control_frame_display(
 async def sync_frame_content(
     frame_id: str = Path(..., description="Frame Device ID"),
     sync_data: Dict[str, Any] = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """同步相框内容 - 使用现有设备命令API，包含权限检查"""
     try:
@@ -671,7 +736,10 @@ async def sync_frame_content(
         # Check ownership or family sharing permissions
         if device.user_id != user_context["user_id"]:
             # TODO: Check family sharing permissions via organization service
-            raise HTTPException(status_code=403, detail="Insufficient permissions to sync this smart frame")
+            raise HTTPException(
+                status_code=403,
+                detail="Insufficient permissions to sync this smart frame",
+            )
 
         # Use existing device command infrastructure
         sync_command = DeviceCommandRequest(
@@ -679,10 +747,10 @@ async def sync_frame_content(
             parameters={
                 "album_ids": sync_data.get("album_ids", []),
                 "sync_type": sync_data.get("sync_type", "incremental"),
-                "force": sync_data.get("force", False)
+                "force": sync_data.get("force", False),
             },
             timeout=sync_data.get("timeout", 300),  # Longer timeout for sync
-            priority=5  # default medium priority
+            priority=5,  # default medium priority
         )
 
         result = await send_command(frame_id, sync_command, user_context)
@@ -699,7 +767,7 @@ async def sync_frame_content(
 async def update_frame_config(
     frame_id: str = Path(..., description="Frame Device ID"),
     config_updates: Dict[str, Any] = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """更新相框配置 - 使用现有设备更新API，包含权限检查"""
     try:
@@ -709,7 +777,10 @@ async def update_frame_config(
         # Check if user has write access to this smart frame
         if current_device.user_id != user_context["user_id"]:
             # TODO: Check family sharing permissions via organization service
-            raise HTTPException(status_code=403, detail="Insufficient permissions to configure this smart frame")
+            raise HTTPException(
+                status_code=403,
+                detail="Insufficient permissions to configure this smart frame",
+            )
 
         current_metadata = current_device.metadata or {}
 
@@ -722,12 +793,12 @@ async def update_frame_config(
             metadata={**current_metadata, "frame_config": frame_config}
         )
 
-        result = await update_device(frame_id, update_request, user_context)
+        await update_device(frame_id, update_request, user_context)
         return {
             "success": True,
             "device_id": frame_id,
             "updated_config": frame_config,
-            "message": "Frame config updated using existing device infrastructure"
+            "message": "Frame config updated using existing device infrastructure",
         }
 
     except HTTPException:
@@ -740,6 +811,7 @@ async def update_frame_config(
 # ======================
 # Service Statistics
 # ======================
+
 
 @app.get("/api/v1/service/stats")
 async def get_service_stats():
@@ -755,11 +827,11 @@ async def get_service_stats():
             "commands": 1,
             "monitoring": 2,
             "groups": 3,
-            "bulk": 2
+            "bulk": 2,
         },
         "features": [
             "device_registration",
-            "device_authentication", 
+            "device_authentication",
             "lifecycle_management",
             "remote_commands",
             "health_monitoring",
@@ -767,43 +839,45 @@ async def get_service_stats():
             "bulk_operations",
             "smart_frame_support",
             "display_control",
-            "content_sync"
-        ]
+            "content_sync",
+        ],
     }
+
 
 # Debug endpoint removed — was exposing service topology without authentication
 
 # 导入datetime
-from datetime import datetime
 
 if __name__ == "__main__":
     import uvicorn
+
     # Print configuration summary for debugging
     config_manager.print_config_summary()
-    
+
     uvicorn.run(
-        app, 
-        host=config.service_host, 
+        app,
+        host=config.service_host,
         port=config.service_port,
-        log_level=config.log_level.lower()
+        log_level=config.log_level.lower(),
     )
 
 # ============================================================================
 # Device Pairing API
 # ============================================================================
 
+
 @app.post("/api/v1/devices/{device_id}/pair", response_model=DevicePairingResponse)
 async def pair_device(
     device_id: str = Path(..., description="Device ID to pair"),
     request: DevicePairingRequest = Body(...),
-    user_context: Dict[str, Any] = Depends(get_user_context)
+    user_context: Dict[str, Any] = Depends(get_user_context),
 ):
     """
     Pair a device with a user using pairing token from QR code
-    
+
     This endpoint is called by the mobile app after scanning the QR code
     displayed on the EmoFrame device.
-    
+
     Flow:
     1. Mobile user scans QR code on Display device
     2. QR code contains: EMOFRAME:deviceId:pairingToken
@@ -811,43 +885,41 @@ async def pair_device(
     4. This endpoint verifies token with auth_service
     5. If valid, updates device owner and status to 'active'
     6. Publishes device.paired event
-    
+
     Args:
         device_id: Device ID from QR code
         request: Pairing request with token and user_id
         user_context: User context from authentication
-        
+
     Returns:
         DevicePairingResponse with success status and device info
     """
     try:
         # Get device service instance
         device_service = app.state.microservice.service
-        
+
         # Call pairing method
         result = await device_service.pair_device(
             device_id=device_id,
             pairing_token=request.pairing_token,
-            user_id=request.user_id
+            user_id=request.user_id,
         )
-        
+
         if not result.get("success"):
             return DevicePairingResponse(
-                success=False,
-                error=result.get("error", "Device pairing failed")
+                success=False, error=result.get("error", "Device pairing failed")
             )
-        
-        logger.info(f"Device {device_id} successfully paired with user {request.user_id}")
-        
+
+        logger.info(
+            f"Device {device_id} successfully paired with user {request.user_id}"
+        )
+
         return DevicePairingResponse(
             success=True,
             device=result.get("device"),
-            message=f"Device {device_id} successfully paired"
+            message=f"Device {device_id} successfully paired",
         )
-        
+
     except Exception as e:
         logger.error(f"Error in pair_device endpoint: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to pair device"
-        )
+        raise HTTPException(status_code=500, detail="Failed to pair device")

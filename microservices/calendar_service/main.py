@@ -4,7 +4,6 @@ Calendar Service - Main Application
 日历事件管理微服务主应用
 """
 
-import logging
 import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
@@ -29,7 +28,6 @@ from .models import (
     EventQueryRequest,
     EventResponse,
     EventUpdateRequest,
-    SyncProvider,
     SyncStatusResponse,
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
@@ -63,8 +61,7 @@ class CalendarMicroservice:
         # Create service with real dependencies using factory
         try:
             self.service = create_calendar_service(
-                config=config_manager,
-                event_bus=self.event_bus
+                config=config_manager, event_bus=self.event_bus
             )
             logger.info("Calendar service initialized")
         except Exception as e:
@@ -136,7 +133,7 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -180,7 +177,9 @@ setup_metrics(app, "calendar_service")
 # =============================================================================
 
 
-health = HealthCheck("calendar_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "calendar_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/calendar/health")
@@ -188,6 +187,7 @@ health = HealthCheck("calendar_service", version="1.0.0", shutdown_manager=shutd
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post("/api/v1/calendar/events", response_model=EventResponse, status_code=201)
 async def create_event(request: EventCreateRequest = Body(...)):
@@ -431,4 +431,9 @@ if __name__ == "__main__":
 
     port = config.service_port if hasattr(config, "service_port") else 8217
 
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=os.getenv("DEBUG", "false").lower() == "true")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
+    )

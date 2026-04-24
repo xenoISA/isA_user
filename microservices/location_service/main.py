@@ -7,15 +7,12 @@ Supports real-time location tracking, geofences, places, and route management
 Port: 8224
 """
 
-import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-
-from fastapi.responses import JSONResponse
 
 
 from core.config_manager import ConfigManager
@@ -32,15 +29,12 @@ from .models import (
     GeofenceCreateRequest,
     GeofenceUpdateRequest,
     LocationBatchRequest,
-    LocationOperationResult,
     LocationReportRequest,
-    LocationServiceStatus,
     NearbySearchRequest,
     PlaceCreateRequest,
     PlaceUpdateRequest,
     PolygonSearchRequest,
     RadiusSearchRequest,
-    RouteStartRequest,
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
@@ -101,7 +95,7 @@ async def lifespan(app: FastAPI):
                 consul_port=service_config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -153,7 +147,9 @@ async def get_authenticated_user_id(
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
-    x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
+    x_internal_service_secret: Optional[str] = Header(
+        None, alias="X-Internal-Service-Secret"
+    ),
 ) -> str:
     """
     Extract user ID from verified authentication credentials.
@@ -163,6 +159,7 @@ async def get_authenticated_user_id(
 
     # Internal service auth
     from core.auth_dependencies import INTERNAL_SERVICE_SECRET as internal_secret
+
     if x_internal_service == "true" and x_internal_service_secret == internal_secret:
         return "internal-service"
 
@@ -207,7 +204,9 @@ async def get_authenticated_user_id(
 # ==================== Health Check ====================
 
 
-health = HealthCheck("location_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "location_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/location/health")
@@ -216,8 +215,11 @@ async def health_check():
     """Service health check"""
     return await health.check()
 
+
 @app.post("/api/v1/locations")
-async def report_location(request: LocationReportRequest, user_id: str = Depends(get_authenticated_user_id)):
+async def report_location(
+    request: LocationReportRequest, user_id: str = Depends(get_authenticated_user_id)
+):
     """Report device location"""
     try:
         result = await location_service.report_location(request, user_id)
@@ -233,7 +235,9 @@ async def report_location(request: LocationReportRequest, user_id: str = Depends
 
 
 @app.post("/api/v1/locations/batch")
-async def batch_report_locations(request: LocationBatchRequest, user_id: str = Depends(get_authenticated_user_id)):
+async def batch_report_locations(
+    request: LocationBatchRequest, user_id: str = Depends(get_authenticated_user_id)
+):
     """Report multiple locations in batch"""
     try:
         result = await location_service.batch_report_locations(request, user_id)
@@ -245,7 +249,9 @@ async def batch_report_locations(request: LocationBatchRequest, user_id: str = D
 
 
 @app.get("/api/v1/locations/device/{device_id}")
-async def get_device_latest_location(device_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def get_device_latest_location(
+    device_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Get device's latest location"""
     try:
         location = await location_service.get_device_latest_location(device_id, user_id)
@@ -263,7 +269,9 @@ async def get_device_latest_location(device_id: str, user_id: str = Depends(get_
 
 
 @app.get("/api/v1/locations/device/{device_id}/latest")
-async def get_device_latest_location_alt(device_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def get_device_latest_location_alt(
+    device_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Get device's latest location (alternative route)"""
     return await get_device_latest_location(device_id, user_id)
 
@@ -296,7 +304,9 @@ async def get_device_location_history(
 
 
 @app.get("/api/v1/locations/user/{target_user_id}")
-async def get_user_devices_locations(target_user_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def get_user_devices_locations(
+    target_user_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Get latest locations for all user's devices"""
     try:
         # Verify user has permission
@@ -329,7 +339,9 @@ async def delete_location(location_id: str):
 
 
 @app.post("/api/v1/geofences")
-async def create_geofence(request: GeofenceCreateRequest, user_id: str = Depends(get_authenticated_user_id)):
+async def create_geofence(
+    request: GeofenceCreateRequest, user_id: str = Depends(get_authenticated_user_id)
+):
     """Create a new geofence"""
     try:
         result = await location_service.create_geofence(request, user_id)
@@ -365,7 +377,9 @@ async def list_geofences(
 
 
 @app.get("/api/v1/geofences/{geofence_id}")
-async def get_geofence(geofence_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def get_geofence(
+    geofence_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Get geofence details"""
     try:
         geofence = await location_service.get_geofence(geofence_id, user_id)
@@ -383,7 +397,11 @@ async def get_geofence(geofence_id: str, user_id: str = Depends(get_authenticate
 
 
 @app.put("/api/v1/geofences/{geofence_id}")
-async def update_geofence(geofence_id: str, request: GeofenceUpdateRequest, user_id: str = Depends(get_authenticated_user_id)):
+async def update_geofence(
+    geofence_id: str,
+    request: GeofenceUpdateRequest,
+    user_id: str = Depends(get_authenticated_user_id),
+):
     """Update a geofence"""
     try:
         result = await location_service.update_geofence(geofence_id, request, user_id)
@@ -399,7 +417,9 @@ async def update_geofence(geofence_id: str, request: GeofenceUpdateRequest, user
 
 
 @app.delete("/api/v1/geofences/{geofence_id}")
-async def delete_geofence(geofence_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def delete_geofence(
+    geofence_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Delete a geofence"""
     try:
         result = await location_service.delete_geofence(geofence_id, user_id)
@@ -415,7 +435,9 @@ async def delete_geofence(geofence_id: str, user_id: str = Depends(get_authentic
 
 
 @app.post("/api/v1/geofences/{geofence_id}/activate")
-async def activate_geofence(geofence_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def activate_geofence(
+    geofence_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Activate a geofence"""
     try:
         result = await location_service.activate_geofence(geofence_id, user_id)
@@ -431,7 +453,9 @@ async def activate_geofence(geofence_id: str, user_id: str = Depends(get_authent
 
 
 @app.post("/api/v1/geofences/{geofence_id}/deactivate")
-async def deactivate_geofence(geofence_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def deactivate_geofence(
+    geofence_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Deactivate a geofence"""
     try:
         result = await location_service.deactivate_geofence(geofence_id, user_id)
@@ -478,7 +502,9 @@ async def check_device_in_geofences(device_id: str):
 
 
 @app.post("/api/v1/places")
-async def create_place(request: PlaceCreateRequest, user_id: str = Depends(get_authenticated_user_id)):
+async def create_place(
+    request: PlaceCreateRequest, user_id: str = Depends(get_authenticated_user_id)
+):
     """Create a new place"""
     try:
         result = await location_service.create_place(request, user_id)
@@ -494,7 +520,9 @@ async def create_place(request: PlaceCreateRequest, user_id: str = Depends(get_a
 
 
 @app.get("/api/v1/places/user/{target_user_id}")
-async def list_user_places(target_user_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def list_user_places(
+    target_user_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """List places for a user"""
     try:
         # Verify permission
@@ -530,7 +558,11 @@ async def get_place(place_id: str, user_id: str = Depends(get_authenticated_user
 
 
 @app.put("/api/v1/places/{place_id}")
-async def update_place(place_id: str, request: PlaceUpdateRequest, user_id: str = Depends(get_authenticated_user_id)):
+async def update_place(
+    place_id: str,
+    request: PlaceUpdateRequest,
+    user_id: str = Depends(get_authenticated_user_id),
+):
     """Update a place"""
     try:
         result = await location_service.update_place(place_id, request, user_id)
@@ -546,7 +578,9 @@ async def update_place(place_id: str, request: PlaceUpdateRequest, user_id: str 
 
 
 @app.delete("/api/v1/places/{place_id}")
-async def delete_place(place_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def delete_place(
+    place_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Delete a place"""
     try:
         result = await location_service.delete_place(place_id, user_id)
@@ -576,7 +610,6 @@ async def find_nearby_devices(
 ):
     """Find devices near a location"""
     try:
-
         device_types_list = device_types.split(",") if device_types else None
 
         request = NearbySearchRequest(
@@ -597,7 +630,9 @@ async def find_nearby_devices(
 
 
 @app.post("/api/v1/locations/search/radius")
-async def search_radius(request: RadiusSearchRequest, user_id: str = Depends(get_authenticated_user_id)):
+async def search_radius(
+    request: RadiusSearchRequest, user_id: str = Depends(get_authenticated_user_id)
+):
     """Search locations within a circular area"""
     try:
         locations = await location_service.search_radius(request, user_id)
@@ -661,7 +696,9 @@ async def calculate_distance_alt(
 
 
 @app.get("/api/v1/stats/user/{target_user_id}")
-async def get_user_stats(target_user_id: str, user_id: str = Depends(get_authenticated_user_id)):
+async def get_user_stats(
+    target_user_id: str, user_id: str = Depends(get_authenticated_user_id)
+):
     """Get location statistics for a user"""
     try:
         # Verify permission

@@ -52,19 +52,20 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("tax_service")
         logger.info("Event bus initialized successfully")
     except Exception as e:
-        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"Failed to initialize event bus: {e}. Continuing without event publishing."
+        )
         event_bus = None
 
     # Create service layer (always create — service handles None repository
     # gracefully for stateless preview calculations without order_id)
-    service = TaxService(
-        repository=repository, event_bus=event_bus, provider=provider
-    )
+    service = TaxService(repository=repository, event_bus=event_bus, provider=provider)
 
     # Register event handlers
     if event_bus and repository:
         try:
             from .events.handlers import get_event_handlers
+
             handler_map = get_event_handlers(provider, repository, event_bus)
 
             for event_pattern, handler_func in handler_map.items():
@@ -73,7 +74,9 @@ async def lifespan(app: FastAPI):
                 )
                 logger.info(f"Subscribed to {event_pattern} events")
 
-            logger.info(f"Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+            logger.info(
+                f"Event handlers registered successfully - Subscribed to {len(handler_map)} event types"
+            )
         except Exception as e:
             logger.error(f"Failed to register event handlers: {e}")
 
@@ -93,7 +96,7 @@ async def lifespan(app: FastAPI):
                 consul_port=int(os.getenv("CONSUL_PORT", "8500")),
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -146,6 +149,7 @@ health.add_nats(lambda: event_bus)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post("/api/v1/tax/calculate")
 async def calculate_tax(payload: Dict[str, Any]):

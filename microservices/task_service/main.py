@@ -4,7 +4,6 @@ Task Service - Main Application
 任务管理微服务主应用，提供待办事项、任务调度、日历管理等功能
 """
 
-import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
@@ -36,7 +35,6 @@ from .models import (
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .task_repository import TaskRepository
-from .task_service import TaskService
 from .factory import create_task_service
 
 # 初始化配置
@@ -139,7 +137,7 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             microservice.consul_registry.register()
             microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -204,23 +202,27 @@ async def health_check():
     """Service health check"""
     return await health.check()
 
+
 async def get_user_context(
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="x-api-key"),
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
-    x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
+    x_internal_service_secret: Optional[str] = Header(
+        None, alias="X-Internal-Service-Secret"
+    ),
 ) -> Dict[str, Any]:
     """获取用户上下文信息"""
     logger.debug("Processing authentication request")
 
     # Allow internal service-to-service calls with verified secret
     from core.auth_dependencies import INTERNAL_SERVICE_SECRET as internal_secret
+
     if x_internal_service == "true" and x_internal_service_secret == internal_secret:
         logger.debug("Verified internal service call")
         return {
             "user_id": "internal-service",
             "subscription_level": "pro",
-            "internal_call": True
+            "internal_call": True,
         }
 
     if not authorization and not x_api_key:
@@ -276,7 +278,9 @@ async def get_user_context(
                 )
 
                 if response.status_code != 200:
-                    logger.warning(f"API key verification failed: {response.status_code}")
+                    logger.warning(
+                        f"API key verification failed: {response.status_code}"
+                    )
                     raise HTTPException(status_code=401, detail="Invalid API key")
 
                 result = response.json()
