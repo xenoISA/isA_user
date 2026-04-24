@@ -7,18 +7,15 @@ Port: 8240
 
 import logging
 import os
-import sys
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Request, status
 from fastapi.responses import JSONResponse
 
-# Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
@@ -26,25 +23,19 @@ from core.metrics import setup_metrics
 from core.health import HealthCheck
 
 from .models import (
-    Campaign,
     CampaignCreateRequest,
     CampaignUpdateRequest,
     CampaignResponse,
     CampaignListResponse,
     CampaignStatus,
     CampaignType,
-    CampaignChannel,
-    HealthResponse,
-    ReadinessResponse,
-    LivenessResponse,
     ScheduleRequest,
     CancelRequest,
     CloneRequest,
     VariantCreateRequest,
     ContentPreviewRequest,
-    ErrorResponse,
 )
-from .factory import CampaignServiceFactory, get_factory, close_factory
+from .factory import CampaignServiceFactory
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .protocols import (
     CampaignNotFoundError,
@@ -57,8 +48,7 @@ from isa_common.consul_client import ConsulRegistry
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -107,7 +97,7 @@ async def lifespan(app: FastAPI):
                 consul_port=int(os.getenv("CONSUL_PORT", "8500")),
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -190,6 +180,7 @@ async def variant_allocation_handler(request: Request, exc: VariantAllocationErr
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch-all exception handler to help debug issues"""
     import traceback
+
     error_traceback = traceback.format_exc()
     logger.error(f"Unhandled exception: {exc}\n{error_traceback}")
     return JSONResponse(
@@ -226,7 +217,10 @@ async def get_auth_context(request: Request) -> dict:
     # 1. Internal service auth
     x_internal_service = request.headers.get("X-Internal-Service")
     x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
-    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+    if (
+        x_internal_service == "true"
+        and x_internal_service_secret == INTERNAL_SERVICE_SECRET
+    ):
         user_id = "internal-service"
 
     # 2. Bearer JWT auth
@@ -259,8 +253,12 @@ async def get_auth_context(request: Request) -> dict:
 # ====================
 
 
-health = HealthCheck("campaign_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: factory.repository.db if factory and factory.repository else None)
+health = HealthCheck(
+    "campaign_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
+health.add_postgres(
+    lambda: factory.repository.db if factory and factory.repository else None
+)
 
 
 @app.get("/api/v1/campaigns/health")
@@ -268,6 +266,7 @@ health.add_postgres(lambda: factory.repository.db if factory and factory.reposit
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post(
     "/api/v1/campaigns",
@@ -303,14 +302,26 @@ async def create_campaign(
     tags=["Campaigns"],
 )
 async def list_campaigns(
-    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status (comma-separated)"),
-    type_filter: Optional[str] = Query(None, alias="type", description="Filter by type"),
+    status_filter: Optional[str] = Query(
+        None, alias="status", description="Filter by status (comma-separated)"
+    ),
+    type_filter: Optional[str] = Query(
+        None, alias="type", description="Filter by type"
+    ),
     channel: Optional[str] = Query(None, description="Filter by channel"),
     search: Optional[str] = Query(None, description="Search by name"),
-    created_after: Optional[datetime] = Query(None, description="Filter by creation date"),
-    created_before: Optional[datetime] = Query(None, description="Filter by creation date"),
-    scheduled_after: Optional[datetime] = Query(None, description="Filter by scheduled date"),
-    scheduled_before: Optional[datetime] = Query(None, description="Filter by scheduled date"),
+    created_after: Optional[datetime] = Query(
+        None, description="Filter by creation date"
+    ),
+    created_before: Optional[datetime] = Query(
+        None, description="Filter by creation date"
+    ),
+    scheduled_after: Optional[datetime] = Query(
+        None, description="Filter by scheduled date"
+    ),
+    scheduled_before: Optional[datetime] = Query(
+        None, description="Filter by scheduled date"
+    ),
     tags: Optional[str] = Query(None, description="Filter by tags (comma-separated)"),
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
@@ -617,8 +628,12 @@ async def clone_campaign(
 )
 async def get_campaign_metrics(
     campaign_id: str,
-    breakdown_by: Optional[str] = Query(None, description="Breakdown dimensions (variant,channel,segment)"),
-    execution_id: Optional[str] = Query(None, description="Filter to specific execution"),
+    breakdown_by: Optional[str] = Query(
+        None, description="Breakdown dimensions (variant,channel,segment)"
+    ),
+    execution_id: Optional[str] = Query(
+        None, description="Filter to specific execution"
+    ),
     service=Depends(get_service),
     auth: dict = Depends(get_auth_context),
 ):

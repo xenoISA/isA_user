@@ -8,18 +8,12 @@ Responsibilities:
 - Subscription history and audit trail
 """
 
-import logging
-import os
-import sys
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import ConfigManager
 from core.config_manager import ConfigManager
@@ -34,16 +28,27 @@ from core.admin_audit import publish_admin_action
 from core.health import HealthCheck
 
 from .models import (
-    CreateSubscriptionRequest, CreateSubscriptionResponse,
-    UpdateSubscriptionRequest, CancelSubscriptionRequest, CancelSubscriptionResponse,
-    ConsumeCreditsRequest, ConsumeCreditsResponse, CreditBalanceResponse,
-    ReserveCreditsRequest, ReserveCreditsResponse,
-    ReconcileReservationRequest, ReconcileReservationResponse,
-    ReleaseReservationRequest, ReleaseReservationResponse,
+    CreateSubscriptionRequest,
+    CreateSubscriptionResponse,
+    CancelSubscriptionRequest,
+    CancelSubscriptionResponse,
+    ConsumeCreditsRequest,
+    ConsumeCreditsResponse,
+    CreditBalanceResponse,
+    ReserveCreditsRequest,
+    ReserveCreditsResponse,
+    ReconcileReservationRequest,
+    ReconcileReservationResponse,
+    ReleaseReservationRequest,
+    ReleaseReservationResponse,
     BillingAccountType,
-    SubscriptionResponse, SubscriptionListResponse, SubscriptionHistoryResponse,
-    SubscriptionStatus, SubscriptionAction, SubscriptionHistory, InitiatedBy,
-    ErrorResponse, HealthResponse
+    SubscriptionResponse,
+    SubscriptionListResponse,
+    SubscriptionHistoryResponse,
+    SubscriptionStatus,
+    SubscriptionAction,
+    SubscriptionHistory,
+    InitiatedBy,
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
@@ -55,7 +60,7 @@ from .protocols import (
     SubscriptionNotFoundError,
     SubscriptionValidationError,
     InsufficientCreditsError,
-    TierNotFoundError
+    TierNotFoundError,
 )
 
 # Initialize configuration
@@ -137,7 +142,9 @@ async def lifespan(app: FastAPI):
         try:
             from .events import SubscriptionEventHandlers
 
-            event_handlers = SubscriptionEventHandlers(subscription_microservice.subscription_service)
+            event_handlers = SubscriptionEventHandlers(
+                subscription_microservice.subscription_service
+            )
             handler_map = event_handlers.get_event_handler_map()
 
             for event_pattern, handler_func in handler_map.items():
@@ -146,7 +153,9 @@ async def lifespan(app: FastAPI):
                 )
                 logger.info(f"Subscribed to {event_pattern} events")
 
-            logger.info(f"Event handlers registered - Subscribed to {len(handler_map)} event types")
+            logger.info(
+                f"Event handlers registered - Subscribed to {len(handler_map)} event types"
+            )
         except Exception as e:
             logger.warning(f"Failed to subscribe to events: {e}")
 
@@ -167,7 +176,7 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             subscription_microservice.consul_registry.register()
             subscription_microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -213,8 +222,16 @@ def get_subscription_service() -> SubscriptionService:
 # Health Endpoints
 # ====================
 
-health = HealthCheck("subscription_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: subscription_microservice.subscription_service.repository.db if subscription_microservice.subscription_service and hasattr(subscription_microservice.subscription_service, 'repository') and subscription_microservice.subscription_service.repository else None)
+health = HealthCheck(
+    "subscription_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
+health.add_postgres(
+    lambda: subscription_microservice.subscription_service.repository.db
+    if subscription_microservice.subscription_service
+    and hasattr(subscription_microservice.subscription_service, "repository")
+    and subscription_microservice.subscription_service.repository
+    else None
+)
 
 
 @app.get("/api/v1/subscriptions/health")
@@ -222,6 +239,7 @@ health.add_postgres(lambda: subscription_microservice.subscription_service.repos
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post("/api/v1/subscriptions", response_model=CreateSubscriptionResponse)
 async def create_subscription(
@@ -244,7 +262,9 @@ async def create_subscription(
 @app.get("/api/v1/subscriptions", response_model=SubscriptionListResponse)
 async def list_subscriptions(
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
-    organization_id: Optional[str] = Query(None, description="Filter by organization ID"),
+    organization_id: Optional[str] = Query(
+        None, description="Filter by organization ID"
+    ),
     status: Optional[SubscriptionStatus] = Query(None, description="Filter by status"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
@@ -257,7 +277,7 @@ async def list_subscriptions(
             organization_id=organization_id,
             status=status,
             page=page,
-            page_size=page_size
+            page_size=page_size,
         )
     except SubscriptionServiceError as e:
         raise HTTPException(
@@ -274,7 +294,9 @@ async def get_subscription(
     try:
         response = await subscription_service.get_subscription(subscription_id)
         if not response.success:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=response.message)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=response.message
+            )
         return response
     except SubscriptionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -284,7 +306,10 @@ async def get_subscription(
         )
 
 
-@app.post("/api/v1/subscriptions/{subscription_id}/cancel", response_model=CancelSubscriptionResponse)
+@app.post(
+    "/api/v1/subscriptions/{subscription_id}/cancel",
+    response_model=CancelSubscriptionResponse,
+)
 async def cancel_subscription(
     subscription_id: str,
     request: CancelSubscriptionRequest,
@@ -293,7 +318,9 @@ async def cancel_subscription(
 ):
     """Cancel a subscription"""
     try:
-        return await subscription_service.cancel_subscription(subscription_id, request, user_id)
+        return await subscription_service.cancel_subscription(
+            subscription_id, request, user_id
+        )
     except SubscriptionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except SubscriptionValidationError as e:
@@ -307,6 +334,7 @@ async def cancel_subscription(
 # ====================
 # User Subscription Endpoint
 # ====================
+
 
 @app.get("/api/v1/subscriptions/user/{user_id}", response_model=SubscriptionResponse)
 async def get_user_subscription(
@@ -338,6 +366,7 @@ async def get_user_subscription(
 # Credit Endpoints
 # ====================
 
+
 @app.get("/api/v1/subscriptions/credits/balance", response_model=CreditBalanceResponse)
 async def get_credit_balance(
     user_id: str = Query(..., description="User ID"),
@@ -364,7 +393,9 @@ async def get_credit_balance(
         )
 
 
-@app.post("/api/v1/subscriptions/credits/consume", response_model=ConsumeCreditsResponse)
+@app.post(
+    "/api/v1/subscriptions/credits/consume", response_model=ConsumeCreditsResponse
+)
 async def consume_credits(
     request: ConsumeCreditsRequest,
     subscription_service: SubscriptionService = Depends(get_subscription_service),
@@ -374,9 +405,14 @@ async def consume_credits(
         response = await subscription_service.consume_credits(request)
         if not response.success:
             if "Insufficient credits" in response.message:
-                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=response.message)
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=response.message,
+                )
             elif "No active subscription" in response.message:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=response.message)
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=response.message
+                )
         return response
     except InsufficientCreditsError as e:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
@@ -386,7 +422,9 @@ async def consume_credits(
         )
 
 
-@app.post("/api/v1/subscriptions/credits/reserve", response_model=ReserveCreditsResponse)
+@app.post(
+    "/api/v1/subscriptions/credits/reserve", response_model=ReserveCreditsResponse
+)
 async def reserve_credits(
     request: ReserveCreditsRequest,
     subscription_service: SubscriptionService = Depends(get_subscription_service),
@@ -396,9 +434,14 @@ async def reserve_credits(
         response = await subscription_service.reserve_credits(request)
         if not response.success:
             if "Insufficient credits" in response.message:
-                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=response.message)
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=response.message,
+                )
             elif "No active subscription" in response.message:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=response.message)
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=response.message
+                )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=response.message,
@@ -410,7 +453,10 @@ async def reserve_credits(
         )
 
 
-@app.post("/api/v1/subscriptions/credits/reconcile", response_model=ReconcileReservationResponse)
+@app.post(
+    "/api/v1/subscriptions/credits/reconcile",
+    response_model=ReconcileReservationResponse,
+)
 async def reconcile_reservation(
     request: ReconcileReservationRequest,
     subscription_service: SubscriptionService = Depends(get_subscription_service),
@@ -420,8 +466,12 @@ async def reconcile_reservation(
         response = await subscription_service.reconcile_reservation(request)
         if not response.success:
             if "not found" in response.message.lower():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=response.message)
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=response.message)
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=response.message
+                )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=response.message
+            )
         return response
     except SubscriptionServiceError as e:
         raise HTTPException(
@@ -429,7 +479,9 @@ async def reconcile_reservation(
         )
 
 
-@app.post("/api/v1/subscriptions/credits/release", response_model=ReleaseReservationResponse)
+@app.post(
+    "/api/v1/subscriptions/credits/release", response_model=ReleaseReservationResponse
+)
 async def release_reservation(
     request: ReleaseReservationRequest,
     subscription_service: SubscriptionService = Depends(get_subscription_service),
@@ -439,8 +491,12 @@ async def release_reservation(
         response = await subscription_service.release_reservation(request)
         if not response.success:
             if "not found" in response.message.lower():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=response.message)
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=response.message)
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=response.message
+                )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=response.message
+            )
         return response
     except SubscriptionServiceError as e:
         raise HTTPException(
@@ -452,7 +508,11 @@ async def release_reservation(
 # History Endpoint
 # ====================
 
-@app.get("/api/v1/subscriptions/{subscription_id}/history", response_model=SubscriptionHistoryResponse)
+
+@app.get(
+    "/api/v1/subscriptions/{subscription_id}/history",
+    response_model=SubscriptionHistoryResponse,
+)
 async def get_subscription_history(
     subscription_id: str,
     page: int = Query(1, ge=1, description="Page number"),
@@ -462,9 +522,7 @@ async def get_subscription_history(
     """Get subscription history"""
     try:
         return await subscription_service.get_subscription_history(
-            subscription_id=subscription_id,
-            page=page,
-            page_size=page_size
+            subscription_id=subscription_id, page=page, page_size=page_size
         )
     except SubscriptionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -477,6 +535,7 @@ async def get_subscription_history(
 # ====================
 # Admin Endpoints
 # ====================
+
 
 async def require_admin(request: Request):
     """Check for admin role header"""
@@ -526,7 +585,9 @@ async def admin_list_all_subscriptions(
     request: Request,
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     tier_code: Optional[str] = Query(None, description="Filter by tier code"),
-    subscription_status: Optional[SubscriptionStatus] = Query(None, alias="status", description="Filter by status"),
+    subscription_status: Optional[SubscriptionStatus] = Query(
+        None, alias="status", description="Filter by status"
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     subscription_service: SubscriptionService = Depends(get_subscription_service),
@@ -571,7 +632,9 @@ async def admin_force_tier_change(
         # Get current subscription
         sub = await subscription_service.repository.get_subscription(subscription_id)
         if not sub:
-            raise HTTPException(status_code=404, detail=f"Subscription {subscription_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Subscription {subscription_id} not found"
+            )
 
         previous_tier = sub.tier_code
 
@@ -583,27 +646,39 @@ async def admin_force_tier_change(
             "tier_code": new_tier_code,
             "tier_id": tier_info.get("tier_id", new_tier_code),
         }
-        updated = await subscription_service.repository.update_subscription(subscription_id, updates)
+        await subscription_service.repository.update_subscription(
+            subscription_id, updates
+        )
 
         # Record history
         import uuid as _uuid
-        await subscription_service.repository.add_history(SubscriptionHistory(
-            history_id=f"hist_{_uuid.uuid4().hex[:16]}",
-            subscription_id=subscription_id,
-            user_id=sub.user_id,
-            organization_id=sub.organization_id,
-            action=SubscriptionAction.UPGRADED if new_tier_code != previous_tier else SubscriptionAction.UPGRADED,
-            previous_tier_code=previous_tier,
-            new_tier_code=new_tier_code,
-            reason=reason or "Admin forced tier change",
-            initiated_by=InitiatedBy.ADMIN,
-        ))
+
+        await subscription_service.repository.add_history(
+            SubscriptionHistory(
+                history_id=f"hist_{_uuid.uuid4().hex[:16]}",
+                subscription_id=subscription_id,
+                user_id=sub.user_id,
+                organization_id=sub.organization_id,
+                action=SubscriptionAction.UPGRADED
+                if new_tier_code != previous_tier
+                else SubscriptionAction.UPGRADED,
+                previous_tier_code=previous_tier,
+                new_tier_code=new_tier_code,
+                reason=reason or "Admin forced tier change",
+                initiated_by=InitiatedBy.ADMIN,
+            )
+        )
 
         # Audit
         await _audit_admin_action(
-            request, action="force_tier_change", resource_type="subscription",
+            request,
+            action="force_tier_change",
+            resource_type="subscription",
             resource_id=subscription_id,
-            changes={"before": {"tier_code": previous_tier}, "after": {"tier_code": new_tier_code}},
+            changes={
+                "before": {"tier_code": previous_tier},
+                "after": {"tier_code": new_tier_code},
+            },
             metadata={"reason": reason},
         )
 
@@ -628,7 +703,10 @@ async def admin_force_tier_change(
 async def admin_credit_adjustment(
     subscription_id: str,
     request: Request,
-    credits: int = Query(..., description="Credit adjustment amount (positive to add, negative to subtract)"),
+    credits: int = Query(
+        ...,
+        description="Credit adjustment amount (positive to add, negative to subtract)",
+    ),
     reason: str = Query(..., description="Reason for credit adjustment"),
     subscription_service: SubscriptionService = Depends(get_subscription_service),
 ):
@@ -637,7 +715,9 @@ async def admin_credit_adjustment(
     try:
         sub = await subscription_service.repository.get_subscription(subscription_id)
         if not sub:
-            raise HTTPException(status_code=404, detail=f"Subscription {subscription_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Subscription {subscription_id} not found"
+            )
 
         previous_remaining = sub.credits_remaining
         new_remaining = max(0, previous_remaining + credits)
@@ -646,26 +726,37 @@ async def admin_credit_adjustment(
         if credits > 0:
             updates["credits_allocated"] = sub.credits_allocated + credits
 
-        await subscription_service.repository.update_subscription(subscription_id, updates)
+        await subscription_service.repository.update_subscription(
+            subscription_id, updates
+        )
 
         # Record history
         import uuid as _uuid
-        action = SubscriptionAction.CREDITS_ALLOCATED if credits > 0 else SubscriptionAction.CREDITS_CONSUMED
-        await subscription_service.repository.add_history(SubscriptionHistory(
-            history_id=f"hist_{_uuid.uuid4().hex[:16]}",
-            subscription_id=subscription_id,
-            user_id=sub.user_id,
-            organization_id=sub.organization_id,
-            action=action,
-            credits_change=credits,
-            credits_balance_after=new_remaining,
-            reason=reason,
-            initiated_by=InitiatedBy.ADMIN,
-        ))
+
+        action = (
+            SubscriptionAction.CREDITS_ALLOCATED
+            if credits > 0
+            else SubscriptionAction.CREDITS_CONSUMED
+        )
+        await subscription_service.repository.add_history(
+            SubscriptionHistory(
+                history_id=f"hist_{_uuid.uuid4().hex[:16]}",
+                subscription_id=subscription_id,
+                user_id=sub.user_id,
+                organization_id=sub.organization_id,
+                action=action,
+                credits_change=credits,
+                credits_balance_after=new_remaining,
+                reason=reason,
+                initiated_by=InitiatedBy.ADMIN,
+            )
+        )
 
         # Audit
         await _audit_admin_action(
-            request, action="credit_adjustment", resource_type="subscription",
+            request,
+            action="credit_adjustment",
+            resource_type="subscription",
             resource_id=subscription_id,
             changes={
                 "before": {"credits_remaining": previous_remaining},
@@ -694,6 +785,7 @@ async def admin_credit_adjustment(
 # ====================
 # Error Handlers
 # ====================
+
 
 @app.exception_handler(SubscriptionValidationError)
 async def validation_error_handler(request, exc):

@@ -2,14 +2,11 @@
 
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException
 
-# Add parent directory to path for core imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from isa_common.consul_client import ConsulRegistry
 from core.nats_client import get_event_bus
@@ -57,7 +54,9 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("fulfillment_service")
         logger.info("Event bus initialized successfully")
     except Exception as e:
-        logger.warning(f"Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"Failed to initialize event bus: {e}. Continuing without event publishing."
+        )
         event_bus = None
 
     # Create service layer
@@ -70,6 +69,7 @@ async def lifespan(app: FastAPI):
     if event_bus and repository:
         try:
             from .events.handlers import get_event_handlers
+
             handler_map = get_event_handlers(provider, repository, event_bus)
 
             for event_pattern, handler_func in handler_map.items():
@@ -78,7 +78,9 @@ async def lifespan(app: FastAPI):
                 )
                 logger.info(f"Subscribed to {event_pattern} events")
 
-            logger.info(f"Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+            logger.info(
+                f"Event handlers registered successfully - Subscribed to {len(handler_map)} event types"
+            )
         except Exception as e:
             logger.error(f"Failed to register event handlers: {e}")
 
@@ -98,7 +100,7 @@ async def lifespan(app: FastAPI):
                 consul_port=int(os.getenv("CONSUL_PORT", "8500")),
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -142,7 +144,9 @@ def _get_service() -> FulfillmentService:
     return service
 
 
-health = HealthCheck("fulfillment_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "fulfillment_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_nats(lambda: event_bus)
 
 
@@ -151,6 +155,7 @@ health.add_nats(lambda: event_bus)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post("/api/v1/fulfillment/shipments")
 async def create_shipment(payload: Dict[str, Any]):

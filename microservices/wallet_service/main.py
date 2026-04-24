@@ -8,19 +8,14 @@ Responsibilities:
 - Transaction history and analytics
 """
 
-import logging
-import os
-import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 import uvicorn
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, status
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import local components
 from isa_common.consul_client import ConsulRegistry
@@ -30,7 +25,7 @@ from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
-from core.nats_client import Event, get_event_bus
+from core.nats_client import get_event_bus
 from core.health import HealthCheck
 
 from .models import (
@@ -40,18 +35,15 @@ from .models import (
     TransactionFilter,
     TransactionType,
     TransferRequest,
-    WalletBalance,
     WalletCreate,
     WalletResponse,
-    WalletStatistics,
-    WalletTransaction,
     WalletType,
-    WalletUpdate,
     WithdrawRequest,
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .wallet_service import WalletService
 from .factory import create_wallet_service
+from .events import get_event_handlers
 
 # Initialize configuration
 config_manager = ConfigManager("wallet_service")
@@ -62,12 +54,6 @@ app_logger = setup_service_logger("wallet_service")
 logger = app_logger  # for backward compatibility
 
 shutdown_manager = GracefulShutdown("wallet_service")
-
-# =============================================================================
-# NEW: Import standardized event handlers and clients
-# =============================================================================
-from .clients import AccountClient
-from .events import get_event_handlers
 
 # =============================================================================
 # OLD: Legacy event handlers (KEPT FOR BACKWARD COMPATIBILITY - DO NOT USE)
@@ -118,8 +104,7 @@ class WalletMicroservice:
         try:
             self.event_bus = event_bus
             self.wallet_service = create_wallet_service(
-                config=config_manager,
-                event_bus=event_bus
+                config=config_manager, event_bus=event_bus
             )
             logger.info("Wallet microservice initialized successfully")
         except Exception as e:
@@ -231,7 +216,7 @@ async def lifespan(app: FastAPI):
                 consul_port=config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             wallet_microservice.consul_registry.register()
             wallet_microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -280,8 +265,16 @@ def get_wallet_service() -> WalletService:
 
 
 # Health check endpoints
-health = HealthCheck("wallet_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: wallet_microservice.wallet_service.repository.db if wallet_microservice.wallet_service and hasattr(wallet_microservice.wallet_service, 'repository') and wallet_microservice.wallet_service.repository else None)
+health = HealthCheck(
+    "wallet_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
+health.add_postgres(
+    lambda: wallet_microservice.wallet_service.repository.db
+    if wallet_microservice.wallet_service
+    and hasattr(wallet_microservice.wallet_service, "repository")
+    and wallet_microservice.wallet_service.repository
+    else None
+)
 
 
 @app.get("/api/v1/wallet/health")
@@ -289,6 +282,7 @@ health.add_postgres(lambda: wallet_microservice.wallet_service.repository.db if 
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post("/api/v1/wallets", response_model=WalletResponse)
 async def create_wallet(
@@ -702,6 +696,7 @@ async def get_wallet_service_stats(
 # Admin Endpoints
 # ====================
 
+
 async def require_admin(request: Request):
     """Check for admin role header"""
     if request.headers.get("X-Admin-Role") != "true":
@@ -760,12 +755,20 @@ async def admin_get_wallet_details(
         for w in wallets:
             summary = {
                 "wallet_id": w.wallet_id,
-                "wallet_type": w.wallet_type.value if hasattr(w.wallet_type, "value") else str(w.wallet_type),
+                "wallet_type": w.wallet_type.value
+                if hasattr(w.wallet_type, "value")
+                else str(w.wallet_type),
                 "balance": float(w.balance),
-                "locked_balance": float(w.locked_balance) if hasattr(w, "locked_balance") else 0.0,
-                "available_balance": float(w.available_balance) if hasattr(w, "available_balance") else float(w.balance),
+                "locked_balance": float(w.locked_balance)
+                if hasattr(w, "locked_balance")
+                else 0.0,
+                "available_balance": float(w.available_balance)
+                if hasattr(w, "available_balance")
+                else float(w.balance),
                 "currency": w.currency,
-                "last_updated": w.last_updated.isoformat() if hasattr(w, "last_updated") and w.last_updated else None,
+                "last_updated": w.last_updated.isoformat()
+                if hasattr(w, "last_updated") and w.last_updated
+                else None,
             }
             wallet_summaries.append(summary)
 
@@ -788,9 +791,13 @@ async def admin_get_wallet_details(
 async def admin_adjust_wallet_balance(
     user_id: str,
     request: Request,
-    amount: Decimal = Query(..., description="Adjustment amount (positive to add, negative to subtract)"),
+    amount: Decimal = Query(
+        ..., description="Adjustment amount (positive to add, negative to subtract)"
+    ),
     reason: str = Query(..., description="Reason for balance adjustment"),
-    wallet_id: Optional[str] = Query(None, description="Target wallet ID (defaults to primary fiat wallet)"),
+    wallet_id: Optional[str] = Query(
+        None, description="Target wallet ID (defaults to primary fiat wallet)"
+    ),
     wallet_service: WalletService = Depends(get_wallet_service),
 ):
     """[Admin] Adjust wallet balance for a user with reason"""
@@ -800,17 +807,23 @@ async def admin_adjust_wallet_balance(
         if wallet_id:
             wallet = await wallet_service.get_wallet(wallet_id)
             if not wallet:
-                raise HTTPException(status_code=404, detail=f"Wallet {wallet_id} not found")
+                raise HTTPException(
+                    status_code=404, detail=f"Wallet {wallet_id} not found"
+                )
             # Verify it belongs to the user
             if hasattr(wallet, "user_id") and wallet.user_id != user_id:
-                raise HTTPException(status_code=400, detail="Wallet does not belong to specified user")
+                raise HTTPException(
+                    status_code=400, detail="Wallet does not belong to specified user"
+                )
             target_wallet_id = wallet_id
         else:
             # Get user's primary fiat wallet
             wallets = await wallet_service.get_user_wallets(user_id)
             fiat_wallets = [w for w in wallets if w.wallet_type == WalletType.FIAT]
             if not fiat_wallets:
-                raise HTTPException(status_code=404, detail=f"No fiat wallet found for user {user_id}")
+                raise HTTPException(
+                    status_code=404, detail=f"No fiat wallet found for user {user_id}"
+                )
             target_wallet_id = fiat_wallets[0].wallet_id
 
         # Perform the adjustment as a deposit (positive) or withdraw (negative)
@@ -833,14 +846,18 @@ async def admin_adjust_wallet_balance(
                 ),
             )
         else:
-            raise HTTPException(status_code=400, detail="Adjustment amount must be non-zero")
+            raise HTTPException(
+                status_code=400, detail="Adjustment amount must be non-zero"
+            )
 
         if not result.success:
             raise HTTPException(status_code=400, detail=result.message)
 
         # Audit
         await _audit_admin_action(
-            request, action="balance_adjustment", resource_type="wallet",
+            request,
+            action="balance_adjustment",
+            resource_type="wallet",
             resource_id=target_wallet_id,
             changes={"adjustment": str(amount), "new_balance": str(result.balance)},
             metadata={"user_id": user_id, "reason": reason},

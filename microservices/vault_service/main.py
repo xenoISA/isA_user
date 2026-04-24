@@ -4,18 +4,21 @@ Vault Microservice
 Secure credential and secret management with blockchain verification support.
 """
 
-import logging
 import os
-import sys
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import List, Optional
 
 import uvicorn
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import core components
 from core.blockchain_client import BlockchainClient
@@ -29,7 +32,6 @@ from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
-    HealthResponse,
     SecretType,
     ServiceInfo,
     VaultAccessLogResponse,
@@ -48,10 +50,7 @@ from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 # Import local components
 from .vault_service import (
-    VaultAccessDeniedError,
-    VaultNotFoundError,
     VaultService,
-    VaultServiceError,
 )
 from .factory import create_vault_service
 
@@ -83,7 +82,10 @@ async def get_user_id(request: Request) -> str:
     # 1. Internal service auth
     x_internal_service = request.headers.get("X-Internal-Service")
     x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
-    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+    if (
+        x_internal_service == "true"
+        and x_internal_service_secret == INTERNAL_SERVICE_SECRET
+    ):
         return "internal-service"
 
     # 2. Bearer JWT auth
@@ -151,7 +153,11 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Event bus initialized successfully")
 
             # Initialize vault service with event bus (using factory pattern)
-            vault_service = create_vault_service(config=config_manager, event_bus=event_bus, blockchain_client=blockchain_client)
+            vault_service = create_vault_service(
+                config=config_manager,
+                event_bus=event_bus,
+                blockchain_client=blockchain_client,
+            )
 
         except Exception as e:
             logger.warning(
@@ -160,7 +166,11 @@ async def lifespan(app: FastAPI):
             event_bus = None
 
             # Initialize vault service without event bus (using factory pattern)
-            vault_service = create_vault_service(config=config_manager, event_bus=None, blockchain_client=blockchain_client)
+            vault_service = create_vault_service(
+                config=config_manager,
+                event_bus=None,
+                blockchain_client=blockchain_client,
+            )
 
         # =============================================================================
         # Subscribe to events using standardized event handlers
@@ -210,11 +220,11 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type="ttl"  # Use TTL for reliable health checks,
+                    health_check_type="ttl",  # Use TTL for reliable health checks,
                 )
                 consul_registry.register()
                 consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
+                # Start TTL heartbeat - added for consistency with isA_Model
                 logger.info(
                     f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
                 )
@@ -264,8 +274,16 @@ setup_metrics(app, "vault_service")
 # ============ Health & Info Endpoints ============
 
 
-health = HealthCheck("vault_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_postgres(lambda: vault_service.repository.db if vault_service and hasattr(vault_service, 'repository') and vault_service.repository else None)
+health = HealthCheck(
+    "vault_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
+health.add_postgres(
+    lambda: vault_service.repository.db
+    if vault_service
+    and hasattr(vault_service, "repository")
+    and vault_service.repository
+    else None
+)
 health.add_nats(lambda: event_bus)
 
 
@@ -274,6 +292,7 @@ health.add_nats(lambda: event_bus)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.get("/info", response_model=ServiceInfo)
 async def service_info():
@@ -296,12 +315,12 @@ async def create_secret(
 ):
     """Create a new secret"""
     try:
-        logger.info(f"[main.py] create_secret endpoint called for user header")
+        logger.info("[main.py] create_secret endpoint called for user header")
         user_id = await get_user_id(request)
         logger.info(f"[main.py] User ID: {user_id}")
         ip_address, user_agent = get_client_info(request)
 
-        logger.info(f"[main.py] Calling vault_service.create_secret")
+        logger.info("[main.py] Calling vault_service.create_secret")
         success, result, message = await vault_service.create_secret(
             user_id=user_id,
             request=request_data,
@@ -316,7 +335,7 @@ async def create_secret(
             logger.error(f"[main.py] Create failed with message: {message}")
             raise HTTPException(status_code=400, detail=message)
 
-        logger.info(f"[main.py] Returning success result")
+        logger.info("[main.py] Returning success result")
         return result
 
     except HTTPException:

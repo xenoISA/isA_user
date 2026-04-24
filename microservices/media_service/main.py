@@ -8,9 +8,6 @@ Port: 8222
 """
 
 import os
-import sys
-import asyncio
-import logging
 from typing import Optional, List
 from datetime import datetime
 
@@ -18,8 +15,6 @@ from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
@@ -30,18 +25,25 @@ from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
-    PhotoVersionCreateRequest, PhotoVersionResponse,
-    PlaylistCreateRequest, PlaylistUpdateRequest, PlaylistResponse,
-    RotationScheduleCreateRequest, RotationScheduleResponse,
-    PhotoMetadataUpdateRequest, PhotoMetadataResponse,
-    PhotoCacheResponse, CacheStatus, MediaServiceStatus
+    PhotoVersionCreateRequest,
+    PhotoVersionResponse,
+    PlaylistCreateRequest,
+    PlaylistUpdateRequest,
+    PlaylistResponse,
+    RotationScheduleCreateRequest,
+    RotationScheduleResponse,
+    PhotoMetadataUpdateRequest,
+    PhotoMetadataResponse,
+    PhotoCacheResponse,
+    CacheStatus,
+    MediaServiceStatus,
 )
 from .media_service import (
     MediaService,
     MediaServiceError,
     MediaNotFoundError,
     MediaValidationError,
-    MediaPermissionError
+    MediaPermissionError,
 )
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .factory import create_media_service
@@ -74,14 +76,16 @@ async def lifespan(app: FastAPI):
     try:
         event_bus = await get_event_bus("media_service")
         # Check if NATS is actually healthy before subscribing
-        if event_bus and hasattr(event_bus, 'check_health'):
+        if event_bus and hasattr(event_bus, "check_health"):
             health = await event_bus.check_health()
-            nats_healthy = health.get('healthy', False)
+            nats_healthy = health.get("healthy", False)
         else:
             nats_healthy = event_bus is not None
         logger.info(f"✅ Event bus initialized (healthy: {nats_healthy})")
     except Exception as e:
-        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
+        )
         event_bus = None
 
     # Initialize service (using factory pattern)
@@ -91,46 +95,51 @@ async def lifespan(app: FastAPI):
     if event_bus and nats_healthy:
         try:
             from .events import MediaEventHandler
+
             event_handler = MediaEventHandler(media_service)
 
             # Subscribe to storage/device events using same pattern format as album_service
             await event_bus.subscribe_to_events(
                 pattern="events.*.file.uploaded.with_ai",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="media-file-uploaded-consumer"
+                durable="media-file-uploaded-consumer",
             )
             logger.info("✅ Subscribed to file.uploaded.with_ai events")
 
             await event_bus.subscribe_to_events(
                 pattern="events.*.file.deleted",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="media-file-deleted-consumer"
+                durable="media-file-deleted-consumer",
             )
             logger.info("✅ Subscribed to file.deleted events")
 
             await event_bus.subscribe_to_events(
                 pattern="events.*.device.deleted",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="media-device-deleted-consumer"
+                durable="media-device-deleted-consumer",
             )
             logger.info("✅ Subscribed to device.deleted events")
 
             await event_bus.subscribe_to_events(
                 pattern="events.*.user.deleted",
                 handler=lambda msg: event_handler.handle_event(msg),
-                durable="media-user-deleted-consumer"
+                durable="media-user-deleted-consumer",
             )
             logger.info("✅ Subscribed to user.deleted events")
 
         except Exception as e:
             logger.error(f"Failed to subscribe to events: {e}")
     elif event_bus:
-        logger.warning("⚠️  Skipping event subscriptions - NATS not healthy (prevents infinite reconnection loops)")
+        logger.warning(
+            "⚠️  Skipping event subscriptions - NATS not healthy (prevents infinite reconnection loops)"
+        )
 
     # Check database connection
     health = await media_service.check_health()
     if health.get("status") != "healthy":
-        logger.warning("⚠️  Database connection failed. Service will start but some features may be unavailable.")
+        logger.warning(
+            "⚠️  Database connection failed. Service will start but some features may be unavailable."
+        )
     else:
         logger.info("✅ Database connection verified")
 
@@ -142,23 +151,25 @@ async def lifespan(app: FastAPI):
 
             # 合并服务元数据
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
             }
 
             consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=service_config.service_port,
                 consul_host=service_config.consul_host,
                 consul_port=service_config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='ttl'  # Use TTL for reliable health checks
+                health_check_type="ttl",  # Use TTL for reliable health checks
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
-            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             consul_registry = None
@@ -194,13 +205,14 @@ app = FastAPI(
     title="Media Service",
     description="Media processing and management for smart frame ecosystem",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "media_service")
 
 
 # ==================== Dependency Injection ====================
+
 
 def get_media_service() -> MediaService:
     """Get media service instance"""
@@ -218,6 +230,7 @@ def get_user_id(user_id: str = Query(..., description="User ID")) -> str:
 
 # ==================== Health Check ====================
 
+
 @app.get("/", response_model=MediaServiceStatus)
 async def root():
     """Root endpoint - service status"""
@@ -228,11 +241,13 @@ async def root():
         port=service_config.service_port,
         version="1.0.0",
         database_connected=health.get("database") == "connected",
-        timestamp=datetime.fromisoformat(health.get("timestamp"))
+        timestamp=datetime.fromisoformat(health.get("timestamp")),
     )
 
 
-health = HealthCheck("media_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "media_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_nats(lambda: event_bus)
 
 
@@ -241,6 +256,7 @@ health.add_nats(lambda: event_bus)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post("/api/v1/media/files/upload")
 async def upload_file():
@@ -252,20 +268,21 @@ async def upload_file():
     """
     # TODO: Proxy to storage_service on port 8209
     import uuid
+
     file_id = f"file_{uuid.uuid4().hex[:16]}"
     return {
         "file_id": file_id,
         "message": "File upload endpoint - proxy to storage service needed",
-        "note": "This is a stub for testing. Implement proxy to storage_service:8209"
+        "note": "This is a stub for testing. Implement proxy to storage_service:8209",
     }
 
 
 # ==================== Photo Version Endpoints ====================
 
+
 @app.post("/api/v1/media/photos/versions/save")
 async def save_photo_version(
-    request_body: dict,
-    service: MediaService = Depends(get_media_service)
+    request_body: dict, service: MediaService = Depends(get_media_service)
 ):
     """
     Save a photo version (AI enhanced, styled, etc.)
@@ -282,13 +299,17 @@ async def save_photo_version(
         processing_mode = request_body.get("processing_mode", version_type)
 
         if not photo_id or not user_id or not version_name:
-            raise HTTPException(status_code=400, detail="Missing required fields: photo_id, user_id, version_name")
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required fields: photo_id, user_id, version_name",
+            )
 
         # Create version request
         from .models import PhotoVersionCreateRequest, PhotoVersionType
 
         # Generate a mock file_id for the version
         import uuid
+
         file_id = f"file_ver_{uuid.uuid4().hex[:16]}"
 
         version_req = PhotoVersionCreateRequest(
@@ -296,7 +317,7 @@ async def save_photo_version(
             version_name=version_name,
             version_type=PhotoVersionType(version_type),
             processing_mode=processing_mode,
-            file_id=file_id
+            file_id=file_id,
         )
 
         version = await service.create_photo_version(version_req, user_id)
@@ -309,7 +330,9 @@ async def save_photo_version(
             "version_type": version_type,
             "file_id": file_id,
             "source_url": source_url,
-            "created_at": version.created_at.isoformat() if version.created_at else None
+            "created_at": version.created_at.isoformat()
+            if version.created_at
+            else None,
         }
     except MediaValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -323,7 +346,7 @@ async def create_photo_version(
     request: PhotoVersionCreateRequest,
     user_id: str = Depends(get_user_id),
     organization_id: Optional[str] = Query(None),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Create a new photo version (AI-enhanced, styled, edited, etc.)
@@ -340,7 +363,7 @@ async def create_photo_version(
 async def get_photo_versions_list(
     photo_id: str,
     user_id: str = Query(...),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Get all versions of a photo (storage-service compatible format)
@@ -362,13 +385,15 @@ async def get_photo_versions_list(
                 {
                     "version_id": v.version_id,
                     "version_name": v.version_name,
-                    "version_type": v.version_type.value if hasattr(v.version_type, 'value') else str(v.version_type),
+                    "version_type": v.version_type.value
+                    if hasattr(v.version_type, "value")
+                    else str(v.version_type),
                     "is_current": v.is_current,
-                    "created_at": v.created_at.isoformat() if v.created_at else None
+                    "created_at": v.created_at.isoformat() if v.created_at else None,
                 }
                 for v in versions
             ],
-            "total": len(versions)
+            "total": len(versions),
         }
     except Exception as e:
         logger.error(f"Error getting photo versions: {e}")
@@ -380,7 +405,7 @@ async def switch_photo_version_endpoint(
     photo_id: str,
     version_id: str,
     user_id: str = Query(...),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Switch current photo version
@@ -397,7 +422,7 @@ async def switch_photo_version_endpoint(
             "success": True,
             "photo_id": photo_id,
             "version_id": version_id,
-            "message": "Version switched successfully"
+            "message": "Version switched successfully",
         }
     except MediaNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -412,7 +437,7 @@ async def switch_photo_version_endpoint(
 async def delete_photo_version_endpoint(
     version_id: str,
     user_id: str = Query(...),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Delete a photo version (cannot delete original)
@@ -423,20 +448,21 @@ async def delete_photo_version_endpoint(
 
         if version.version_type.value == "original":
             raise HTTPException(
-                status_code=400,
-                detail="Cannot delete original version"
+                status_code=400, detail="Cannot delete original version"
             )
 
         # Delete version from database
         deleted = await service.repository.delete_photo_version(version_id, user_id)
 
         if not deleted:
-            raise HTTPException(status_code=404, detail="Version not found or already deleted")
+            raise HTTPException(
+                status_code=404, detail="Version not found or already deleted"
+            )
 
         return {
             "success": True,
             "version_id": version_id,
-            "message": "Version deleted successfully"
+            "message": "Version deleted successfully",
         }
     except MediaNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -451,7 +477,7 @@ async def delete_photo_version_endpoint(
 async def get_photo_version(
     version_id: str,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Get photo version by ID
@@ -466,11 +492,14 @@ async def get_photo_version(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/media/photos/{photo_id}/versions", response_model=List[PhotoVersionResponse])
+@app.get(
+    "/api/v1/media/photos/{photo_id}/versions",
+    response_model=List[PhotoVersionResponse],
+)
 async def list_photo_versions(
     photo_id: str,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     List all versions of a photo
@@ -483,19 +512,22 @@ async def list_photo_versions(
 
 # ==================== Photo Metadata Endpoints ====================
 
+
 @app.put("/api/v1/media/metadata/{file_id}", response_model=PhotoMetadataResponse)
 async def update_photo_metadata(
     file_id: str,
     request: PhotoMetadataUpdateRequest,
     user_id: str = Depends(get_user_id),
     organization_id: Optional[str] = Query(None),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Update or create photo metadata (AI analysis, EXIF data)
     """
     try:
-        return await service.update_photo_metadata(file_id, user_id, request, organization_id)
+        return await service.update_photo_metadata(
+            file_id, user_id, request, organization_id
+        )
     except MediaServiceError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -504,7 +536,7 @@ async def update_photo_metadata(
 async def get_photo_metadata(
     file_id: str,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Get photo metadata by file ID
@@ -524,7 +556,7 @@ async def get_photo_metadata(
 async def get_photo_for_frame(
     file_id: str,
     frame_id: Optional[str] = Query(None, description="Frame ID for optimization"),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Get photo metadata and download URLs for smart frames
@@ -553,26 +585,32 @@ async def get_photo_for_frame(
         versions = []
 
         # For now, provide standard size options
-        base_download_url = f"http://storage-service:8220/api/v1/files/download/{file_id}"
+        base_download_url = (
+            f"http://storage-service:8220/api/v1/files/download/{file_id}"
+        )
         versions = [
             {
                 "size": "thumbnail",
                 "width": 300,
                 "height": 200,
-                "url": f"{base_download_url}?size=thumbnail"
+                "url": f"{base_download_url}?size=thumbnail",
             },
             {
                 "size": "hd",
                 "width": 1920,
                 "height": 1080,
-                "url": f"{base_download_url}?size=hd"
+                "url": f"{base_download_url}?size=hd",
             },
             {
                 "size": "original",
-                "width": metadata.full_metadata.get("width", 4032) if metadata.full_metadata else 4032,
-                "height": metadata.full_metadata.get("height", 3024) if metadata.full_metadata else 3024,
-                "url": base_download_url
-            }
+                "width": metadata.full_metadata.get("width", 4032)
+                if metadata.full_metadata
+                else 4032,
+                "height": metadata.full_metadata.get("height", 3024)
+                if metadata.full_metadata
+                else 3024,
+                "url": base_download_url,
+            },
         ]
 
         # Check if cached for this frame
@@ -590,12 +628,16 @@ async def get_photo_for_frame(
                 "colors": metadata.ai_colors,
                 "description": metadata.ai_description,
                 "quality_score": metadata.quality_score,
-                "face_detection": metadata.face_detection
+                "face_detection": metadata.face_detection,
             },
             "versions": versions,
             "cached_for_frames": cached_for_frames,
-            "download_url": metadata.full_metadata.get("download_url") if metadata.full_metadata else base_download_url,
-            "timestamp": metadata.created_at.isoformat() if metadata.created_at else None
+            "download_url": metadata.full_metadata.get("download_url")
+            if metadata.full_metadata
+            else base_download_url,
+            "timestamp": metadata.created_at.isoformat()
+            if metadata.created_at
+            else None,
         }
 
         return response
@@ -606,12 +648,13 @@ async def get_photo_for_frame(
 
 # ==================== Playlist Endpoints ====================
 
+
 @app.post("/api/v1/media/playlists", response_model=PlaylistResponse)
 async def create_playlist(
     request: PlaylistCreateRequest,
     user_id: str = Depends(get_user_id),
     organization_id: Optional[str] = Query(None),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Create a new playlist (manual, smart, or AI-curated)
@@ -628,7 +671,7 @@ async def create_playlist(
 async def get_playlist(
     playlist_id: str,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Get playlist by ID
@@ -648,7 +691,7 @@ async def list_user_playlists(
     user_id: str = Depends(get_user_id),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     List user's playlists
@@ -664,7 +707,7 @@ async def update_playlist(
     playlist_id: str,
     request: PlaylistUpdateRequest,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Update playlist
@@ -683,7 +726,7 @@ async def update_playlist(
 async def delete_playlist(
     playlist_id: str,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Delete playlist
@@ -701,11 +744,12 @@ async def delete_playlist(
 
 # ==================== Rotation Schedule Endpoints ====================
 
+
 @app.post("/api/v1/media/schedules", response_model=RotationScheduleResponse)
 async def create_rotation_schedule(
     request: RotationScheduleCreateRequest,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Create a new rotation schedule for a smart frame
@@ -718,11 +762,13 @@ async def create_rotation_schedule(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/media/schedules/{schedule_id}", response_model=RotationScheduleResponse)
+@app.get(
+    "/api/v1/media/schedules/{schedule_id}", response_model=RotationScheduleResponse
+)
 async def get_rotation_schedule(
     schedule_id: str,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Get rotation schedule by ID
@@ -737,11 +783,14 @@ async def get_rotation_schedule(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/media/frames/{frame_id}/schedules", response_model=List[RotationScheduleResponse])
+@app.get(
+    "/api/v1/media/frames/{frame_id}/schedules",
+    response_model=List[RotationScheduleResponse],
+)
 async def list_frame_schedules(
     frame_id: str,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     List all schedules for a smart frame
@@ -752,12 +801,14 @@ async def list_frame_schedules(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.patch("/api/v1/schedules/{schedule_id}/status", response_model=RotationScheduleResponse)
+@app.patch(
+    "/api/v1/schedules/{schedule_id}/status", response_model=RotationScheduleResponse
+)
 async def update_schedule_status(
     schedule_id: str,
     is_active: bool = Query(...),
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Update schedule active status
@@ -776,7 +827,7 @@ async def update_schedule_status(
 async def delete_rotation_schedule(
     schedule_id: str,
     user_id: str = Depends(get_user_id),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Delete rotation schedule
@@ -794,29 +845,34 @@ async def delete_rotation_schedule(
 
 # ==================== Photo Cache Endpoints ====================
 
+
 @app.post("/api/v1/media/cache", response_model=PhotoCacheResponse)
 async def cache_photo_for_frame(
     frame_id: str = Query(...),
     photo_id: str = Query(...),
     user_id: str = Depends(get_user_id),
     version_id: Optional[str] = Query(None),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Create cache entry for a photo on a smart frame
     """
     try:
-        return await service.cache_photo_for_frame(frame_id, photo_id, user_id, version_id)
+        return await service.cache_photo_for_frame(
+            frame_id, photo_id, user_id, version_id
+        )
     except MediaServiceError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/media/frames/{frame_id}/cache", response_model=List[PhotoCacheResponse])
+@app.get(
+    "/api/v1/media/frames/{frame_id}/cache", response_model=List[PhotoCacheResponse]
+)
 async def list_frame_cache(
     frame_id: str,
     user_id: str = Depends(get_user_id),
     status: Optional[CacheStatus] = Query(None),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     List cache entries for a smart frame
@@ -832,7 +888,7 @@ async def update_cache_status(
     cache_id: str,
     status: CacheStatus = Query(...),
     error_message: Optional[str] = Query(None),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """
     Update photo cache status
@@ -845,12 +901,13 @@ async def update_cache_status(
 
 # ==================== Gallery Endpoints (Compatibility Layer) ====================
 
+
 # Gallery Albums - proxy to storage service
 @app.get("/api/v1/media/gallery/albums")
 async def list_gallery_albums(
     user_id: str = Query(...),
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
 ):
     """List user albums - returns empty for now (should proxy to storage service)"""
     return {"albums": [], "total": 0, "limit": limit, "offset": offset}
@@ -859,8 +916,7 @@ async def list_gallery_albums(
 # Gallery Playlists - proxy to existing playlist endpoints
 @app.get("/api/v1/media/gallery/playlists")
 async def list_gallery_playlists(
-    user_id: str = Query(...),
-    service: MediaService = Depends(get_media_service)
+    user_id: str = Query(...), service: MediaService = Depends(get_media_service)
 ):
     """List user playlists"""
     try:
@@ -872,8 +928,7 @@ async def list_gallery_playlists(
 
 @app.post("/api/v1/media/gallery/playlists", status_code=201)
 async def create_gallery_playlist(
-    request_body: dict,
-    service: MediaService = Depends(get_media_service)
+    request_body: dict, service: MediaService = Depends(get_media_service)
 ):
     """Create playlist - accepts JSON body"""
     try:
@@ -903,10 +958,12 @@ async def create_gallery_playlist(
             photo_ids=request_body.get("photo_ids", []),
             shuffle=request_body.get("shuffle", False),
             loop=request_body.get("loop", True),
-            transition_duration=request_body.get("transition_duration", 5)
+            transition_duration=request_body.get("transition_duration", 5),
         )
 
-        result = await service.create_playlist(playlist_request, user_id, organization_id)
+        result = await service.create_playlist(
+            playlist_request, user_id, organization_id
+        )
 
         # Return compatible response
         return {
@@ -914,9 +971,11 @@ async def create_gallery_playlist(
             "name": result.name,
             "description": result.description,
             "user_id": result.user_id,
-            "playlist_type": result.playlist_type.value if hasattr(result.playlist_type, 'value') else str(result.playlist_type),
+            "playlist_type": result.playlist_type.value
+            if hasattr(result.playlist_type, "value")
+            else str(result.playlist_type),
             "photo_ids": result.photo_ids,
-            "created_at": result.created_at.isoformat() if result.created_at else None
+            "created_at": result.created_at.isoformat() if result.created_at else None,
         }
     except MediaValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -929,7 +988,7 @@ async def create_gallery_playlist(
 async def get_gallery_playlist(
     playlist_id: str,
     user_id: str = Query(...),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """Get playlist details"""
     try:
@@ -946,7 +1005,7 @@ async def get_gallery_playlist(
 async def update_gallery_playlist(
     playlist_id: str,
     request_body: dict,
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """Update playlist - accepts JSON body"""
     try:
@@ -960,7 +1019,7 @@ async def update_gallery_playlist(
             smart_criteria=request_body.get("smart_criteria"),
             shuffle=request_body.get("shuffle"),
             loop=request_body.get("loop"),
-            transition_duration=request_body.get("transition_duration")
+            transition_duration=request_body.get("transition_duration"),
         )
 
         # Get playlist directly without permission check to find user_id
@@ -974,7 +1033,7 @@ async def update_gallery_playlist(
             "playlist_id": result.playlist_id,
             "name": result.name,
             "description": result.description,
-            "transition_duration": result.transition_duration
+            "transition_duration": result.transition_duration,
         }
     except MediaNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -987,8 +1046,7 @@ async def update_gallery_playlist(
 
 @app.delete("/api/v1/media/gallery/playlists/{playlist_id}", status_code=204)
 async def delete_gallery_playlist(
-    playlist_id: str,
-    service: MediaService = Depends(get_media_service)
+    playlist_id: str, service: MediaService = Depends(get_media_service)
 ):
     """Delete playlist"""
     try:
@@ -1016,7 +1074,7 @@ async def delete_gallery_playlist(
 async def get_random_photos(
     user_id: str = Query(...),
     count: int = Query(10, ge=1, le=100),
-    favorites_only: bool = Query(False)
+    favorites_only: bool = Query(False),
 ):
     """Get random photos - returns empty for now (should query storage service)"""
     return {"photos": [], "count": 0, "requested": count}
@@ -1027,7 +1085,7 @@ async def get_random_photos(
 async def update_gallery_photo_metadata(
     request_body: dict,
     user_id: str = Query(...),
-    service: MediaService = Depends(get_media_service)
+    service: MediaService = Depends(get_media_service),
 ):
     """Update photo metadata - accepts JSON body"""
     try:
@@ -1063,7 +1121,7 @@ async def preload_gallery_images(request_body: dict):
         "frame_id": frame_id,
         "user_id": user_id,
         "preloaded_count": len(photo_ids),
-        "priority": priority
+        "priority": priority,
     }
 
 
@@ -1076,28 +1134,24 @@ async def get_gallery_cache_stats(frame_id: str):
         "total_size_bytes": 0,
         "cache_hit_rate": 0.0,
         "pending_count": 0,
-        "failed_count": 0
+        "failed_count": 0,
     }
 
 
 @app.post("/api/v1/media/gallery/cache/{frame_id}/clear")
-async def clear_gallery_cache(
-    frame_id: str,
-    days_old: int = Query(30, ge=1, le=365)
-):
+async def clear_gallery_cache(frame_id: str, days_old: int = Query(30, ge=1, le=365)):
     """Clear expired cache"""
     return {
         "frame_id": frame_id,
         "deleted_count": 0,
-        "message": f"Cleared cache older than {days_old} days"
+        "message": f"Cleared cache older than {days_old} days",
     }
 
 
 # Gallery schedules - proxy to existing schedule endpoints
 @app.post("/api/v1/media/gallery/schedules", status_code=201)
 async def create_gallery_schedule(
-    request_body: dict,
-    service: MediaService = Depends(get_media_service)
+    request_body: dict, service: MediaService = Depends(get_media_service)
 ):
     """Create rotation schedule - accepts JSON body"""
     try:
@@ -1123,7 +1177,7 @@ async def create_gallery_schedule(
             end_time=request_body.get("end_time"),
             days_of_week=request_body.get("days_of_week", []),
             rotation_interval=request_body.get("interval_seconds", 10),
-            shuffle=request_body.get("shuffle", False)
+            shuffle=request_body.get("shuffle", False),
         )
 
         result = await service.create_rotation_schedule(schedule_req, user_id)
@@ -1133,7 +1187,7 @@ async def create_gallery_schedule(
             "frame_id": result.frame_id,
             "playlist_id": result.playlist_id,
             "is_active": result.is_active,
-            "created_at": result.created_at.isoformat() if result.created_at else None
+            "created_at": result.created_at.isoformat() if result.created_at else None,
         }
     except MediaValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1144,8 +1198,7 @@ async def create_gallery_schedule(
 
 @app.get("/api/v1/media/gallery/schedules/{frame_id}")
 async def get_gallery_schedules(
-    frame_id: str,
-    service: MediaService = Depends(get_media_service)
+    frame_id: str, service: MediaService = Depends(get_media_service)
 ):
     """Get frame schedules"""
     try:
@@ -1164,12 +1217,13 @@ async def get_gallery_frame_playlists(frame_id: str):
 
 # ==================== Error Handlers ====================
 
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """Handle HTTP exceptions"""
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": exc.detail, "status_code": exc.status_code}
+        content={"error": exc.detail, "status_code": exc.status_code},
     )
 
 
@@ -1178,8 +1232,7 @@ async def general_exception_handler(request, exc):
     """Handle general exceptions"""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "status_code": 500}
+        status_code=500, content={"error": "Internal server error", "status_code": 500}
     )
 
 
@@ -1195,5 +1248,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port,
         reload=os.getenv("DEBUG", "false").lower() == "true",
-        log_level="info"
+        log_level="info",
     )

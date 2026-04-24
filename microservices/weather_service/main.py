@@ -4,18 +4,11 @@ Weather Service - Main Application
 天气服务微服务主应用
 """
 
-import logging
 import os
-import sys
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Path, Query
 
-# Add parent directory to path
-sys.path.append(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
@@ -37,7 +30,6 @@ from .models import (
 )
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 from .weather_repository import WeatherRepository
-from .weather_service import WeatherService
 from .factory import create_weather_service
 
 # Initialize config
@@ -71,7 +63,9 @@ class WeatherMicroservice:
             self.event_bus = None
 
         self.repository = WeatherRepository(config=config_manager)
-        self.service = create_weather_service(config=config_manager, event_bus=self.event_bus)
+        self.service = create_weather_service(
+            config=config_manager, event_bus=self.event_bus
+        )
         logger.info("Weather service initialized")
 
         # Consul service registration
@@ -94,11 +88,11 @@ class WeatherMicroservice:
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type="ttl"  # Use TTL for reliable health checks,
+                    health_check_type="ttl",  # Use TTL for reliable health checks,
                 )
                 self.consul_registry.register()
                 self.consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
+                # Start TTL heartbeat - added for consistency with isA_Model
                 logger.info(
                     f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
                 )
@@ -162,7 +156,9 @@ setup_metrics(app, "weather_service")
 # =============================================================================
 
 
-health = HealthCheck("weather_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "weather_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/weather/health")
@@ -170,6 +166,7 @@ health = HealthCheck("weather_service", version="1.0.0", shutdown_manager=shutdo
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.get("/api/v1/weather/current", response_model=WeatherCurrentResponse)
 async def get_current_weather(
@@ -326,4 +323,9 @@ if __name__ == "__main__":
 
     port = config.service_port if hasattr(config, "service_port") else 8218
 
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=os.getenv("DEBUG", "false").lower() == "true")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
+    )

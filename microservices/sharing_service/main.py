@@ -7,17 +7,11 @@ Responsibilities:
 - Share revocation and lifecycle management
 """
 
-import logging
-import os
-import sys
 from contextlib import asynccontextmanager
-from typing import Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
@@ -28,7 +22,6 @@ from core.nats_client import get_event_bus
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
-    ErrorResponse,
     ShareCreateRequest,
     ShareListResponse,
     ShareResponse,
@@ -175,7 +168,9 @@ def get_sharing_service() -> SharingService:
 
 
 # Health check
-health = HealthCheck("sharing_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "sharing_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_postgres(
     lambda: sharing_microservice.sharing_service.share_repo.db
     if sharing_microservice.sharing_service

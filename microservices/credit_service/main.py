@@ -4,18 +4,12 @@ Credit Microservice API
 Promotional credit management service with FIFO expiration and event-driven architecture.
 """
 
-import asyncio
-import logging
-import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus
@@ -41,7 +35,6 @@ from .models import (
     CreditAccountResponse,
     CreditBalanceSummary as CreditBalanceResponse,
     CreditStatisticsResponse,
-    HealthCheckResponse as HealthResponse,
     TransactionListResponse,
     TransferCreditsRequest,
     TransferResponse as TransferCreditsResponse,
@@ -134,10 +127,10 @@ async def lifespan(app: FastAPI):
             # Add expiration job - runs daily at midnight
             scheduler.add_job(
                 credit_service.process_expirations,
-                'cron',
+                "cron",
                 hour=0,
                 minute=0,
-                id='credit_expiration_job',
+                id="credit_expiration_job",
                 replace_existing=True,
             )
 
@@ -168,11 +161,11 @@ async def lifespan(app: FastAPI):
                     consul_port=config.consul_port,
                     tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type="ttl"  # Use TTL for reliable health checks,
+                    health_check_type="ttl",  # Use TTL for reliable health checks,
                 )
                 consul_registry.register()
                 consul_registry.start_maintenance()  # Start TTL heartbeat
-            # Start TTL heartbeat - added for consistency with isA_Model
+                # Start TTL heartbeat - added for consistency with isA_Model
                 logger.info(
                     f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
                 )
@@ -246,7 +239,9 @@ async def get_credit_service() -> CreditService:
 # ====================
 
 
-health = HealthCheck("credit_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "credit_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_postgres(lambda: repository.db if repository else None)
 health.add_nats(lambda: event_bus)
 
@@ -257,10 +252,10 @@ async def health_check():
     """Service health check"""
     return await health.check()
 
+
 @app.post("/api/v1/credits/accounts", response_model=CreditAccountResponse)
 async def create_account(
-    request: CreateAccountRequest,
-    service: CreditService = Depends(get_credit_service)
+    request: CreateAccountRequest, service: CreditService = Depends(get_credit_service)
 ):
     """Create a new credit account"""
     try:
@@ -270,7 +265,7 @@ async def create_account(
             organization_id=request.organization_id,
             expiration_policy=request.expiration_policy,
             expiration_days=request.expiration_days,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
         return result
     except Exception as e:
@@ -283,14 +278,12 @@ async def list_accounts(
     user_id: str,
     credit_type: Optional[str] = None,
     is_active: Optional[bool] = None,
-    service: CreditService = Depends(get_credit_service)
+    service: CreditService = Depends(get_credit_service),
 ):
     """List user's credit accounts"""
     try:
         result = await service.get_user_accounts(
-            user_id=user_id,
-            credit_type=credit_type,
-            is_active=is_active
+            user_id=user_id, credit_type=credit_type, is_active=is_active
         )
         return result
     except Exception as e:
@@ -300,8 +293,7 @@ async def list_accounts(
 
 @app.get("/api/v1/credits/accounts/{account_id}", response_model=CreditAccountResponse)
 async def get_account(
-    account_id: str,
-    service: CreditService = Depends(get_credit_service)
+    account_id: str, service: CreditService = Depends(get_credit_service)
 ):
     """Get account by ID"""
     try:
@@ -323,8 +315,7 @@ async def get_account(
 
 @app.get("/api/v1/credits/balance", response_model=CreditBalanceResponse)
 async def get_balance(
-    user_id: str,
-    service: CreditService = Depends(get_credit_service)
+    user_id: str, service: CreditService = Depends(get_credit_service)
 ):
     """Get aggregated credit balance summary"""
     try:
@@ -335,17 +326,19 @@ async def get_balance(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.post("/api/v1/credits/check-availability", response_model=CheckAvailabilityResponse)
+@app.post(
+    "/api/v1/credits/check-availability", response_model=CheckAvailabilityResponse
+)
 async def check_availability(
     request: CheckAvailabilityRequest,
-    service: CreditService = Depends(get_credit_service)
+    service: CreditService = Depends(get_credit_service),
 ):
     """Check credit availability for consumption"""
     try:
         result = await service.check_availability(
             user_id=request.user_id,
             amount=request.amount,
-            credit_type=request.credit_type
+            credit_type=request.credit_type,
         )
         return result
     except Exception as e:
@@ -361,7 +354,7 @@ async def check_availability(
 @app.post("/api/v1/credits/allocate", response_model=AllocateCreditsResponse)
 async def allocate_credits(
     request: AllocateCreditsRequest,
-    service: CreditService = Depends(get_credit_service)
+    service: CreditService = Depends(get_credit_service),
 ):
     """Allocate credits to user"""
     try:
@@ -372,10 +365,12 @@ async def allocate_credits(
             campaign_id=request.campaign_id,
             description=request.description,
             expires_at=request.expires_at,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
         if not result.get("success", True):
-            raise HTTPException(status_code=400, detail=result.get("message", "Allocation failed"))
+            raise HTTPException(
+                status_code=400, detail=result.get("message", "Allocation failed")
+            )
         return result
     except HTTPException:
         raise
@@ -386,8 +381,7 @@ async def allocate_credits(
 
 @app.post("/api/v1/credits/consume", response_model=ConsumeCreditsResponse)
 async def consume_credits(
-    request: ConsumeCreditsRequest,
-    service: CreditService = Depends(get_credit_service)
+    request: ConsumeCreditsRequest, service: CreditService = Depends(get_credit_service)
 ):
     """Consume credits with FIFO expiration"""
     try:
@@ -396,10 +390,12 @@ async def consume_credits(
             amount=request.amount,
             billing_record_id=request.billing_record_id,
             description=request.description,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
         if not result.get("success", True):
-            raise HTTPException(status_code=400, detail=result.get("message", "Consumption failed"))
+            raise HTTPException(
+                status_code=400, detail=result.get("message", "Consumption failed")
+            )
         return result
     except HTTPException:
         raise
@@ -411,7 +407,7 @@ async def consume_credits(
 @app.post("/api/v1/credits/transfer", response_model=TransferCreditsResponse)
 async def transfer_credits(
     request: TransferCreditsRequest,
-    service: CreditService = Depends(get_credit_service)
+    service: CreditService = Depends(get_credit_service),
 ):
     """Transfer credits between users"""
     try:
@@ -421,10 +417,12 @@ async def transfer_credits(
             amount=request.amount,
             credit_type=request.credit_type,
             description=request.description,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
         if not result.get("success", True):
-            raise HTTPException(status_code=400, detail=result.get("message", "Transfer failed"))
+            raise HTTPException(
+                status_code=400, detail=result.get("message", "Transfer failed")
+            )
         return result
     except HTTPException:
         raise
@@ -446,7 +444,7 @@ async def get_transactions(
     end_date: Optional[datetime] = None,
     limit: int = 100,
     offset: int = 0,
-    service: CreditService = Depends(get_credit_service)
+    service: CreditService = Depends(get_credit_service),
 ):
     """Get credit transaction history"""
     try:
@@ -471,8 +469,7 @@ async def get_transactions(
 
 @app.post("/api/v1/credits/campaigns", response_model=CampaignResponse)
 async def create_campaign(
-    request: CampaignRequest,
-    service: CreditService = Depends(get_credit_service)
+    request: CampaignRequest, service: CreditService = Depends(get_credit_service)
 ):
     """Create a new credit campaign"""
     try:
@@ -488,7 +485,7 @@ async def create_campaign(
             allocation_rules=request.allocation_rules,
             expiration_days=request.expiration_days,
             max_allocations_per_user=request.max_allocations_per_user,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
         return result
     except Exception as e:
@@ -500,7 +497,7 @@ async def create_campaign(
 async def list_campaigns(
     credit_type: Optional[str] = None,
     is_active: Optional[bool] = None,
-    service: CreditService = Depends(get_credit_service)
+    service: CreditService = Depends(get_credit_service),
 ):
     """List credit campaigns"""
     try:
@@ -514,8 +511,7 @@ async def list_campaigns(
 
 @app.get("/api/v1/credits/campaigns/{campaign_id}", response_model=CampaignResponse)
 async def get_campaign(
-    campaign_id: str,
-    service: CreditService = Depends(get_credit_service)
+    campaign_id: str, service: CreditService = Depends(get_credit_service)
 ):
     """Get campaign by ID"""
     try:
@@ -534,7 +530,7 @@ async def get_campaign(
 async def update_campaign(
     campaign_id: str,
     request: CampaignRequest,
-    service: CreditService = Depends(get_credit_service)
+    service: CreditService = Depends(get_credit_service),
 ):
     """Update campaign"""
     try:
@@ -560,7 +556,7 @@ async def get_statistics(
     credit_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    service: CreditService = Depends(get_credit_service)
+    service: CreditService = Depends(get_credit_service),
 ):
     """Get credit statistics and analytics"""
     try:

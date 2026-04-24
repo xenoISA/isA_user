@@ -8,13 +8,8 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Query, Body
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
-import logging
-import os
-import sys
 from datetime import datetime
 
-# 添加父目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from isa_common.consul_client import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
@@ -28,11 +23,19 @@ from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .product_repository import ProductRepository
 from .product_service import ProductService
 from .models import (
-    Product, ProductCategory, PricingModel, ServicePlan, UserSubscription,
-    ProductUsageRecord, ProductType, PricingType, SubscriptionStatus, BillingCycle,
-    CompatibilityPricingCalculationRequest, CompatibilityPricingCalculationResponse,
-    AdminCreateProductRequest, AdminUpdateProductRequest,
-    AdminCreatePricingRequest, AdminUpdatePricingRequest,
+    Product,
+    ProductCategory,
+    UserSubscription,
+    ProductUsageRecord,
+    ProductType,
+    SubscriptionStatus,
+    BillingCycle,
+    CompatibilityPricingCalculationRequest,
+    CompatibilityPricingCalculationResponse,
+    AdminCreateProductRequest,
+    AdminUpdateProductRequest,
+    AdminCreatePricingRequest,
+    AdminUpdatePricingRequest,
 )
 
 # 初始化配置管理器
@@ -70,7 +73,13 @@ async def lifespan(app: FastAPI):
 
         # Initialize service clients
         try:
-            from .clients import AccountClient, OrganizationClient, SubscriptionClient, BillingClient
+            from .clients import (
+                AccountClient,
+                OrganizationClient,
+                SubscriptionClient,
+                BillingClient,
+            )
+
             account_client = AccountClient()
             organization_client = OrganizationClient()
             subscription_client = SubscriptionClient()
@@ -80,7 +89,9 @@ async def lifespan(app: FastAPI):
                 subscription_client=subscription_client,
                 billing_client=billing_client,
             )
-            logger.info("✅ Service clients initialized successfully (account, org, subscription, billing)")
+            logger.info(
+                "✅ Service clients initialized successfully (account, org, subscription, billing)"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to initialize service clients: {e}")
             account_client = None
@@ -91,7 +102,9 @@ async def lifespan(app: FastAPI):
             event_bus = await get_event_bus("product_service")
             logger.info("✅ Event bus initialized successfully")
         except Exception as e:
-            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
+            logger.warning(
+                f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
+            )
             event_bus = None
 
         # 初始化业务服务 with event bus and service clients
@@ -99,23 +112,25 @@ async def lifespan(app: FastAPI):
             repository,
             event_bus=event_bus,
             account_client=account_client,
-            organization_client=organization_client
+            organization_client=organization_client,
         )
 
         # Subscribe to events using new API
         if event_bus:
             try:
                 from .events import get_event_handlers
+
                 handler_map = get_event_handlers(product_service)
 
                 for event_pattern, handler_func in handler_map.items():
                     await event_bus.subscribe_to_events(
-                        pattern=event_pattern,
-                        handler=handler_func
+                        pattern=event_pattern, handler=handler_func
                     )
                     logger.info(f"Subscribed to {event_pattern} events")
 
-                logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
+                logger.info(
+                    f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types"
+                )
             except Exception as e:
                 logger.error(f"⚠️  Failed to register event handlers: {e}")
 
@@ -127,23 +142,27 @@ async def lifespan(app: FastAPI):
 
                 # Merge service metadata
                 consul_meta = {
-                    'version': SERVICE_METADATA['version'],
-                    'capabilities': ','.join(SERVICE_METADATA['capabilities'][:5]),  # Limit capabilities
-                    **route_meta
+                    "version": SERVICE_METADATA["version"],
+                    "capabilities": ",".join(
+                        SERVICE_METADATA["capabilities"][:5]
+                    ),  # Limit capabilities
+                    **route_meta,
                 }
 
                 consul_registry = ConsulRegistry(
-                    service_name=SERVICE_METADATA['service_name'],
+                    service_name=SERVICE_METADATA["service_name"],
                     service_port=SERVICE_PORT,
                     consul_host=config.consul_host,
                     consul_port=config.consul_port,
-                    tags=SERVICE_METADATA['tags'],
+                    tags=SERVICE_METADATA["tags"],
                     meta=consul_meta,
-                    health_check_type='ttl'  # Use TTL for reliable health checks
+                    health_check_type="ttl",  # Use TTL for reliable health checks
                 )
                 consul_registry.register()
                 consul_registry.start_maintenance()  # Start TTL heartbeat
-                logger.info(f"Service registered with Consul: {route_meta.get('route_count', 0)} routes")
+                logger.info(
+                    f"Service registered with Consul: {route_meta.get('route_count', 0)} routes"
+                )
             except Exception as e:
                 logger.warning(f"Failed to register with Consul: {e}")
                 consul_registry = None
@@ -200,7 +219,7 @@ app = FastAPI(
     title="Product Service",
     description="专注于产品目录、定价和订阅管理",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "product_service")
@@ -209,6 +228,7 @@ setup_metrics(app, "product_service")
 # ====================
 # 依赖注入
 # ====================
+
 
 async def get_product_service() -> ProductService:
     """获取产品服务实例"""
@@ -244,14 +264,18 @@ def _normalize_subscription_payload(subscription: Any) -> Any:
             "seats_purchased": payload.get("seats_purchased"),
             "seats_used": payload.get("seats_used"),
         }
-        quota_limits = {key: value for key, value in quota_limits.items() if value is not None}
+        quota_limits = {
+            key: value for key, value in quota_limits.items() if value is not None
+        }
 
     normalized = {
         "id": payload.get("id"),
         "subscription_id": payload.get("subscription_id"),
         "user_id": payload.get("user_id"),
         "organization_id": payload.get("organization_id"),
-        "plan_id": payload.get("plan_id") or payload.get("tier_id") or payload.get("tier_code"),
+        "plan_id": payload.get("plan_id")
+        or payload.get("tier_id")
+        or payload.get("tier_code"),
         "plan_tier": payload.get("plan_tier") or payload.get("tier_code"),
         "status": payload.get("status"),
         "billing_cycle": payload.get("billing_cycle"),
@@ -278,10 +302,11 @@ def _normalize_subscription_payload(subscription: Any) -> Any:
 # 健康检查和服务信息
 # ====================
 
-health = HealthCheck("product_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "product_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_postgres(lambda: repository.db if repository else None)
 health.add_nats(lambda: event_bus)
-health.add_minio(lambda: s3_client)
 
 
 @app.get("/api/v1/products/health")
@@ -289,6 +314,7 @@ health.add_minio(lambda: s3_client)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.get("/api/v1/product/info")
 async def get_service_info():
@@ -299,24 +325,24 @@ async def get_service_info():
         "description": "专注于产品目录、定价和订阅管理的微服务",
         "capabilities": [
             "product_catalog",
-            "pricing_management", 
+            "pricing_management",
             "subscription_management",
             "usage_tracking",
-            "product_analytics"
+            "product_analytics",
         ],
         "supported_product_types": [
             "model_inference",
-            "mcp_service", 
+            "mcp_service",
             "agent_execution",
             "storage_minio",
-            "api_gateway"
+            "api_gateway",
         ],
         "supported_pricing_types": [
             "freemium",
             "usage_based",
-            "subscription", 
-            "hybrid"
-        ]
+            "subscription",
+            "hybrid",
+        ],
     }
 
 
@@ -324,9 +350,10 @@ async def get_service_info():
 # 产品目录API
 # ====================
 
+
 @app.get("/api/v1/product/categories", response_model=List[ProductCategory])
 async def get_product_categories(
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """获取产品类别列表"""
     try:
@@ -341,15 +368,13 @@ async def get_products(
     category_id: Optional[str] = Query(None, description="产品类别ID"),
     product_type: Optional[str] = Query(None, description="产品类型"),
     is_active: bool = Query(True, description="是否仅获取激活的产品"),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """获取产品列表"""
     try:
         product_type_enum = ProductType(product_type) if product_type else None
         return await service.get_products(
-            category_id=category_id,
-            product_type=product_type_enum,
-            is_active=is_active
+            category_id=category_id, product_type=product_type_enum, is_active=is_active
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid product_type: {str(e)}")
@@ -360,8 +385,7 @@ async def get_products(
 
 @app.get("/api/v1/product/products/{product_id}", response_model=Product)
 async def get_product(
-    product_id: str,
-    service: ProductService = Depends(get_product_service)
+    product_id: str, service: ProductService = Depends(get_product_service)
 ):
     """获取单个产品信息"""
     try:
@@ -381,14 +405,12 @@ async def get_product_pricing(
     product_id: str,
     user_id: Optional[str] = Query(None, description="用户ID"),
     subscription_id: Optional[str] = Query(None, description="订阅ID"),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """获取产品定价信息"""
     try:
         pricing = await service.get_product_pricing(
-            product_id=product_id,
-            user_id=user_id,
-            subscription_id=subscription_id
+            product_id=product_id, user_id=user_id, subscription_id=subscription_id
         )
         if not pricing:
             raise HTTPException(status_code=404, detail="Product pricing not found")
@@ -423,7 +445,10 @@ async def lookup_cost_definition(
             tool_name=tool_name,
         )
         if not result.get("success"):
-            raise HTTPException(status_code=404, detail=result.get("message", "Cost definition not found"))
+            raise HTTPException(
+                status_code=404,
+                detail=result.get("message", "Cost definition not found"),
+            )
         return result
     except HTTPException:
         raise
@@ -432,7 +457,9 @@ async def lookup_cost_definition(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.post("/api/v1/pricing/calculate", response_model=CompatibilityPricingCalculationResponse)
+@app.post(
+    "/api/v1/pricing/calculate", response_model=CompatibilityPricingCalculationResponse
+)
 async def calculate_pricing(
     request: CompatibilityPricingCalculationRequest,
     service: ProductService = Depends(get_product_service),
@@ -446,7 +473,9 @@ async def calculate_pricing(
             tier_code=request.tier_code,
         )
         if not result.get("success"):
-            raise HTTPException(status_code=404, detail=result.get("message", "Pricing not found"))
+            raise HTTPException(
+                status_code=404, detail=result.get("message", "Pricing not found")
+            )
         return result
     except HTTPException:
         raise
@@ -460,14 +489,12 @@ async def check_product_availability(
     product_id: str,
     user_id: str = Query(..., description="用户ID"),
     organization_id: Optional[str] = Query(None, description="组织ID"),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """检查产品可用性"""
     try:
         result = await service.check_product_availability(
-            product_id=product_id,
-            user_id=user_id,
-            organization_id=organization_id
+            product_id=product_id, user_id=user_id, organization_id=organization_id
         )
         return result
     except Exception as e:
@@ -479,23 +506,30 @@ async def check_product_availability(
 # 订阅管理API
 # ====================
 
-@app.get("/api/v1/product/subscriptions/user/{user_id}", response_model=List[UserSubscription])
+
+@app.get(
+    "/api/v1/product/subscriptions/user/{user_id}",
+    response_model=List[UserSubscription],
+)
 async def get_user_subscriptions(
     user_id: str,
     status: Optional[str] = Query(None, description="订阅状态过滤"),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """获取用户订阅列表"""
     try:
         status_enum = SubscriptionStatus(status) if status else None
         subscriptions = await service.get_user_subscriptions(
-            user_id=user_id,
-            status=status_enum
+            user_id=user_id, status=status_enum
         )
         if isinstance(subscriptions, dict):
-            subscriptions = subscriptions.get("subscriptions") or subscriptions.get("items") or []
+            subscriptions = (
+                subscriptions.get("subscriptions") or subscriptions.get("items") or []
+            )
         return [
-            UserSubscription.model_validate(_normalize_subscription_payload(subscription))
+            UserSubscription.model_validate(
+                _normalize_subscription_payload(subscription)
+            )
             for subscription in (subscriptions or [])
         ]
     except ValueError as e:
@@ -505,10 +539,11 @@ async def get_user_subscriptions(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/v1/product/subscriptions/{subscription_id}", response_model=UserSubscription)
+@app.get(
+    "/api/v1/product/subscriptions/{subscription_id}", response_model=UserSubscription
+)
 async def get_subscription(
-    subscription_id: str,
-    service: ProductService = Depends(get_product_service)
+    subscription_id: str, service: ProductService = Depends(get_product_service)
 ):
     """获取订阅详情"""
     try:
@@ -532,7 +567,7 @@ async def create_subscription(
     organization_id: Optional[str] = Body(None),
     billing_cycle: str = Body("monthly"),
     metadata: Optional[Dict[str, Any]] = Body(None),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """创建新订阅"""
     try:
@@ -540,14 +575,16 @@ async def create_subscription(
         try:
             billing_cycle_enum = BillingCycle(billing_cycle)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid billing_cycle: {billing_cycle}")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid billing_cycle: {billing_cycle}"
+            )
 
         return await service.create_subscription(
             user_id=user_id,
             plan_id=plan_id,
             organization_id=organization_id,
             billing_cycle=billing_cycle_enum,
-            metadata=metadata
+            metadata=metadata,
         )
     except HTTPException:
         raise
@@ -562,7 +599,7 @@ async def create_subscription(
 async def update_subscription_status(
     subscription_id: str,
     status: str = Body(..., embed=True),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """更新订阅状态"""
     try:
@@ -573,8 +610,7 @@ async def update_subscription_status(
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
         success = await service.update_subscription_status(
-            subscription_id=subscription_id,
-            status=status_enum
+            subscription_id=subscription_id, status=status_enum
         )
 
         if not success:
@@ -594,6 +630,7 @@ async def update_subscription_status(
 # 使用量记录API
 # ====================
 
+
 @app.post("/api/v1/product/usage/record")
 async def record_product_usage(
     user_id: str = Body(...),
@@ -605,11 +642,12 @@ async def record_product_usage(
     request_id: Optional[str] = Body(None),
     usage_details: Optional[Dict[str, Any]] = Body(None),
     usage_timestamp: Optional[datetime] = Body(None),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """记录产品使用量"""
     try:
         from decimal import Decimal
+
         result = await service.record_product_usage(
             user_id=user_id,
             organization_id=organization_id,
@@ -619,7 +657,7 @@ async def record_product_usage(
             session_id=session_id,
             request_id=request_id,
             usage_details=usage_details,
-            usage_timestamp=usage_timestamp
+            usage_timestamp=usage_timestamp,
         )
         return result
     except Exception as e:
@@ -637,7 +675,7 @@ async def get_usage_records(
     end_date: Optional[datetime] = Query(None, description="结束日期"),
     limit: int = Query(100, description="返回记录数量限制"),
     offset: int = Query(0, description="偏移量"),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """获取使用量记录"""
     try:
@@ -649,7 +687,7 @@ async def get_usage_records(
             start_date=start_date,
             end_date=end_date,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
     except Exception as e:
         logger.error(f"Error getting usage records: {e}")
@@ -660,6 +698,7 @@ async def get_usage_records(
 # 统计和分析API
 # ====================
 
+
 @app.get("/api/v1/product/statistics/usage")
 async def get_usage_statistics(
     user_id: Optional[str] = Query(None, description="用户ID"),
@@ -667,7 +706,7 @@ async def get_usage_statistics(
     product_id: Optional[str] = Query(None, description="产品ID"),
     start_date: Optional[datetime] = Query(None, description="开始日期"),
     end_date: Optional[datetime] = Query(None, description="结束日期"),
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """获取使用量统计"""
     try:
@@ -676,7 +715,7 @@ async def get_usage_statistics(
             organization_id=organization_id,
             product_id=product_id,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
         )
     except Exception as e:
         logger.error(f"Error getting usage statistics: {e}")
@@ -685,7 +724,7 @@ async def get_usage_statistics(
 
 @app.get("/api/v1/product/statistics/service")
 async def get_service_statistics(
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """获取服务统计"""
     try:
@@ -698,6 +737,7 @@ async def get_service_statistics(
 # ====================
 # Admin API
 # ====================
+
 
 async def require_admin(request: Request):
     """Check for admin role header"""
@@ -746,20 +786,25 @@ async def _audit_admin_action(
 async def admin_create_product(
     body: AdminCreateProductRequest,
     request: Request,
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """Create a new product"""
     await require_admin(request)
     try:
         existing = await service.get_product(body.product_id)
         if existing:
-            raise HTTPException(status_code=409, detail=f"Product {body.product_id} already exists")
+            raise HTTPException(
+                status_code=409, detail=f"Product {body.product_id} already exists"
+            )
         result = await service.admin_create_product(body.model_dump())
         if not result:
             raise HTTPException(status_code=500, detail="Failed to create product")
         await _audit_admin_action(
-            request, action="create_product", resource_type="product",
-            resource_id=body.product_id, changes={"after": body.model_dump()},
+            request,
+            action="create_product",
+            resource_type="product",
+            resource_id=body.product_id,
+            changes={"after": body.model_dump()},
         )
         return result
     except HTTPException:
@@ -776,7 +821,7 @@ async def admin_update_product(
     product_id: str,
     body: AdminUpdateProductRequest,
     request: Request,
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """Update an existing product"""
     await require_admin(request)
@@ -787,10 +832,15 @@ async def admin_update_product(
         update_fields = body.model_dump(exclude_none=True)
         result = await service.admin_update_product(product_id, update_fields)
         if not result:
-            raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Product {product_id} not found"
+            )
         await _audit_admin_action(
-            request, action="update_product", resource_type="product",
-            resource_id=product_id, changes={"before": before_data, "after": update_fields},
+            request,
+            action="update_product",
+            resource_type="product",
+            resource_id=product_id,
+            changes={"before": before_data, "after": update_fields},
         )
         return result
     except HTTPException:
@@ -806,19 +856,27 @@ async def admin_update_product(
 async def admin_delete_product(
     product_id: str,
     request: Request,
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """Soft-delete a product (sets is_active = FALSE)"""
     await require_admin(request)
     try:
         success = await service.admin_delete_product(product_id)
         if not success:
-            raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Product {product_id} not found"
+            )
         await _audit_admin_action(
-            request, action="delete_product", resource_type="product",
-            resource_id=product_id, changes={"after": {"is_active": False}},
+            request,
+            action="delete_product",
+            resource_type="product",
+            resource_id=product_id,
+            changes={"after": {"is_active": False}},
         )
-        return {"message": f"Product {product_id} deactivated", "product_id": product_id}
+        return {
+            "message": f"Product {product_id} deactivated",
+            "product_id": product_id,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -831,17 +889,21 @@ async def admin_create_pricing(
     product_id: str,
     body: AdminCreatePricingRequest,
     request: Request,
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """Create a pricing tier for a product"""
     await require_admin(request)
     try:
         result = await service.admin_create_pricing(product_id, body.model_dump())
         if result is None:
-            raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Product {product_id} not found"
+            )
         await _audit_admin_action(
-            request, action="create_pricing", resource_type="pricing",
-            resource_id=getattr(body, 'pricing_id', None),
+            request,
+            action="create_pricing",
+            resource_type="pricing",
+            resource_id=getattr(body, "pricing_id", None),
             changes={"after": body.model_dump()},
             metadata={"product_id": product_id},
         )
@@ -850,7 +912,9 @@ async def admin_create_pricing(
         raise
     except Exception as e:
         if "duplicate" in str(e).lower() or "unique" in str(e).lower():
-            raise HTTPException(status_code=409, detail=f"Pricing {body.pricing_id} already exists")
+            raise HTTPException(
+                status_code=409, detail=f"Pricing {body.pricing_id} already exists"
+            )
         logger.error(f"Error creating pricing: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -860,7 +924,7 @@ async def admin_update_pricing(
     pricing_id: str,
     body: AdminUpdatePricingRequest,
     request: Request,
-    service: ProductService = Depends(get_product_service)
+    service: ProductService = Depends(get_product_service),
 ):
     """Update a pricing tier"""
     await require_admin(request)
@@ -868,10 +932,15 @@ async def admin_update_pricing(
         update_fields = body.model_dump(exclude_none=True)
         result = await service.admin_update_pricing(pricing_id, update_fields)
         if result is None:
-            raise HTTPException(status_code=404, detail=f"Pricing {pricing_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Pricing {pricing_id} not found"
+            )
         await _audit_admin_action(
-            request, action="update_pricing", resource_type="pricing",
-            resource_id=pricing_id, changes={"after": update_fields},
+            request,
+            action="update_pricing",
+            resource_type="pricing",
+            resource_id=pricing_id,
+            changes={"after": update_fields},
         )
         return result
     except HTTPException:
@@ -885,74 +954,104 @@ async def admin_update_pricing(
 # Cost Definition Admin API
 # ====================
 
+
 @app.get("/api/v1/product/admin/cost-definitions")
 async def admin_list_cost_definitions(
-    is_active: Optional[bool] = Query(None), provider: Optional[str] = Query(None),
-    service_type: Optional[str] = Query(None), request: Request = None,
-    service: ProductService = Depends(get_product_service)
+    is_active: Optional[bool] = Query(None),
+    provider: Optional[str] = Query(None),
+    service_type: Optional[str] = Query(None),
+    request: Request = None,
+    service: ProductService = Depends(get_product_service),
 ):
     await require_admin(request)
-    return await service.admin_get_cost_definitions(is_active=is_active, provider=provider, service_type=service_type)
+    return await service.admin_get_cost_definitions(
+        is_active=is_active, provider=provider, service_type=service_type
+    )
 
 
 @app.post("/api/v1/product/admin/cost-definitions", status_code=201)
 async def admin_create_cost_definition(
-    body: Dict[str, Any] = Body(...), request: Request = None,
-    service: ProductService = Depends(get_product_service)
+    body: Dict[str, Any] = Body(...),
+    request: Request = None,
+    service: ProductService = Depends(get_product_service),
 ):
     await require_admin(request)
     try:
         result = await service.admin_create_cost_definition(body)
-        if not result: raise HTTPException(status_code=500, detail="Failed to create cost definition")
+        if not result:
+            raise HTTPException(
+                status_code=500, detail="Failed to create cost definition"
+            )
         await _audit_admin_action(
-            request, action="create_cost_definition", resource_type="cost_definition",
-            resource_id=body.get("cost_id"), changes={"after": body},
+            request,
+            action="create_cost_definition",
+            resource_type="cost_definition",
+            resource_id=body.get("cost_id"),
+            changes={"after": body},
         )
         return result
-    except ValueError as e: raise HTTPException(status_code=422, detail=str(e))
-    except HTTPException: raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         if "duplicate" in str(e).lower() or "unique" in str(e).lower():
-            raise HTTPException(status_code=409, detail="Cost definition already exists")
+            raise HTTPException(
+                status_code=409, detail="Cost definition already exists"
+            )
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.put("/api/v1/product/admin/cost-definitions/{cost_id}")
 async def admin_update_cost_definition(
-    cost_id: str, body: Dict[str, Any] = Body(...), request: Request = None,
-    service: ProductService = Depends(get_product_service)
+    cost_id: str,
+    body: Dict[str, Any] = Body(...),
+    request: Request = None,
+    service: ProductService = Depends(get_product_service),
 ):
     await require_admin(request)
     result = await service.admin_update_cost_definition(cost_id, body)
-    if result is None: raise HTTPException(status_code=404, detail=f"Cost definition {cost_id} not found")
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail=f"Cost definition {cost_id} not found"
+        )
     await _audit_admin_action(
-        request, action="update_cost_definition", resource_type="cost_definition",
-        resource_id=cost_id, changes={"after": body},
+        request,
+        action="update_cost_definition",
+        resource_type="cost_definition",
+        resource_id=cost_id,
+        changes={"after": body},
     )
     return result
 
 
 @app.post("/api/v1/product/admin/cost-definitions/rotate")
 async def admin_rotate_cost_definitions(
-    body: List[Dict[str, Any]] = Body(...), request: Request = None,
-    service: ProductService = Depends(get_product_service)
+    body: List[Dict[str, Any]] = Body(...),
+    request: Request = None,
+    service: ProductService = Depends(get_product_service),
 ):
     await require_admin(request)
     try:
         results = await service.admin_rotate_cost_definitions(body)
         await _audit_admin_action(
-            request, action="rotate_cost_definitions", resource_type="cost_definition",
+            request,
+            action="rotate_cost_definitions",
+            resource_type="cost_definition",
             changes={"after": {"rotated_count": len(results), "definitions": body}},
         )
         return {"rotated": len(results), "details": results}
-    except ValueError as e: raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/v1/product/admin/cost-definitions/history/{model_name}")
 async def admin_get_cost_history(
-    model_name: str, request: Request = None,
-    service: ProductService = Depends(get_product_service)
+    model_name: str,
+    request: Request = None,
+    service: ProductService = Depends(get_product_service),
 ):
     await require_admin(request)
     return await service.admin_get_cost_history(model_name)
@@ -961,6 +1060,7 @@ async def admin_get_cost_history(
 # ====================
 # Catalog Alignment Health Check
 # ====================
+
 
 @app.get("/api/v1/product/admin/health/catalog-alignment")
 async def admin_catalog_alignment(
@@ -974,6 +1074,7 @@ async def admin_catalog_alignment(
 # 错误处理
 # ====================
 
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """全局异常处理"""
@@ -986,10 +1087,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "microservices.product_service.main:app",
         host="0.0.0.0",
         port=SERVICE_PORT,
         reload=config.debug,
-        log_level=config.log_level.lower()
+        log_level=config.log_level.lower(),
     )

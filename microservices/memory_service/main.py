@@ -12,22 +12,15 @@ Architecture:
 Port: 8223
 """
 
-import os
-import sys
 import asyncio
-import logging
-from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Body
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Query
 
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
@@ -38,20 +31,23 @@ from core.health import HealthCheck
 from isa_common.consul_client import ConsulRegistry
 
 from .models import (
-    MemoryType, MemoryOperationResult,
-    MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams,
-    MemoryServiceStatus, DecayRequest, DecayResponse,
-    ConsolidationRequest, ConsolidationResponse,
-    GraphSearchResponse, GraphNeighborsResponse,
-    HybridSearchResponse
+    MemoryType,
+    MemoryOperationResult,
+    MemoryCreateRequest,
+    MemoryUpdateRequest,
+    MemoryListParams,
+    DecayRequest,
+    DecayResponse,
+    ConsolidationRequest,
+    ConsolidationResponse,
+    GraphSearchResponse,
+    GraphNeighborsResponse,
 )
 from .graph_client import GraphClient
-from .memory_service import MemoryService
 from .context_ordering import order_by_importance_edges
 from .context_compressor import ContextCompressor
 from .mmr_reranker import apply_mmr_reranking
 from .hybrid_search import merge_hybrid_results
-from .events.handlers import MemoryEventHandlers
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 from .factory import create_memory_service
 
@@ -76,7 +72,9 @@ async def _maybe_rerank(results, query, service, rerank, mmr_lambda, limit):
     try:
         query_embedding = await service._generate_embedding(query)
         if query_embedding is not None:
-            results = apply_mmr_reranking(results, query_embedding, lambda_param=mmr_lambda, top_k=limit)
+            results = apply_mmr_reranking(
+                results, query_embedding, lambda_param=mmr_lambda, top_k=limit
+            )
     except Exception as e:
         logger.warning("MMR re-ranking failed, using raw results: %s", e)
     return results
@@ -113,14 +111,17 @@ async def lifespan(app: FastAPI):
 
         for event_pattern, handler_func in handler_map.items():
             await event_bus.subscribe_to_events(
-                pattern=event_pattern,
-                handler=handler_func
+                pattern=event_pattern, handler=handler_func
             )
 
-        logger.info(f"✅ Memory event subscriber started ({len(handler_map)} event types)")
+        logger.info(
+            f"✅ Memory event subscriber started ({len(handler_map)} event types)"
+        )
 
     except Exception as e:
-        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event subscriptions.")
+        logger.warning(
+            f"⚠️  Failed to initialize event bus: {e}. Continuing without event subscriptions."
+        )
         event_bus = None
 
         # Initialize service without event bus (using factory pattern)
@@ -137,9 +138,13 @@ async def lifespan(app: FastAPI):
         if await graph_client.health_check():
             logger.info("GraphClient connected to isA_Data graph service")
         else:
-            logger.warning("isA_Data graph service not reachable — graph queries will degrade gracefully")
+            logger.warning(
+                "isA_Data graph service not reachable — graph queries will degrade gracefully"
+            )
     except Exception as e:
-        logger.warning(f"Failed to initialize GraphClient: {e}. Graph queries disabled.")
+        logger.warning(
+            f"Failed to initialize GraphClient: {e}. Graph queries disabled."
+        )
         graph_client = GraphClient()  # keep instance for graceful degradation
 
     # Consul 服务注册
@@ -150,24 +155,26 @@ async def lifespan(app: FastAPI):
 
             # 合并服务元数据
             consul_meta = {
-                'version': SERVICE_METADATA['version'],
-                'capabilities': ','.join(SERVICE_METADATA['capabilities']),
-                **route_meta
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
             }
 
             consul_registry = ConsulRegistry(
-                service_name=SERVICE_METADATA['service_name'],
+                service_name=SERVICE_METADATA["service_name"],
                 service_port=service_config.service_port,
                 consul_host=service_config.consul_host,
                 consul_port=service_config.consul_port,
-                tags=SERVICE_METADATA['tags'],
+                tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type='ttl'  # Use TTL for reliable health checks
+                health_check_type="ttl",  # Use TTL for reliable health checks
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
             shutdown_manager.set_consul_registry(consul_registry)
-            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             consul_registry = None
@@ -194,7 +201,7 @@ app = FastAPI(
     title="Memory Service",
     description="AI-powered memory service for intelligent information storage and retrieval",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, "memory_service")
@@ -202,7 +209,9 @@ setup_metrics(app, "memory_service")
 
 # ==================== Health Check ====================
 
-health = HealthCheck("memory_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "memory_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 health.add_neo4j(lambda: graph_client)
 health.add_qdrant(
     lambda: memory_service.factual_service.qdrant
@@ -216,6 +225,7 @@ health.add_qdrant(
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 class StoreFactualMemoryRequest(BaseModel):
     user_id: str
@@ -269,7 +279,7 @@ async def store_factual_memory(request: StoreFactualMemoryRequest):
         result = await memory_service.store_factual_memory(
             user_id=request.user_id,
             dialog_content=request.dialog_content,
-            importance_score=request.importance_score
+            importance_score=request.importance_score,
         )
         return result
     except Exception as e:
@@ -284,7 +294,7 @@ async def store_episodic_memory(request: StoreEpisodicMemoryRequest):
         result = await memory_service.store_episodic_memory(
             user_id=request.user_id,
             dialog_content=request.dialog_content,
-            importance_score=request.importance_score
+            importance_score=request.importance_score,
         )
         return result
     except Exception as e:
@@ -299,7 +309,7 @@ async def store_procedural_memory(request: StoreProceduralMemoryRequest):
         result = await memory_service.store_procedural_memory(
             user_id=request.user_id,
             dialog_content=request.dialog_content,
-            importance_score=request.importance_score
+            importance_score=request.importance_score,
         )
         return result
     except Exception as e:
@@ -314,7 +324,7 @@ async def store_semantic_memory(request: StoreSemanticMemoryRequest):
         result = await memory_service.store_semantic_memory(
             user_id=request.user_id,
             dialog_content=request.dialog_content,
-            importance_score=request.importance_score
+            importance_score=request.importance_score,
         )
         return result
     except Exception as e:
@@ -323,6 +333,7 @@ async def store_semantic_memory(request: StoreSemanticMemoryRequest):
 
 
 # ==================== General Memory Operations ====================
+
 
 @app.post("/api/v1/memories", response_model=MemoryOperationResult)
 async def create_memory(request: MemoryCreateRequest):
@@ -337,19 +348,22 @@ async def create_memory(request: MemoryCreateRequest):
 
 # ==================== Session-specific Routes (must come before generic routes) ====================
 
+
 @app.post("/api/v1/memories/session/store", response_model=MemoryOperationResult)
 async def store_session_message(request: StoreSessionMessageRequest):
     """Store session message"""
     try:
         # Get existing session memories to determine interaction sequence
-        existing_memories = await memory_service.get_session_memories(request.user_id, request.session_id)
+        existing_memories = await memory_service.get_session_memories(
+            request.user_id, request.session_id
+        )
         interaction_sequence = len(existing_memories) + 1
 
         # Build conversation state
         conversation_state = {
             "message_type": request.message_type,
             "role": request.role,
-            "sequence": interaction_sequence
+            "sequence": interaction_sequence,
         }
 
         result = await memory_service.session_service.store_session_memory(
@@ -358,7 +372,7 @@ async def store_session_message(request: StoreSessionMessageRequest):
             content=request.message_content,
             interaction_sequence=interaction_sequence,
             conversation_state=conversation_state,
-            session_type="chat"
+            session_type="chat",
         )
         return result
     except Exception as e:
@@ -371,7 +385,7 @@ async def get_session_context(
     session_id: str,
     user_id: str = Query(...),
     include_summaries: bool = Query(True),
-    max_recent_messages: int = Query(5)
+    max_recent_messages: int = Query(5),
 ):
     """Get comprehensive session context"""
     try:
@@ -379,17 +393,19 @@ async def get_session_context(
         memories = await memory_service.get_session_memories(user_id, session_id)
 
         # Sort by interaction sequence
-        memories.sort(key=lambda m: m.get('interaction_sequence', 0))
+        memories.sort(key=lambda m: m.get("interaction_sequence", 0))
 
         # Get recent messages
-        recent_messages = memories[-max_recent_messages:] if max_recent_messages > 0 else memories
+        recent_messages = (
+            memories[-max_recent_messages:] if max_recent_messages > 0 else memories
+        )
 
         # Build context response
         context = {
             "session_id": session_id,
             "user_id": user_id,
             "total_messages": len(memories),
-            "recent_messages": recent_messages
+            "recent_messages": recent_messages,
         }
 
         # Include summary if requested
@@ -404,10 +420,7 @@ async def get_session_context(
 
 
 @app.get("/api/v1/memories/session/{session_id}")
-async def get_session_memories(
-    session_id: str,
-    user_id: str = Query(...)
-):
+async def get_session_memories(session_id: str, user_id: str = Query(...)):
     """Get memories for a specific session"""
     try:
         results = await memory_service.get_session_memories(user_id, session_id)
@@ -417,11 +430,11 @@ async def get_session_memories(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/memories/session/{session_id}/deactivate", response_model=MemoryOperationResult)
-async def deactivate_session(
-    session_id: str,
-    user_id: str = Query(...)
-):
+@app.post(
+    "/api/v1/memories/session/{session_id}/deactivate",
+    response_model=MemoryOperationResult,
+)
+async def deactivate_session(session_id: str, user_id: str = Query(...)):
     """Deactivate a session"""
     try:
         result = await memory_service.deactivate_session(user_id, session_id)
@@ -431,11 +444,11 @@ async def deactivate_session(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/memories/session/{session_id}/summarize", response_model=MemoryOperationResult)
-async def summarize_session(
-    session_id: str,
-    request: SummarizeSessionRequest
-):
+@app.post(
+    "/api/v1/memories/session/{session_id}/summarize",
+    response_model=MemoryOperationResult,
+)
+async def summarize_session(session_id: str, request: SummarizeSessionRequest):
     """
     Summarize session conversation intelligently.
 
@@ -443,25 +456,29 @@ async def summarize_session(
     """
     try:
         # Get all session memories
-        memories = await memory_service.get_session_memories(request.user_id, session_id)
+        memories = await memory_service.get_session_memories(
+            request.user_id, session_id
+        )
 
         if not memories:
             return MemoryOperationResult(
                 success=False,
                 operation="summarize_session",
-                message="No messages found in session to summarize"
+                message="No messages found in session to summarize",
             )
 
         # Get existing summary if not forcing update
         existing_summary = None
         if not request.force_update:
-            existing_summary = await memory_service.get_session_summary(request.user_id, session_id)
+            existing_summary = await memory_service.get_session_summary(
+                request.user_id, session_id
+            )
             if existing_summary:
                 return MemoryOperationResult(
                     success=True,
                     operation="summarize_session",
                     message="Using existing summary (use force_update=true to regenerate)",
-                    data=existing_summary
+                    data=existing_summary,
                 )
 
         # Extract content from memories for summarization
@@ -488,6 +505,7 @@ async def summarize_session(
 
         # Store the summary
         import uuid
+
         summary_data = {
             "id": str(uuid.uuid4()),
             "session_id": session_id,
@@ -495,21 +513,19 @@ async def summarize_session(
             "key_points": key_sentences[:3],
             "message_count": len(memories),
             "compression_level": request.compression_level,
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now().isoformat(),
         }
 
         # Store summary via repository
         await memory_service.session_service.repository.store_session_summary(
-            user_id=request.user_id,
-            session_id=session_id,
-            summary_data=summary_data
+            user_id=request.user_id, session_id=session_id, summary_data=summary_data
         )
 
         return MemoryOperationResult(
             success=True,
             operation="summarize_session",
             message=f"Session summarized ({len(memories)} messages → {len(key_sentences)} key points)",
-            data=summary_data
+            data=summary_data,
         )
 
     except Exception as e:
@@ -519,16 +535,20 @@ async def summarize_session(
 
 # ==================== Working Memory-specific Routes (must come before generic routes) ====================
 
+
 @app.post("/api/v1/memories/working/store", response_model=MemoryOperationResult)
 async def store_working_memory(request: StoreWorkingMemoryRequest):
     """Store working memory from dialog"""
     try:
         import uuid
+
         # Generate task_id and task_context from dialog
         task_id = str(uuid.uuid4())
         task_context = {
             "source": "dialog",
-            "content_preview": request.dialog_content[:100] if len(request.dialog_content) > 100 else request.dialog_content
+            "content_preview": request.dialog_content[:100]
+            if len(request.dialog_content) > 100
+            else request.dialog_content,
         }
 
         result = await memory_service.working_service.store_working_memory(
@@ -537,7 +557,7 @@ async def store_working_memory(request: StoreWorkingMemoryRequest):
             task_id=task_id,
             task_context=task_context,
             priority=5,
-            ttl_seconds=request.ttl_seconds
+            ttl_seconds=request.ttl_seconds,
         )
         return result
     except Exception as e:
@@ -569,13 +589,16 @@ async def cleanup_expired_memories(user_id: Optional[str] = Query(None)):
 
 # ==================== Graph Retrieval Endpoints ====================
 
+
 @app.get("/api/v1/memories/graph/search", response_model=GraphSearchResponse)
 async def graph_search(
     query: str = Query(..., description="Search query text"),
     user_id: str = Query(..., description="User ID to scope results"),
     limit: int = Query(10, ge=1, le=100, description="Maximum number of results"),
     max_depth: int = Query(2, ge=1, le=5, description="Maximum traversal depth"),
-    entity_types: Optional[List[str]] = Query(None, description="Filter by entity types"),
+    entity_types: Optional[List[str]] = Query(
+        None, description="Filter by entity types"
+    ),
 ):
     """Search the knowledge graph for entities and relationships."""
     if graph_client is None:
@@ -604,7 +627,9 @@ async def graph_neighbors(
     entity_id: str = Query(..., description="Source entity ID"),
     depth: int = Query(2, ge=1, le=5, description="Maximum traversal depth"),
     user_id: Optional[str] = Query(None, description="Optional user ID for scoping"),
-    relationship_types: Optional[List[str]] = Query(None, description="Filter by relationship types"),
+    relationship_types: Optional[List[str]] = Query(
+        None, description="Filter by relationship types"
+    ),
 ):
     """Get neighbors of a graph entity."""
     if graph_client is None:
@@ -628,6 +653,7 @@ async def graph_neighbors(
 
 
 # ==================== Related Memories (A-MEM Cross-Links) ====================
+
 
 @app.get("/api/v1/memories/{memory_type}/{memory_id}/related")
 async def get_related_memories(
@@ -655,11 +681,10 @@ async def get_related_memories(
 
 # ==================== Generic Memory Routes ====================
 
+
 @app.get("/api/v1/memories/{memory_type}/{memory_id}")
 async def get_memory(
-    memory_type: MemoryType,
-    memory_id: str,
-    user_id: Optional[str] = Query(None)
+    memory_type: MemoryType, memory_id: str, user_id: Optional[str] = Query(None)
 ):
     """Get memory by ID and type"""
     try:
@@ -680,7 +705,7 @@ async def list_memories(
     memory_type: Optional[MemoryType] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    importance_min: Optional[float] = Query(None)
+    importance_min: Optional[float] = Query(None),
 ):
     """List memories for a user"""
     try:
@@ -689,7 +714,7 @@ async def list_memories(
             memory_type=memory_type,
             limit=limit,
             offset=offset,
-            importance_min=importance_min
+            importance_min=importance_min,
         )
         result = await memory_service.list_memories(params)
         return {"memories": result, "count": len(result)}
@@ -698,12 +723,14 @@ async def list_memories(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/v1/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult)
+@app.put(
+    "/api/v1/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult
+)
 async def update_memory(
     memory_type: MemoryType,
     memory_id: str,
     request: MemoryUpdateRequest,
-    user_id: str = Query(...)
+    user_id: str = Query(...),
 ):
     """Update a memory"""
     try:
@@ -711,7 +738,7 @@ async def update_memory(
             memory_id=memory_id,
             memory_type=memory_type,
             request=request,
-            user_id=user_id
+            user_id=user_id,
         )
         return result
     except Exception as e:
@@ -719,11 +746,11 @@ async def update_memory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/v1/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult)
+@app.delete(
+    "/api/v1/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult
+)
 async def delete_memory(
-    memory_type: MemoryType,
-    memory_id: str,
-    user_id: str = Query(...)
+    memory_type: MemoryType, memory_id: str, user_id: str = Query(...)
 ):
     """Delete a memory"""
     try:
@@ -736,11 +763,12 @@ async def delete_memory(
 
 # ==================== Search Operations ====================
 
+
 @app.get("/api/v1/memories/factual/search/subject")
 async def search_facts_by_subject(
     user_id: str = Query(...),
     subject: str = Query(...),
-    limit: int = Query(10, ge=1, le=100)
+    limit: int = Query(10, ge=1, le=100),
 ):
     """Search factual memories by subject"""
     try:
@@ -755,11 +783,13 @@ async def search_facts_by_subject(
 async def search_episodes_by_event_type(
     user_id: str = Query(...),
     event_type: str = Query(...),
-    limit: int = Query(10, ge=1, le=100)
+    limit: int = Query(10, ge=1, le=100),
 ):
     """Search episodic memories by event type"""
     try:
-        results = await memory_service.search_episodes_by_event_type(user_id, event_type, limit)
+        results = await memory_service.search_episodes_by_event_type(
+            user_id, event_type, limit
+        )
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error searching episodes: {e}")
@@ -770,11 +800,13 @@ async def search_episodes_by_event_type(
 async def search_concepts_by_category(
     user_id: str = Query(...),
     category: str = Query(...),
-    limit: int = Query(10, ge=1, le=100)
+    limit: int = Query(10, ge=1, le=100),
 ):
     """Search semantic memories by category"""
     try:
-        results = await memory_service.search_concepts_by_category(user_id, category, limit)
+        results = await memory_service.search_concepts_by_category(
+            user_id, category, limit
+        )
         return {"memories": results, "count": len(results)}
     except Exception as e:
         logger.error(f"Error searching semantic memories: {e}")
@@ -783,20 +815,32 @@ async def search_concepts_by_category(
 
 # ==================== Vector Search Operations ====================
 
+
 @app.get("/api/v1/memories/factual/search/vector")
 async def search_factual_vector(
     user_id: str = Query(...),
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
-    rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
-    mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
-    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
+    rerank: bool = Query(
+        False, description="Enable MMR re-ranking for diverse results"
+    ),
+    mmr_lambda: float = Query(
+        0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"
+    ),
+    order_results: bool = Query(
+        False,
+        description="Order results for lost-in-the-middle mitigation (highest importance at edges)",
+    ),
 ):
     """Vector similarity search for factual memories using Qdrant"""
     try:
-        results = await memory_service.vector_search_factual(user_id, query, limit, score_threshold, with_vectors=rerank)
-        results = await _maybe_rerank(results, query, memory_service.factual_service, rerank, mmr_lambda, limit)
+        results = await memory_service.vector_search_factual(
+            user_id, query, limit, score_threshold, with_vectors=rerank
+        )
+        results = await _maybe_rerank(
+            results, query, memory_service.factual_service, rerank, mmr_lambda, limit
+        )
         if order_results and results:
             results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
@@ -811,14 +855,25 @@ async def search_episodic_vector(
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
-    rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
-    mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
-    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
+    rerank: bool = Query(
+        False, description="Enable MMR re-ranking for diverse results"
+    ),
+    mmr_lambda: float = Query(
+        0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"
+    ),
+    order_results: bool = Query(
+        False,
+        description="Order results for lost-in-the-middle mitigation (highest importance at edges)",
+    ),
 ):
     """Vector similarity search for episodic memories using Qdrant"""
     try:
-        results = await memory_service.vector_search_episodic(user_id, query, limit, score_threshold, with_vectors=rerank)
-        results = await _maybe_rerank(results, query, memory_service.episodic_service, rerank, mmr_lambda, limit)
+        results = await memory_service.vector_search_episodic(
+            user_id, query, limit, score_threshold, with_vectors=rerank
+        )
+        results = await _maybe_rerank(
+            results, query, memory_service.episodic_service, rerank, mmr_lambda, limit
+        )
         if order_results and results:
             results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
@@ -833,14 +888,25 @@ async def search_procedural_vector(
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
-    rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
-    mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
-    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
+    rerank: bool = Query(
+        False, description="Enable MMR re-ranking for diverse results"
+    ),
+    mmr_lambda: float = Query(
+        0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"
+    ),
+    order_results: bool = Query(
+        False,
+        description="Order results for lost-in-the-middle mitigation (highest importance at edges)",
+    ),
 ):
     """Vector similarity search for procedural memories using Qdrant"""
     try:
-        results = await memory_service.vector_search_procedural(user_id, query, limit, score_threshold, with_vectors=rerank)
-        results = await _maybe_rerank(results, query, memory_service.procedural_service, rerank, mmr_lambda, limit)
+        results = await memory_service.vector_search_procedural(
+            user_id, query, limit, score_threshold, with_vectors=rerank
+        )
+        results = await _maybe_rerank(
+            results, query, memory_service.procedural_service, rerank, mmr_lambda, limit
+        )
         if order_results and results:
             results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
@@ -855,14 +921,25 @@ async def search_semantic_vector(
     query: str = Query(...),
     limit: int = Query(10, ge=1, le=100),
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
-    rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
-    mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
-    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
+    rerank: bool = Query(
+        False, description="Enable MMR re-ranking for diverse results"
+    ),
+    mmr_lambda: float = Query(
+        0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"
+    ),
+    order_results: bool = Query(
+        False,
+        description="Order results for lost-in-the-middle mitigation (highest importance at edges)",
+    ),
 ):
     """Vector similarity search for semantic memories using Qdrant"""
     try:
-        results = await memory_service.vector_search_semantic(user_id, query, limit, score_threshold, with_vectors=rerank)
-        results = await _maybe_rerank(results, query, memory_service.semantic_service, rerank, mmr_lambda, limit)
+        results = await memory_service.vector_search_semantic(
+            user_id, query, limit, score_threshold, with_vectors=rerank
+        )
+        results = await _maybe_rerank(
+            results, query, memory_service.semantic_service, rerank, mmr_lambda, limit
+        )
         if order_results and results:
             results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
@@ -878,14 +955,25 @@ async def search_working_vector(
     limit: int = Query(10, ge=1, le=100),
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
     include_expired: bool = Query(False),
-    rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
-    mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
-    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
+    rerank: bool = Query(
+        False, description="Enable MMR re-ranking for diverse results"
+    ),
+    mmr_lambda: float = Query(
+        0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"
+    ),
+    order_results: bool = Query(
+        False,
+        description="Order results for lost-in-the-middle mitigation (highest importance at edges)",
+    ),
 ):
     """Vector similarity search for working memories using Qdrant"""
     try:
-        results = await memory_service.vector_search_working(user_id, query, limit, score_threshold, include_expired, with_vectors=rerank)
-        results = await _maybe_rerank(results, query, memory_service.working_service, rerank, mmr_lambda, limit)
+        results = await memory_service.vector_search_working(
+            user_id, query, limit, score_threshold, include_expired, with_vectors=rerank
+        )
+        results = await _maybe_rerank(
+            results, query, memory_service.working_service, rerank, mmr_lambda, limit
+        )
         if order_results and results:
             results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
@@ -901,14 +989,25 @@ async def search_session_vector(
     limit: int = Query(10, ge=1, le=100),
     score_threshold: float = Query(0.15, ge=0.0, le=1.0),
     session_id: Optional[str] = Query(None),
-    rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
-    mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"),
-    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
+    rerank: bool = Query(
+        False, description="Enable MMR re-ranking for diverse results"
+    ),
+    mmr_lambda: float = Query(
+        0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=diversity, 1.0=relevance"
+    ),
+    order_results: bool = Query(
+        False,
+        description="Order results for lost-in-the-middle mitigation (highest importance at edges)",
+    ),
 ):
     """Vector similarity search for session memories using Qdrant"""
     try:
-        results = await memory_service.vector_search_session(user_id, query, limit, score_threshold, session_id, with_vectors=rerank)
-        results = await _maybe_rerank(results, query, memory_service.session_service, rerank, mmr_lambda, limit)
+        results = await memory_service.vector_search_session(
+            user_id, query, limit, score_threshold, session_id, with_vectors=rerank
+        )
+        results = await _maybe_rerank(
+            results, query, memory_service.session_service, rerank, mmr_lambda, limit
+        )
         if order_results and results:
             results = order_by_importance_edges(results)
         return {"memories": results, "count": len(results)}
@@ -924,12 +1023,28 @@ async def search_all_memories(
     memory_types: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=100),
     similarity_threshold: float = Query(0.15, ge=0.0, le=1.0),
-    rerank: bool = Query(False, description="Enable MMR re-ranking for diverse results"),
-    mmr_lambda: float = Query(0.5, ge=0.0, le=1.0, description="MMR lambda: 0.0=pure diversity, 1.0=pure relevance"),
-    order_results: bool = Query(False, description="Order results for lost-in-the-middle mitigation (highest importance at edges)"),
-    compress: bool = Query(False, description="Compress results into a focused summary using LLM"),
-    target_tokens: int = Query(500, ge=50, le=5000, description="Target token count for compressed summary"),
-    include_graph: bool = Query(False, description="Include knowledge graph results from Neo4j via isA_Data"),
+    rerank: bool = Query(
+        False, description="Enable MMR re-ranking for diverse results"
+    ),
+    mmr_lambda: float = Query(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="MMR lambda: 0.0=pure diversity, 1.0=pure relevance",
+    ),
+    order_results: bool = Query(
+        False,
+        description="Order results for lost-in-the-middle mitigation (highest importance at edges)",
+    ),
+    compress: bool = Query(
+        False, description="Compress results into a focused summary using LLM"
+    ),
+    target_tokens: int = Query(
+        500, ge=50, le=5000, description="Target token count for compressed summary"
+    ),
+    include_graph: bool = Query(
+        False, description="Include knowledge graph results from Neo4j via isA_Data"
+    ),
 ):
     """
     Universal semantic search across all memory types using vector similarity
@@ -952,9 +1067,16 @@ async def search_all_memories(
 
         # Parse memory types if provided, otherwise search all
         if memory_types:
-            types_to_search = [t.strip().upper() for t in memory_types.split(',')]
+            types_to_search = [t.strip().upper() for t in memory_types.split(",")]
         else:
-            types_to_search = ['FACTUAL', 'EPISODIC', 'PROCEDURAL', 'SEMANTIC', 'WORKING', 'SESSION']
+            types_to_search = [
+                "FACTUAL",
+                "EPISODIC",
+                "PROCEDURAL",
+                "SEMANTIC",
+                "WORKING",
+                "SESSION",
+            ]
 
         # Normalize to lowercase for internal use
         types_lower = [t.lower() for t in types_to_search]
@@ -963,35 +1085,39 @@ async def search_all_memories(
         with_vectors = rerank
 
         # Generate embedding ONCE and share across all memory type searches
-        query_embedding = await memory_service.factual_service._generate_embedding(query)
+        query_embedding = await memory_service.factual_service._generate_embedding(
+            query
+        )
         if query_embedding is not None:
-            logger.info(f"Generated shared query embedding ({len(query_embedding)} dims) for search: {query[:50]}...")
+            logger.info(
+                f"Generated shared query embedding ({len(query_embedding)} dims) for search: {query[:50]}..."
+            )
         else:
             logger.warning(f"Failed to generate query embedding for: {query[:50]}...")
 
         # Search all memory types in parallel
         search_dispatch = {
-            'factual': (
+            "factual": (
                 memory_service.vector_search_factual,
                 memory_service.search_facts_by_subject,
             ),
-            'episodic': (
+            "episodic": (
                 memory_service.vector_search_episodic,
                 memory_service.search_episodes_by_event_type,
             ),
-            'procedural': (
+            "procedural": (
                 memory_service.vector_search_procedural,
                 memory_service.search_procedures_by_skill_type,
             ),
-            'semantic': (
+            "semantic": (
                 memory_service.vector_search_semantic,
                 memory_service.search_concepts_by_category,
             ),
-            'working': (
+            "working": (
                 memory_service.vector_search_working,
                 None,  # fallback handled inline
             ),
-            'session': (
+            "session": (
                 memory_service.vector_search_session,
                 None,
             ),
@@ -1001,20 +1127,32 @@ async def search_all_memories(
             vector_fn, fallback_fn = search_dispatch[memory_type]
             try:
                 return memory_type, await vector_fn(
-                    user_id, query, limit, similarity_threshold,
-                    query_embedding=query_embedding, with_vectors=with_vectors,
+                    user_id,
+                    query,
+                    limit,
+                    similarity_threshold,
+                    query_embedding=query_embedding,
+                    with_vectors=with_vectors,
                 )
             except Exception as e:
-                logger.warning(f"Error in {memory_type} vector search, trying fallback: {e}")
+                logger.warning(
+                    f"Error in {memory_type} vector search, trying fallback: {e}"
+                )
                 if fallback_fn:
                     try:
                         return memory_type, await fallback_fn(user_id, query, limit)
                     except Exception as e2:
                         logger.warning(f"Fallback for {memory_type} also failed: {e2}")
-                elif memory_type == 'working':
+                elif memory_type == "working":
                     try:
-                        all_working = await memory_service.get_active_working_memories(user_id)
-                        filtered = [m for m in all_working if query.lower() in m.get('content', '').lower()]
+                        all_working = await memory_service.get_active_working_memories(
+                            user_id
+                        )
+                        filtered = [
+                            m
+                            for m in all_working
+                            if query.lower() in m.get("content", "").lower()
+                        ]
                         return memory_type, filtered[:limit]
                     except Exception as e2:
                         logger.warning(f"Working memory fallback failed: {e2}")
@@ -1026,7 +1164,9 @@ async def search_all_memories(
         for memory_type, type_results in parallel_results:
             results[memory_type] = type_results
             total_count += len(type_results)
-            logger.info(f"Vector search found {len(type_results)} {memory_type} memories")
+            logger.info(
+                f"Vector search found {len(type_results)} {memory_type} memories"
+            )
 
         # Apply MMR re-ranking per memory type if enabled
         if rerank and query_embedding is not None:
@@ -1034,17 +1174,26 @@ async def search_all_memories(
                 if results[memory_type]:
                     try:
                         results[memory_type] = apply_mmr_reranking(
-                            results[memory_type], query_embedding, lambda_param=mmr_lambda, top_k=limit
+                            results[memory_type],
+                            query_embedding,
+                            lambda_param=mmr_lambda,
+                            top_k=limit,
                         )
-                        logger.info(f"MMR re-ranked {memory_type} results (lambda={mmr_lambda})")
+                        logger.info(
+                            f"MMR re-ranked {memory_type} results (lambda={mmr_lambda})"
+                        )
                     except Exception as e:
-                        logger.warning(f"MMR re-ranking failed for {memory_type}, using raw results: {e}")
+                        logger.warning(
+                            f"MMR re-ranking failed for {memory_type}, using raw results: {e}"
+                        )
 
         # Apply context ordering per memory type if enabled
         if order_results:
             for memory_type in list(results.keys()):
                 if results[memory_type]:
-                    results[memory_type] = order_by_importance_edges(results[memory_type])
+                    results[memory_type] = order_by_importance_edges(
+                        results[memory_type]
+                    )
 
         # Query knowledge graph if enabled
         graph_results = None
@@ -1054,7 +1203,9 @@ async def search_all_memories(
                     query=query, user_id=user_id, limit=limit
                 )
                 if graph_results.get("error"):
-                    logger.warning("Graph query returned error: %s", graph_results["error"])
+                    logger.warning(
+                        "Graph query returned error: %s", graph_results["error"]
+                    )
                 else:
                     logger.info(
                         "Graph search found %d entities for query: %s",
@@ -1062,7 +1213,9 @@ async def search_all_memories(
                         query[:50],
                     )
             except Exception as e:
-                logger.warning("Graph query failed, continuing without graph results: %s", e)
+                logger.warning(
+                    "Graph query failed, continuing without graph results: %s", e
+                )
                 graph_results = {"entities": [], "total": 0, "error": str(e)}
 
         # Apply context compression if enabled
@@ -1085,7 +1238,9 @@ async def search_all_memories(
                     "total_count": total_count,
                 }
             except Exception as e:
-                logger.warning(f"Context compression failed, returning uncompressed: {e}")
+                logger.warning(
+                    f"Context compression failed, returning uncompressed: {e}"
+                )
 
         response = {
             "query": query,
@@ -1111,14 +1266,21 @@ async def search_all_memories(
 
 # ==================== Hybrid Search (Vector + Graph) ====================
 
+
 @app.get("/api/v1/memories/hybrid-search")
 async def hybrid_search(
     query: str = Query(...),
     user_id: str = Query(...),
-    memory_types: Optional[str] = Query(None, description="Comma-separated memory types (e.g., 'factual,episodic')"),
+    memory_types: Optional[str] = Query(
+        None, description="Comma-separated memory types (e.g., 'factual,episodic')"
+    ),
     limit: int = Query(10, ge=1, le=100),
-    vector_weight: float = Query(0.6, ge=0.0, le=1.0, description="Weight for vector similarity results"),
-    graph_weight: float = Query(0.4, ge=0.0, le=1.0, description="Weight for graph traversal results"),
+    vector_weight: float = Query(
+        0.6, ge=0.0, le=1.0, description="Weight for vector similarity results"
+    ),
+    graph_weight: float = Query(
+        0.4, ge=0.0, le=1.0, description="Weight for graph traversal results"
+    ),
 ):
     """
     Hybrid search combining Qdrant vector similarity with Neo4j graph traversal.
@@ -1131,23 +1293,32 @@ async def hybrid_search(
     try:
         # --- Vector search across requested memory types ---
         if memory_types:
-            types_to_search = [t.strip().lower() for t in memory_types.split(',')]
+            types_to_search = [t.strip().lower() for t in memory_types.split(",")]
         else:
-            types_to_search = ['factual', 'episodic', 'procedural', 'semantic', 'working', 'session']
+            types_to_search = [
+                "factual",
+                "episodic",
+                "procedural",
+                "semantic",
+                "working",
+                "session",
+            ]
 
         # Generate embedding once
-        query_embedding = await memory_service.factual_service._generate_embedding(query)
+        query_embedding = await memory_service.factual_service._generate_embedding(
+            query
+        )
 
         # Collect vector results from all requested types
         vector_results: List[Dict[str, Any]] = []
 
         search_methods = {
-            'factual': memory_service.vector_search_factual,
-            'episodic': memory_service.vector_search_episodic,
-            'procedural': memory_service.vector_search_procedural,
-            'semantic': memory_service.vector_search_semantic,
-            'working': memory_service.vector_search_working,
-            'session': memory_service.vector_search_session,
+            "factual": memory_service.vector_search_factual,
+            "episodic": memory_service.vector_search_episodic,
+            "procedural": memory_service.vector_search_procedural,
+            "semantic": memory_service.vector_search_semantic,
+            "working": memory_service.vector_search_working,
+            "session": memory_service.vector_search_session,
         }
 
         for mem_type in types_to_search:
@@ -1155,12 +1326,16 @@ async def hybrid_search(
             if not search_fn:
                 continue
             try:
-                results = await search_fn(user_id, query, limit, 0.15, query_embedding=query_embedding)
+                results = await search_fn(
+                    user_id, query, limit, 0.15, query_embedding=query_embedding
+                )
                 for r in results:
                     r.setdefault("memory_id", r.get("id", ""))
                 vector_results.extend(results)
             except Exception as e:
-                logger.warning("Hybrid search: vector search failed for %s: %s", mem_type, e)
+                logger.warning(
+                    "Hybrid search: vector search failed for %s: %s", mem_type, e
+                )
 
         # --- Graph search via GraphClient ---
         graph_results: List[Dict[str, Any]] = []
@@ -1175,26 +1350,40 @@ async def hybrid_search(
                     query=query, user_id=user_id, limit=limit
                 )
                 for entity in entity_resp.get("entities", []):
-                    graph_results.append({
-                        "memory_id": entity.get("id", entity.get("entity_id", "")),
-                        "content": entity.get("content", entity.get("name", "")),
-                        "memory_type": entity.get("memory_type", entity.get("type", "graph")),
-                        "relevance_score": entity.get("relevance_score", entity.get("score", 0.5)),
-                    })
+                    graph_results.append(
+                        {
+                            "memory_id": entity.get("id", entity.get("entity_id", "")),
+                            "content": entity.get("content", entity.get("name", "")),
+                            "memory_type": entity.get(
+                                "memory_type", entity.get("type", "graph")
+                            ),
+                            "relevance_score": entity.get(
+                                "relevance_score", entity.get("score", 0.5)
+                            ),
+                        }
+                    )
             else:
                 graph_available = False
-                logger.info("Hybrid search: graph service unavailable, falling back to vector-only")
+                logger.info(
+                    "Hybrid search: graph service unavailable, falling back to vector-only"
+                )
         except ImportError:
             graph_available = False
-            logger.info("Hybrid search: graph_client not available, falling back to vector-only")
+            logger.info(
+                "Hybrid search: graph_client not available, falling back to vector-only"
+            )
         except Exception as e:
             graph_available = False
-            logger.warning("Hybrid search: graph query failed, falling back to vector-only: %s", e)
+            logger.warning(
+                "Hybrid search: graph query failed, falling back to vector-only: %s", e
+            )
 
         # --- Merge results ---
         merged = merge_hybrid_results(
-            vector_results, graph_results,
-            vector_weight=vector_weight, graph_weight=graph_weight,
+            vector_results,
+            graph_results,
+            vector_weight=vector_weight,
+            graph_weight=graph_weight,
         )
 
         # Trim to requested limit
@@ -1216,6 +1405,7 @@ async def hybrid_search(
 
 
 # ==================== Memory Decay ====================
+
 
 @app.post("/api/v1/memories/decay", response_model=DecayResponse)
 async def run_memory_decay(request: DecayRequest):
@@ -1256,6 +1446,7 @@ async def run_memory_decay(request: DecayRequest):
 
 
 # ==================== Memory Consolidation ====================
+
 
 @app.post("/api/v1/memories/consolidate", response_model=ConsolidationResponse)
 async def run_memory_consolidation(request: ConsolidationRequest):
@@ -1305,6 +1496,7 @@ async def run_memory_consolidation(request: ConsolidationRequest):
 
 # ==================== Statistics ====================
 
+
 @app.get("/api/v1/memories/statistics")
 async def get_memory_statistics(user_id: str = Query(...)):
     """Get memory statistics for a user"""
@@ -1326,10 +1518,4 @@ if __name__ == "__main__":
 
     logger.info(f"Starting Memory Service on {host}:{port}")
 
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=False,
-        log_level="info"
-    )
+    uvicorn.run("main:app", host=host, port=port, reload=False, log_level="info")

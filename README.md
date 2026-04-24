@@ -164,11 +164,14 @@ docker-compose -f deployment/docker/loki-stack.yml up -d
 
 6. **Start all services**
 ```bash
-# Start all microservices in development environment
-./deployment/scripts/start_user_service.sh start
+# Start the supported local dev stack
+./deployment/local-dev.sh --run-all
 
-# Or start specific service in dev mode (with auto-reload)
-./deployment/scripts/start_user_service.sh dev payment_service
+# Or start a single service with auto-reload
+./deployment/local-dev.sh --run payment_service
+
+# If you need a raw uvicorn command, run from the repo root
+PYTHONPATH="$PWD" python -m uvicorn microservices.auth_service.main:app --reload --port 8201
 ```
 
 ### Docker Deployment
@@ -211,41 +214,37 @@ kubectl get svc -n isa-cloud-staging
 
 ```bash
 # Start all services
-./deployment/scripts/start_user_service.sh start
+./deployment/local-dev.sh --run-all
 
 # Stop all services
-./deployment/scripts/start_user_service.sh stop
+./deployment/local-dev.sh --stop-all
 
 # Restart all services
-./deployment/scripts/start_user_service.sh restart
+./deployment/local-dev.sh --run-all
 
 # Restart specific service
-./deployment/scripts/start_user_service.sh restart payment_service
+./deployment/local-dev.sh --restart payment_service
 
 # Start in development mode (auto-reload)
-./deployment/scripts/start_user_service.sh dev payment_service
+./deployment/local-dev.sh --run payment_service
 ```
 
 ### Check Service Status
 
 ```bash
 # View all service status
-./deployment/scripts/start_user_service.sh status
+./deployment/local-dev.sh --status
 
 # View service logs
-./deployment/scripts/start_user_service.sh logs payment_service
-
-# Test service endpoints
-./deployment/scripts/start_user_service.sh test
+tail -f logs/payment_service.log
 ```
 
 ### Environment Management
 
 ```bash
 # Start with specific environment
-./deployment/scripts/start_user_service.sh --env test start
-./deployment/scripts/start_user_service.sh --env staging start
-./deployment/scripts/start_user_service.sh --env prod start
+./deployment/local-dev.sh --run-all
+# Edit deployment/environments/dev.env before starting if you need a different local config
 ```
 
 ## 📚 API Documentation
@@ -562,8 +561,7 @@ isA_user/
 │   │   ├── namespace.yaml
 │   │   ├── user-configmap.yaml
 │   │   └── deployments/
-│   └── scripts/               # Management scripts
-│       └── start_user_service.sh
+│   └── local-dev.sh           # Local development runner
 ├── tests/                     # Test suites
 └── docs/                      # Documentation
 ```
@@ -610,12 +608,13 @@ isA_user/
 
 ### Development
 ```bash
-./deployment/scripts/start_user_service.sh --env dev start
+./deployment/local-dev.sh --run-all
 ```
 
 ### Testing
 ```bash
-./deployment/scripts/start_user_service.sh --env test start
+./deployment/local-dev.sh --run-all
+# Swap deployment/environments/dev.env values to match your test targets before starting
 ```
 
 ### Staging (Kubernetes)
@@ -669,7 +668,7 @@ kubectl apply -f deployment/k8s/ -n isa-cloud-production
 ### Service won't start
 ```bash
 # Check logs
-./deployment/scripts/start_user_service.sh logs <service_name>
+tail -f logs/<service_name>.log
 
 # Check port availability
 lsof -i :8207

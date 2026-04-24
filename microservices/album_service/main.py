@@ -7,19 +7,14 @@ Handles albums, album photos, and smart frame synchronization
 Port: 8219
 """
 
-import asyncio
-import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
@@ -187,7 +182,7 @@ async def lifespan(app: FastAPI):
                 consul_port=service_config.consul_port,
                 tags=SERVICE_METADATA["tags"],
                 meta=consul_meta,
-                health_check_type="ttl"  # Use TTL for reliable health checks,
+                health_check_type="ttl",  # Use TTL for reliable health checks,
             )
             consul_registry.register()
             consul_registry.start_maintenance()  # Start TTL heartbeat
@@ -278,8 +273,10 @@ async def root():
     )
 
 
-health = HealthCheck("album_service", version="1.0.0", shutdown_manager=shutdown_manager)
-health.add_mqtt(lambda: mqtt_client)
+health = HealthCheck(
+    "album_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
+health.add_mqtt(lambda: mqtt_publisher)
 
 
 @app.get("/api/v1/albums/health")
@@ -287,6 +284,7 @@ health.add_mqtt(lambda: mqtt_client)
 async def health_check():
     """Service health check"""
     return await health.check()
+
 
 @app.post("/api/v1/albums", response_model=AlbumResponse, status_code=201)
 async def create_album(
@@ -531,7 +529,8 @@ async def get_album_photos(
     try:
         photos = await service.get_album_photos(album_id, user_id, limit, offset)
         return JSONResponse(
-            content={"photos": [p.model_dump(mode='json') for p in photos]}, status_code=200
+            content={"photos": [p.model_dump(mode="json") for p in photos]},
+            status_code=200,
         )
     except AlbumNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -612,4 +611,10 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("ALBUM_SERVICE_PORT", "8219"))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=os.getenv("DEBUG", "false").lower() == "true", log_level="info")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
+        log_level="info",
+    )
