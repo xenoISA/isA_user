@@ -9,7 +9,6 @@ from microservices.project_service.models import (
     SetInstructionsRequest,
     ProjectFileListResponse,
     ProjectFileResponse,
-    ProjectResponse,
     ProjectListResponse,
     ErrorResponse,
 )
