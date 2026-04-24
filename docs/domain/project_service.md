@@ -1,76 +1,106 @@
-# Project Service Domain Context
+# Project Service - Domain Context
 
 ## Overview
 
-The Project Service owns user-scoped project workspaces in `isA_user`. A project
-is the durable container for a user's name, description, and custom
-instructions that other services can later consume when assembling context for
-sessions and agents.
+The Project Service is the user-scoped workspace boundary for `isA_user`. It stores named projects, project-specific instructions, and the storage-backed knowledge files that should travel with that project into downstream chat and agent flows.
 
-## Core Entities
+**Business Context**: a user can maintain multiple projects, each with its own instructions and attached knowledge base. The service must keep those project assets isolated per owner while exposing enough metadata for frontend reload, session setup, and future context injection.
 
-### Project
-- `id`: stable project identifier
-- `user_id`: owning caller
-- `org_id`: optional organization scope
-- `name`: display name, max 255 characters
-- `description`: optional summary
-- `custom_instructions`: optional long-form instructions, max 8000 characters
-- `created_at` / `updated_at`: lifecycle timestamps
+**Core Value Proposition**: turn an otherwise stateless chat experience into a project-aware workflow where instructions and knowledge files can be managed once and reused consistently.
 
-### Project File Reference
-- `id`: file link identifier
-- `project_id`: owning project
-- `filename`: display name from storage
-- `storage_path`: durable storage pointer
-- `file_type` / `file_size`: optional metadata
+---
+
+## Business Taxonomy
+
+### 1. Project
+**Definition**: A user-owned workspace that groups instructions and knowledge assets.
+
+**Business Purpose**:
+- Provide a durable unit of organization for chat and agent work
+- Store reusable custom instructions distinct from account-level instructions
+- Act as the ownership boundary for attached knowledge files
+
+**Key Attributes**:
+- Project ID
+- User ID
+- Optional organization ID
+- Name
+- Description
+- Custom instructions
+- Created/updated timestamps
+
+### 2. Project Knowledge File
+**Definition**: A storage-backed file association attached to a project.
+
+**Business Purpose**:
+- Persist references to documents uploaded into a project knowledge base
+- Allow the frontend to reload and manage existing attachments
+- Decouple file blob storage from project ownership logic
+
+**Key Attributes**:
+- File ID
+- Project ID
+- Filename
+- File type / MIME type
+- File size
+- Storage path
+- Created timestamp
+
+### 3. Project Owner
+**Definition**: The authenticated caller who owns a project.
+
+**Business Purpose**:
+- Enforce access boundaries for CRUD and knowledge file operations
+- Ensure project metadata and attached knowledge files cannot be listed or modified cross-user
+
+---
+
+## Domain Scenarios
+
+### Scenario 1: Create a project
+1. User submits project name and optional description/instructions.
+2. Service validates per-user project limits.
+3. Service creates the project record and returns the workspace metadata.
+
+### Scenario 2: Update project instructions
+1. User opens project settings.
+2. User updates project-specific instructions.
+3. Service verifies ownership, persists the instruction string, and returns success.
+
+### Scenario 3: Upload a project knowledge file
+1. User selects a file in project settings.
+2. Service verifies project ownership.
+3. Service uploads the file bytes to `storage_service`.
+4. Service persists the returned storage metadata as a project file association.
+5. Frontend can now reload the project and still see the attachment.
+
+### Scenario 4: Reload the project knowledge list
+1. User reopens project settings or reloads the app.
+2. Frontend requests `GET /api/v1/projects/{project_id}/files`.
+3. Service verifies ownership and returns the persisted associations in newest-first order.
+
+### Scenario 5: Remove a project knowledge file
+1. User deletes an attached file from project settings.
+2. Service verifies ownership and the file association.
+3. Service deletes the underlying storage object.
+4. Service deletes the project-file association.
+5. Future project reloads no longer include the file.
+
+---
 
 ## Domain Rules
 
-1. Projects are private to their owner unless another service explicitly adds a
-   collaboration model.
-2. Ownership checks happen before read, update, delete, or instruction changes.
-3. A user can create at most 100 projects.
-4. Empty updates are invalid and must return a validation error.
-5. Audit-style project events are best-effort: CRUD succeeds even if event
-   publication fails.
+- A project belongs to exactly one owner (`user_id`) for the current implementation.
+- Knowledge files are scoped through the project, not directly through ad hoc file lists.
+- File blobs live in `storage_service`; `project_service` stores only the association metadata needed to manage and reload them.
+- Cross-user access to a project or its files must fail with authorization or not-found semantics, never silent success.
+- Removing a project knowledge file should delete both the storage object and the project association.
 
-## Bounded Context
+---
 
-### Internal Dependencies
-- `ProjectRepository`: persistence for project records
-- `ProjectService`: business rules and ownership enforcement
-- `EventBusProtocol`: optional audit/event sink
+## External Dependencies
 
-### External Dependencies
-- `auth_service`: caller identity resolution via shared auth dependency
-- `NATS`: optional event publication for project lifecycle events
-- `PostgreSQL`: project persistence through the repository layer
-
-## Events Published
-- `project.create`
-- `project.read`
-- `project.update`
-- `project.delete`
-- `project.set_instructions`
-
-## Primary Use Cases
-
-### UC-1: Create Project
-1. Authenticated caller submits `name`, optional `description`, and optional
-   `custom_instructions`.
-2. Service checks the per-user project count.
-3. Repository persists the project.
-4. Service emits a best-effort `project.create` event.
-
-### UC-2: Update Instructions
-1. Caller requests `/api/v1/projects/{project_id}/instructions`.
-2. Service verifies ownership.
-3. Repository stores the new instruction text.
-4. Service emits `project.set_instructions`.
-
-### UC-3: Delete Project
-1. Caller requests deletion.
-2. Service verifies ownership.
-3. Repository deletes the project record.
-4. Service emits `project.delete`.
+- `storage_service`: persists file bytes and returns canonical file metadata
+- PostgreSQL: stores projects and project file associations
+- NATS: publishes audit-style project events when available
+- Auth service helpers: resolve the authenticated caller from JWT, API key, or trusted internal service headers
