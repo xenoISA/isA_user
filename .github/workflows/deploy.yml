@@ -28,7 +28,7 @@ on:
           - staging
           - production
       services:
-        description: 'Services to deploy (comma-separated, or "all")'
+        description: 'Services to deploy (comma-separated short names or *_service dirs, or "all")'
         required: true
         default: 'all'
 
@@ -67,11 +67,11 @@ jobs:
         id: set-services
         run: |
           if [[ "${{ github.event.inputs.services }}" == "all" ]] || [[ -z "${{ github.event.inputs.services }}" ]]; then
-            services=$(ls -d microservices/*_service | xargs -I{} basename {} | tr '\n' ',' | sed 's/,$//')
-            echo "services=$services" >> $GITHUB_OUTPUT
+            services=$(python core/deployment_targets.py --list-service-dirs --format csv)
           else
-            echo "services=${{ github.event.inputs.services }}" >> $GITHUB_OUTPUT
+            services=$(python core/deployment_targets.py --normalize-list "${{ github.event.inputs.services }}" --format csv)
           fi
+          echo "services=$services" >> $GITHUB_OUTPUT
 
       - name: Set Version
         id: set-version
@@ -122,16 +122,24 @@ jobs:
 
       - name: Build and Push Service Images
         run: |
+          resolve_target() {
+            while IFS='=' read -r key value; do
+              printf -v "$key" '%s' "$value"
+            done < <(python core/deployment_targets.py "$1" --format env)
+          }
+
           IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
           for service in "${SERVICES[@]}"; do
-            echo "Building $service..."
+            resolve_target "$service"
+
+            echo "Building ${TARGET_SERVICE_DIR} -> image ${TARGET_IMAGE_NAME}..."
             docker build \
               --build-arg BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/base:${{ needs.prepare.outputs.version }} \
               -f deployment/k8s/Dockerfile.service \
-              --build-arg SERVICE_NAME=$service \
-              -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ needs.prepare.outputs.version }} \
+              --build-arg SERVICE_NAME=$TARGET_SERVICE_DIR \
+              -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:${{ needs.prepare.outputs.version }} \
               .
-            docker push ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ needs.prepare.outputs.version }}
+            docker push ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:${{ needs.prepare.outputs.version }}
           done
 
   # ===========================================================================
@@ -160,20 +168,41 @@ jobs:
 
       - name: Deploy Services
         run: |
+          resolve_target() {
+            while IFS='=' read -r key value; do
+              printf -v "$key" '%s' "$value"
+            done < <(python core/deployment_targets.py "$1" --format env)
+          }
+
           NAMESPACE="isa-cloud-staging"
           VERSION="${{ needs.prepare.outputs.version }}"
 
           IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
           for service in "${SERVICES[@]}"; do
-            echo "Deploying $service to staging..."
+            resolve_target "$service"
+
+            echo "Deploying ${TARGET_SERVICE_DIR} to staging via ${TARGET_DEPLOYMENT_NAME}..."
+
+            echo "Validate rollout target ${TARGET_DEPLOYMENT_NAME}/${TARGET_CONTAINER_NAME}..."
+            if ! kubectl get deployment "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" >/dev/null 2>&1; then
+              echo "::error::Deployment ${TARGET_DEPLOYMENT_NAME} not found in namespace ${NAMESPACE} for service ${TARGET_SERVICE_DIR}"
+              exit 1
+            fi
+            container_names=$(kubectl get deployment "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}')
+            if ! grep -Fxq "${TARGET_CONTAINER_NAME}" <<< "$container_names"; then
+              echo "::error::Container ${TARGET_CONTAINER_NAME} not found in deployment ${TARGET_DEPLOYMENT_NAME}"
+              echo "Available containers:"
+              echo "$container_names"
+              exit 1
+            fi
 
             # Update image tag
-            kubectl set image deployment/${service%-service}-deployment \
-              $service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:$VERSION \
+            kubectl set image deployment/${TARGET_DEPLOYMENT_NAME} \
+              ${TARGET_CONTAINER_NAME}=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:$VERSION \
               -n $NAMESPACE
 
             # Wait for rollout
-            kubectl rollout status deployment/${service%-service}-deployment \
+            kubectl rollout status deployment/${TARGET_DEPLOYMENT_NAME} \
               -n $NAMESPACE --timeout=300s
           done
 
@@ -217,20 +246,41 @@ jobs:
 
       - name: Blue-Green Deployment
         run: |
+          resolve_target() {
+            while IFS='=' read -r key value; do
+              printf -v "$key" '%s' "$value"
+            done < <(python core/deployment_targets.py "$1" --format env)
+          }
+
           NAMESPACE="isa-cloud-prod"
           VERSION="${{ needs.prepare.outputs.version }}"
 
           IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
           for service in "${SERVICES[@]}"; do
-            echo "Deploying $service to production (blue-green)..."
+            resolve_target "$service"
+
+            echo "Deploying ${TARGET_SERVICE_DIR} to production (blue-green) via ${TARGET_DEPLOYMENT_NAME}..."
+
+            echo "Validate rollout target ${TARGET_DEPLOYMENT_NAME}/${TARGET_CONTAINER_NAME}..."
+            if ! kubectl get deployment "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" >/dev/null 2>&1; then
+              echo "::error::Deployment ${TARGET_DEPLOYMENT_NAME} not found in namespace ${NAMESPACE} for service ${TARGET_SERVICE_DIR}"
+              exit 1
+            fi
+            container_names=$(kubectl get deployment "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}')
+            if ! grep -Fxq "${TARGET_CONTAINER_NAME}" <<< "$container_names"; then
+              echo "::error::Container ${TARGET_CONTAINER_NAME} not found in deployment ${TARGET_DEPLOYMENT_NAME}"
+              echo "Available containers:"
+              echo "$container_names"
+              exit 1
+            fi
 
             # Update image tag
-            kubectl set image deployment/${service%-service}-deployment \
-              $service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:$VERSION \
+            kubectl set image deployment/${TARGET_DEPLOYMENT_NAME} \
+              ${TARGET_CONTAINER_NAME}=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:$VERSION \
               -n $NAMESPACE
 
             # Wait for rollout
-            kubectl rollout status deployment/${service%-service}-deployment \
+            kubectl rollout status deployment/${TARGET_DEPLOYMENT_NAME} \
               -n $NAMESPACE --timeout=600s
           done
 
