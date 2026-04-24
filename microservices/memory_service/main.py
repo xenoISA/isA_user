@@ -12,11 +12,8 @@ Architecture:
 Port: 8223
 """
 
-import os
-import sys
 import asyncio
 import logging
-from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -26,8 +23,6 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger

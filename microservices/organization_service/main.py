@@ -18,13 +18,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 import uvicorn
 from contextlib import asynccontextmanager
-import sys
-import os
 from typing import Optional, List
 from datetime import datetime
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import local components
 from .organization_service import (

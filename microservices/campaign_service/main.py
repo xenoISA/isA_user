@@ -7,7 +7,6 @@ Port: 8240
 
 import logging
 import os
-import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -17,8 +16,6 @@ from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Query, Depends, Request, status
 from fastapi.responses import JSONResponse
 
-# Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware

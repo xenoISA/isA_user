@@ -13,14 +13,10 @@ from fastapi import FastAPI, HTTPException, Depends, status, Query, Path, Body
 import uvicorn
 import logging
 from contextlib import asynccontextmanager
-import sys
-import os
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 # Import local components
 from .order_service import OrderService

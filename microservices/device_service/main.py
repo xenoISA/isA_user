@@ -9,11 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 import logging
-import sys
-import os
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger

@@ -3,15 +3,12 @@ Project Microservice — CRUD for project workspaces (#258, #294)
 Port: 8260
 """
 import logging
-import os
-import sys
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger

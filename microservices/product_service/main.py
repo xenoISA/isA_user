@@ -9,12 +9,8 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 import logging
-import os
-import sys
 from datetime import datetime
 
-# 添加父目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from isa_common.consul_client import ConsulRegistry
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger

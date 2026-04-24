@@ -6,16 +6,12 @@ Promotional credit management service with FIFO expiration and event-driven arch
 
 import asyncio
 import logging
-import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.nats_client import get_event_bus

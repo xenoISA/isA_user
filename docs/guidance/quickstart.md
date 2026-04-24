@@ -20,12 +20,11 @@ pip install -r deployment/requirements/base.txt
 ### Single Service (Development)
 
 ```bash
-# Start auth service
-cd microservices/auth_service
-uvicorn main:app --reload --port 8201
+# Start auth service from the repo root
+PYTHONPATH="$PWD" python -m uvicorn microservices.auth_service.main:app --reload --port 8201
 
-# Or use the start script
-./scripts/start_user_service.sh auth_service
+# Or use the local-dev helper
+./deployment/local-dev.sh --run auth_service
 ```
 
 ### Multiple Services
@@ -33,9 +32,7 @@ uvicorn main:app --reload --port 8201
 ```bash
 # Start core services
 for service in auth account session authorization; do
-    cd microservices/${service}_service
-    uvicorn main:app --port 820${i} &
-    cd ../..
+    PYTHONPATH="$PWD" python -m uvicorn microservices.${service}_service.main:app --port 820${i} &
 done
 ```
 
@@ -251,8 +248,7 @@ http://localhost:8207/docs  # Payment service
 ### Run Unit Tests
 
 ```bash
-cd microservices/auth_service
-pytest tests/unit/ -v
+pytest tests/unit -v
 ```
 
 ### Run Integration Tests

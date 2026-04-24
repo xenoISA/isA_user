@@ -8,12 +8,8 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Header, Body, stat
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 import logging
-import os
-import sys
 from datetime import datetime
 
-# 添加父目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger  # 使用新的日志模块
 from core.nats_client import get_event_bus

@@ -12,8 +12,6 @@ Port: 8203
 
 import asyncio
 import logging
-import sys
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -21,8 +19,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-# Add parent directory to path for consul_registry
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics

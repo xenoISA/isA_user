@@ -5,18 +5,12 @@ Task Service - Main Application
 """
 
 import logging
-import os
-import sys
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Path, Query
 
-# Add parent directory to path
-sys.path.append(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware

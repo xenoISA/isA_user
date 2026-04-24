@@ -6,7 +6,6 @@ Secure credential and secret management with blockchain verification support.
 
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
@@ -14,8 +13,6 @@ from typing import List, Optional
 import uvicorn
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import core components
 from core.blockchain_client import BlockchainClient

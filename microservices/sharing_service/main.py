@@ -8,16 +8,12 @@ Responsibilities:
 """
 
 import logging
-import os
-import sys
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware

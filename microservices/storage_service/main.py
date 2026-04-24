@@ -15,7 +15,6 @@ Port: 8209
 import asyncio
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
@@ -23,8 +22,6 @@ from typing import List, Optional
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 
-# 添加父目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger

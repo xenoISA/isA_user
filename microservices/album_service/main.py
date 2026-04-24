@@ -10,7 +10,6 @@ Port: 8219
 import asyncio
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
@@ -18,8 +17,6 @@ from typing import List, Optional
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware

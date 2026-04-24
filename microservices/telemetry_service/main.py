@@ -9,14 +9,10 @@ from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any, List
 import logging
-import sys
-import os
 import json
 import httpx
 from datetime import datetime, timedelta, timezone
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware

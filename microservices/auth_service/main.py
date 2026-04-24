@@ -14,15 +14,12 @@ Note: Authorization/permission control is handled by separate Authorization micr
 """
 
 import os
-import sys
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, timedelta
 import uvicorn
 
-# 添加父目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # FastAPI imports
 from fastapi import FastAPI, HTTPException, Depends, status, Query, Form, Security

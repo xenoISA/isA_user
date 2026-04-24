@@ -9,8 +9,6 @@ Responsibilities:
 """
 
 import logging
-import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
@@ -18,8 +16,6 @@ from typing import Optional
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import ConfigManager
 from core.config_manager import ConfigManager

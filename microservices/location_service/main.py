@@ -9,18 +9,14 @@ Port: 8224
 
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
-from pathlib import Path
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from fastapi.responses import JSONResponse
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger

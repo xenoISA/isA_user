@@ -2,14 +2,11 @@
 
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException
 
-# Add parent directory to path for core imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from isa_common.consul_client import ConsulRegistry
 from core.nats_client import get_event_bus

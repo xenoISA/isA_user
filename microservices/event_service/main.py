@@ -4,12 +4,10 @@ Event Service - Main Application
 统一事件管理服务的主应用程序
 """
 
-import os
 import json
 import asyncio
 import uuid
 import logging
-import sys
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
@@ -22,8 +20,6 @@ from nats.aio.client import Client as NATS
 from nats.js import JetStreamContext
 import uvicorn
 
-# 添加父目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from .models import (
     Event, EventSource, EventCategory, EventStatus,

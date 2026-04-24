@@ -8,12 +8,8 @@ from fastapi import FastAPI, HTTPException, Depends, Query, Path, Body, File, Up
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any, List
 import logging
-import sys
-import os
 import httpx
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.config_manager import ConfigManager
 from core.logger import setup_service_logger

@@ -7,8 +7,6 @@ Audit Service Main Application
 
 import uvicorn
 import logging
-import os
-import sys
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
@@ -16,8 +14,6 @@ from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.responses import JSONResponse
 
-# Add parent directory to path for consul_registry
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.metrics import setup_metrics

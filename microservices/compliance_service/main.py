@@ -14,7 +14,6 @@ Responsibilities:
 
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -25,8 +24,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import io
 import json
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from core.logger import setup_service_logger
 from core.config_manager import ConfigManager

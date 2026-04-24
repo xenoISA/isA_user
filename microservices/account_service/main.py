@@ -12,8 +12,6 @@ Note: Authentication is handled by auth_service, credits by credit_service
 """
 
 import logging
-import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -21,8 +19,6 @@ from typing import Any, Dict, List, Optional
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import ConfigManager
 from core.config_manager import ConfigManager
