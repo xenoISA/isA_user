@@ -11,6 +11,8 @@ Usage:
         )
         projects = await client.list_projects(user_id="user123", auth_token="Bearer ...")
 """
+from io import BytesIO
+
 import httpx
 import logging
 from typing import Optional, List, Dict, Any
@@ -155,6 +157,71 @@ class ProjectServiceClient:
             return False
         except Exception as e:
             logger.error("set_instructions error: %s", e)
+            return False
+
+    async def list_project_files(
+        self,
+        auth_token: str,
+        project_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            resp = await self.client.get(
+                f"{self.base_url}/api/v1/projects/{project_id}/files",
+                params={"limit": limit, "offset": offset},
+                headers=self._headers(auth_token),
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            logger.error("list_project_files failed: %s", e.response.status_code)
+            return None
+        except Exception as e:
+            logger.error("list_project_files error: %s", e)
+            return None
+
+    async def upload_project_file(
+        self,
+        auth_token: str,
+        project_id: str,
+        filename: str,
+        file_content: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            resp = await self.client.post(
+                f"{self.base_url}/api/v1/projects/{project_id}/files",
+                files={"file": (filename, BytesIO(file_content), content_type)},
+                headers=self._headers(auth_token),
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            logger.error("upload_project_file failed: %s", e.response.status_code)
+            return None
+        except Exception as e:
+            logger.error("upload_project_file error: %s", e)
+            return None
+
+    async def delete_project_file(
+        self,
+        auth_token: str,
+        project_id: str,
+        file_id: str,
+    ) -> bool:
+        try:
+            resp = await self.client.delete(
+                f"{self.base_url}/api/v1/projects/{project_id}/files/{file_id}",
+                headers=self._headers(auth_token),
+            )
+            resp.raise_for_status()
+            return True
+        except httpx.HTTPStatusError as e:
+            logger.error("delete_project_file failed: %s", e.response.status_code)
+            return False
+        except Exception as e:
+            logger.error("delete_project_file error: %s", e)
             return False
 
     async def health_check(self) -> bool:

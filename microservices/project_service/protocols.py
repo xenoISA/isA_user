@@ -46,6 +46,11 @@ class RepositoryError(ProjectServiceException):
         super().__init__(detail)
 
 
+class ProjectStorageError(ProjectServiceException):
+    """Project file storage operation failed"""
+    pass
+
+
 # =============================================================================
 # Repository Protocol
 # =============================================================================
@@ -72,6 +77,31 @@ class ProjectRepositoryProtocol(Protocol):
 
     async def count_projects(self, user_id: str) -> int: ...
 
+    async def create_project_file(
+        self,
+        project_id: str,
+        file_id: str,
+        filename: str,
+        storage_path: str,
+        file_type: str = None,
+        file_size: int = None,
+    ) -> Dict[str, Any]: ...
+
+    async def list_project_files(
+        self,
+        project_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]: ...
+
+    async def get_project_file(
+        self,
+        project_id: str,
+        file_id: str,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    async def delete_project_file(self, project_id: str, file_id: str) -> bool: ...
+
     async def cleanup(self) -> None: ...
 
 
@@ -84,3 +114,29 @@ class EventBusProtocol(Protocol):
     """Interface for Event Bus — no I/O imports."""
 
     async def publish_event(self, event: Any) -> None: ...
+
+
+@runtime_checkable
+class StorageServiceProtocol(Protocol):
+    """Interface for storage service operations used by project_service."""
+
+    async def upload_file(
+        self,
+        file_content: bytes,
+        filename: str,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        access_level: str = "private",
+        content_type: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        auto_delete_after_days: Optional[int] = None,
+        enable_indexing: bool = True,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    async def delete_file(
+        self,
+        file_id: str,
+        user_id: str,
+        permanent: bool = False,
+    ) -> bool: ...

@@ -8,6 +8,7 @@ from microservices.project_service.protocols import (
     ProjectPermissionError,
     ProjectLimitExceeded,
     InvalidProjectUpdate,
+    ProjectStorageError,
     RepositoryError,
 )
 
@@ -22,6 +23,7 @@ class TestExceptionHierarchy:
             ProjectPermissionError,
             ProjectLimitExceeded,
             InvalidProjectUpdate,
+            ProjectStorageError,
             RepositoryError,
         ],
     )

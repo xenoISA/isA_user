@@ -7,6 +7,8 @@ from microservices.project_service.models import (
     CreateProjectRequest,
     UpdateProjectRequest,
     SetInstructionsRequest,
+    ProjectFileListResponse,
+    ProjectFileResponse,
     ProjectResponse,
     ProjectListResponse,
     ErrorResponse,
@@ -72,3 +74,22 @@ class TestProjectListResponse:
         resp = ProjectListResponse(projects=[], total=0)
         assert resp.total == 0
         assert resp.projects == []
+
+
+class TestProjectFileResponse:
+    def test_minimal_shape(self):
+        file_resp = ProjectFileResponse(
+            id="file_123",
+            project_id="proj_123",
+            filename="guide.md",
+            storage_path="storage/guide.md",
+        )
+        assert file_resp.id == "file_123"
+        assert file_resp.filename == "guide.md"
+
+
+class TestProjectFileListResponse:
+    def test_empty_list(self):
+        resp = ProjectFileListResponse(files=[], total=0)
+        assert resp.total == 0
+        assert resp.files == []

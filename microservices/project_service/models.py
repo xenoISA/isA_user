@@ -51,6 +51,11 @@ class ProjectFileResponse(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class ProjectFileListResponse(BaseModel):
+    files: List[ProjectFileResponse]
+    total: int
+
+
 class ProjectListResponse(BaseModel):
     projects: List[ProjectResponse]
     total: int
