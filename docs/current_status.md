@@ -403,8 +403,8 @@ tests/
 - Routes: 17 API endpoints registered (compact format, base_path: /api/v1/memberships)
 
 ### Deployment Artifacts Created
-- `deployment/k8s/manifests/membership-deployment.yaml` - K8s Deployment + Service
-- Added `membership_service:8250` to `deployment/k8s/build-all-images.sh`
+- `deployment/_legacy/k8s/manifests/membership-deployment.yaml` - archived K8s Deployment + Service
+- Added `membership_service:8250` to `deployment/_legacy/k8s/build-all-images.sh`
 - Fixed routes_registry.py for Consul 512 char limit
 
 ## credit_service Deployment (2025-12-19 09:20)
@@ -1307,4 +1307,3 @@ All API endpoints in `main.py` correctly call service methods:
 - Internal headers (X-Internal-Call: true) bypass authentication for testing
 - Service pod currently running but with infrastructure warnings (NATS/Consul connectivity)
 - Integration/API tests use X-Internal-Call header to bypass auth
-

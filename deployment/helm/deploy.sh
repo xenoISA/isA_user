@@ -11,48 +11,19 @@
 
 set -e
 
-cd "$(dirname "$0")/../.."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+cd "${REPO_ROOT}"
 
-CHART_PATH="${HOME}/Documents/Fun/isA/isA_Cloud/deployments/charts/isa-service"
+DEFAULT_CHART_PATH="$(cd "${REPO_ROOT}/.." && pwd)/isA_Cloud/deployments/charts/isa-service"
+CHART_PATH="${ISA_SERVICE_CHART_PATH:-${DEFAULT_CHART_PATH}}"
 
-# Microservices with ports
-declare -A SERVICES=(
-    ["auth"]="8201"
-    ["account"]="8202"
-    ["session"]="8203"
-    ["authorization"]="8204"
-    ["audit"]="8205"
-    ["notification"]="8206"
-    ["payment"]="8207"
-    ["wallet"]="8208"
-    ["storage"]="8209"
-    ["order"]="8210"
-    ["task"]="8211"
-    ["organization"]="8212"
-    ["invitation"]="8213"
-    ["vault"]="8214"
-    ["product"]="8215"
-    ["billing"]="8216"
-    ["calendar"]="8217"
-    ["weather"]="8218"
-    ["album"]="8219"
-    ["device"]="8220"
-    ["ota"]="8221"
-    ["media"]="8222"
-    ["memory"]="8223"
-    ["location"]="8224"
-    ["telemetry"]="8225"
-    ["compliance"]="8226"
-    ["document"]="8227"
-    ["subscription"]="8228"
-    ["credit"]="8229"
-    ["event"]="8230"
-    ["membership"]="8250"
-    ["campaign"]="8251"
-    ["inventory"]="8252"
-    ["tax"]="8253"
-    ["fulfillment"]="8254"
-)
+resolve_target() {
+    resolved_target="$(python3 core/deployment_targets.py "$1" --format env)" || return 1
+    while IFS='=' read -r key value; do
+        printf -v "$key" '%s' "$value"
+    done <<< "${resolved_target}"
+}
 
 # Parse arguments
 ENV="${1:-staging}"
@@ -85,6 +56,12 @@ if [ "$2" != "--dry-run" ] && [ -n "$2" ]; then
     SPECIFIC_SERVICE="$2"
 fi
 
+if [ ! -d "${CHART_PATH}" ]; then
+    echo "Error: Helm chart path not found: ${CHART_PATH}"
+    echo "Set ISA_SERVICE_CHART_PATH to the isa-service chart directory."
+    exit 1
+fi
+
 # Set namespace and values file
 if [ "$ENV" = "production" ]; then
     NAMESPACE="$(python3 core/deployment_targets.py --namespace production)"
@@ -101,40 +78,42 @@ echo "Deploying ISA User Platform"
 echo "Environment: $ENV"
 echo "Namespace: $NAMESPACE"
 echo "Registry: $REGISTRY"
+echo "Chart path: $CHART_PATH"
 echo "========================================="
 echo ""
 
 # Build service list
 if [ -n "$SPECIFIC_SERVICE" ]; then
-    if [ -z "${SERVICES[$SPECIFIC_SERVICE]}" ]; then
+    if ! resolve_target "$SPECIFIC_SERVICE" >/dev/null 2>&1; then
         echo "Error: Service '$SPECIFIC_SERVICE' not found"
-        echo "Available services: ${!SERVICES[*]}"
+        echo "Available services:"
+        python3 core/deployment_targets.py --list-service-dirs
         exit 1
     fi
-    DEPLOY_SERVICES=("$SPECIFIC_SERVICE")
+    DEPLOY_SERVICES=("$TARGET_SERVICE_DIR")
 else
-    DEPLOY_SERVICES=("${!SERVICES[@]}")
+    IFS=',' read -r -a DEPLOY_SERVICES <<< "$(python3 core/deployment_targets.py --list-service-dirs --format csv)"
 fi
 
 echo "Services to deploy: ${#DEPLOY_SERVICES[@]}"
 echo ""
 
 for svc in "${DEPLOY_SERVICES[@]}"; do
-    port="${SERVICES[$svc]}"
-    release_name="user-${svc}-service"
+    resolve_target "$svc"
+    release_name="${TARGET_RELEASE_NAME}"
 
-    echo "Deploying ${release_name} (port ${port})..."
+    echo "Deploying ${release_name} (port ${TARGET_SERVICE_PORT})..."
 
     helm upgrade --install "${release_name}" "${CHART_PATH}" \
         -f "${VALUES_FILE}" \
         --set name="${release_name}" \
         --set image.registry="${REGISTRY}" \
-        --set image.repository="isa/user-${svc}" \
-        --set port="${port}" \
+        --set image.repository="isa/user-${TARGET_IMAGE_NAME}" \
+        --set port="${TARGET_SERVICE_PORT}" \
         --set "env[0].name=SERVICE_NAME" \
-        --set "env[0].value=${svc}_service" \
+        --set "env[0].value=${TARGET_SERVICE_DIR}" \
         --set "env[1].name=SERVICE_PORT" \
-        --set "env[1].value=${port}" \
+        --set "env[1].value=${TARGET_SERVICE_PORT}" \
         -n "${NAMESPACE}" \
         ${DRY_RUN}
 

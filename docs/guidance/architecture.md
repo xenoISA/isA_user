@@ -421,10 +421,10 @@ REQUEST_LATENCY = Histogram(
 
 ## Deployment
 
-### Kubernetes
+### Kubernetes (Helm-managed)
 
 ```yaml
-# deployment/k8s/manifests/auth-service.yaml
+# Rendered from the shared isa-service chart via deployment/helm/deploy.sh
 apiVersion: apps/v1
 kind: Deployment
 metadata:

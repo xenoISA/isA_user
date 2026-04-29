@@ -5,6 +5,16 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+resolve_target() {
+    resolved_target="$(python3 core/deployment_targets.py "$1" --format env)" || return 1
+    while IFS='=' read -r key value; do
+        printf -v "$key" '%s' "$value"
+    done <<< "${resolved_target}"
+}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -59,20 +69,23 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-SERVICE_SHORT_NAME="$1"
-SERVICE_FULL_NAME="${SERVICE_SHORT_NAME}_service"
-SERVICE_IMAGE="isa-${SERVICE_SHORT_NAME}:latest"
-DEPLOYMENT_NAME="${SERVICE_SHORT_NAME}"
+SERVICE_INPUT="$1"
+cd "${REPO_ROOT}"
+resolve_target "${SERVICE_INPUT}"
+
+SERVICE_SHORT_NAME="${TARGET_SHORT_NAME}"
+SERVICE_FULL_NAME="${TARGET_SERVICE_DIR}"
+SERVICE_IMAGE="harbor.local:30443/isa/user-${TARGET_IMAGE_NAME}:latest"
+DEPLOYMENT_NAME="${TARGET_DEPLOYMENT_NAME}"
+NAMESPACE="$(python3 core/deployment_targets.py --namespace staging)"
 
 log_step "🚀 Redeploying ${SERVICE_FULL_NAME} to Kind Kubernetes"
 
 # Step 1: Build Docker image
 log_step "Step 1: Building Docker image"
-log_info "Running build-all-images.sh --service ${SERVICE_SHORT_NAME} --no-cache..."
+log_info "Running deployment/docker/build.sh staging --service ${SERVICE_SHORT_NAME} --no-cache..."
 
-cd /Users/xenodennis/Documents/Fun/isA_user
-
-if ./deployment/k8s/build-all-images.sh --service "${SERVICE_SHORT_NAME}" --no-load --no-cache; then
+if ./deployment/docker/build.sh staging --service "${SERVICE_SHORT_NAME}" --no-load --no-cache; then
     log_success "Docker image built successfully"
 else
     log_error "Failed to build Docker image"
@@ -90,54 +103,29 @@ else
     exit 1
 fi
 
-# Step 3: Delete old pod
-log_step "Step 3: Deleting old pod"
-log_info "Finding pods for deployment: ${DEPLOYMENT_NAME}..."
+# Step 3: Restart deployment
+log_step "Step 3: Restarting deployment"
+log_info "Restarting deployment/${DEPLOYMENT_NAME} in ${NAMESPACE}..."
 
-POD_NAME=$(kubectl get pods -n "${NAMESPACE}" -l "app=${DEPLOYMENT_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-
-if [ -z "$POD_NAME" ]; then
-    log_warning "No existing pod found for ${DEPLOYMENT_NAME}"
+if kubectl rollout restart "deployment/${DEPLOYMENT_NAME}" -n "${NAMESPACE}"; then
+    log_success "Deployment restart triggered"
 else
-    log_info "Deleting pod: ${POD_NAME}"
-    if kubectl delete pod "${POD_NAME}" -n "${NAMESPACE}"; then
-        log_success "Pod deleted successfully"
-    else
-        log_error "Failed to delete pod"
-        exit 1
-    fi
+    log_error "Failed to restart deployment"
+    exit 1
 fi
 
-# Step 4: Wait for new pod to start
-log_step "Step 4: Waiting for new pod to start"
-log_info "Waiting for pod to be ready (timeout: ${WAIT_TIMEOUT}s)..."
+# Step 4: Wait for rollout
+log_step "Step 4: Waiting for rollout to complete"
+log_info "Waiting for deployment/${DEPLOYMENT_NAME} rollout (timeout: ${WAIT_TIMEOUT}s)..."
 
-START_TIME=$(date +%s)
-while true; do
-    CURRENT_TIME=$(date +%s)
-    ELAPSED=$((CURRENT_TIME - START_TIME))
+if kubectl rollout status "deployment/${DEPLOYMENT_NAME}" -n "${NAMESPACE}" --timeout="${WAIT_TIMEOUT}s"; then
+    log_success "Deployment rollout completed"
+else
+    log_error "Timeout waiting for rollout to complete"
+    exit 1
+fi
 
-    if [ $ELAPSED -gt $WAIT_TIMEOUT ]; then
-        log_error "Timeout waiting for pod to start"
-        exit 1
-    fi
-
-    POD_NAME=$(kubectl get pods -n "${NAMESPACE}" -l "app=${DEPLOYMENT_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-
-    if [ -n "$POD_NAME" ]; then
-        POD_STATUS=$(kubectl get pod "${POD_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-        POD_READY=$(kubectl get pod "${POD_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
-
-        log_info "Pod: ${POD_NAME} | Status: ${POD_STATUS} | Ready: ${POD_READY}"
-
-        if [ "$POD_STATUS" = "Running" ] && [ "$POD_READY" = "True" ]; then
-            log_success "Pod is running and ready"
-            break
-        fi
-    fi
-
-    sleep 3
-done
+POD_NAME=$(kubectl get pods -n "${NAMESPACE}" --sort-by=.metadata.creationTimestamp -o name | grep "${DEPLOYMENT_NAME}-" | tail -1 | cut -d/ -f2)
 
 # Step 5: Verify Consul registration
 log_step "Step 5: Verifying Consul registration"
@@ -188,8 +176,8 @@ echo ""
 log_info "Useful commands:"
 echo "  Watch logs:   kubectl logs -f ${POD_NAME} -n ${NAMESPACE}"
 echo "  Pod details:  kubectl describe pod ${POD_NAME} -n ${NAMESPACE}"
-echo "  Restart pod:  kubectl delete pod ${POD_NAME} -n ${NAMESPACE}"
-echo "  Service info: kubectl get svc ${DEPLOYMENT_NAME} -n ${NAMESPACE}"
+echo "  Restart pod:  kubectl rollout restart deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
+echo "  Service info: kubectl get svc ${TARGET_K8S_SERVICE_NAME} -n ${NAMESPACE}"
 echo ""
 
 log_success "✨ Redeploy complete!"
