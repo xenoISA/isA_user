@@ -174,7 +174,7 @@ jobs:
             done < <(python core/deployment_targets.py "$1" --format env)
           }
 
-          NAMESPACE="isa-cloud-staging"
+          NAMESPACE=$(python core/deployment_targets.py --namespace staging)
           VERSION="${{ needs.prepare.outputs.version }}"
 
           IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
@@ -252,7 +252,7 @@ jobs:
             done < <(python core/deployment_targets.py "$1" --format env)
           }
 
-          NAMESPACE="isa-cloud-prod"
+          NAMESPACE=$(python core/deployment_targets.py --namespace production)
           VERSION="${{ needs.prepare.outputs.version }}"
 
           IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"

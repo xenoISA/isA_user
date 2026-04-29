@@ -64,7 +64,7 @@ if [ "$ENV" = "--help" ]; then
     echo ""
     echo "Environments:"
     echo "  staging      Deploy to isa-cloud-staging namespace"
-    echo "  production   Deploy to isa-cloud-production namespace"
+    echo "  production   Deploy to isa-cloud-prod namespace"
     echo ""
     echo "Options:"
     echo "  [service]    Deploy only specific service (e.g., auth, billing)"
@@ -87,11 +87,11 @@ fi
 
 # Set namespace and values file
 if [ "$ENV" = "production" ]; then
-    NAMESPACE="isa-cloud-production"
+    NAMESPACE="$(python3 core/deployment_targets.py --namespace production)"
     VALUES_FILE="deployment/helm/values-production.yaml"
     REGISTRY="harbor.isa.io"
 else
-    NAMESPACE="isa-cloud-staging"
+    NAMESPACE="$(python3 core/deployment_targets.py --namespace staging)"
     VALUES_FILE="deployment/helm/values-staging.yaml"
     REGISTRY="harbor.local:30443"
 fi
