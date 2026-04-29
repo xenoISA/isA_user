@@ -1,200 +1,108 @@
 # isA User Platform - Deployment Configuration
 
-## Overview
+## Active Deployment Paths
 
-TDD/CDD AI Agent 驱动的开发模式，只需要两个环境：
+The checked-in deployment assets now use one active layout:
 
-| Environment | Purpose | Where | Tests |
-|------------|---------|-------|-------|
-| **dev** | 本地开发 | Local venv | unit, component |
-| **test** | K8s 测试 | Kind K8s + port-forward | integration, api, smoke |
+- `deployment/docker/`: build Docker images for local Kind or remote registries
+- `deployment/helm/`: render and deploy Kubernetes releases
+- `deployment/_legacy/k8s/`: archived manifests and scripts, kept only for historical reference
 
-## K8s 环境详情
+## Environments
 
-### Cluster & Namespace
+| Environment | Purpose | Active Assets |
+|------------|---------|---------------|
+| `dev` | local development and unit/component tests | `deployment/environments/dev.env`, `deployment/local-dev.sh` |
+| `staging` | local Kind / shared staging clusters | `deployment/docker/*`, `deployment/helm/*` |
+| `production` | production deploys | `deployment/docker/*`, `deployment/helm/*` |
 
-| 项目 | 值 | 说明 |
-|-----|-----|------|
-| **Cluster** | `kind-isa-cloud-local` | Kind 本地 K8s 集群 |
-| **Namespace** | `isa-cloud-staging` | 所有服务部署的 namespace |
-| **Context** | `kind-isa-cloud-local` | kubectl 默认 context |
+Canonical Kubernetes namespaces are defined in `config/ports.yaml`:
 
-### 架构组件
-
-```
-                                    ┌─────────────────────────────────────┐
-                                    │         Kind K8s Cluster            │
-                                    │       (kind-isa-cloud-local)        │
-                                    │                                     │
-    External                        │   ┌─────────────────────────────┐   │
-    ────────►  Port 8000  ─────────►│   │    APISIX Gateway           │   │
-    (Smoke Tests)                   │   │    (API Gateway + LB)       │   │
-                                    │   └──────────┬──────────────────┘   │
-                                    │              │                      │
-                                    │   ┌──────────▼──────────────────┐   │
-                                    │   │    Consul                    │   │
-                                    │   │    (Service Discovery)       │   │
-                                    │   │    - 服务注册                │   │
-                                    │   │    - 路由元数据              │   │
-                                    │   └──────────┬──────────────────┘   │
-                                    │              │                      │
-                                    │   ┌──────────▼──────────────────┐   │
-                                    │   │    Microservices            │   │
-                                    │   │    (8201-8230 ports)        │   │
-                                    │   └─────────────────────────────┘   │
-                                    │                                     │
-    Port-Forward                    │   ┌─────────────────────────────┐   │
-    ────────►  8201-8230 ──────────►│   │    Direct Service Access    │   │
-    (Integration/API Tests)         │   │    (bypass gateway)         │   │
-                                    │   └─────────────────────────────┘   │
-                                    │                                     │
-                                    └─────────────────────────────────────┘
-```
-
-### APISIX 网关
-
-| 项目 | 值 |
-|-----|-----|
-| **Service** | `apisix-gateway.isa-cloud-staging.svc.cluster.local` |
-| **External Port** | `8000` (HTTP), `8443` (HTTPS) |
-| **Admin Port** | `9180` |
-| **Admin Key** | `edd1c9f034335f136f87ad84b625c8f1` |
-
-**路由同步**: Consul → APISIX 自动同步
-- CronJob: `consul-apisix-sync` (每5分钟)
-- 脚本: `/Users/xenodennis/Documents/Fun/isA_Cloud/deployments/scripts/apisix/sync_routes_from_consul_k8s.sh`
-- 只同步有 `api_path` 或 `base_path` 元数据的服务
-
-> **注意**: `/health` 端点不会同步到网关，因为它不在服务的 api_path 中
-
-### Consul 服务发现
-
-| 项目 | 值 |
-|-----|-----|
-| **Service** | `consul-agent.isa-cloud-staging.svc.cluster.local` |
-| **Port** | `8500` |
-| **UI** | `http://localhost:8500/ui` (需 port-forward) |
-
-**服务注册元数据**:
-```json
-{
-  "api_path": "/api/v1/accounts",
-  "base_path": "/api/v1/accounts",
-  "auth_required": "true",
-  "rate_limit": "100"
-}
-```
-
-### 测试环境访问方式
-
-| 测试类型 | 访问方式 | URL 示例 |
-|---------|---------|---------|
-| **Integration** | Port-forward 直连服务 | `http://localhost:8224/api/v1/locations` |
-| **API** | Port-forward 直连服务 | `http://localhost:8224/api/v1/locations` |
-| **Smoke** | APISIX 网关 | `http://localhost:8000/api/v1/locations` |
+- `staging`: `isa-cloud-staging`
+- `production`: `isa-cloud-prod`
 
 ## Directory Structure
 
-```
+```text
 deployment/
-├── README.md                    # This file
-├── requirements/
-│   ├── base.txt                 # Runtime dependencies (K8s images)
-│   ├── dev.txt                  # Development + test dependencies (local venv)
-│   └── agent.txt                # AI-SDLC Agent Framework (MCP + Anthropic SDK)
-│
+├── README.md
+├── docker/
+│   ├── Dockerfile.base
+│   ├── Dockerfile.microservice
+│   └── build.sh
 ├── environments/
-│   ├── dev.env                  # Local development config
-│   └── test.env                 # K8s test config (port-forward)
-│
-└── k8s/                         # Kubernetes deployment
-    ├── Dockerfile.base          # Base image with dependencies
-    ├── Dockerfile.microservice  # Per-service image
-    ├── build-all-images.sh      # Build script
-    ├── user-configmap.yaml      # K8s ConfigMap
-    ├── generate-manifests.sh    # Generate K8s manifests
-    └── manifests/               # Service deployments
-        └── *-deployment.yaml
+│   ├── dev.env
+│   ├── staging.env
+│   └── production.env
+├── helm/
+│   ├── deploy.sh
+│   ├── values.yaml
+│   ├── values-staging.yaml
+│   └── values-production.yaml
+├── local-dev.sh
+├── requirements/
+│   ├── base.txt
+│   ├── dev.txt
+│   └── agent.txt
+└── _legacy/
+    └── k8s/
 ```
 
 ## Quick Start
 
-### 1. Local Development (Unit + Component Tests)
+### 1. Local Development
 
 ```bash
-# Create venv with uv (first time only)
 uv venv .venv
 source .venv/bin/activate
-
-# Install dev dependencies
 uv pip install -r deployment/requirements/dev.txt
 
-# Load dev environment
-export $(cat deployment/environments/dev.env | xargs)
+set -a
+source deployment/environments/dev.env
+set +a
 
-# Run unit and component tests
 pytest tests/unit -v
 pytest tests/component -v
 ```
 
-### 2. K8s Testing (Integration + API + Smoke Tests)
+### 2. Build Service Images
 
 ```bash
-# Start port forwarding (in separate terminal)
-./scripts/port-forward-test.sh
+# Build base + every service for staging
+./deployment/docker/build.sh
 
-# Load test environment
-export $(cat deployment/environments/test.env | xargs)
-
-# Run integration, API and smoke tests
-pytest tests/integration -v
-pytest tests/api -v
-pytest tests/smoke -v
+# Build one service only
+./deployment/docker/build.sh --service auth
 ```
 
-### 3. Build and Deploy to K8s
+### 3. Preview or Deploy a Helm Release
+
+`deployment/helm/deploy.sh` expects the shared `isa-service` chart from `isA_Cloud`.
+If the chart is not in the default sibling repo location, set `ISA_SERVICE_CHART_PATH`.
 
 ```bash
-# Build base image
-docker build -t isa-user-base:latest -f deployment/k8s/Dockerfile.base .
-kind load docker-image isa-user-base:latest --name isa-cloud-local
+# Dry-run a staging deploy
+ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
+  ./deployment/helm/deploy.sh staging auth --dry-run
 
-# Build and deploy a service
-./deployment/k8s/build-all-images.sh account
-kubectl rollout restart deployment/account -n isa-cloud-staging
+# Apply for real
+ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
+  ./deployment/helm/deploy.sh staging auth
 ```
 
-### 4. Port-Forward for Testing
+### 4. Kind Redeploy Helper
 
 ```bash
-# Terminal 1: Infrastructure
-kubectl port-forward -n isa-cloud-staging svc/isa-postgres-grpc 50061:50061 &
-kubectl port-forward -n isa-cloud-staging svc/nats 4222:4222 &
-kubectl port-forward -n isa-cloud-staging svc/redis 6379:6379 &
-
-# Terminal 2: APISIX Gateway (for smoke tests)
-kubectl port-forward -n isa-cloud-staging svc/apisix-gateway 8000:8000 &
-
-# Terminal 3: Services (for integration/api tests)
-kubectl port-forward -n isa-cloud-staging svc/location 8224:8224 &
-# ... other services as needed
+# Rebuild, load, and restart a single service in Kind
+./scripts/redeploy_k8s.sh auth
 ```
 
-### 5. Verify Environment
+### 5. Verify the Cluster
 
 ```bash
-# Check cluster context
-kubectl config current-context
-# Expected: kind-isa-cloud-local
-
-# Check pods in staging namespace
 kubectl get pods -n isa-cloud-staging
-
-# Test gateway access
-curl http://localhost:8000/api/v1/accounts
-
-# Test direct service access
-curl http://localhost:8224/health
+kubectl get svc -n isa-cloud-staging
+kubectl rollout status deployment/user-auth-service -n isa-cloud-staging
 ```
 
 ## Dependencies

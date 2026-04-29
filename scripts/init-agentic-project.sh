@@ -226,7 +226,8 @@ create_directory_structure() {
 
         # Deployment
         "deployment/environments"
-        "deployment/k8s/manifests"
+        "deployment/docker"
+        "deployment/helm"
         "deployment/requirements"
 
         # Microservices

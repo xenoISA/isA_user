@@ -63,7 +63,7 @@ class TestConfig:
     """Centralized test configuration"""
 
     # Service URLs (port registry)
-    # Authoritative source: deployment/k8s/build-all-images.sh
+    # Authoritative source: config/ports.yaml
     SERVICES = {
         "auth_service": 8201,
         "account_service": 8202,

@@ -226,10 +226,13 @@ kubectl port-forward -n isa-cloud-staging svc/auth-service 8201:8201
 ### Deploy to Staging
 
 ```bash
-# Apply manifests
-kubectl apply -f deployment/k8s/namespace.yaml
-kubectl apply -f deployment/k8s/user-configmap.yaml
-kubectl apply -f deployment/k8s/manifests/
+# Preview the Helm release
+ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
+  ./deployment/helm/deploy.sh staging auth --dry-run
+
+# Deploy for real
+ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
+  ./deployment/helm/deploy.sh staging auth
 ```
 
 ## API Documentation

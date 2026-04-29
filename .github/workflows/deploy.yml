@@ -112,7 +112,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: deployment/k8s/Dockerfile.base
+          file: deployment/docker/Dockerfile.base
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/base:${{ needs.prepare.outputs.version }}
@@ -135,7 +135,7 @@ jobs:
             echo "Building ${TARGET_SERVICE_DIR} -> image ${TARGET_IMAGE_NAME}..."
             docker build \
               --build-arg BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/base:${{ needs.prepare.outputs.version }} \
-              -f deployment/k8s/Dockerfile.service \
+              -f deployment/docker/Dockerfile.microservice \
               --build-arg SERVICE_NAME=$TARGET_SERVICE_DIR \
               -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:${{ needs.prepare.outputs.version }} \
               .

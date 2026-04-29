@@ -130,18 +130,20 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 3. **Install dependencies**
 ```bash
-uv pip install -r deployment/dev/requirements.txt
+uv pip install -r deployment/requirements/dev.txt
 # or
-pip install -r deployment/dev/requirements.txt
+pip install -r deployment/requirements/dev.txt
 ```
 
 4. **Configure environment**
 ```bash
-# Copy example environment file
-cp deployment/.env.example deployment/dev/.env
+# Review the checked-in dev defaults
+sed -n '1,40p' deployment/environments/dev.env
 
-# Edit configuration
-nano deployment/dev/.env
+# Export them for the current shell when needed
+set -a
+source deployment/environments/dev.env
+set +a
 ```
 
 5. **Start infrastructure services**
@@ -178,12 +180,12 @@ PYTHONPATH="$PWD" python -m uvicorn microservices.auth_service.main:app --reload
 
 1. **Build all service images**
 ```bash
-./deployment/docker/build.sh all dev latest
+./deployment/docker/build.sh
 ```
 
 2. **Build specific service**
 ```bash
-./deployment/docker/build.sh payment_service dev latest
+./deployment/docker/build.sh --service payment
 ```
 
 3. **Run service container**
@@ -191,17 +193,20 @@ PYTHONPATH="$PWD" python -m uvicorn microservices.auth_service.main:app --reload
 docker run -d \
   --name payment_service \
   -p 8207:8207 \
-  --env-file deployment/dev/.env \
-  isa-user/payment:latest
+  --env-file deployment/environments/dev.env \
+  harbor.local:30443/isa/user-payment:latest
 ```
 
 ### Kubernetes Deployment
 
 ```bash
+# Preview the staging release
+ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
+  ./deployment/helm/deploy.sh staging payment --dry-run
+
 # Deploy to staging namespace
-kubectl apply -f deployment/k8s/namespace.yaml
-kubectl apply -f deployment/k8s/user-configmap.yaml
-kubectl apply -f deployment/k8s/deployments/
+ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
+  ./deployment/helm/deploy.sh staging payment
 
 # Check deployment status
 kubectl get pods -n isa-cloud-staging
@@ -277,7 +282,7 @@ Each service exposes Swagger/OpenAPI documentation:
 
 ### Environment Variables
 
-Key configuration variables in `deployment/dev/.env`:
+Key configuration variables in `deployment/environments/dev.env`:
 
 ```bash
 # Environment
@@ -619,12 +624,14 @@ isA_user/
 
 ### Staging (Kubernetes)
 ```bash
-kubectl apply -f deployment/k8s/ -n isa-cloud-staging
+ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
+  ./deployment/helm/deploy.sh staging auth --dry-run
 ```
 
 ### Production (Kubernetes)
 ```bash
-kubectl apply -f deployment/k8s/ -n isa-cloud-prod
+ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
+  ./deployment/helm/deploy.sh production auth --dry-run
 ```
 
 Canonical Kubernetes namespaces are defined in `config/ports.yaml`. The
@@ -662,9 +669,9 @@ production namespace is `isa-cloud-prod`.
    - Restart service
 
 3. **Deploy changes**:
-   - Build images: `./deployment/docker/build.sh all dev latest`
+   - Build images: `./deployment/docker/build.sh --service <service>`
    - Push to registry (if needed)
-   - Update K8s deployment: `kubectl apply -f deployment/k8s/`
+   - Preview/apply Helm release: `ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service ./deployment/helm/deploy.sh staging <service> [--dry-run]`
 
 ## 🆘 Troubleshooting
 
@@ -677,7 +684,7 @@ tail -f logs/<service_name>.log
 lsof -i :8207
 
 # Verify environment variables
-cat deployment/dev/.env
+cat deployment/environments/dev.env
 ```
 
 ### Database connection issues

@@ -1347,7 +1347,7 @@ curl http://localhost:8000/api/v1/locations  # 检查 API 而非 health
 
 ### Service Ports
 
-**Authoritative Source**: `deployment/k8s/build-all-images.sh`
+**Authoritative Source**: `config/ports.yaml`
 
 ```python
 # Sequential ports 8201-8230

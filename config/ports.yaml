@@ -4,7 +4,7 @@
 # This file is the ONLY source of truth for port configuration across:
 # - .claude/settings.local.json (MCP servers)
 # - .claude/skills/environment-context/SKILL.md (documentation)
-# - deployment/k8s/*.yaml (Kubernetes manifests)
+# - deployment/helm/values*.yaml and deployment/helm/deploy.sh
 # - agents/mcp_servers/*.py (MCP implementations)
 #
 # Architecture:
