@@ -21,24 +21,26 @@ Environment Variables:
     PAYMENT_BASE_URL: Base URL for payment service (default: http://localhost:8207)
 """
 
-import os
+import httpx
 import pytest
 import uuid
-import httpx
-from datetime import datetime
+
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
 
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("PAYMENT_BASE_URL", "http://localhost:8207")
+BASE_URL = resolve_base_url("payment_service", "PAYMENT_BASE_URL")
 # Payment service uses /api/v1/payment (singular)
 API_V1 = f"{BASE_URL}/api/v1/payment"
+HEALTH_URL = resolve_service_url("payment_service", "/health", "PAYMENT_BASE_URL")
 TIMEOUT = 10.0
 
 
 # =============================================================================
 # Test Data Generators
 # =============================================================================
+
 
 def unique_user_id() -> str:
     """Generate unique user ID for smoke tests"""
@@ -58,6 +60,7 @@ def unique_payment_id() -> str:
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 async def http_client():
@@ -82,33 +85,38 @@ def internal_headers() -> dict:
 # SMOKE TEST 1: Health Checks
 # =============================================================================
 
+
 class TestHealthSmoke:
     """Smoke: Health endpoint sanity checks"""
 
     async def test_health_endpoint_responds(self, http_client):
         """SMOKE: GET /health returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health")
-        assert response.status_code == 200, \
-            f"Health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_URL)
+        assert (
+            response.status_code == 200
+        ), f"Health check failed: {response.status_code}"
 
     async def test_service_info_responds(self, http_client):
         """SMOKE: GET /api/v1/payments/info returns 200"""
         response = await http_client.get(f"{API_V1}/info")
-        assert response.status_code == 200, \
-            f"Service info check failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Service info check failed: {response.status_code}"
 
     async def test_health_returns_valid_json(self, http_client):
         """SMOKE: GET /health returns valid JSON with expected fields"""
-        response = await http_client.get(f"{BASE_URL}/health")
+        response = await http_client.get(HEALTH_URL)
         if response.status_code == 200:
             data = response.json()
-            assert "status" in data or "service" in data, \
-                "Health response missing status or service field"
+            assert (
+                "status" in data or "service" in data
+            ), "Health response missing status or service field"
 
 
 # =============================================================================
 # SMOKE TEST 2: Subscription Plans
 # =============================================================================
+
 
 class TestSubscriptionPlanSmoke:
     """Smoke: Subscription plan sanity checks"""
@@ -118,8 +126,11 @@ class TestSubscriptionPlanSmoke:
         response = await http_client.get(f"{API_V1}/plans", headers=internal_headers)
 
         # Accept success or auth required
-        assert response.status_code in [200, 401, 403], \
-            f"List plans failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+        ], f"List plans failed unexpectedly: {response.status_code}"
 
     async def test_create_plan_validates_input(self, http_client, internal_headers):
         """SMOKE: POST /plans validates required fields
@@ -140,18 +151,24 @@ class TestSubscriptionPlanSmoke:
         )
 
         # Expected: 400/422, Actual: 200 (validation not deployed)
-        assert response.status_code in [200, 400, 422], \
-            f"Unexpected status: {response.status_code}"
+        assert response.status_code in [
+            200,
+            400,
+            422,
+        ], f"Unexpected status: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 3: Subscriptions
 # =============================================================================
 
+
 class TestSubscriptionSmoke:
     """Smoke: Subscription sanity checks"""
 
-    async def test_create_subscription_validates_input(self, http_client, internal_headers):
+    async def test_create_subscription_validates_input(
+        self, http_client, internal_headers
+    ):
         """SMOKE: POST /subscriptions validates required fields"""
         response = await http_client.post(
             f"{API_V1}/subscriptions",
@@ -163,19 +180,28 @@ class TestSubscriptionSmoke:
         )
 
         # Accept 400/422 for validation, 500 for account validation failure
-        assert response.status_code in [400, 422, 500], \
-            f"Expected 400/422/500, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+            500,
+        ], f"Expected 400/422/500, got {response.status_code}"
 
     async def test_get_user_subscription_works(self, http_client, internal_headers):
         """SMOKE: GET /subscriptions/user/{user_id} responds correctly"""
         user_id = unique_user_id()
 
         # Service endpoint is /subscriptions/user/{user_id}
-        response = await http_client.get(f"{API_V1}/subscriptions/user/{user_id}", headers=internal_headers)
+        response = await http_client.get(
+            f"{API_V1}/subscriptions/user/{user_id}", headers=internal_headers
+        )
 
         # Accept 200 (no subscription), 404, or auth required
-        assert response.status_code in [200, 401, 403, 404], \
-            f"Get subscription failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+        ], f"Get subscription failed unexpectedly: {response.status_code}"
 
     async def test_cancel_subscription_validates(self, http_client, internal_headers):
         """SMOKE: POST /subscriptions/{id}/cancel validates input"""
@@ -186,15 +212,22 @@ class TestSubscriptionSmoke:
             json={"immediate": True},
             headers=internal_headers,
         )
-        
+
         # Should return 404 for non-existent subscription
-        assert response.status_code in [200, 400, 401, 403, 404, 422], \
-            f"Cancel subscription failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            400,
+            401,
+            403,
+            404,
+            422,
+        ], f"Cancel subscription failed unexpectedly: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 4: Payment Intents
 # =============================================================================
+
 
 class TestPaymentIntentSmoke:
     """Smoke: Payment intent sanity checks"""
@@ -212,23 +245,36 @@ class TestPaymentIntentSmoke:
         )
 
         # Accept 400/422 for validation, 500 for account validation failure
-        assert response.status_code in [400, 422, 500], \
-            f"Expected 400/422/500, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+            500,
+        ], f"Expected 400/422/500, got {response.status_code}"
 
-    async def test_confirm_payment_handles_not_found(self, http_client, internal_headers):
+    async def test_confirm_payment_handles_not_found(
+        self, http_client, internal_headers
+    ):
         """SMOKE: POST /payments/{id}/confirm handles non-existent payment"""
         payment_id = unique_payment_id()
 
-        response = await http_client.post(f"{API_V1}/payments/{payment_id}/confirm", headers=internal_headers)
-        
+        response = await http_client.post(
+            f"{API_V1}/payments/{payment_id}/confirm", headers=internal_headers
+        )
+
         # Should return 404 for non-existent payment
-        assert response.status_code in [400, 401, 403, 404, 422], \
-            f"Confirm payment failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            400,
+            401,
+            403,
+            404,
+            422,
+        ], f"Confirm payment failed unexpectedly: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 5: Payment History
 # =============================================================================
+
 
 class TestPaymentHistorySmoke:
     """Smoke: Payment history sanity checks"""
@@ -238,33 +284,41 @@ class TestPaymentHistorySmoke:
         user_id = unique_user_id()
 
         # Service endpoint is /payments/user/{user_id}
-        response = await http_client.get(f"{API_V1}/payments/user/{user_id}", headers=internal_headers)
+        response = await http_client.get(
+            f"{API_V1}/payments/user/{user_id}", headers=internal_headers
+        )
 
         # Accept success or auth required (empty list is valid for new user)
-        assert response.status_code in [200, 401, 403], \
-            f"Get payment history failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+        ], f"Get payment history failed unexpectedly: {response.status_code}"
 
-    async def test_get_payment_history_with_filters(self, http_client, internal_headers):
+    async def test_get_payment_history_with_filters(
+        self, http_client, internal_headers
+    ):
         """SMOKE: GET /payments/user/{user_id} with filters works"""
         user_id = unique_user_id()
 
         # Service endpoint is /payments/user/{user_id} with query params
         response = await http_client.get(
             f"{API_V1}/payments/user/{user_id}",
-            params={
-                "status": "succeeded",
-                "limit": 10
-            },
+            params={"status": "succeeded", "limit": 10},
             headers=internal_headers,
         )
 
-        assert response.status_code in [200, 401, 403], \
-            f"Get payment history with filters failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+        ], f"Get payment history with filters failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 6: Invoices
 # =============================================================================
+
 
 class TestInvoiceSmoke:
     """Smoke: Invoice sanity checks"""
@@ -273,11 +327,17 @@ class TestInvoiceSmoke:
         """SMOKE: GET /invoices/{id} handles non-existent invoice"""
         invoice_id = f"inv_{uuid.uuid4().hex[:12]}"
 
-        response = await http_client.get(f"{API_V1}/invoices/{invoice_id}", headers=internal_headers)
-        
+        response = await http_client.get(
+            f"{API_V1}/invoices/{invoice_id}", headers=internal_headers
+        )
+
         # Should return 404 for non-existent invoice
-        assert response.status_code in [200, 401, 403, 404], \
-            f"Get invoice failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+        ], f"Get invoice failed unexpectedly: {response.status_code}"
 
     async def test_create_invoice_validates(self, http_client, internal_headers):
         """SMOKE: POST /invoices validates required fields"""
@@ -291,13 +351,17 @@ class TestInvoiceSmoke:
         )
 
         # Accept 400/422 for validation, 500 for internal errors
-        assert response.status_code in [400, 422, 500], \
-            f"Expected 400/422/500, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+            500,
+        ], f"Expected 400/422/500, got {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 7: Refunds
 # =============================================================================
+
 
 class TestRefundSmoke:
     """Smoke: Refund sanity checks"""
@@ -315,8 +379,11 @@ class TestRefundSmoke:
         )
 
         # Accept 400/422 for validation, 500 for internal errors
-        assert response.status_code in [400, 422, 500], \
-            f"Expected 400/422/500, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+            500,
+        ], f"Expected 400/422/500, got {response.status_code}"
 
     async def test_create_refund_handles_not_found(self, http_client, internal_headers):
         """SMOKE: POST /refunds handles non-existent payment"""
@@ -329,38 +396,53 @@ class TestRefundSmoke:
             },
             headers=internal_headers,
         )
-        
+
         # Should return 400/404 for non-existent payment
-        assert response.status_code in [400, 404, 422], \
-            f"Expected 400/404/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            404,
+            422,
+        ], f"Expected 400/404/422, got {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 8: Statistics
 # =============================================================================
 
+
 class TestStatisticsSmoke:
     """Smoke: Statistics endpoint sanity checks"""
 
     async def test_get_revenue_stats_works(self, http_client, internal_headers):
         """SMOKE: GET /stats/revenue returns revenue statistics"""
-        response = await http_client.get(f"{API_V1}/stats/revenue", headers=internal_headers)
-        
+        response = await http_client.get(
+            f"{API_V1}/stats/revenue", headers=internal_headers
+        )
+
         # Should return 200 or require auth
-        assert response.status_code in [200, 401, 403], \
-            f"Get revenue stats failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+        ], f"Get revenue stats failed unexpectedly: {response.status_code}"
 
     async def test_get_subscription_stats_works(self, http_client, internal_headers):
         """SMOKE: GET /stats/subscriptions returns subscription statistics"""
-        response = await http_client.get(f"{API_V1}/stats/subscriptions", headers=internal_headers)
-        
-        assert response.status_code in [200, 401, 403], \
-            f"Get subscription stats failed unexpectedly: {response.status_code}"
+        response = await http_client.get(
+            f"{API_V1}/stats/subscriptions", headers=internal_headers
+        )
+
+        assert response.status_code in [
+            200,
+            401,
+            403,
+        ], f"Get subscription stats failed unexpectedly: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 9: Critical User Flow
 # =============================================================================
+
 
 class TestCriticalFlowSmoke:
     """Smoke: Critical payment flow end-to-end"""
@@ -374,39 +456,62 @@ class TestCriticalFlowSmoke:
         user_id = unique_user_id()
 
         # Step 1: Get available plans
-        plans_response = await http_client.get(f"{API_V1}/plans", headers=internal_headers)
-        assert plans_response.status_code in [200, 401, 403], \
-            f"Get plans failed: {plans_response.status_code}"
+        plans_response = await http_client.get(
+            f"{API_V1}/plans", headers=internal_headers
+        )
+        assert plans_response.status_code in [
+            200,
+            401,
+            403,
+        ], f"Get plans failed: {plans_response.status_code}"
 
         # Step 2: Check user subscription status (endpoint is /subscriptions/user/{user_id})
-        sub_response = await http_client.get(f"{API_V1}/subscriptions/user/{user_id}", headers=internal_headers)
-        assert sub_response.status_code in [200, 401, 403, 404], \
-            f"Get subscription failed: {sub_response.status_code}"
+        sub_response = await http_client.get(
+            f"{API_V1}/subscriptions/user/{user_id}", headers=internal_headers
+        )
+        assert sub_response.status_code in [
+            200,
+            401,
+            403,
+            404,
+        ], f"Get subscription failed: {sub_response.status_code}"
 
         # Step 3: Get payment history (endpoint is /payments/user/{user_id})
-        payments_response = await http_client.get(f"{API_V1}/payments/user/{user_id}", headers=internal_headers)
-        assert payments_response.status_code in [200, 401, 403], \
-            f"Get payments failed: {payments_response.status_code}"
+        payments_response = await http_client.get(
+            f"{API_V1}/payments/user/{user_id}", headers=internal_headers
+        )
+        assert payments_response.status_code in [
+            200,
+            401,
+            403,
+        ], f"Get payments failed: {payments_response.status_code}"
 
         # Step 4: Get revenue stats
-        stats_response = await http_client.get(f"{API_V1}/stats/revenue", headers=internal_headers)
-        assert stats_response.status_code in [200, 401, 403], \
-            f"Get stats failed: {stats_response.status_code}"
+        stats_response = await http_client.get(
+            f"{API_V1}/stats/revenue", headers=internal_headers
+        )
+        assert stats_response.status_code in [
+            200,
+            401,
+            403,
+        ], f"Get stats failed: {stats_response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 10: Error Handling
 # =============================================================================
 
+
 class TestErrorHandlingSmoke:
     """Smoke: Error handling sanity checks"""
 
     async def test_not_found_returns_404(self, http_client, internal_headers):
         """SMOKE: Non-existent endpoint returns 404"""
-        response = await http_client.get(f"{API_V1}/nonexistent_endpoint", headers=internal_headers)
-        
-        assert response.status_code == 404, \
-            f"Expected 404, got {response.status_code}"
+        response = await http_client.get(
+            f"{API_V1}/nonexistent_endpoint", headers=internal_headers
+        )
+
+        assert response.status_code == 404, f"Expected 404, got {response.status_code}"
 
     async def test_invalid_json_returns_error(self, http_client, internal_headers):
         """SMOKE: Invalid JSON returns 400 or 422"""
@@ -415,17 +520,21 @@ class TestErrorHandlingSmoke:
             content="not valid json",
             headers=internal_headers,
         )
-        
-        assert response.status_code in [400, 422], \
-            f"Expected 400/422, got {response.status_code}"
+
+        assert response.status_code in [
+            400,
+            422,
+        ], f"Expected 400/422, got {response.status_code}"
 
     async def test_method_not_allowed(self, http_client, internal_headers):
         """SMOKE: Invalid HTTP method returns 405"""
         response = await http_client.delete(f"{API_V1}/plans", headers=internal_headers)
-        
+
         # DELETE on /plans should return 405 or 404
-        assert response.status_code in [404, 405], \
-            f"Expected 404/405, got {response.status_code}"
+        assert response.status_code in [
+            404,
+            405,
+        ], f"Expected 404/405, got {response.status_code}"
 
 
 # =============================================================================

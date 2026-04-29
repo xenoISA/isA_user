@@ -13,28 +13,14 @@ import os
 import httpx
 import pytest
 
+from tests.smoke.conftest import resolve_service_url
+
 pytestmark = pytest.mark.smoke
 
 HOST = os.getenv("HEALTH_HOST", "localhost")
 GATEWAY_PORT = int(os.getenv("GATEWAY_PORT", "8000"))
 GATEWAY_URL = f"http://{HOST}:{GATEWAY_PORT}"
 TIMEOUT = 10.0
-
-# Service name → (direct_port, gateway_health_path)
-SERVICE_ROUTING = {
-    "auth_service": (8201, "auth"),
-    "session_service": (8203, "sessions"),
-    "organization_service": (8212, "organization"),
-    "task_service": (8211, "tasks"),
-    "payment_service": (8207, "payment"),
-    "wallet_service": (8208, "wallets"),
-    "order_service": (8210, "orders"),
-    "vault_service": (8214, "vault"),
-    "billing_service": (8216, "billing"),
-    "event_service": (8230, "events"),
-    "telemetry_service": (8225, "telemetry"),
-    "memory_service": (8223, "memory"),
-}
 
 # Core services that MUST be reachable through the gateway
 CORE_SERVICES = [
@@ -83,9 +69,8 @@ class TestGatewayRoutingSmoke:
     )
     async def test_gateway_vs_direct(self, service_name, health_path):
         """Compare gateway and direct responses — both should return 200."""
-        port, _prefix = SERVICE_ROUTING[service_name]
-        direct_url = f"http://{HOST}:{port}/health"
-        gateway_url = f"{GATEWAY_URL}{health_path}"
+        direct_url = resolve_service_url(service_name, "/health", mode="direct")
+        gateway_url = resolve_service_url(service_name, "/health", mode="gateway")
 
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             direct_resp = await client.get(direct_url)

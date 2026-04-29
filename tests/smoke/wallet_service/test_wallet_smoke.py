@@ -10,14 +10,21 @@ Usage:
 Environment Variables:
     WALLET_SERVICE_URL: Wallet service base URL (default: http://localhost:8208)
 """
-import os
-import pytest
+
 import httpx
+import pytest
+
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
 
 pytestmark = [pytest.mark.smoke]
 
 # Service configuration from environment
-WALLET_SERVICE_URL = os.getenv("WALLET_SERVICE_URL", "http://localhost:8208")
+WALLET_SERVICE_URL = resolve_base_url("wallet_service", "WALLET_SERVICE_URL")
+WALLET_HEALTH_URL = resolve_service_url(
+    "wallet_service",
+    "/health",
+    "WALLET_SERVICE_URL",
+)
 
 
 @pytest.fixture
@@ -33,18 +40,18 @@ class TestServiceHealth:
 
     def test_health_endpoint_available(self, client):
         """SMOKE: /health endpoint is accessible"""
-        response = client.get("/health")
+        response = client.get(WALLET_HEALTH_URL)
         assert response.status_code == 200
 
     def test_health_returns_healthy(self, client):
         """SMOKE: Service reports healthy status"""
-        response = client.get("/health")
+        response = client.get(WALLET_HEALTH_URL)
         data = response.json()
         assert data["status"] == "healthy"
 
     def test_service_version_present(self, client):
         """SMOKE: Service version is present in health response"""
-        response = client.get("/health")
+        response = client.get(WALLET_HEALTH_URL)
         data = response.json()
         assert "version" in data
         assert data["version"] is not None
@@ -70,8 +77,12 @@ class TestCriticalPathWalletOperations:
 
         response = client.post("/api/v1/wallets", json=request_data)
         # May return 500/503 during shutdown or 400 if account service unavailable
-        assert response.status_code in [200, 400, 500, 503], \
-            f"Create wallet failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            400,
+            500,
+            503,
+        ], f"Create wallet failed: {response.status_code} - {response.text}"
         if response.status_code == 200:
             data = response.json()
             assert data["success"] is True
@@ -83,12 +94,15 @@ class TestCriticalPathWalletOperations:
 
         # First create a wallet
         user_id = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        create_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id,
-            "wallet_type": "fiat",
-            "initial_balance": 0,
-            "currency": "CREDIT",
-        })
+        create_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id,
+                "wallet_type": "fiat",
+                "initial_balance": 0,
+                "currency": "CREDIT",
+            },
+        )
 
         if create_response.status_code != 200:
             pytest.skip(f"Cannot create wallet: {create_response.status_code}")
@@ -107,12 +121,15 @@ class TestCriticalPathWalletOperations:
 
         # First create a wallet
         user_id = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        create_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id,
-            "wallet_type": "fiat",
-            "initial_balance": 0,
-            "currency": "CREDIT",
-        })
+        create_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id,
+                "wallet_type": "fiat",
+                "initial_balance": 0,
+                "currency": "CREDIT",
+            },
+        )
 
         if create_response.status_code != 200:
             pytest.skip(f"Cannot create wallet: {create_response.status_code}")
@@ -120,10 +137,13 @@ class TestCriticalPathWalletOperations:
         wallet_id = create_response.json()["wallet_id"]
 
         # Then deposit
-        response = client.post(f"/api/v1/wallets/{wallet_id}/deposit", json={
-            "amount": "50.00",
-            "description": "Smoke test deposit",
-        })
+        response = client.post(
+            f"/api/v1/wallets/{wallet_id}/deposit",
+            json={
+                "amount": "50.00",
+                "description": "Smoke test deposit",
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -135,12 +155,15 @@ class TestCriticalPathWalletOperations:
 
         # First create a wallet with balance
         user_id = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        create_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id,
-            "wallet_type": "fiat",
-            "initial_balance": 500,
-            "currency": "CREDIT",
-        })
+        create_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id,
+                "wallet_type": "fiat",
+                "initial_balance": 500,
+                "currency": "CREDIT",
+            },
+        )
 
         if create_response.status_code != 200:
             pytest.skip(f"Cannot create wallet: {create_response.status_code}")
@@ -166,12 +189,15 @@ class TestCriticalPathTransactions:
 
         # Create wallet with balance
         user_id = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        create_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id,
-            "wallet_type": "fiat",
-            "initial_balance": 1000,
-            "currency": "CREDIT",
-        })
+        create_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id,
+                "wallet_type": "fiat",
+                "initial_balance": 1000,
+                "currency": "CREDIT",
+            },
+        )
 
         if create_response.status_code != 200:
             pytest.skip(f"Cannot create wallet: {create_response.status_code}")
@@ -179,10 +205,13 @@ class TestCriticalPathTransactions:
         wallet_id = create_response.json()["wallet_id"]
 
         # Withdraw
-        response = client.post(f"/api/v1/wallets/{wallet_id}/withdraw", json={
-            "amount": "100.00",
-            "description": "Smoke test withdrawal",
-        })
+        response = client.post(
+            f"/api/v1/wallets/{wallet_id}/withdraw",
+            json={
+                "amount": "100.00",
+                "description": "Smoke test withdrawal",
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -194,12 +223,15 @@ class TestCriticalPathTransactions:
 
         # Create wallet with balance
         user_id = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        create_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id,
-            "wallet_type": "fiat",
-            "initial_balance": 500,
-            "currency": "CREDIT",
-        })
+        create_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id,
+                "wallet_type": "fiat",
+                "initial_balance": 500,
+                "currency": "CREDIT",
+            },
+        )
 
         if create_response.status_code != 200:
             pytest.skip(f"Cannot create wallet: {create_response.status_code}")
@@ -207,10 +239,13 @@ class TestCriticalPathTransactions:
         wallet_id = create_response.json()["wallet_id"]
 
         # Consume
-        response = client.post(f"/api/v1/wallets/{wallet_id}/consume", json={
-            "amount": "25.00",
-            "description": "Smoke test consumption",
-        })
+        response = client.post(
+            f"/api/v1/wallets/{wallet_id}/consume",
+            json={
+                "amount": "25.00",
+                "description": "Smoke test consumption",
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -222,12 +257,15 @@ class TestCriticalPathTransactions:
 
         # Create wallet and make some transactions
         user_id = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        create_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id,
-            "wallet_type": "fiat",
-            "initial_balance": 100,
-            "currency": "CREDIT",
-        })
+        create_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id,
+                "wallet_type": "fiat",
+                "initial_balance": 100,
+                "currency": "CREDIT",
+            },
+        )
 
         if create_response.status_code != 200:
             pytest.skip(f"Cannot create wallet: {create_response.status_code}")
@@ -253,34 +291,43 @@ class TestCriticalPathTransfer:
 
         # Create source wallet with balance
         user_id_1 = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        source_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id_1,
-            "wallet_type": "fiat",
-            "initial_balance": 1000,
-            "currency": "CREDIT",
-        })
+        source_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id_1,
+                "wallet_type": "fiat",
+                "initial_balance": 1000,
+                "currency": "CREDIT",
+            },
+        )
         if source_response.status_code != 200:
             pytest.skip(f"Cannot create source wallet: {source_response.status_code}")
         source_wallet_id = source_response.json()["wallet_id"]
 
         # Create destination wallet
         user_id_2 = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        dest_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id_2,
-            "wallet_type": "fiat",
-            "initial_balance": 0,
-            "currency": "CREDIT",
-        })
+        dest_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id_2,
+                "wallet_type": "fiat",
+                "initial_balance": 0,
+                "currency": "CREDIT",
+            },
+        )
         if dest_response.status_code != 200:
             pytest.skip(f"Cannot create dest wallet: {dest_response.status_code}")
         dest_wallet_id = dest_response.json()["wallet_id"]
 
         # Transfer
-        response = client.post(f"/api/v1/wallets/{source_wallet_id}/transfer", json={
-            "to_wallet_id": dest_wallet_id,
-            "amount": "200.00",
-            "description": "Smoke test transfer",
-        })
+        response = client.post(
+            f"/api/v1/wallets/{source_wallet_id}/transfer",
+            json={
+                "to_wallet_id": dest_wallet_id,
+                "amount": "200.00",
+                "description": "Smoke test transfer",
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -298,12 +345,15 @@ class TestCriticalPathStatistics:
 
         # Create wallet
         user_id = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        create_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id,
-            "wallet_type": "fiat",
-            "initial_balance": 100,
-            "currency": "CREDIT",
-        })
+        create_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id,
+                "wallet_type": "fiat",
+                "initial_balance": 100,
+                "currency": "CREDIT",
+            },
+        )
 
         if create_response.status_code != 200:
             pytest.skip(f"Cannot create wallet: {create_response.status_code}")
@@ -328,19 +378,21 @@ class TestBackwardCompatibility:
 
         # Create wallet
         user_id = f"smoke_test_user_{uuid.uuid4().hex[:8]}"
-        create_response = client.post("/api/v1/wallets", json={
-            "user_id": user_id,
-            "wallet_type": "fiat",
-            "initial_balance": 500,
-            "currency": "CREDIT",
-        })
+        create_response = client.post(
+            "/api/v1/wallets",
+            json={
+                "user_id": user_id,
+                "wallet_type": "fiat",
+                "initial_balance": 500,
+                "currency": "CREDIT",
+            },
+        )
         if create_response.status_code != 200:
             pytest.skip(f"Cannot create wallet: {create_response.status_code}")
 
         # Get credit balance via backward compat endpoint
         response = client.get(
-            "/api/v1/wallets/credits/balance",
-            params={"user_id": user_id}
+            "/api/v1/wallets/credits/balance", params={"user_id": user_id}
         )
 
         assert response.status_code == 200
@@ -352,8 +404,10 @@ class TestBackwardCompatibility:
         """SMOKE: Service stats endpoint works"""
         response = client.get("/api/v1/wallet/stats")
 
-        assert response.status_code in [200, 503], \
-            f"Service stats failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"Service stats failed: {response.status_code}"
         if response.status_code == 200:
             data = response.json()
             assert data["service"] == "wallet_service"

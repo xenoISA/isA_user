@@ -21,29 +21,30 @@ Environment Variables:
     TELEMETRY_BASE_URL: Base URL for telemetry service (default: http://localhost:8225)
 """
 
-import os
+from datetime import datetime, timezone, timedelta
+
+import httpx
 import pytest
 import uuid
-import httpx
-from datetime import datetime, timezone, timedelta
 
 from tests.contracts.telemetry.data_contract import (
     TelemetryTestDataFactory,
-    DataType,
-    AggregationType,
 )
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
 
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("TELEMETRY_BASE_URL", "http://localhost:8225")
+BASE_URL = resolve_base_url("telemetry_service", "TELEMETRY_BASE_URL")
 API_V1 = f"{BASE_URL}/api/v1/telemetry"
+HEALTH_URL = resolve_service_url("telemetry_service", "/health", "TELEMETRY_BASE_URL")
 TIMEOUT = 10.0
 
 
 # =============================================================================
 # Test Data Generators
 # =============================================================================
+
 
 def unique_device_id() -> str:
     """Generate unique device ID for smoke tests"""
@@ -58,6 +59,7 @@ def unique_metric_name() -> str:
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 async def http_client():
@@ -93,7 +95,7 @@ async def test_metric(http_client, internal_headers):
     response = await http_client.post(
         f"{API_V1}/metrics",
         json=metric_data,
-        headers={**internal_headers, "X-User-ID": user_id}
+        headers={**internal_headers, "X-User-ID": user_id},
     )
 
     if response.status_code in [200, 201]:
@@ -104,8 +106,7 @@ async def test_metric(http_client, internal_headers):
         # Cleanup - try to delete the metric
         try:
             await http_client.delete(
-                f"{API_V1}/metrics/{metric_data['name']}",
-                headers=internal_headers
+                f"{API_V1}/metrics/{metric_data['name']}", headers=internal_headers
             )
         except Exception:
             pass  # Ignore cleanup errors
@@ -125,7 +126,7 @@ async def test_alert_rule(http_client, internal_headers):
     response = await http_client.post(
         f"{API_V1}/alerts/rules",
         json=rule_data,
-        headers={**internal_headers, "X-User-ID": user_id}
+        headers={**internal_headers, "X-User-ID": user_id},
     )
 
     if response.status_code in [200, 201]:
@@ -140,18 +141,20 @@ async def test_alert_rule(http_client, internal_headers):
 # SMOKE TEST 1: Health Checks
 # =============================================================================
 
+
 class TestHealthSmoke:
     """Smoke: Health endpoint sanity checks"""
 
     async def test_health_endpoint_responds(self, http_client):
         """SMOKE: GET /health returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health")
-        assert response.status_code == 200, \
-            f"Health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_URL)
+        assert (
+            response.status_code == 200
+        ), f"Health check failed: {response.status_code}"
 
     async def test_health_returns_status(self, http_client):
         """SMOKE: GET /health returns status field"""
-        response = await http_client.get(f"{BASE_URL}/health")
+        response = await http_client.get(HEALTH_URL)
         assert response.status_code == 200
         data = response.json()
         assert "status" in data, "Health response missing 'status' field"
@@ -160,6 +163,7 @@ class TestHealthSmoke:
 # =============================================================================
 # SMOKE TEST 2: Telemetry Data Ingestion
 # =============================================================================
+
 
 class TestTelemetryIngestSmoke:
     """Smoke: Telemetry data ingestion sanity checks"""
@@ -172,32 +176,39 @@ class TestTelemetryIngestSmoke:
         response = await http_client.post(
             f"{API_V1}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
-        assert response.status_code in [200, 201, 503], \
-            f"Ingest single point failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+            503,
+        ], f"Ingest single point failed: {response.status_code} - {response.text}"
 
         if response.status_code in [200, 201]:
             result = response.json()
             assert result.get("success") is True or result.get("ingested_count", 0) >= 1
 
-    async def test_ingest_multiple_data_points_works(self, http_client, internal_headers):
+    async def test_ingest_multiple_data_points_works(
+        self, http_client, internal_headers
+    ):
         """SMOKE: POST /devices/{id}/telemetry/batch ingests multiple points"""
         device_id = unique_device_id()
         data_points = [
-            TelemetryTestDataFactory.make_data_point_dict()
-            for _ in range(5)
+            TelemetryTestDataFactory.make_data_point_dict() for _ in range(5)
         ]
 
         response = await http_client.post(
             f"{API_V1}/devices/{device_id}/telemetry/batch",
             json={"data_points": data_points},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
-        assert response.status_code in [200, 201, 503], \
-            f"Ingest multiple points failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            201,
+            503,
+        ], f"Ingest multiple points failed: {response.status_code}"
 
         if response.status_code in [200, 201]:
             result = response.json()
@@ -210,16 +221,19 @@ class TestTelemetryIngestSmoke:
         response = await http_client.post(
             f"{API_V1}/devices/{device_id}/telemetry/batch",
             json={"data_points": []},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
-        assert response.status_code in [422, 503], \
-            f"Expected 422 for empty batch, got {response.status_code}"
+        assert response.status_code in [
+            422,
+            503,
+        ], f"Expected 422 for empty batch, got {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 3: Telemetry Query
 # =============================================================================
+
 
 class TestTelemetryQuerySmoke:
     """Smoke: Telemetry query sanity checks"""
@@ -235,14 +249,15 @@ class TestTelemetryQuerySmoke:
         }
 
         response = await http_client.post(
-            f"{API_V1}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_V1}/query", json=query_params, headers=internal_headers
         )
 
         # May return 200 with empty data, 404 if no data, 503 if shutting down
-        assert response.status_code in [200, 404, 503], \
-            f"Query failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            404,
+            503,
+        ], f"Query failed: {response.status_code}"
 
     async def test_query_returns_data_structure(self, http_client, internal_headers):
         """SMOKE: POST /query returns correct data structure"""
@@ -252,14 +267,13 @@ class TestTelemetryQuerySmoke:
         now = datetime.now(timezone.utc)
 
         data_point = TelemetryTestDataFactory.make_data_point_dict(
-            metric_name=metric_name,
-            timestamp=now.isoformat()
+            metric_name=metric_name, timestamp=now.isoformat()
         )
 
         await http_client.post(
             f"{API_V1}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         # Query the data
@@ -271,9 +285,7 @@ class TestTelemetryQuerySmoke:
         }
 
         response = await http_client.post(
-            f"{API_V1}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_V1}/query", json=query_params, headers=internal_headers
         )
 
         assert response.status_code in [200, 404, 503]
@@ -286,6 +298,7 @@ class TestTelemetryQuerySmoke:
 # SMOKE TEST 4: Metric Definitions
 # =============================================================================
 
+
 class TestMetricDefinitionSmoke:
     """Smoke: Metric definition sanity checks"""
 
@@ -297,12 +310,16 @@ class TestMetricDefinitionSmoke:
         response = await http_client.post(
             f"{API_V1}/metrics",
             json=metric_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         # May return 500 if DB schema issue, 503 if service shutting down
-        assert response.status_code in [200, 201, 500, 503], \
-            f"Create metric failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+            500,
+            503,
+        ], f"Create metric failed: {response.status_code} - {response.text}"
 
         if response.status_code in [200, 201]:
             result = response.json()
@@ -310,19 +327,17 @@ class TestMetricDefinitionSmoke:
 
             # Cleanup
             await http_client.delete(
-                f"{API_V1}/metrics/{metric_data['name']}",
-                headers=internal_headers
+                f"{API_V1}/metrics/{metric_data['name']}", headers=internal_headers
             )
 
     async def test_list_metrics_works(self, http_client, internal_headers):
         """SMOKE: GET /metrics returns list"""
-        response = await http_client.get(
-            f"{API_V1}/metrics",
-            headers=internal_headers
-        )
+        response = await http_client.get(f"{API_V1}/metrics", headers=internal_headers)
 
-        assert response.status_code in [200, 503], \
-            f"List metrics failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"List metrics failed: {response.status_code}"
 
         if response.status_code == 200:
             result = response.json()
@@ -333,17 +348,19 @@ class TestMetricDefinitionSmoke:
         metric_name = test_metric["_test_name"]
 
         response = await http_client.get(
-            f"{API_V1}/metrics/{metric_name}",
-            headers=internal_headers
+            f"{API_V1}/metrics/{metric_name}", headers=internal_headers
         )
 
-        assert response.status_code in [200, 503], \
-            f"Get metric failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"Get metric failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 5: Alert Rules
 # =============================================================================
+
 
 class TestAlertRuleSmoke:
     """Smoke: Alert rule sanity checks"""
@@ -356,12 +373,16 @@ class TestAlertRuleSmoke:
         response = await http_client.post(
             f"{API_V1}/alerts/rules",
             json=rule_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         # May return 500 if DB schema issue, 503 if service shutting down
-        assert response.status_code in [200, 201, 500, 503], \
-            f"Create alert rule failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+            500,
+            503,
+        ], f"Create alert rule failed: {response.status_code} - {response.text}"
 
         if response.status_code in [200, 201]:
             result = response.json()
@@ -370,68 +391,77 @@ class TestAlertRuleSmoke:
     async def test_list_alert_rules_works(self, http_client, internal_headers):
         """SMOKE: GET /alerts/rules returns list"""
         response = await http_client.get(
-            f"{API_V1}/alerts/rules",
-            headers=internal_headers
+            f"{API_V1}/alerts/rules", headers=internal_headers
         )
 
-        assert response.status_code in [200, 503], \
-            f"List alert rules failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"List alert rules failed: {response.status_code}"
 
-    async def test_get_alert_rule_works(self, http_client, internal_headers, test_alert_rule):
+    async def test_get_alert_rule_works(
+        self, http_client, internal_headers, test_alert_rule
+    ):
         """SMOKE: GET /alerts/rules/{id} retrieves rule"""
         rule_id = test_alert_rule["rule_id"]
 
         response = await http_client.get(
-            f"{API_V1}/alerts/rules/{rule_id}",
-            headers=internal_headers
+            f"{API_V1}/alerts/rules/{rule_id}", headers=internal_headers
         )
 
-        assert response.status_code in [200, 503], \
-            f"Get alert rule failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"Get alert rule failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 6: Alerts
 # =============================================================================
 
+
 class TestAlertSmoke:
     """Smoke: Alert sanity checks"""
 
     async def test_list_alerts_works(self, http_client, internal_headers):
         """SMOKE: GET /alerts returns list"""
-        response = await http_client.get(
-            f"{API_V1}/alerts",
-            headers=internal_headers
-        )
+        response = await http_client.get(f"{API_V1}/alerts", headers=internal_headers)
 
-        assert response.status_code in [200, 503], \
-            f"List alerts failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"List alerts failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 7: Stats
 # =============================================================================
 
+
 class TestStatsSmoke:
     """Smoke: Service stats sanity checks"""
 
     async def test_service_stats_works(self, http_client, internal_headers):
         """SMOKE: GET /stats returns service statistics"""
-        response = await http_client.get(
-            f"{API_V1}/stats",
-            headers=internal_headers
-        )
+        response = await http_client.get(f"{API_V1}/stats", headers=internal_headers)
 
-        assert response.status_code in [200, 503], \
-            f"Get stats failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"Get stats failed: {response.status_code}"
 
         if response.status_code == 200:
             result = response.json()
             # Should have some stats fields
-            assert any(key in result for key in [
-                "total_devices", "total_metrics", "total_data_points",
-                "active_devices"
-            ])
+            assert any(
+                key in result
+                for key in [
+                    "total_devices",
+                    "total_metrics",
+                    "total_data_points",
+                    "active_devices",
+                ]
+            )
 
     async def test_device_stats_works(self, http_client, internal_headers):
         """SMOKE: GET /devices/{id}/stats returns device stats"""
@@ -442,16 +472,17 @@ class TestStatsSmoke:
         await http_client.post(
             f"{API_V1}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         response = await http_client.get(
-            f"{API_V1}/devices/{device_id}/stats",
-            headers=internal_headers
+            f"{API_V1}/devices/{device_id}/stats", headers=internal_headers
         )
 
-        assert response.status_code in [200, 503], \
-            f"Get device stats failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"Get device stats failed: {response.status_code}"
 
         if response.status_code == 200:
             result = response.json()
@@ -461,6 +492,7 @@ class TestStatsSmoke:
 # =============================================================================
 # SMOKE TEST 8: Real-Time Subscriptions
 # =============================================================================
+
 
 class TestSubscriptionSmoke:
     """Smoke: Real-time subscription sanity checks"""
@@ -473,13 +505,14 @@ class TestSubscriptionSmoke:
         }
 
         response = await http_client.post(
-            f"{API_V1}/subscribe",
-            json=subscription_data,
-            headers=internal_headers
+            f"{API_V1}/subscribe", json=subscription_data, headers=internal_headers
         )
 
-        assert response.status_code in [200, 201, 503], \
-            f"Create subscription failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            201,
+            503,
+        ], f"Create subscription failed: {response.status_code}"
 
         if response.status_code in [200, 201]:
             result = response.json()
@@ -488,14 +521,14 @@ class TestSubscriptionSmoke:
             # Cleanup - unsubscribe
             sub_id = result["subscription_id"]
             await http_client.delete(
-                f"{API_V1}/subscribe/{sub_id}",
-                headers=internal_headers
+                f"{API_V1}/subscribe/{sub_id}", headers=internal_headers
             )
 
 
 # =============================================================================
 # SMOKE TEST 9: Critical User Flow
 # =============================================================================
+
 
 class TestCriticalFlowSmoke:
     """Smoke: Critical user flow end-to-end"""
@@ -514,15 +547,13 @@ class TestCriticalFlowSmoke:
         try:
             # Step 1: Ingest data
             data_point = TelemetryTestDataFactory.make_data_point_dict(
-                metric_name=metric_name,
-                value=test_value,
-                timestamp=now.isoformat()
+                metric_name=metric_name, value=test_value, timestamp=now.isoformat()
             )
 
             ingest_response = await http_client.post(
                 f"{API_V1}/devices/{device_id}/telemetry/batch",
                 json={"data_points": [data_point]},
-                headers=internal_headers
+                headers=internal_headers,
             )
             if ingest_response.status_code == 503:
                 pytest.skip("Service shutting down (503)")
@@ -537,18 +568,18 @@ class TestCriticalFlowSmoke:
             }
 
             query_response = await http_client.post(
-                f"{API_V1}/query",
-                json=query_params,
-                headers=internal_headers
+                f"{API_V1}/query", json=query_params, headers=internal_headers
             )
             assert query_response.status_code in [200, 404, 503], "Query failed"
 
             # Step 3: Get device stats
             stats_response = await http_client.get(
-                f"{API_V1}/devices/{device_id}/stats",
-                headers=internal_headers
+                f"{API_V1}/devices/{device_id}/stats", headers=internal_headers
             )
-            assert stats_response.status_code in [200, 503], "Failed to get device stats"
+            assert stats_response.status_code in [
+                200,
+                503,
+            ], "Failed to get device stats"
             if stats_response.status_code == 200:
                 assert stats_response.json()["device_id"] == device_id
 
@@ -562,6 +593,7 @@ class TestCriticalFlowSmoke:
 # SMOKE TEST 10: Error Handling
 # =============================================================================
 
+
 class TestErrorHandlingSmoke:
     """Smoke: Error handling sanity checks"""
 
@@ -570,30 +602,36 @@ class TestErrorHandlingSmoke:
         fake_metric_name = f"nonexistent_{uuid.uuid4().hex[:8]}"
 
         response = await http_client.get(
-            f"{API_V1}/metrics/{fake_metric_name}",
-            headers=internal_headers
+            f"{API_V1}/metrics/{fake_metric_name}", headers=internal_headers
         )
 
-        assert response.status_code in [404, 500, 503], \
-            f"Expected 404/500, got {response.status_code}"
+        assert response.status_code in [
+            404,
+            500,
+            503,
+        ], f"Expected 404/500, got {response.status_code}"
 
     async def test_invalid_request_returns_error(self, http_client, internal_headers):
         """SMOKE: Invalid request returns 422"""
         response = await http_client.post(
             f"{API_V1}/query",
             json={"start_time": "invalid-date"},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
-        assert response.status_code in [422, 503], \
-            f"Expected 422, got {response.status_code}"
+        assert response.status_code in [
+            422,
+            503,
+        ], f"Expected 422, got {response.status_code}"
 
     async def test_unauthenticated_request_returns_401(self, http_client):
         """SMOKE: Request without auth returns 401 (or 503 if service shutting down)"""
         response = await http_client.get(f"{API_V1}/metrics")
 
-        assert response.status_code in [401, 503], \
-            f"Expected 401, got {response.status_code}"
+        assert response.status_code in [
+            401,
+            503,
+        ], f"Expected 401, got {response.status_code}"
 
 
 # =============================================================================

@@ -21,23 +21,29 @@ Environment Variables:
     ORGANIZATION_BASE_URL: Base URL for organization service (default: http://localhost:8212)
 """
 
-import os
+import httpx
 import pytest
 import uuid
-import httpx
-from datetime import datetime
+
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
 
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("ORGANIZATION_BASE_URL", "http://localhost:8212")
+BASE_URL = resolve_base_url("organization_service", "ORGANIZATION_BASE_URL")
 API_V1 = f"{BASE_URL}/api/v1/organization/organizations"
+HEALTH_URL = resolve_service_url(
+    "organization_service",
+    "/health",
+    "ORGANIZATION_BASE_URL",
+)
 TIMEOUT = 10.0
 
 
 # =============================================================================
 # Test Data Generators
 # =============================================================================
+
 
 def unique_user_id() -> str:
     """Generate unique user ID for smoke tests"""
@@ -91,7 +97,7 @@ async def test_organization(http_client):
             "name": unique_org_name(),
             "billing_email": unique_email(),
         },
-        headers={"X-User-ID": owner_user_id}
+        headers={"X-User-ID": owner_user_id},
     )
 
     if response.status_code in [200, 201]:
@@ -103,31 +109,34 @@ async def test_organization(http_client):
         try:
             org_id = org_data["organization_id"]
             await http_client.delete(
-                f"{API_V1}/{org_id}",
-                headers={"X-User-ID": owner_user_id}
+                f"{API_V1}/{org_id}", headers={"X-User-ID": owner_user_id}
             )
         except Exception:
             pass  # Ignore cleanup errors
     else:
-        pytest.skip(f"Could not create test organization: {response.status_code} - {response.text}")
+        pytest.skip(
+            f"Could not create test organization: {response.status_code} - {response.text}"
+        )
 
 
 # =============================================================================
 # SMOKE TEST 1: Health Checks
 # =============================================================================
 
+
 class TestHealthSmoke:
     """Smoke: Health endpoint sanity checks"""
 
     async def test_health_endpoint_responds(self, http_client):
         """SMOKE: GET /health returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health")
-        assert response.status_code == 200, \
-            f"Health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_URL)
+        assert (
+            response.status_code == 200
+        ), f"Health check failed: {response.status_code}"
 
     async def test_health_contains_status(self, http_client):
         """SMOKE: GET /health returns status field"""
-        response = await http_client.get(f"{BASE_URL}/health")
+        response = await http_client.get(HEALTH_URL)
         assert response.status_code == 200
         data = response.json()
         assert "status" in data, "Response missing status field"
@@ -137,6 +146,7 @@ class TestHealthSmoke:
 # =============================================================================
 # SMOKE TEST 2: Organization CRUD
 # =============================================================================
+
 
 class TestOrganizationCRUDSmoke:
     """Smoke: Organization CRUD operation sanity checks"""
@@ -151,11 +161,13 @@ class TestOrganizationCRUDSmoke:
                 "name": unique_org_name(),
                 "billing_email": unique_email(),
             },
-            headers={"X-User-ID": owner_user_id}
+            headers={"X-User-ID": owner_user_id},
         )
 
-        assert response.status_code in [200, 201], \
-            f"Create organization failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+        ], f"Create organization failed: {response.status_code} - {response.text}"
 
         data = response.json()
         assert "organization_id" in data, "Response missing organization_id"
@@ -165,7 +177,7 @@ class TestOrganizationCRUDSmoke:
         try:
             await http_client.delete(
                 f"{API_V1}/{data['organization_id']}",
-                headers={"X-User-ID": owner_user_id}
+                headers={"X-User-ID": owner_user_id},
             )
         except Exception:
             pass
@@ -176,12 +188,12 @@ class TestOrganizationCRUDSmoke:
         user_id = test_organization["_owner_user_id"]
 
         response = await http_client.get(
-            f"{API_V1}/{org_id}",
-            headers={"X-User-ID": user_id}
+            f"{API_V1}/{org_id}", headers={"X-User-ID": user_id}
         )
 
-        assert response.status_code == 200, \
-            f"Get organization failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get organization failed: {response.status_code}"
 
         data = response.json()
         assert data["organization_id"] == org_id
@@ -195,11 +207,12 @@ class TestOrganizationCRUDSmoke:
         response = await http_client.put(
             f"{API_V1}/{org_id}",
             json={"name": new_name},
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
-        assert response.status_code == 200, \
-            f"Update organization failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Update organization failed: {response.status_code}"
 
         data = response.json()
         assert data["name"] == new_name
@@ -208,6 +221,7 @@ class TestOrganizationCRUDSmoke:
 # =============================================================================
 # SMOKE TEST 3: Member Operations
 # =============================================================================
+
 
 class TestMemberSmoke:
     """Smoke: Member operation sanity checks"""
@@ -218,12 +232,12 @@ class TestMemberSmoke:
         user_id = test_organization["_owner_user_id"]
 
         response = await http_client.get(
-            f"{API_V1}/{org_id}/members",
-            headers={"X-User-ID": user_id}
+            f"{API_V1}/{org_id}/members", headers={"X-User-ID": user_id}
         )
 
-        assert response.status_code == 200, \
-            f"Get members failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get members failed: {response.status_code}"
 
         data = response.json()
         assert "members" in data, "Response missing members field"
@@ -238,11 +252,13 @@ class TestMemberSmoke:
         response = await http_client.post(
             f"{API_V1}/{org_id}/members",
             json={"user_id": new_member_id, "role": "member"},
-            headers={"X-User-ID": owner_id}
+            headers={"X-User-ID": owner_id},
         )
 
-        assert response.status_code in [200, 201], \
-            f"Add member failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+        ], f"Add member failed: {response.status_code} - {response.text}"
 
         data = response.json()
         assert data["user_id"] == new_member_id
@@ -251,6 +267,7 @@ class TestMemberSmoke:
 # =============================================================================
 # SMOKE TEST 4: Context Switching
 # =============================================================================
+
 
 class TestContextSmoke:
     """Smoke: Context switching sanity checks"""
@@ -262,16 +279,19 @@ class TestContextSmoke:
         response = await http_client.post(
             f"{API_V1}/context",
             json={"organization_id": None},
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
-        assert response.status_code == 200, \
-            f"Switch context failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Switch context failed: {response.status_code}"
 
         data = response.json()
         assert data["context_type"] == "individual"
 
-    async def test_switch_to_organization_context_works(self, http_client, test_organization):
+    async def test_switch_to_organization_context_works(
+        self, http_client, test_organization
+    ):
         """SMOKE: POST /organizations/context with org_id works"""
         org_id = test_organization["organization_id"]
         user_id = test_organization["_owner_user_id"]
@@ -279,11 +299,12 @@ class TestContextSmoke:
         response = await http_client.post(
             f"{API_V1}/context",
             json={"organization_id": org_id},
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
-        assert response.status_code == 200, \
-            f"Switch context failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Switch context failed: {response.status_code}"
 
         data = response.json()
         assert data["context_type"] == "organization"
@@ -294,6 +315,7 @@ class TestContextSmoke:
 # SMOKE TEST 5: User Organizations
 # =============================================================================
 
+
 class TestUserOrganizationsSmoke:
     """Smoke: User organizations sanity checks"""
 
@@ -301,13 +323,11 @@ class TestUserOrganizationsSmoke:
         """SMOKE: GET /organizations retrieves user's organizations (user_id from header)"""
         user_id = test_organization["_owner_user_id"]
 
-        response = await http_client.get(
-            API_V1,
-            headers={"X-User-ID": user_id}
-        )
+        response = await http_client.get(API_V1, headers={"X-User-ID": user_id})
 
-        assert response.status_code == 200, \
-            f"Get user organizations failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get user organizations failed: {response.status_code}"
 
         data = response.json()
         assert "organizations" in data, "Response missing organizations field"
@@ -318,6 +338,7 @@ class TestUserOrganizationsSmoke:
 # SMOKE TEST 6: Statistics
 # =============================================================================
 
+
 class TestStatsSmoke:
     """Smoke: Organization statistics sanity checks"""
 
@@ -327,12 +348,10 @@ class TestStatsSmoke:
         user_id = test_organization["_owner_user_id"]
 
         response = await http_client.get(
-            f"{API_V1}/{org_id}/stats",
-            headers={"X-User-ID": user_id}
+            f"{API_V1}/{org_id}/stats", headers={"X-User-ID": user_id}
         )
 
-        assert response.status_code == 200, \
-            f"Get stats failed: {response.status_code}"
+        assert response.status_code == 200, f"Get stats failed: {response.status_code}"
 
         data = response.json()
         assert "organization_id" in data
@@ -342,6 +361,7 @@ class TestStatsSmoke:
 # =============================================================================
 # SMOKE TEST 7: Critical User Flow
 # =============================================================================
+
 
 class TestCriticalFlowSmoke:
     """Smoke: Critical user flow end-to-end"""
@@ -364,7 +384,7 @@ class TestCriticalFlowSmoke:
                     "name": unique_org_name(),
                     "billing_email": unique_email(),
                 },
-                headers={"X-User-ID": owner_id}
+                headers={"X-User-ID": owner_id},
             )
             assert create_response.status_code in [200, 201], "Failed to create org"
             org_id = create_response.json()["organization_id"]
@@ -373,7 +393,7 @@ class TestCriticalFlowSmoke:
             add_member_response = await http_client.post(
                 f"{API_V1}/{org_id}/members",
                 json={"user_id": member_id, "role": "member"},
-                headers={"X-User-ID": owner_id}
+                headers={"X-User-ID": owner_id},
             )
             assert add_member_response.status_code in [200, 201], "Failed to add member"
 
@@ -381,23 +401,21 @@ class TestCriticalFlowSmoke:
             context_response = await http_client.post(
                 f"{API_V1}/context",
                 json={"organization_id": org_id},
-                headers={"X-User-ID": member_id}
+                headers={"X-User-ID": member_id},
             )
             assert context_response.status_code == 200, "Failed to switch context"
             assert context_response.json()["context_type"] == "organization"
 
             # Step 4: Verify member list
             members_response = await http_client.get(
-                f"{API_V1}/{org_id}/members",
-                headers={"X-User-ID": owner_id}
+                f"{API_V1}/{org_id}/members", headers={"X-User-ID": owner_id}
             )
             assert members_response.status_code == 200, "Failed to get members"
             assert len(members_response.json()["members"]) >= 2, "Should have 2 members"
 
             # Step 5: Delete organization
             delete_response = await http_client.delete(
-                f"{API_V1}/{org_id}",
-                headers={"X-User-ID": owner_id}
+                f"{API_V1}/{org_id}", headers={"X-User-ID": owner_id}
             )
             assert delete_response.status_code == 200, "Failed to delete org"
 
@@ -406,8 +424,7 @@ class TestCriticalFlowSmoke:
             if org_id:
                 try:
                     await http_client.delete(
-                        f"{API_V1}/{org_id}",
-                        headers={"X-User-ID": owner_id}
+                        f"{API_V1}/{org_id}", headers={"X-User-ID": owner_id}
                     )
                 except Exception:
                     pass
@@ -416,6 +433,7 @@ class TestCriticalFlowSmoke:
 # =============================================================================
 # SMOKE TEST 8: Error Handling
 # =============================================================================
+
 
 class TestErrorHandlingSmoke:
     """Smoke: Error handling sanity checks"""
@@ -426,24 +444,27 @@ class TestErrorHandlingSmoke:
         user_id = unique_user_id()
 
         response = await http_client.get(
-            f"{API_V1}/{fake_org_id}",
-            headers={"X-User-ID": user_id}
+            f"{API_V1}/{fake_org_id}", headers={"X-User-ID": user_id}
         )
 
         # Either 404 (not found) or 403 (access denied) is acceptable
-        assert response.status_code in [403, 404], \
-            f"Expected 403/404, got {response.status_code}"
+        assert response.status_code in [
+            403,
+            404,
+        ], f"Expected 403/404, got {response.status_code}"
 
     async def test_invalid_request_returns_error(self, http_client):
         """SMOKE: Invalid request returns 400 or 422"""
         response = await http_client.post(
             API_V1,
             json={"name": ""},  # Empty name
-            headers={"X-User-ID": unique_user_id()}
+            headers={"X-User-ID": unique_user_id()},
         )
 
-        assert response.status_code in [400, 422], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+        ], f"Expected 400/422, got {response.status_code}"
 
 
 # =============================================================================

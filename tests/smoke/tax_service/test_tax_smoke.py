@@ -5,15 +5,17 @@ Port: 8253 (PORT env var)
 Routes: /api/v1/tax/...
 """
 
-import os
 import uuid
 
 import httpx
 import pytest
 
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
+
 pytestmark = pytest.mark.smoke
 
-BASE_URL = os.getenv("TAX_SERVICE_URL", "http://localhost:8253")
+BASE_URL = resolve_base_url("tax_service", "TAX_SERVICE_URL")
+HEALTH_URL = resolve_service_url("tax_service", "/health", "TAX_SERVICE_URL")
 TIMEOUT = 15.0
 
 INTERNAL_HEADERS = {
@@ -30,7 +32,7 @@ class TestTaxHealthSmoke:
     @pytest.mark.asyncio
     async def test_health(self):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(f"{BASE_URL}/health")
+            resp = await client.get(HEALTH_URL)
             assert resp.status_code == 200
 
 
@@ -63,9 +65,10 @@ class TestTaxCalculationSmoke:
                     },
                 },
             )
-            assert resp.status_code in (200, 201), (
-                f"Tax calc failed: {resp.status_code} {resp.text[:200]}"
-            )
+            assert resp.status_code in (
+                200,
+                201,
+            ), f"Tax calc failed: {resp.status_code} {resp.text[:200]}"
             data = resp.json()
             # Should return tax amount and breakdown
             assert "total_tax" in data or "tax_amount" in data or "amount" in data
