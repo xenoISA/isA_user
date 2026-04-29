@@ -21,10 +21,9 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from core.config_manager import ConfigManager
-from core.nats_client import Event
 from fastapi import HTTPException, UploadFile
 
 # Use isa-common's AsyncMinIOClient for async gRPC
@@ -32,7 +31,6 @@ from isa_common import AsyncMinIOClient
 
 from .clients import StorageOrganizationClient
 from .models import (
-    FileAccessLevel,
     FileInfoResponse,
     FileListRequest,
     FileShare,
@@ -89,7 +87,7 @@ class StorageService:
         )
 
         # Get MinIO credentials from environment
-        import os
+
         minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
         minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 
@@ -104,7 +102,7 @@ class StorageService:
         )
         self._bucket_initialized = False  # Lazy init flag
 
-        self.bucket_name = getattr(config, "minio_bucket_name", "isa-storage")
+        self.bucket_name = getattr(config, "minio_bucket_name", None) or "isa-storage"
 
         # 文件配置
         self.allowed_types = [
@@ -473,8 +471,10 @@ class StorageService:
 
         # Batch generate presigned URLs for expired ones
         files_needing_urls = [
-            f for f in files
-            if not f.download_url or f.download_url_expires_at < datetime.now(timezone.utc)
+            f
+            for f in files
+            if not f.download_url
+            or f.download_url_expires_at < datetime.now(timezone.utc)
         ]
 
         if files_needing_urls:
@@ -533,8 +533,7 @@ class StorageService:
             try:
                 async with self.minio_client:
                     await self.minio_client.delete_object(
-                        file.bucket_name,
-                        file.object_name
+                        file.bucket_name, file.object_name
                     )
             except Exception as e:
                 logger.error(f"Error deleting file from MinIO: {e}")

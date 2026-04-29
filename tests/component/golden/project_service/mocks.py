@@ -17,6 +17,9 @@ class MockProjectRepository:
         self._files: Dict[str, Dict[str, Any]] = {}
         self._should_fail: Optional[Exception] = None
 
+    async def initialize(self) -> None:
+        return None
+
     def set_failure(self, error: Exception):
         self._should_fail = error
 

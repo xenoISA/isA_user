@@ -68,6 +68,14 @@ class TestProjectFileEndpoints:
             "proj1", "user1", 100, 0
         )
 
+    async def test_list_project_files_forwards_limit_and_offset(
+        self, client, mock_service
+    ):
+        response = await client.get("/api/v1/projects/proj1/files?limit=10&offset=5")
+
+        assert response.status_code == 200
+        mock_service.list_project_files.assert_awaited_with("proj1", "user1", 10, 5)
+
     async def test_upload_project_file_accepts_multipart_file(
         self, client, mock_service
     ):

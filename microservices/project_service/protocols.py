@@ -68,6 +68,9 @@ class ProjectStorageError(ProjectServiceException):
 class ProjectRepositoryProtocol(Protocol):
     """Interface for Project Repository — implementations provide data access."""
 
+    async def initialize(self) -> None:
+        ...
+
     async def create_project(
         self,
         user_id: str,
