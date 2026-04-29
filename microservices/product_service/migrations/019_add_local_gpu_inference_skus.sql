@@ -3,7 +3,7 @@
 -- These rows intentionally use NULL model_name so product_service can
 -- fall back to engine-level pricing when model-specific catalog rows do not exist.
 
-INSERT INTO cost_definitions (
+INSERT INTO product.cost_definitions (
     cost_id,
     product_id,
     service_type,

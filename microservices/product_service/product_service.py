@@ -112,6 +112,7 @@ class ProductService:
     async def lookup_cost(
         self,
         service_type: str,
+        product_id: Optional[str] = None,
         provider: Optional[str] = None,
         model_name: Optional[str] = None,
         operation_type: Optional[str] = None,
@@ -133,6 +134,8 @@ class ProductService:
         region: Optional[str] = None,
         preemptible: Optional[bool] = None,
         tool_name: Optional[str] = None,
+        unit_type: Optional[str] = None,
+        meter_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lookup an active cost definition in a shape compatible with isa_model."""
         try:
@@ -148,13 +151,40 @@ class ProductService:
             )
 
             if service_type == "model_inference":
+                resolved_service_surface = service_surface or product_id
                 return self._build_model_inference_cost_lookup(
                     cost_definitions,
                     lookup_name,
+                    service_surface=resolved_service_surface,
                     provider=provider,
                     backend=backend,
                     engine_used=engine_used,
+                    gpu_type=gpu_type,
+                    gpu_count=gpu_count,
+                    prefill_seconds=prefill_seconds,
+                    generation_seconds=generation_seconds,
+                    queue_seconds=queue_seconds,
+                    cold_start_seconds=cold_start_seconds,
+                    warm_path=warm_path,
+                    kv_cache_peak_bytes=kv_cache_peak_bytes,
+                    kv_cache_gib_seconds=kv_cache_gib_seconds,
+                    scheduler_share=scheduler_share,
+                    batch_share=batch_share,
+                    tenancy_mode=tenancy_mode,
+                    region=region,
+                    preemptible=preemptible,
                 )
+
+            if product_id:
+                product_backed_lookup = await self._build_product_backed_cost_lookup(
+                    product_id=product_id,
+                    service_type=service_type,
+                    operation_type=operation_type,
+                    requested_unit_type=unit_type,
+                    meter_type=meter_type,
+                )
+                if product_backed_lookup:
+                    return product_backed_lookup
 
             cost_definition = self._select_cost_definition(
                 cost_definitions,
@@ -264,6 +294,101 @@ class ProductService:
             response.update(extra_fields)
         return response
 
+    async def _build_product_backed_cost_lookup(
+        self,
+        *,
+        product_id: str,
+        service_type: str,
+        operation_type: Optional[str],
+        requested_unit_type: Optional[str],
+        meter_type: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        product = await self.repository.get_product(product_id)
+        if not product or not product.is_active:
+            return None
+
+        pricing_rows = await self.repository.get_product_pricing_rows(product_id)
+        selected_row = (
+            self._select_pricing_row_for_quantity(pricing_rows, Decimal("1"))
+            if pricing_rows
+            else None
+        )
+        resolved_unit_type = (
+            self._resolve_unit_type(
+                requested_unit_type=requested_unit_type,
+                product=product,
+                pricing_row=selected_row,
+            )
+            if selected_row
+            else (
+                requested_unit_type
+                or self._infer_unit_type_from_billing_interval(product.billing_interval)
+            )
+        )
+
+        row_metadata = selected_row.get("metadata") if selected_row else {}
+        if isinstance(row_metadata, str):
+            try:
+                import json as _json
+
+                row_metadata = _json.loads(row_metadata)
+            except Exception:
+                row_metadata = {}
+        if not isinstance(row_metadata, dict):
+            row_metadata = {}
+
+        product_metadata = dict(product.metadata or {})
+        resolved_service_type = service_type or str(
+            product_metadata.get("service_type") or product.service_type or "other"
+        )
+        resolved_operation_type = (
+            operation_type
+            or row_metadata.get("meter_type")
+            or meter_type
+            or product_metadata.get("operation_type")
+            or product.billing_profile.primary_meter
+        )
+        unit_price = Decimal(
+            str((selected_row or {}).get("unit_price", product.base_price))
+        )
+
+        free_tier_limit = 0
+        if isinstance(product.quota_limits, dict):
+            for key in ("free_tier_seconds", "free_tier_limit"):
+                if product.quota_limits.get(key) is not None:
+                    free_tier_limit = product.quota_limits.get(key)
+                    break
+
+        cost_definition = {
+            "cost_id": (selected_row or {}).get("pricing_id") or product.product_id,
+            "product_id": product.product_id,
+            "service_type": resolved_service_type,
+            "provider": product.provider or product_metadata.get("provider"),
+            "model_name": None,
+            "operation_type": resolved_operation_type,
+            "cost_per_unit": unit_price,
+            "unit_type": resolved_unit_type,
+            "unit_size": 1,
+            "free_tier_limit": free_tier_limit,
+            "free_tier_period": "monthly",
+            "is_active": product.is_active,
+            "description": product.description,
+            "metadata": {
+                **product_metadata,
+                **row_metadata,
+                "product_type": product.product_type.value,
+                "billing_interval": product.billing_interval,
+            },
+        }
+        return self._format_cost_lookup_response(
+            cost_definition,
+            extra_fields={
+                "product_backed_pricing": True,
+                "pricing_model_id": (selected_row or {}).get("pricing_id"),
+                "tier_name": (selected_row or {}).get("tier_name"),
+            },
+        )
+
     @staticmethod
     def _select_cost_definition(
         cost_definitions: List[Dict[str, Any]],
@@ -334,6 +459,83 @@ class ProductService:
 
         return normalized_backend, normalized_engine
 
+    @staticmethod
+    def _normalize_runtime_bool(value: Optional[Any]) -> Optional[bool]:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return None
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return None
+
+    @staticmethod
+    def _normalize_runtime_float(value: Optional[Any]) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _normalize_runtime_int(value: Optional[Any]) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _build_requested_model_inference_runtime(
+        self,
+        provider: Optional[str],
+        backend: Optional[str],
+        engine_used: Optional[str],
+        gpu_type: Optional[str],
+        gpu_count: Optional[int],
+        prefill_seconds: Optional[float],
+        generation_seconds: Optional[float],
+        queue_seconds: Optional[float],
+        cold_start_seconds: Optional[float],
+        warm_path: Optional[bool],
+        kv_cache_peak_bytes: Optional[int],
+        kv_cache_gib_seconds: Optional[float],
+        scheduler_share: Optional[float],
+        batch_share: Optional[float],
+        tenancy_mode: Optional[str],
+        region: Optional[str],
+        preemptible: Optional[bool],
+    ) -> Dict[str, Any]:
+        normalized_backend, normalized_engine = self._normalize_model_inference_runtime(
+            provider,
+            backend,
+            engine_used,
+        )
+        return {
+            "backend": normalized_backend,
+            "engine_used": normalized_engine,
+            "gpu_type": self._normalize_runtime_value(gpu_type),
+            "gpu_count": self._normalize_runtime_int(gpu_count),
+            "prefill_seconds": self._normalize_runtime_float(prefill_seconds),
+            "generation_seconds": self._normalize_runtime_float(generation_seconds),
+            "queue_seconds": self._normalize_runtime_float(queue_seconds),
+            "cold_start_seconds": self._normalize_runtime_float(cold_start_seconds),
+            "warm_path": self._normalize_runtime_bool(warm_path),
+            "kv_cache_peak_bytes": self._normalize_runtime_int(kv_cache_peak_bytes),
+            "kv_cache_gib_seconds": self._normalize_runtime_float(kv_cache_gib_seconds),
+            "scheduler_share": self._normalize_runtime_float(scheduler_share),
+            "batch_share": self._normalize_runtime_float(batch_share),
+            "tenancy_mode": self._normalize_runtime_value(tenancy_mode),
+            "region": self._normalize_runtime_value(region),
+            "preemptible": self._normalize_runtime_bool(preemptible),
+        }
+
     def _extract_model_inference_runtime(self, cost_definition: Dict[str, Any]):
         metadata = cost_definition.get("metadata") or {}
         if not isinstance(metadata, dict):
@@ -346,20 +548,75 @@ class ProductService:
         )
         return backend, engine_used
 
+    def _extract_model_inference_runtime_metadata(
+        self,
+        cost_definition: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        metadata = cost_definition.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        backend, engine_used = self._extract_model_inference_runtime(cost_definition)
+        return {
+            "backend": backend,
+            "engine_used": engine_used,
+            "service_surface": self._normalize_runtime_value(
+                metadata.get("service_surface")
+            ),
+            "gpu_type": self._normalize_runtime_value(metadata.get("gpu_type")),
+            "min_gpu_count": self._normalize_runtime_int(metadata.get("min_gpu_count")),
+            "max_gpu_count": self._normalize_runtime_int(metadata.get("max_gpu_count")),
+            "tenancy_mode": self._normalize_runtime_value(metadata.get("tenancy_mode")),
+            "region": self._normalize_runtime_value(metadata.get("region")),
+            "preemptible": self._normalize_runtime_bool(metadata.get("preemptible")),
+            "sku_family": self._normalize_runtime_value(metadata.get("sku_family")),
+        }
+
     def _score_model_inference_definition(
         self,
         cost_definition: Dict[str, Any],
         model_name: Optional[str],
+        service_surface: Optional[str],
         provider: Optional[str],
         backend: Optional[str],
         engine_used: Optional[str],
+        gpu_type: Optional[str] = None,
+        gpu_count: Optional[int] = None,
+        prefill_seconds: Optional[float] = None,
+        generation_seconds: Optional[float] = None,
+        queue_seconds: Optional[float] = None,
+        cold_start_seconds: Optional[float] = None,
+        warm_path: Optional[bool] = None,
+        kv_cache_peak_bytes: Optional[int] = None,
+        kv_cache_gib_seconds: Optional[float] = None,
+        scheduler_share: Optional[float] = None,
+        batch_share: Optional[float] = None,
+        tenancy_mode: Optional[str] = None,
+        region: Optional[str] = None,
+        preemptible: Optional[bool] = None,
     ) -> Optional[int]:
         normalized_provider = self._normalize_runtime_value(provider)
-        requested_backend, requested_engine = self._normalize_model_inference_runtime(
+        requested_service_surface = self._normalize_runtime_value(service_surface)
+        requested_runtime = self._build_requested_model_inference_runtime(
             provider,
             backend,
             engine_used,
+            gpu_type,
+            gpu_count,
+            prefill_seconds,
+            generation_seconds,
+            queue_seconds,
+            cold_start_seconds,
+            warm_path,
+            kv_cache_peak_bytes,
+            kv_cache_gib_seconds,
+            scheduler_share,
+            batch_share,
+            tenancy_mode,
+            region,
+            preemptible,
         )
+        requested_backend = requested_runtime.get("backend")
+        requested_engine = requested_runtime.get("engine_used")
         item_provider = self._normalize_runtime_value(cost_definition.get("provider"))
         item_model_name = cost_definition.get("model_name")
         if model_name and item_model_name not in (model_name, None, ""):
@@ -372,12 +629,51 @@ class ProductService:
             if item_provider not in allowed_providers and item_provider is not None:
                 return None
 
-        item_backend, item_engine = self._extract_model_inference_runtime(
-            cost_definition
-        )
+        item_runtime = self._extract_model_inference_runtime_metadata(cost_definition)
+        item_backend = item_runtime.get("backend")
+        item_engine = item_runtime.get("engine_used")
+        item_service_surface = item_runtime.get("service_surface")
+        if requested_service_surface and item_service_surface not in (
+            None,
+            requested_service_surface,
+        ):
+            return None
         if requested_engine and item_engine not in (None, requested_engine):
             return None
         if requested_backend and item_backend not in (None, requested_backend):
+            return None
+        if requested_runtime.get("gpu_type") and item_runtime.get("gpu_type") not in (
+            None,
+            requested_runtime["gpu_type"],
+        ):
+            return None
+        if requested_runtime.get("tenancy_mode") and item_runtime.get(
+            "tenancy_mode"
+        ) not in (None, requested_runtime["tenancy_mode"]):
+            return None
+        if requested_runtime.get("region") and item_runtime.get("region") not in (
+            None,
+            requested_runtime["region"],
+        ):
+            return None
+        if requested_runtime.get("preemptible") is not None and item_runtime.get(
+            "preemptible"
+        ) not in (None, requested_runtime["preemptible"]):
+            return None
+        requested_gpu_count = requested_runtime.get("gpu_count")
+        min_gpu_count = item_runtime.get("min_gpu_count")
+        max_gpu_count = item_runtime.get("max_gpu_count")
+        if (
+            requested_gpu_count is not None
+            and min_gpu_count is not None
+            and requested_gpu_count < min_gpu_count
+        ):
+            return None
+        if (
+            requested_gpu_count is not None
+            and max_gpu_count is not None
+            and requested_gpu_count > max_gpu_count
+        ):
             return None
 
         score = 0
@@ -397,6 +693,12 @@ class ProductService:
         elif item_provider is None:
             score += 5
 
+        if requested_service_surface:
+            if item_service_surface == requested_service_surface:
+                score += 120
+        elif item_service_surface is not None:
+            score -= 12
+
         if requested_engine:
             if item_engine == requested_engine:
                 score += 200
@@ -409,6 +711,38 @@ class ProductService:
         elif item_backend is not None:
             score -= 10
 
+        if requested_runtime.get("gpu_type"):
+            if item_runtime.get("gpu_type") == requested_runtime["gpu_type"]:
+                score += 80
+        elif item_runtime.get("gpu_type") is not None:
+            score -= 8
+
+        if requested_runtime.get("tenancy_mode"):
+            if item_runtime.get("tenancy_mode") == requested_runtime["tenancy_mode"]:
+                score += 70
+        elif item_runtime.get("tenancy_mode") is not None:
+            score -= 6
+
+        if requested_runtime.get("region"):
+            if item_runtime.get("region") == requested_runtime["region"]:
+                score += 50
+        elif item_runtime.get("region") is not None:
+            score -= 4
+
+        if requested_runtime.get("preemptible") is not None:
+            if item_runtime.get("preemptible") == requested_runtime["preemptible"]:
+                score += 40
+        elif item_runtime.get("preemptible") is not None:
+            score -= 4
+
+        if requested_gpu_count is not None and (
+            min_gpu_count is not None or max_gpu_count is not None
+        ):
+            score += 20
+
+        if item_runtime.get("sku_family") == "local_gpu_inference":
+            score += 5
+
         if cost_definition.get("operation_type") in {"input", "output"}:
             score += 1
 
@@ -419,9 +753,24 @@ class ProductService:
         cost_definitions: List[Dict[str, Any]],
         operation_type: Optional[str],
         model_name: Optional[str],
+        service_surface: Optional[str],
         provider: Optional[str],
         backend: Optional[str],
         engine_used: Optional[str],
+        gpu_type: Optional[str] = None,
+        gpu_count: Optional[int] = None,
+        prefill_seconds: Optional[float] = None,
+        generation_seconds: Optional[float] = None,
+        queue_seconds: Optional[float] = None,
+        cold_start_seconds: Optional[float] = None,
+        warm_path: Optional[bool] = None,
+        kv_cache_peak_bytes: Optional[int] = None,
+        kv_cache_gib_seconds: Optional[float] = None,
+        scheduler_share: Optional[float] = None,
+        batch_share: Optional[float] = None,
+        tenancy_mode: Optional[str] = None,
+        region: Optional[str] = None,
+        preemptible: Optional[bool] = None,
     ) -> Optional[Dict[str, Any]]:
         best_definition = None
         best_score = None
@@ -431,9 +780,24 @@ class ProductService:
             score = self._score_model_inference_definition(
                 item,
                 model_name=model_name,
+                service_surface=service_surface,
                 provider=provider,
                 backend=backend,
                 engine_used=engine_used,
+                gpu_type=gpu_type,
+                gpu_count=gpu_count,
+                prefill_seconds=prefill_seconds,
+                generation_seconds=generation_seconds,
+                queue_seconds=queue_seconds,
+                cold_start_seconds=cold_start_seconds,
+                warm_path=warm_path,
+                kv_cache_peak_bytes=kv_cache_peak_bytes,
+                kv_cache_gib_seconds=kv_cache_gib_seconds,
+                scheduler_share=scheduler_share,
+                batch_share=batch_share,
+                tenancy_mode=tenancy_mode,
+                region=region,
+                preemptible=preemptible,
             )
             if score is None:
                 continue
@@ -442,29 +806,135 @@ class ProductService:
                 best_score = score
         return best_definition
 
+    def _build_model_inference_runtime_components(
+        self,
+        cost_definitions: List[Dict[str, Any]],
+        model_name: Optional[str],
+        service_surface: Optional[str],
+        provider: Optional[str],
+        backend: Optional[str],
+        engine_used: Optional[str],
+        gpu_type: Optional[str],
+        gpu_count: Optional[int],
+        prefill_seconds: Optional[float],
+        generation_seconds: Optional[float],
+        queue_seconds: Optional[float],
+        cold_start_seconds: Optional[float],
+        warm_path: Optional[bool],
+        kv_cache_peak_bytes: Optional[int],
+        kv_cache_gib_seconds: Optional[float],
+        scheduler_share: Optional[float],
+        batch_share: Optional[float],
+        tenancy_mode: Optional[str],
+        region: Optional[str],
+        preemptible: Optional[bool],
+    ) -> List[Dict[str, Any]]:
+        component_definitions: List[Dict[str, Any]] = []
+        seen_cost_ids = set()
+        for operation_type in (
+            "gpu_seconds",
+            "prefill_seconds",
+            "queue_seconds",
+            "cold_start_seconds",
+            "kv_cache_gib_seconds",
+        ):
+            component = self._select_best_model_inference_definition(
+                cost_definitions,
+                operation_type=operation_type,
+                model_name=model_name,
+                service_surface=service_surface,
+                provider=provider,
+                backend=backend,
+                engine_used=engine_used,
+                gpu_type=gpu_type,
+                gpu_count=gpu_count,
+                prefill_seconds=prefill_seconds,
+                generation_seconds=generation_seconds,
+                queue_seconds=queue_seconds,
+                cold_start_seconds=cold_start_seconds,
+                warm_path=warm_path,
+                kv_cache_peak_bytes=kv_cache_peak_bytes,
+                kv_cache_gib_seconds=kv_cache_gib_seconds,
+                scheduler_share=scheduler_share,
+                batch_share=batch_share,
+                tenancy_mode=tenancy_mode,
+                region=region,
+                preemptible=preemptible,
+            )
+            cost_id = component.get("cost_id") if component else None
+            if component and cost_id not in seen_cost_ids:
+                component_definitions.append(component)
+                seen_cost_ids.add(cost_id)
+        return component_definitions
+
     def _build_model_inference_cost_lookup(
         self,
         cost_definitions: List[Dict[str, Any]],
         model_name: Optional[str],
+        service_surface: Optional[str] = None,
         provider: Optional[str] = None,
         backend: Optional[str] = None,
         engine_used: Optional[str] = None,
+        gpu_type: Optional[str] = None,
+        gpu_count: Optional[int] = None,
+        prefill_seconds: Optional[float] = None,
+        generation_seconds: Optional[float] = None,
+        queue_seconds: Optional[float] = None,
+        cold_start_seconds: Optional[float] = None,
+        warm_path: Optional[bool] = None,
+        kv_cache_peak_bytes: Optional[int] = None,
+        kv_cache_gib_seconds: Optional[float] = None,
+        scheduler_share: Optional[float] = None,
+        batch_share: Optional[float] = None,
+        tenancy_mode: Optional[str] = None,
+        region: Optional[str] = None,
+        preemptible: Optional[bool] = None,
     ) -> Dict[str, Any]:
         input_definition = self._select_best_model_inference_definition(
             cost_definitions,
             operation_type="input",
             model_name=model_name,
+            service_surface=service_surface,
             provider=provider,
             backend=backend,
             engine_used=engine_used,
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
+            prefill_seconds=prefill_seconds,
+            generation_seconds=generation_seconds,
+            queue_seconds=queue_seconds,
+            cold_start_seconds=cold_start_seconds,
+            warm_path=warm_path,
+            kv_cache_peak_bytes=kv_cache_peak_bytes,
+            kv_cache_gib_seconds=kv_cache_gib_seconds,
+            scheduler_share=scheduler_share,
+            batch_share=batch_share,
+            tenancy_mode=tenancy_mode,
+            region=region,
+            preemptible=preemptible,
         )
         output_definition = self._select_best_model_inference_definition(
             cost_definitions,
             operation_type="output",
             model_name=model_name,
+            service_surface=service_surface,
             provider=provider,
             backend=backend,
             engine_used=engine_used,
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
+            prefill_seconds=prefill_seconds,
+            generation_seconds=generation_seconds,
+            queue_seconds=queue_seconds,
+            cold_start_seconds=cold_start_seconds,
+            warm_path=warm_path,
+            kv_cache_peak_bytes=kv_cache_peak_bytes,
+            kv_cache_gib_seconds=kv_cache_gib_seconds,
+            scheduler_share=scheduler_share,
+            batch_share=batch_share,
+            tenancy_mode=tenancy_mode,
+            region=region,
+            preemptible=preemptible,
         )
         primary = (
             input_definition
@@ -473,9 +943,24 @@ class ProductService:
                 cost_definitions,
                 operation_type=None,
                 model_name=model_name,
+                service_surface=service_surface,
                 provider=provider,
                 backend=backend,
                 engine_used=engine_used,
+                gpu_type=gpu_type,
+                gpu_count=gpu_count,
+                prefill_seconds=prefill_seconds,
+                generation_seconds=generation_seconds,
+                queue_seconds=queue_seconds,
+                cold_start_seconds=cold_start_seconds,
+                warm_path=warm_path,
+                kv_cache_peak_bytes=kv_cache_peak_bytes,
+                kv_cache_gib_seconds=kv_cache_gib_seconds,
+                scheduler_share=scheduler_share,
+                batch_share=batch_share,
+                tenancy_mode=tenancy_mode,
+                region=region,
+                preemptible=preemptible,
             )
         )
         if not primary:
@@ -483,6 +968,55 @@ class ProductService:
 
         resolved_input = input_definition or primary
         resolved_output = output_definition
+        requested_runtime = self._build_requested_model_inference_runtime(
+            provider,
+            backend,
+            engine_used,
+            gpu_type,
+            gpu_count,
+            prefill_seconds,
+            generation_seconds,
+            queue_seconds,
+            cold_start_seconds,
+            warm_path,
+            kv_cache_peak_bytes,
+            kv_cache_gib_seconds,
+            scheduler_share,
+            batch_share,
+            tenancy_mode,
+            region,
+            preemptible,
+        )
+        runtime_cost_components: List[Dict[str, Any]] = []
+        if requested_runtime.get("backend") in {
+            "local_gpu",
+            "modal",
+        } or service_surface in {
+            "local-gpu",
+            "cloud-gpu",
+        }:
+            runtime_cost_components = self._build_model_inference_runtime_components(
+                cost_definitions,
+                model_name=model_name,
+                service_surface=service_surface,
+                provider=provider,
+                backend=backend,
+                engine_used=engine_used,
+                gpu_type=gpu_type,
+                gpu_count=gpu_count,
+                prefill_seconds=prefill_seconds,
+                generation_seconds=generation_seconds,
+                queue_seconds=queue_seconds,
+                cold_start_seconds=cold_start_seconds,
+                warm_path=warm_path,
+                kv_cache_peak_bytes=kv_cache_peak_bytes,
+                kv_cache_gib_seconds=kv_cache_gib_seconds,
+                scheduler_share=scheduler_share,
+                batch_share=batch_share,
+                tenancy_mode=tenancy_mode,
+                region=region,
+                preemptible=preemptible,
+            )
 
         return self._format_cost_lookup_response(
             primary,
@@ -509,6 +1043,18 @@ class ProductService:
                 "output_unit_type": (
                     resolved_output.get("unit_type") if resolved_output else None
                 ),
+                "runtime_cost_components": runtime_cost_components,
+                "runtime_pricing_context": {
+                    key: value
+                    for key, value in {
+                        "service_surface": self._normalize_runtime_value(
+                            service_surface
+                        ),
+                        **requested_runtime,
+                    }.items()
+                    if value is not None
+                },
+                "hybrid_pricing_available": bool(runtime_cost_components),
             },
         )
 
@@ -973,9 +1519,11 @@ class ProductService:
                 name=data["product_name"],
                 product_code=data.get("product_code"),
                 description=data.get("description"),
-                product_type=ProductType(data["product_type"])
-                if isinstance(data["product_type"], str)
-                else data["product_type"],
+                product_type=(
+                    ProductType(data["product_type"])
+                    if isinstance(data["product_type"], str)
+                    else data["product_type"]
+                ),
                 base_price=Decimal(str(data.get("base_price", 0))),
                 currency=Currency(data.get("currency", "USD")),
                 billing_interval=data.get("billing_interval"),

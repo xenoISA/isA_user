@@ -10,7 +10,6 @@ from datetime import datetime, date
 from decimal import Decimal
 from pydantic import BaseModel, Field, model_validator
 
-
 # ====================
 # 枚举类型定义
 # ====================
@@ -976,9 +975,12 @@ class CostLookupRequest(BaseModel):
     """Request to look up cost for a specific usage"""
 
     service_type: str
+    product_id: Optional[str] = None
     provider: Optional[str] = None
     model_name: Optional[str] = None
     operation_type: Optional[str] = None
+    unit_type: Optional[str] = None
+    meter_type: Optional[str] = None
     service_surface: Optional[str] = None
     backend: Optional[str] = None
     engine_used: Optional[str] = None
@@ -1009,6 +1011,18 @@ class CostLookupResponse(BaseModel):
     unit_size: Optional[int] = None
     free_tier_limit: Optional[int] = None
     free_tier_period: Optional[str] = None
+    input_cost_per_unit: Optional[int] = None
+    output_cost_per_unit: Optional[int] = None
+    input_unit_size: Optional[int] = None
+    output_unit_size: Optional[int] = None
+    input_unit_type: Optional[str] = None
+    output_unit_type: Optional[str] = None
+    runtime_cost_components: List[CostDefinition] = Field(default_factory=list)
+    runtime_pricing_context: Dict[str, Any] = Field(default_factory=dict)
+    hybrid_pricing_available: bool = False
+    pricing_model_id: Optional[str] = None
+    tier_name: Optional[str] = None
+    product_backed_pricing: bool = False
 
 
 class SubscriptionTierResponse(BaseModel):

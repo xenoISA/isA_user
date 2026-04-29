@@ -425,6 +425,7 @@ async def get_product_pricing(
 @app.get("/api/v1/costs/lookup")
 async def lookup_cost_definition(
     service_type: str = Query(..., description="Billing service type"),
+    product_id: Optional[str] = Query(None, description="Concrete product identifier"),
     provider: Optional[str] = Query(None, description="Provider name"),
     model_name: Optional[str] = Query(None, description="Model identifier"),
     operation_type: Optional[str] = Query(None, description="Operation identifier"),
@@ -450,12 +451,15 @@ async def lookup_cost_definition(
     region: Optional[str] = Query(None, description="Execution region"),
     preemptible: Optional[bool] = Query(None, description="Preemptible runtime"),
     tool_name: Optional[str] = Query(None, description="Tool identifier"),
+    unit_type: Optional[str] = Query(None, description="Requested billing unit type"),
+    meter_type: Optional[str] = Query(None, description="Requested billing meter type"),
     service: ProductService = Depends(get_product_service),
 ):
     """Compatibility endpoint for isa_model pricing lookups."""
     try:
         result = await service.lookup_cost(
             service_type=service_type,
+            product_id=product_id,
             provider=provider,
             model_name=model_name,
             operation_type=operation_type,
@@ -477,6 +481,8 @@ async def lookup_cost_definition(
             region=region,
             preemptible=preemptible,
             tool_name=tool_name,
+            unit_type=unit_type,
+            meter_type=meter_type,
         )
         if not result.get("success"):
             raise HTTPException(
