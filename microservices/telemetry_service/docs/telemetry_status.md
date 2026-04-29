@@ -211,14 +211,14 @@ async def get_user_context(
 - `query_telemetry_data()` - Time-series queries with aggregation
 - `get_device_stats()` - Per-device statistics
 - `get_service_stats()` - Service-wide statistics
-- `subscribe_real_time()` - Create real-time data subscriptions
+- `subscribe_real_time()` - Create durable real-time subscriptions with connect tokens
 - `get_aggregated_data()` - Multi-device aggregation
 
 **Helper Methods:**
 - `_validate_data_point()` - Data type and range validation
 - `_check_alert_rules()` - Evaluate alert conditions
 - `_trigger_alert()` - Create and store alerts
-- `_notify_real_time_subscribers()` - Push to WebSocket subscribers
+- `_notify_real_time_subscribers()` - Publish NATS fanout events for bound WebSocket subscribers
 - `_aggregate_data_points()` - Time-series aggregation logic
 
 ---
@@ -262,9 +262,9 @@ async def get_user_context(
 - `GET /api/v1/stats` - Service-wide statistics
 
 ### Real-time Streaming (3 endpoints)
-- `POST /api/v1/subscribe` - Create real-time subscription
+- `POST /api/v1/subscribe` - Create durable real-time subscription and connect token
 - `DELETE /api/v1/subscribe/{subscription_id}` - Cancel subscription
-- `WS /ws/telemetry/{subscription_id}` - WebSocket data stream
+- `WS /ws/telemetry/{subscription_id}` - WebSocket data stream (requires `?token=...`)
 
 ### Data Export (1 endpoint)
 - `GET /api/v1/export/csv` - Export data as CSV
@@ -297,7 +297,7 @@ async def get_user_context(
 ## ✅ Service Configuration
 
 **Port:** 8225
-**Database Schema:** N/A (in-memory storage)
+**Database Schema:** `telemetry.*` (including `telemetry.real_time_subscriptions`)
 **Service Name:** `telemetry_service`
 **Consul Tags:** `["microservice", "iot", "telemetry", "monitoring", "timeseries", "api", "v1"]`
 

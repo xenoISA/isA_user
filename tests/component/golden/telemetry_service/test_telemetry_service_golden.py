@@ -7,9 +7,9 @@ Uses TelemetryTestDataFactory - zero hardcoded data.
 Usage:
     pytest tests/component/golden/telemetry_service -v
 """
+
 import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import timedelta
 
 from .mocks import MockEventBus
 
@@ -20,7 +20,6 @@ from tests.contracts.telemetry.data_contract import (
     AlertLevel,
     AlertStatus,
     AggregationType,
-    TelemetryDataPointContract,
     TelemetryDataPointBuilder,
     AlertRuleCreateRequestBuilder,
     TelemetryQueryRequestBuilder,
@@ -32,6 +31,7 @@ pytestmark = [pytest.mark.component, pytest.mark.golden, pytest.mark.asyncio]
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def mock_event_bus():
@@ -87,10 +87,13 @@ def telemetry_service_with_data(injected_mock_repo, mock_event_bus):
 # TelemetryService.ingest_telemetry_data() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceIngestGolden:
     """Golden: TelemetryService.ingest_telemetry_data() current behavior"""
 
-    async def test_ingest_single_data_point_success(self, telemetry_service, injected_mock_repo):
+    async def test_ingest_single_data_point_success(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: ingest_telemetry_data ingests single point successfully"""
         from microservices.telemetry_service.models import TelemetryDataPoint
 
@@ -109,7 +112,9 @@ class TestTelemetryServiceIngestGolden:
         assert result["failed_count"] == 0
         injected_mock_repo.assert_called("ingest_data_points")
 
-    async def test_ingest_multiple_data_points_success(self, telemetry_service, injected_mock_repo):
+    async def test_ingest_multiple_data_points_success(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: ingest_telemetry_data ingests multiple points successfully"""
         from microservices.telemetry_service.models import TelemetryDataPoint
 
@@ -129,7 +134,9 @@ class TestTelemetryServiceIngestGolden:
         assert result["ingested_count"] == 5
         assert result["total_count"] == 5
 
-    async def test_ingest_empty_list_success(self, telemetry_service, injected_mock_repo):
+    async def test_ingest_empty_list_success(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: ingest_telemetry_data handles empty list"""
         device_id = TelemetryTestDataFactory.make_device_id()
 
@@ -138,7 +145,9 @@ class TestTelemetryServiceIngestGolden:
         assert result["ingested_count"] == 0
         assert result["total_count"] == 0
 
-    async def test_ingest_publishes_event_on_success(self, telemetry_service, injected_mock_repo, mock_event_bus):
+    async def test_ingest_publishes_event_on_success(
+        self, telemetry_service, injected_mock_repo, mock_event_bus
+    ):
         """GOLDEN: ingest_telemetry_data publishes telemetry.data.received event"""
         from microservices.telemetry_service.models import TelemetryDataPoint
 
@@ -154,7 +163,9 @@ class TestTelemetryServiceIngestGolden:
         # Event should be published
         assert mock_event_bus.get_published_count() >= 1
 
-    async def test_ingest_handles_repository_error(self, telemetry_service, injected_mock_repo):
+    async def test_ingest_handles_repository_error(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: ingest_telemetry_data handles repository errors gracefully"""
         from microservices.telemetry_service.models import TelemetryDataPoint
 
@@ -172,7 +183,9 @@ class TestTelemetryServiceIngestGolden:
         assert result["success"] is False
         assert "error" in result
 
-    async def test_ingest_with_string_value(self, telemetry_service, injected_mock_repo):
+    async def test_ingest_with_string_value(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: ingest_telemetry_data handles string values"""
         from microservices.telemetry_service.models import TelemetryDataPoint
 
@@ -188,7 +201,9 @@ class TestTelemetryServiceIngestGolden:
         assert result["success"] is True
         assert result["ingested_count"] == 1
 
-    async def test_ingest_with_boolean_value(self, telemetry_service, injected_mock_repo):
+    async def test_ingest_with_boolean_value(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: ingest_telemetry_data handles boolean values"""
         from microservices.telemetry_service.models import TelemetryDataPoint
 
@@ -242,10 +257,13 @@ class TestTelemetryServiceIngestGolden:
 # TelemetryService.create_metric_definition() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceMetricDefinitionGolden:
     """Golden: TelemetryService.create_metric_definition() current behavior"""
 
-    async def test_create_metric_definition_success(self, telemetry_service, injected_mock_repo):
+    async def test_create_metric_definition_success(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_metric_definition creates metric definition"""
         user_id = TelemetryTestDataFactory.make_user_id()
         metric_data = {
@@ -263,7 +281,9 @@ class TestTelemetryServiceMetricDefinitionGolden:
         assert result.name == metric_data["name"]
         injected_mock_repo.assert_called("create_metric_definition")
 
-    async def test_create_metric_definition_with_min_max(self, telemetry_service, injected_mock_repo):
+    async def test_create_metric_definition_with_min_max(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_metric_definition accepts min/max values"""
         user_id = TelemetryTestDataFactory.make_user_id()
         min_val = TelemetryTestDataFactory.make_boundary_temperature_min()
@@ -282,7 +302,9 @@ class TestTelemetryServiceMetricDefinitionGolden:
         assert result.min_value == min_val
         assert result.max_value == max_val
 
-    async def test_create_metric_definition_publishes_event(self, telemetry_service, injected_mock_repo, mock_event_bus):
+    async def test_create_metric_definition_publishes_event(
+        self, telemetry_service, injected_mock_repo, mock_event_bus
+    ):
         """GOLDEN: create_metric_definition publishes metric.defined event"""
         user_id = TelemetryTestDataFactory.make_user_id()
         metric_data = {
@@ -294,7 +316,9 @@ class TestTelemetryServiceMetricDefinitionGolden:
 
         assert mock_event_bus.get_published_count() >= 1
 
-    async def test_create_metric_definition_sets_defaults(self, telemetry_service, injected_mock_repo):
+    async def test_create_metric_definition_sets_defaults(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_metric_definition sets default retention and aggregation"""
         user_id = TelemetryTestDataFactory.make_user_id()
         metric_data = {
@@ -308,7 +332,9 @@ class TestTelemetryServiceMetricDefinitionGolden:
         assert result.retention_days == 90  # Default
         assert result.aggregation_interval == 60  # Default
 
-    async def test_create_metric_definition_with_tags(self, telemetry_service, injected_mock_repo):
+    async def test_create_metric_definition_with_tags(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_metric_definition accepts tags"""
         user_id = TelemetryTestDataFactory.make_user_id()
         tags = TelemetryTestDataFactory.make_metric_tags()
@@ -323,7 +349,9 @@ class TestTelemetryServiceMetricDefinitionGolden:
         assert result is not None
         assert result.tags == tags
 
-    async def test_create_metric_definition_handles_error(self, telemetry_service, injected_mock_repo):
+    async def test_create_metric_definition_handles_error(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_metric_definition returns None on error"""
         injected_mock_repo.set_error(Exception("Database error"))
 
@@ -342,10 +370,13 @@ class TestTelemetryServiceMetricDefinitionGolden:
 # TelemetryService.create_alert_rule() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceAlertRuleGolden:
     """Golden: TelemetryService.create_alert_rule() current behavior"""
 
-    async def test_create_alert_rule_success(self, telemetry_service, injected_mock_repo):
+    async def test_create_alert_rule_success(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_alert_rule creates alert rule"""
         user_id = TelemetryTestDataFactory.make_user_id()
         rule_data = {
@@ -362,7 +393,9 @@ class TestTelemetryServiceAlertRuleGolden:
         assert result.name == rule_data["name"]
         injected_mock_repo.assert_called("create_alert_rule")
 
-    async def test_create_alert_rule_with_level(self, telemetry_service, injected_mock_repo):
+    async def test_create_alert_rule_with_level(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_alert_rule accepts alert level"""
         user_id = TelemetryTestDataFactory.make_user_id()
         rule_data = {
@@ -378,7 +411,9 @@ class TestTelemetryServiceAlertRuleGolden:
         assert result is not None
         assert result.level == AlertLevel.CRITICAL
 
-    async def test_create_alert_rule_with_device_filter(self, telemetry_service, injected_mock_repo):
+    async def test_create_alert_rule_with_device_filter(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_alert_rule accepts device_ids filter"""
         user_id = TelemetryTestDataFactory.make_user_id()
         device_ids = TelemetryTestDataFactory.make_device_ids()
@@ -395,7 +430,9 @@ class TestTelemetryServiceAlertRuleGolden:
         assert result is not None
         assert result.device_ids == device_ids
 
-    async def test_create_alert_rule_publishes_event(self, telemetry_service, injected_mock_repo, mock_event_bus):
+    async def test_create_alert_rule_publishes_event(
+        self, telemetry_service, injected_mock_repo, mock_event_bus
+    ):
         """GOLDEN: create_alert_rule publishes alert.rule.created event"""
         user_id = TelemetryTestDataFactory.make_user_id()
         rule_data = {
@@ -409,7 +446,9 @@ class TestTelemetryServiceAlertRuleGolden:
 
         assert mock_event_bus.get_published_count() >= 1
 
-    async def test_create_alert_rule_with_auto_resolve(self, telemetry_service, injected_mock_repo):
+    async def test_create_alert_rule_with_auto_resolve(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_alert_rule accepts auto_resolve settings"""
         user_id = TelemetryTestDataFactory.make_user_id()
         rule_data = {
@@ -427,7 +466,9 @@ class TestTelemetryServiceAlertRuleGolden:
         assert result.auto_resolve is True
         assert result.auto_resolve_timeout == 7200
 
-    async def test_create_alert_rule_handles_error(self, telemetry_service, injected_mock_repo):
+    async def test_create_alert_rule_handles_error(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: create_alert_rule returns None on error"""
         injected_mock_repo.set_error(Exception("Database error"))
 
@@ -448,22 +489,28 @@ class TestTelemetryServiceAlertRuleGolden:
 # TelemetryService.query_telemetry_data() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceQueryGolden:
     """Golden: TelemetryService.query_telemetry_data() current behavior"""
 
-    async def test_query_telemetry_data_success(self, telemetry_service, injected_mock_repo):
+    async def test_query_telemetry_data_success(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: query_telemetry_data returns data points"""
         # Setup mock data
         device_id = TelemetryTestDataFactory.make_device_id()
         metric_name = TelemetryTestDataFactory.make_metric_name()
         now = TelemetryTestDataFactory.make_timestamp()
 
-        injected_mock_repo.add_data_point(device_id, {
-            "time": now,
-            "device_id": device_id,
-            "metric_name": metric_name,
-            "value_numeric": TelemetryTestDataFactory.make_temperature(),
-        })
+        injected_mock_repo.add_data_point(
+            device_id,
+            {
+                "time": now,
+                "device_id": device_id,
+                "metric_name": metric_name,
+                "value_numeric": TelemetryTestDataFactory.make_temperature(),
+            },
+        )
 
         query_params = {
             "devices": [device_id],
@@ -477,7 +524,9 @@ class TestTelemetryServiceQueryGolden:
         assert result is not None
         assert result.count >= 1
 
-    async def test_query_telemetry_data_empty_result(self, telemetry_service, injected_mock_repo):
+    async def test_query_telemetry_data_empty_result(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: query_telemetry_data returns empty for no matching data"""
         now = TelemetryTestDataFactory.make_timestamp()
         query_params = {
@@ -492,7 +541,9 @@ class TestTelemetryServiceQueryGolden:
         assert result is not None
         assert result.count == 0
 
-    async def test_query_telemetry_data_with_limit(self, telemetry_service, injected_mock_repo):
+    async def test_query_telemetry_data_with_limit(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: query_telemetry_data respects limit parameter"""
         device_id = TelemetryTestDataFactory.make_device_id()
         metric_name = TelemetryTestDataFactory.make_metric_name()
@@ -500,12 +551,15 @@ class TestTelemetryServiceQueryGolden:
 
         # Add multiple data points
         for i in range(10):
-            injected_mock_repo.add_data_point(device_id, {
-                "time": now - timedelta(minutes=i),
-                "device_id": device_id,
-                "metric_name": metric_name,
-                "value_numeric": TelemetryTestDataFactory.make_temperature(),
-            })
+            injected_mock_repo.add_data_point(
+                device_id,
+                {
+                    "time": now - timedelta(minutes=i),
+                    "device_id": device_id,
+                    "metric_name": metric_name,
+                    "value_numeric": TelemetryTestDataFactory.make_temperature(),
+                },
+            )
 
         query_params = {
             "devices": [device_id],
@@ -519,19 +573,24 @@ class TestTelemetryServiceQueryGolden:
         assert result is not None
         assert result.count <= 5
 
-    async def test_query_telemetry_data_multiple_devices(self, telemetry_service, injected_mock_repo):
+    async def test_query_telemetry_data_multiple_devices(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: query_telemetry_data queries multiple devices"""
         device_ids = TelemetryTestDataFactory.make_device_ids(count=3)
         metric_name = TelemetryTestDataFactory.make_metric_name()
         now = TelemetryTestDataFactory.make_timestamp()
 
         for device_id in device_ids:
-            injected_mock_repo.add_data_point(device_id, {
-                "time": now,
-                "device_id": device_id,
-                "metric_name": metric_name,
-                "value_numeric": TelemetryTestDataFactory.make_temperature(),
-            })
+            injected_mock_repo.add_data_point(
+                device_id,
+                {
+                    "time": now,
+                    "device_id": device_id,
+                    "metric_name": metric_name,
+                    "value_numeric": TelemetryTestDataFactory.make_temperature(),
+                },
+            )
 
         query_params = {
             "devices": device_ids,
@@ -544,7 +603,9 @@ class TestTelemetryServiceQueryGolden:
         assert result is not None
         assert result.count >= 3
 
-    async def test_query_telemetry_data_handles_error(self, telemetry_service, injected_mock_repo):
+    async def test_query_telemetry_data_handles_error(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: query_telemetry_data returns None on error"""
         injected_mock_repo.set_error(Exception("Database error"))
 
@@ -564,22 +625,28 @@ class TestTelemetryServiceQueryGolden:
 # TelemetryService.get_device_stats() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceDeviceStatsGolden:
     """Golden: TelemetryService.get_device_stats() current behavior"""
 
-    async def test_get_device_stats_with_data(self, telemetry_service, injected_mock_repo):
+    async def test_get_device_stats_with_data(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: get_device_stats returns device statistics"""
         device_id = TelemetryTestDataFactory.make_device_id()
         now = TelemetryTestDataFactory.make_timestamp()
 
         # Add data points
         for i in range(5):
-            injected_mock_repo.add_data_point(device_id, {
-                "time": now - timedelta(minutes=i),
-                "device_id": device_id,
-                "metric_name": f"metric_{i}",
-                "value_numeric": TelemetryTestDataFactory.make_temperature(),
-            })
+            injected_mock_repo.add_data_point(
+                device_id,
+                {
+                    "time": now - timedelta(minutes=i),
+                    "device_id": device_id,
+                    "metric_name": f"metric_{i}",
+                    "value_numeric": TelemetryTestDataFactory.make_temperature(),
+                },
+            )
 
         result = await telemetry_service.get_device_stats(device_id)
 
@@ -587,7 +654,9 @@ class TestTelemetryServiceDeviceStatsGolden:
         assert result.device_id == device_id
         assert result.data_points_count == 5
 
-    async def test_get_device_stats_no_data(self, telemetry_service, injected_mock_repo):
+    async def test_get_device_stats_no_data(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: get_device_stats returns zero stats for device with no data"""
         device_id = TelemetryTestDataFactory.make_device_id()
 
@@ -598,7 +667,9 @@ class TestTelemetryServiceDeviceStatsGolden:
         assert result.data_points_count == 0
         assert result.total_metrics == 0
 
-    async def test_get_device_stats_handles_error(self, telemetry_service, injected_mock_repo):
+    async def test_get_device_stats_handles_error(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: get_device_stats returns None on error"""
         injected_mock_repo.set_error(Exception("Database error"))
 
@@ -613,10 +684,13 @@ class TestTelemetryServiceDeviceStatsGolden:
 # TelemetryService.get_service_stats() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceStatsGolden:
     """Golden: TelemetryService.get_service_stats() current behavior"""
 
-    async def test_get_service_stats_with_data(self, telemetry_service, injected_mock_repo):
+    async def test_get_service_stats_with_data(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: get_service_stats returns service statistics"""
         injected_mock_repo.set_stats(
             total_devices=10,
@@ -640,7 +714,9 @@ class TestTelemetryServiceStatsGolden:
         assert result.total_devices == 0
         assert result.total_data_points == 0
 
-    async def test_get_service_stats_handles_error(self, telemetry_service, injected_mock_repo):
+    async def test_get_service_stats_handles_error(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: get_service_stats returns None on error"""
         injected_mock_repo.set_error(Exception("Database error"))
 
@@ -653,23 +729,27 @@ class TestTelemetryServiceStatsGolden:
 # TelemetryService.subscribe_real_time() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceRealTimeGolden:
-    """Golden: TelemetryService real-time subscription current behavior"""
+    """Golden: TelemetryService durable real-time subscription behavior"""
 
     async def test_subscribe_real_time_success(self, telemetry_service):
-        """GOLDEN: subscribe_real_time creates subscription"""
+        """GOLDEN: subscribe_real_time returns websocket connect credentials"""
         subscription_data = {
             "device_ids": TelemetryTestDataFactory.make_device_ids(),
             "metric_names": [TelemetryTestDataFactory.make_metric_name()],
         }
 
-        subscription_id = await telemetry_service.subscribe_real_time(subscription_data)
+        result = await telemetry_service.subscribe_real_time(
+            TelemetryTestDataFactory.make_user_id(), subscription_data
+        )
 
-        assert subscription_id is not None
-        assert len(subscription_id) == 32  # hex token
+        assert result["subscription_id"]
+        assert result["connect_token"]
+        assert result["websocket_url"].endswith(result["subscription_id"])
 
     async def test_subscribe_real_time_with_filters(self, telemetry_service):
-        """GOLDEN: subscribe_real_time accepts filter conditions"""
+        """GOLDEN: subscribe_real_time persists coarse filters for delivery"""
         subscription_data = {
             "device_ids": TelemetryTestDataFactory.make_device_ids(),
             "metric_names": [TelemetryTestDataFactory.make_metric_name()],
@@ -677,17 +757,30 @@ class TestTelemetryServiceRealTimeGolden:
             "max_frequency": 500,
         }
 
-        subscription_id = await telemetry_service.subscribe_real_time(subscription_data)
+        result = await telemetry_service.subscribe_real_time(
+            TelemetryTestDataFactory.make_user_id(), subscription_data
+        )
+        subscription_id = result["subscription_id"]
 
         assert subscription_id is not None
         assert subscription_id in telemetry_service.real_time_subscribers
+        assert (
+            telemetry_service.real_time_subscribers[subscription_id]["tags"]
+            == subscription_data["tags"]
+        )
 
     async def test_unsubscribe_real_time_success(self, telemetry_service):
-        """GOLDEN: unsubscribe_real_time removes subscription"""
+        """GOLDEN: unsubscribe_real_time removes durable subscription state"""
         subscription_data = {"device_ids": []}
-        subscription_id = await telemetry_service.subscribe_real_time(subscription_data)
+        user_id = TelemetryTestDataFactory.make_user_id()
+        subscription = await telemetry_service.subscribe_real_time(
+            user_id, subscription_data
+        )
+        subscription_id = subscription["subscription_id"]
 
-        result = await telemetry_service.unsubscribe_real_time(subscription_id)
+        result = await telemetry_service.unsubscribe_real_time(
+            subscription_id, {"user_id": user_id, "role": "user"}
+        )
 
         assert result is True
         assert subscription_id not in telemetry_service.real_time_subscribers
@@ -705,6 +798,7 @@ class TestTelemetryServiceRealTimeGolden:
 # TelemetryService.get_aggregated_data() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceAggregationGolden:
     """Golden: TelemetryService.get_aggregated_data() current behavior"""
 
@@ -716,12 +810,15 @@ class TestTelemetryServiceAggregationGolden:
 
         # Add data points with known values
         for i in range(5):
-            injected_mock_repo.add_data_point(device_id, {
-                "time": now - timedelta(minutes=i),
-                "device_id": device_id,
-                "metric_name": metric_name,
-                "value_numeric": 10.0 * (i + 1),  # 10, 20, 30, 40, 50
-            })
+            injected_mock_repo.add_data_point(
+                device_id,
+                {
+                    "time": now - timedelta(minutes=i),
+                    "device_id": device_id,
+                    "metric_name": metric_name,
+                    "value_numeric": 10.0 * (i + 1),  # 10, 20, 30, 40, 50
+                },
+            )
 
         query_params = {
             "device_id": device_id,
@@ -743,12 +840,15 @@ class TestTelemetryServiceAggregationGolden:
         metric_name = TelemetryTestDataFactory.make_metric_name()
         now = TelemetryTestDataFactory.make_timestamp()
 
-        injected_mock_repo.add_data_point(device_id, {
-            "time": now,
-            "device_id": device_id,
-            "metric_name": metric_name,
-            "value_numeric": 100.0,
-        })
+        injected_mock_repo.add_data_point(
+            device_id,
+            {
+                "time": now,
+                "device_id": device_id,
+                "metric_name": metric_name,
+                "value_numeric": 100.0,
+            },
+        )
 
         query_params = {
             "device_id": device_id,
@@ -764,7 +864,9 @@ class TestTelemetryServiceAggregationGolden:
         assert result is not None
         assert result.aggregation_type == AggregationType.SUM
 
-    async def test_get_aggregated_data_empty(self, telemetry_service, injected_mock_repo):
+    async def test_get_aggregated_data_empty(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: get_aggregated_data handles no data"""
         now = TelemetryTestDataFactory.make_timestamp()
         query_params = {
@@ -781,7 +883,9 @@ class TestTelemetryServiceAggregationGolden:
         assert result is not None
         assert result.count == 0
 
-    async def test_get_aggregated_data_handles_error(self, telemetry_service, injected_mock_repo):
+    async def test_get_aggregated_data_handles_error(
+        self, telemetry_service, injected_mock_repo
+    ):
         """GOLDEN: get_aggregated_data returns None on error"""
         injected_mock_repo.set_error(Exception("Database error"))
 
@@ -804,10 +908,13 @@ class TestTelemetryServiceAggregationGolden:
 # TelemetryService.resolve_alert() Tests
 # =============================================================================
 
+
 class TestTelemetryServiceResolveAlertGolden:
     """Golden: TelemetryService.resolve_alert() current behavior"""
 
-    async def test_resolve_alert_success(self, telemetry_service, injected_mock_repo, mock_event_bus):
+    async def test_resolve_alert_success(
+        self, telemetry_service, injected_mock_repo, mock_event_bus
+    ):
         """GOLDEN: resolve_alert resolves existing alert"""
         # Setup alert
         alert = injected_mock_repo.set_alert(
@@ -819,9 +926,7 @@ class TestTelemetryServiceResolveAlertGolden:
         resolution_note = TelemetryTestDataFactory.make_description()
 
         result = await telemetry_service.resolve_alert(
-            alert["alert_id"],
-            resolved_by,
-            resolution_note
+            alert["alert_id"], resolved_by, resolution_note
         )
 
         assert result is True
@@ -836,7 +941,9 @@ class TestTelemetryServiceResolveAlertGolden:
 
         assert result is False
 
-    async def test_resolve_alert_publishes_event(self, telemetry_service, injected_mock_repo, mock_event_bus):
+    async def test_resolve_alert_publishes_event(
+        self, telemetry_service, injected_mock_repo, mock_event_bus
+    ):
         """GOLDEN: resolve_alert publishes alert.resolved event"""
         alert = injected_mock_repo.set_alert(
             alert_id=TelemetryTestDataFactory.make_alert_id(),
@@ -853,6 +960,7 @@ class TestTelemetryServiceResolveAlertGolden:
 # =============================================================================
 # TelemetryService Alert Triggering Tests
 # =============================================================================
+
 
 class TestTelemetryServiceAlertTriggerGolden:
     """Golden: TelemetryService alert triggering current behavior"""
@@ -902,6 +1010,7 @@ class TestTelemetryServiceAlertTriggerGolden:
 # TelemetryService Data Validation Tests
 # =============================================================================
 
+
 class TestTelemetryServiceValidationGolden:
     """Golden: TelemetryService data validation current behavior"""
 
@@ -921,7 +1030,9 @@ class TestTelemetryServiceValidationGolden:
         )
 
         # Should still ingest but log warning
-        result = await telemetry_service_with_data.ingest_telemetry_data(device_id, [data_point])
+        result = await telemetry_service_with_data.ingest_telemetry_data(
+            device_id, [data_point]
+        )
 
         # Ingestion should succeed (validation is non-blocking)
         assert result["success"] is True
@@ -930,6 +1041,7 @@ class TestTelemetryServiceValidationGolden:
 # =============================================================================
 # Factory Method Tests
 # =============================================================================
+
 
 class TestTelemetryTestDataFactoryGolden:
     """Golden: TelemetryTestDataFactory generates valid test data"""
@@ -966,9 +1078,8 @@ class TestTelemetryTestDataFactoryGolden:
 
     def test_make_timestamp_is_utc(self):
         """GOLDEN: make_timestamp returns UTC datetime"""
-        from datetime import timezone
         ts = TelemetryTestDataFactory.make_timestamp()
-        assert ts.tzinfo == timezone.utc
+        assert ts.tzinfo is not None and ts.tzinfo.utcoffset(ts).total_seconds() == 0
 
     def test_make_condition_valid(self):
         """GOLDEN: make_condition returns valid condition"""
@@ -989,6 +1100,7 @@ class TestTelemetryTestDataFactoryGolden:
 # =============================================================================
 # Builder Tests
 # =============================================================================
+
 
 class TestTelemetryBuildersGolden:
     """Golden: Builder classes generate valid requests"""

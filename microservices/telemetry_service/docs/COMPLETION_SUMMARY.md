@@ -115,14 +115,14 @@ Total: 19
 4. **`create_alert_rule()`** - `telemetry_service.py:130-168`
    - Timezone-aware rule creation timestamps
 
-5. **`subscribe_real_time()`** - `telemetry_service.py:377-408`
-   - Timezone-aware subscription management
+5. **`subscribe_real_time()`**
+   - Durable realtime subscription creation with connect-token issuance
 
 6. **`_trigger_alert()`** - `telemetry_service.py:520-557`
    - Proper alert timestamp handling
 
-7. **`_notify_real_time_subscribers()`** - `telemetry_service.py:559-589`
-   - Timezone-aware frequency limit checks
+7. **`_notify_real_time_subscribers()`**
+   - NATS fanout publishing with frequency-limit enforcement
 
 ### API Endpoints (28 Total)
 
@@ -165,9 +165,9 @@ Total: 19
 - `GET /api/v1/stats` - Service-wide statistics
 
 **Real-time Streaming (3 endpoints)**
-- `POST /api/v1/subscribe` - Create subscription
+- `POST /api/v1/subscribe` - Create durable subscription + connect token
 - `DELETE /api/v1/subscribe/{subscription_id}` - Cancel subscription
-- `WS /ws/telemetry/{subscription_id}` - WebSocket stream
+- `WS /ws/telemetry/{subscription_id}` - WebSocket stream with `?token=...`
 
 **Data Export (1 endpoint)**
 - `GET /api/v1/export/csv` - Export as CSV
@@ -282,4 +282,3 @@ The Telemetry Service is **production-ready** with all critical bugs fixed and c
 **Last Updated**: October 15, 2025  
 **Verified By**: Automated Test Suite  
 **Deployment**: Staging Environment (Docker)
-

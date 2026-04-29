@@ -4,7 +4,6 @@ Telemetry Service - Main Application
 遥测微服务主应用，提供设备数据采集、存储、查询和警报功能
 """
 
-import asyncio
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -13,6 +12,7 @@ from fastapi import (
     Path,
     Body,
     WebSocket,
+    WebSocketDisconnect,
     Header,
 )
 from fastapi.responses import StreamingResponse
@@ -53,6 +53,12 @@ from .models import (
 )
 from .telemetry_service import TelemetryService
 from .telemetry_repository import TelemetryRepository
+from .realtime import (
+    RealtimeAuthenticationError,
+    RealtimeSubscriptionNotFoundError,
+    RealtimeUnavailableError,
+    RealtimeUnsupportedFilterError,
+)
 from .events.handlers import TelemetryEventHandler
 from .routes_registry import get_routes_for_consul, SERVICE_METADATA
 
@@ -169,8 +175,20 @@ async def lifespan(app: FastAPI):
                 durable="telemetry_user_deleted",
             )
 
+            realtime_durable = (
+                f"telemetry_realtime_{microservice.service.instance_id}".replace(
+                    ".", "-"
+                ).replace(":", "-")
+            )
+            await event_bus.subscribe_to_events(
+                pattern="telemetry.realtime.deliver",
+                handler=microservice.service.handle_realtime_delivery_event,
+                durable=realtime_durable,
+                delivery_policy="new",
+            )
+
             logger.info(
-                "✅ Event subscriptions set up successfully (device.deleted, user.deleted)"
+                "✅ Event subscriptions set up successfully (device.deleted, user.deleted, realtime.deliver)"
             )
         except Exception as e:
             logger.warning(f"⚠️  Failed to set up event subscriptions: {e}")
@@ -201,11 +219,13 @@ health = HealthCheck(
     "telemetry_service", version="1.0.0", shutdown_manager=shutdown_manager
 )
 health.add_postgres(
-    lambda: microservice.service.repository.db
-    if microservice.service
-    and hasattr(microservice.service, "repository")
-    and microservice.service.repository
-    else None
+    lambda: (
+        microservice.service.repository.db
+        if microservice.service
+        and hasattr(microservice.service, "repository")
+        and microservice.service.repository
+        else None
+    )
 )
 
 
@@ -505,9 +525,11 @@ async def update_metric_definition(
         # Prepare update data (excluding immutable fields)
         update_data = {
             "description": request.description,
-            "metric_type": request.metric_type.value
-            if hasattr(request.metric_type, "value")
-            else request.metric_type,
+            "metric_type": (
+                request.metric_type.value
+                if hasattr(request.metric_type, "value")
+                else request.metric_type
+            ),
             "unit": request.unit,
             "min_value": request.min_value,
             "max_value": request.max_value,
@@ -1062,16 +1084,16 @@ async def subscribe_real_time_data(
 ):
     """订阅实时数据"""
     try:
-        subscription_id = await microservice.service.subscribe_real_time(
-            request.model_dump()
+        return await microservice.service.subscribe_real_time(
+            user_context["user_id"],
+            request.model_dump(),
         )
-        if subscription_id:
-            return {
-                "subscription_id": subscription_id,
-                "message": "Subscription created successfully",
-                "websocket_url": f"/ws/telemetry/{subscription_id}",
-            }
-        raise HTTPException(status_code=400, detail="Failed to create subscription")
+    except RealtimeUnsupportedFilterError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RealtimeUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating subscription: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1084,10 +1106,14 @@ async def unsubscribe_real_time_data(
 ):
     """取消实时数据订阅"""
     try:
-        success = await microservice.service.unsubscribe_real_time(subscription_id)
+        success = await microservice.service.unsubscribe_real_time(
+            subscription_id, user_context
+        )
         if success:
             return {"message": "Subscription cancelled successfully"}
         raise HTTPException(status_code=404, detail="Subscription not found")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error cancelling subscription: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1096,29 +1122,45 @@ async def unsubscribe_real_time_data(
 @app.websocket("/ws/telemetry/{subscription_id}")
 async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str):
     """WebSocket遥测数据流"""
-    await websocket.accept()
+    websocket_id = None
     try:
-        if subscription_id not in microservice.service.real_time_subscribers:
-            await websocket.close(code=4004, reason="Subscription not found")
-            return
+        connect_token = websocket.query_params.get("token", "")
+        session = await microservice.service.prepare_realtime_websocket(
+            subscription_id, connect_token
+        )
+        websocket_id = session["websocket_id"]
+        await websocket.accept()
+        await microservice.service.register_realtime_websocket(
+            subscription_id, websocket_id, websocket
+        )
+        await websocket.send_json(
+            {
+                "type": "subscription.connected",
+                "subscription_id": subscription_id,
+                "websocket_id": websocket_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "connection_expires_at": session.get("connection_expires_at"),
+            }
+        )
 
         while True:
-            # 在实际实现中，这里应该监听数据变化并推送
-            # 目前只是示例代码
-            await websocket.send_json(
-                {
-                    "subscription_id": subscription_id,
-                    "data": "real-time data would be sent here",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-
-            # 等待一段时间，避免过于频繁的推送
-            await asyncio.sleep(1)
-
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.debug("Realtime websocket disconnected: %s", subscription_id)
+    except RealtimeAuthenticationError as e:
+        await websocket.close(code=4401, reason=str(e))
+    except RealtimeSubscriptionNotFoundError as e:
+        await websocket.close(code=4404, reason=str(e))
+    except RealtimeUnavailableError as e:
+        await websocket.close(code=1013, reason=str(e))
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         await websocket.close(code=1011, reason="Internal server error")
+    finally:
+        if websocket_id:
+            await microservice.service.unregister_realtime_websocket(
+                subscription_id, websocket_id
+            )
 
 
 # ======================

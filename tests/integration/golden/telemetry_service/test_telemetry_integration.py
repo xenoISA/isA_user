@@ -776,6 +776,8 @@ class TestRealTimeSubscriptionIntegration:
         assert response.status_code in [200, 201]
         result = response.json()
         assert "subscription_id" in result
+        assert "connect_token" in result
+        assert result["websocket_url"].endswith(result["subscription_id"])
 
     async def test_delete_subscription(self, http_client, internal_headers):
         """Integration: Delete real-time subscription"""
