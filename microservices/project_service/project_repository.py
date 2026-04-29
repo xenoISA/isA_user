@@ -101,7 +101,9 @@ class ProjectRepository:
         self._tables_initialized = True
 
     @staticmethod
-    def _require_query_result(rows: Optional[List[Dict[str, Any]]], operation: str) -> List[Dict[str, Any]]:
+    def _require_query_result(
+        rows: Optional[List[Dict[str, Any]]], operation: str
+    ) -> List[Dict[str, Any]]:
         if rows is None:
             raise RepositoryError(f"Failed to {operation}")
         return rows

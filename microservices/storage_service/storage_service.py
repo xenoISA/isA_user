@@ -90,6 +90,7 @@ class StorageService:
 
         # Get MinIO credentials from environment
         import os
+
         minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
         minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 
@@ -473,8 +474,10 @@ class StorageService:
 
         # Batch generate presigned URLs for expired ones
         files_needing_urls = [
-            f for f in files
-            if not f.download_url or f.download_url_expires_at < datetime.now(timezone.utc)
+            f
+            for f in files
+            if not f.download_url
+            or f.download_url_expires_at < datetime.now(timezone.utc)
         ]
 
         if files_needing_urls:
@@ -533,8 +536,7 @@ class StorageService:
             try:
                 async with self.minio_client:
                     await self.minio_client.delete_object(
-                        file.bucket_name,
-                        file.object_name
+                        file.bucket_name, file.object_name
                     )
             except Exception as e:
                 logger.error(f"Error deleting file from MinIO: {e}")

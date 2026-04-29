@@ -19,7 +19,9 @@ def _make_response(payload=None):
 async def test_upload_file_uses_internal_service_headers():
     client = StorageServiceClient(base_url="http://storage.local")
     client.client.post = AsyncMock(
-        return_value=_make_response({"file_id": "file-1", "file_path": "storage/file-1"})
+        return_value=_make_response(
+            {"file_id": "file-1", "file_path": "storage/file-1"}
+        )
     )
 
     await client.upload_file(

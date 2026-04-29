@@ -18,7 +18,9 @@ def _make_mock_db(*, execute_result=1, query_result=_UNSET):
     mock_db.__aenter__ = AsyncMock(return_value=mock_db)
     mock_db.__aexit__ = AsyncMock(return_value=False)
     mock_db.execute = AsyncMock(return_value=execute_result)
-    mock_db.query = AsyncMock(return_value=[] if query_result is _UNSET else query_result)
+    mock_db.query = AsyncMock(
+        return_value=[] if query_result is _UNSET else query_result
+    )
     return mock_db
 
 

@@ -27,7 +27,7 @@ class StorageServiceClient:
         """
         configured_base_url = base_url or os.getenv("STORAGE_SERVICE_URL")
         if configured_base_url:
-            self.base_url = configured_base_url.rstrip('/')
+            self.base_url = configured_base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -68,7 +68,7 @@ class StorageServiceClient:
         metadata: Optional[Dict[str, Any]] = None,
         tags: Optional[List[str]] = None,
         auto_delete_after_days: Optional[int] = None,
-        enable_indexing: bool = True
+        enable_indexing: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
         Upload file to storage
@@ -102,11 +102,17 @@ class StorageServiceClient:
             import json
             from io import BytesIO
 
-            files = {"file": (filename, BytesIO(file_content), content_type or "application/octet-stream")}
+            files = {
+                "file": (
+                    filename,
+                    BytesIO(file_content),
+                    content_type or "application/octet-stream",
+                )
+            }
             data = {
                 "user_id": user_id,
                 "access_level": access_level,
-                "enable_indexing": enable_indexing
+                "enable_indexing": enable_indexing,
             }
 
             if organization_id:
@@ -135,9 +141,7 @@ class StorageServiceClient:
             return None
 
     async def get_file_info(
-        self,
-        file_id: str,
-        user_id: str
+        self, file_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get file information
@@ -155,7 +159,7 @@ class StorageServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/storage/files/{file_id}",
-                params={"user_id": user_id}
+                params={"user_id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -174,7 +178,7 @@ class StorageServiceClient:
         prefix: Optional[str] = None,
         status: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[List[Dict[str, Any]]]:
         """
         List user files
@@ -203,8 +207,7 @@ class StorageServiceClient:
                 params["status"] = status
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/storage/files",
-                params=params
+                f"{self.base_url}/api/v1/storage/files", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -217,10 +220,7 @@ class StorageServiceClient:
             return None
 
     async def get_download_url(
-        self,
-        file_id: str,
-        user_id: str,
-        expires_minutes: int = 60
+        self, file_id: str, user_id: str, expires_minutes: int = 60
     ) -> Optional[Dict[str, Any]]:
         """
         Get file download URL
@@ -240,7 +240,7 @@ class StorageServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/storage/files/{file_id}/download",
-                params={"user_id": user_id, "expires_minutes": expires_minutes}
+                params={"user_id": user_id, "expires_minutes": expires_minutes},
             )
             response.raise_for_status()
             return response.json()
@@ -253,10 +253,7 @@ class StorageServiceClient:
             return None
 
     async def delete_file(
-        self,
-        file_id: str,
-        user_id: str,
-        permanent: bool = False
+        self, file_id: str, user_id: str, permanent: bool = False
     ) -> bool:
         """
         Delete file
@@ -301,7 +298,7 @@ class StorageServiceClient:
         permissions: Optional[Dict[str, bool]] = None,
         password: Optional[str] = None,
         expires_hours: int = 24,
-        max_downloads: Optional[int] = None
+        max_downloads: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Share file with user or email
@@ -331,9 +328,11 @@ class StorageServiceClient:
             data = {
                 "shared_by": shared_by,
                 "view": permissions.get("view", True) if permissions else True,
-                "download": permissions.get("download", False) if permissions else False,
+                "download": permissions.get("download", False)
+                if permissions
+                else False,
                 "delete": permissions.get("delete", False) if permissions else False,
-                "expires_hours": expires_hours
+                "expires_hours": expires_hours,
             }
 
             if shared_with:
@@ -346,8 +345,7 @@ class StorageServiceClient:
                 data["max_downloads"] = max_downloads
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/storage/files/{file_id}/share",
-                data=data
+                f"{self.base_url}/api/v1/storage/files/{file_id}/share", data=data
             )
             response.raise_for_status()
             return response.json()
@@ -360,10 +358,7 @@ class StorageServiceClient:
             return None
 
     async def get_shared_file(
-        self,
-        share_id: str,
-        token: Optional[str] = None,
-        password: Optional[str] = None
+        self, share_id: str, token: Optional[str] = None, password: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Access shared file
@@ -387,8 +382,7 @@ class StorageServiceClient:
                 params["password"] = password
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/storage/shares/{share_id}",
-                params=params
+                f"{self.base_url}/api/v1/storage/shares/{share_id}", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -405,9 +399,7 @@ class StorageServiceClient:
     # =============================================================================
 
     async def get_storage_stats(
-        self,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None
+        self, user_id: Optional[str] = None, organization_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get storage statistics
@@ -430,8 +422,7 @@ class StorageServiceClient:
                 params["organization_id"] = organization_id
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/storage/stats",
-                params=params
+                f"{self.base_url}/api/v1/storage/stats", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -444,9 +435,7 @@ class StorageServiceClient:
             return None
 
     async def get_storage_quota(
-        self,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None
+        self, user_id: Optional[str] = None, organization_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get storage quota
@@ -469,8 +458,7 @@ class StorageServiceClient:
                 params["organization_id"] = organization_id
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/storage/quota",
-                params=params
+                f"{self.base_url}/api/v1/storage/quota", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -495,7 +483,7 @@ class StorageServiceClient:
         cover_photo_id: Optional[str] = None,
         auto_sync: bool = False,
         is_shared: bool = False,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create album
@@ -526,7 +514,7 @@ class StorageServiceClient:
                 "name": name,
                 "user_id": user_id,
                 "auto_sync": auto_sync,
-                "is_shared": is_shared
+                "is_shared": is_shared,
             }
 
             if description:
@@ -539,8 +527,7 @@ class StorageServiceClient:
                 payload["tags"] = tags
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/albums",
-                json=payload
+                f"{self.base_url}/api/v1/albums", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -552,11 +539,7 @@ class StorageServiceClient:
             logger.error(f"Error creating album: {e}")
             return None
 
-    async def get_album(
-        self,
-        album_id: str,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_album(self, album_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get album details
 
@@ -572,8 +555,7 @@ class StorageServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/albums/{album_id}",
-                params={"user_id": user_id}
+                f"{self.base_url}/api/v1/albums/{album_id}", params={"user_id": user_id}
             )
             response.raise_for_status()
             return response.json()
@@ -586,10 +568,7 @@ class StorageServiceClient:
             return None
 
     async def list_user_albums(
-        self,
-        user_id: str,
-        limit: int = 100,
-        offset: int = 0
+        self, user_id: str, limit: int = 100, offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         List user albums
@@ -608,7 +587,7 @@ class StorageServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/albums",
-                params={"user_id": user_id, "limit": limit, "offset": offset}
+                params={"user_id": user_id, "limit": limit, "offset": offset},
             )
             response.raise_for_status()
             return response.json()
@@ -621,10 +600,7 @@ class StorageServiceClient:
             return None
 
     async def update_album(
-        self,
-        album_id: str,
-        user_id: str,
-        updates: Dict[str, Any]
+        self, album_id: str, user_id: str, updates: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """
         Update album
@@ -648,7 +624,7 @@ class StorageServiceClient:
             response = await self.client.put(
                 f"{self.base_url}/api/v1/albums/{album_id}",
                 json=updates,
-                params={"user_id": user_id}
+                params={"user_id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -660,11 +636,7 @@ class StorageServiceClient:
             logger.error(f"Error updating album: {e}")
             return None
 
-    async def delete_album(
-        self,
-        album_id: str,
-        user_id: str
-    ) -> bool:
+    async def delete_album(self, album_id: str, user_id: str) -> bool:
         """
         Delete album
 
@@ -680,8 +652,7 @@ class StorageServiceClient:
         """
         try:
             response = await self.client.delete(
-                f"{self.base_url}/api/v1/albums/{album_id}",
-                params={"user_id": user_id}
+                f"{self.base_url}/api/v1/albums/{album_id}", params={"user_id": user_id}
             )
             response.raise_for_status()
             return True
@@ -698,7 +669,7 @@ class StorageServiceClient:
         album_id: str,
         photo_ids: List[str],
         added_by: str,
-        is_featured: bool = False
+        is_featured: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Add photos to album
@@ -725,8 +696,8 @@ class StorageServiceClient:
                 json={
                     "photo_ids": photo_ids,
                     "added_by": added_by,
-                    "is_featured": is_featured
-                }
+                    "is_featured": is_featured,
+                },
             )
             response.raise_for_status()
             return response.json()
@@ -739,11 +710,7 @@ class StorageServiceClient:
             return None
 
     async def get_album_photos(
-        self,
-        album_id: str,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, album_id: str, user_id: str, limit: int = 50, offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         Get album photos
@@ -763,7 +730,7 @@ class StorageServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/albums/{album_id}/photos",
-                params={"user_id": user_id, "limit": limit, "offset": offset}
+                params={"user_id": user_id, "limit": limit, "offset": offset},
             )
             response.raise_for_status()
             return response.json()
@@ -787,7 +754,7 @@ class StorageServiceClient:
         version_url: str,
         ai_model: Optional[str] = None,
         ai_prompt: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Save AI-processed photo version
@@ -817,7 +784,7 @@ class StorageServiceClient:
                 "photo_id": photo_id,
                 "user_id": user_id,
                 "version_type": version_type,
-                "version_url": version_url
+                "version_url": version_url,
             }
 
             if ai_model:
@@ -828,8 +795,7 @@ class StorageServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/photos/versions/save",
-                json=payload
+                f"{self.base_url}/api/v1/photos/versions/save", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -842,9 +808,7 @@ class StorageServiceClient:
             return None
 
     async def get_photo_versions(
-        self,
-        photo_id: str,
-        user_id: str
+        self, photo_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get all photo versions
@@ -862,7 +826,7 @@ class StorageServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/photos/{photo_id}/versions",
-                params={"user_id": user_id}
+                params={"user_id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -886,7 +850,7 @@ class StorageServiceClient:
         enable_rerank: bool = False,
         min_score: float = 0.0,
         file_types: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Semantic search files using natural language
@@ -916,7 +880,7 @@ class StorageServiceClient:
                 "query": query,
                 "top_k": top_k,
                 "enable_rerank": enable_rerank,
-                "min_score": min_score
+                "min_score": min_score,
             }
 
             if file_types:
@@ -925,8 +889,7 @@ class StorageServiceClient:
                 payload["tags"] = tags
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/files/search",
-                json=payload
+                f"{self.base_url}/api/v1/files/search", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -947,7 +910,7 @@ class StorageServiceClient:
         top_k: int = 3,
         enable_citations: bool = True,
         max_tokens: int = 500,
-        temperature: float = 0.7
+        temperature: float = 0.7,
     ) -> Optional[Dict[str, Any]]:
         """
         RAG query based on user files
@@ -982,15 +945,14 @@ class StorageServiceClient:
                 "top_k": top_k,
                 "enable_citations": enable_citations,
                 "max_tokens": max_tokens,
-                "temperature": temperature
+                "temperature": temperature,
             }
 
             if session_id:
                 payload["session_id"] = session_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/files/ask",
-                json=payload
+                f"{self.base_url}/api/v1/files/ask", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -1002,10 +964,7 @@ class StorageServiceClient:
             logger.error(f"Error in RAG query: {e}")
             return None
 
-    async def get_intelligence_stats(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_intelligence_stats(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get intelligence service statistics
 
@@ -1021,7 +980,7 @@ class StorageServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/intelligence/stats",
-                params={"user_id": user_id}
+                params={"user_id": user_id},
             )
             response.raise_for_status()
             return response.json()
