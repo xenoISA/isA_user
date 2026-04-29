@@ -870,9 +870,9 @@ class CostDefinition(BaseModel):
     )
     provider: Optional[str] = None  # anthropic, openai, google, internal, etc.
     model_name: Optional[str] = None  # claude-sonnet-4-20250514, gpt-4o, etc.
-    operation_type: Optional[str] = (
-        None  # input, output, request, storage_gb_month, etc.
-    )
+    operation_type: Optional[
+        str
+    ] = None  # input, output, request, storage_gb_month, etc.
 
     # Cost Configuration (in Credits - 1 Credit = $0.00001 USD)
     cost_per_unit: int = Field(..., ge=0, description="Credits per unit")
