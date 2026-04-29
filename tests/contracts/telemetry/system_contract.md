@@ -89,8 +89,12 @@ class TelemetryService:
         # Event bus for publishing events
         self.event_bus = event_bus
 
-        # In-memory structures for real-time features
+        # Durable realtime subscriptions live in Postgres.
+        # In-memory state tracks only live local websocket connections.
         self.real_time_subscribers = {}
+        self.realtime_connections = {}
+        self.realtime_connection_ids = {}
+        self.realtime_heartbeat_tasks = {}
 
         # Configuration
         self.max_batch_size = 1000

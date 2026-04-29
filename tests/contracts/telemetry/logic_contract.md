@@ -733,17 +733,18 @@ This document defines the business rules, state machines, edge cases, and integr
 **Transitions**:
 | From | To | Trigger | Side Effects |
 |------|-----|---------|--------------|
-| CREATED | ACTIVE | WebSocket connect | Start pushing data |
-| CREATED | CLEANED UP | Connection timeout (60s) | Remove from memory |
-| ACTIVE | CLEANED UP | WebSocket disconnect | Remove from memory |
-| ACTIVE | CLEANED UP | DELETE /subscribe/{id} | Close WebSocket, remove |
-| ACTIVE | CLEANED UP | Idle timeout (5min) | Close WebSocket, remove |
+| CREATED | ACTIVE | WebSocket connect with valid connect token | Bind websocket lease and start pushing data |
+| CREATED | CLEANED UP | Subscription TTL expiry | Mark subscription inactive/remove durable row |
+| ACTIVE | CLEANED UP | WebSocket disconnect | Clear websocket lease |
+| ACTIVE | CLEANED UP | DELETE /subscribe/{id} | Close WebSocket, clear lease, delete durable row |
+| ACTIVE | CLEANED UP | Lease expiry without heartbeat | Stop delivery until reconnect |
 
 **Invariants**:
-1. Subscriptions are ephemeral (in-memory only)
-2. Server restart loses all subscriptions
-3. Client responsible for reconnection
-4. One subscription = one WebSocket connection
+1. Subscription state is durable in `telemetry.real_time_subscriptions`
+2. Live websocket ownership is lease-based and replica-local
+3. Server restart loses only the live socket, not the durable subscription row
+4. Client reconnects using the issued connect token until that token expires
+5. One subscription = one WebSocket connection
 
 ---
 

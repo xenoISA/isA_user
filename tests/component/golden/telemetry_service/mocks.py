@@ -4,18 +4,11 @@ Telemetry Service - Mock Dependencies
 Mock implementations for component testing.
 All test data uses TelemetryTestDataFactory - zero hardcoded data.
 """
+
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
-import uuid
 
-from tests.contracts.telemetry.data_contract import (
-    TelemetryTestDataFactory,
-    DataType,
-    MetricType,
-    AlertLevel,
-    AlertStatus,
-    AggregationType,
-)
+from tests.contracts.telemetry.data_contract import TelemetryTestDataFactory
 
 
 class MockTelemetryRepository:
@@ -31,6 +24,7 @@ class MockTelemetryRepository:
         self._metric_by_name: Dict[str, str] = {}  # name -> metric_id
         self._alert_rules: Dict[str, Dict] = {}  # rule_id -> rule
         self._alerts: Dict[str, Dict] = {}  # alert_id -> alert
+        self._realtime_subscriptions: Dict[str, Dict[str, Any]] = {}
         self._stats: Dict[str, Any] = {}
         self._error: Optional[Exception] = None
         self._call_log: List[Dict] = []
@@ -51,7 +45,7 @@ class MockTelemetryRepository:
         name: str = None,
         data_type: str = "numeric",
         metric_type: str = "gauge",
-        **kwargs
+        **kwargs,
     ):
         """Add a metric definition"""
         metric_id = metric_id or TelemetryTestDataFactory.make_metric_id()
@@ -61,7 +55,9 @@ class MockTelemetryRepository:
         metric_def = {
             "metric_id": metric_id,
             "name": name,
-            "description": kwargs.get("description", TelemetryTestDataFactory.make_description()),
+            "description": kwargs.get(
+                "description", TelemetryTestDataFactory.make_description()
+            ),
             "data_type": data_type,
             "metric_type": metric_type,
             "unit": kwargs.get("unit", TelemetryTestDataFactory.make_unit()),
@@ -73,7 +69,9 @@ class MockTelemetryRepository:
             "metadata": kwargs.get("metadata", {}),
             "created_at": kwargs.get("created_at", now),
             "updated_at": kwargs.get("updated_at", now),
-            "created_by": kwargs.get("created_by", TelemetryTestDataFactory.make_user_id()),
+            "created_by": kwargs.get(
+                "created_by", TelemetryTestDataFactory.make_user_id()
+            ),
         }
 
         self._metric_definitions[metric_id] = metric_def
@@ -88,7 +86,7 @@ class MockTelemetryRepository:
         threshold_value: str = "90",
         level: str = "warning",
         enabled: bool = True,
-        **kwargs
+        **kwargs,
     ):
         """Add an alert rule"""
         rule_id = rule_id or TelemetryTestDataFactory.make_rule_id()
@@ -119,7 +117,9 @@ class MockTelemetryRepository:
             "last_triggered": kwargs.get("last_triggered"),
             "created_at": kwargs.get("created_at", now),
             "updated_at": kwargs.get("updated_at", now),
-            "created_by": kwargs.get("created_by", TelemetryTestDataFactory.make_user_id()),
+            "created_by": kwargs.get(
+                "created_by", TelemetryTestDataFactory.make_user_id()
+            ),
         }
 
         self._alert_rules[rule_id] = alert_rule
@@ -133,7 +133,7 @@ class MockTelemetryRepository:
         metric_name: str = None,
         status: str = "active",
         level: str = "warning",
-        **kwargs
+        **kwargs,
     ):
         """Add an alert"""
         alert_id = alert_id or TelemetryTestDataFactory.make_alert_id()
@@ -145,7 +145,9 @@ class MockTelemetryRepository:
         alert = {
             "alert_id": alert_id,
             "rule_id": rule_id,
-            "rule_name": kwargs.get("rule_name", TelemetryTestDataFactory.make_rule_name()),
+            "rule_name": kwargs.get(
+                "rule_name", TelemetryTestDataFactory.make_rule_name()
+            ),
             "device_id": device_id,
             "metric_name": metric_name,
             "level": level,
@@ -176,7 +178,7 @@ class MockTelemetryRepository:
         total_metrics: int = 0,
         total_points: int = 0,
         last_24h_points: int = 0,
-        **kwargs
+        **kwargs,
     ):
         """Set service statistics"""
         self._stats = {
@@ -184,7 +186,7 @@ class MockTelemetryRepository:
             "total_metrics": total_metrics,
             "total_points": total_points,
             "last_24h_points": last_24h_points,
-            **kwargs
+            **kwargs,
         }
 
     def set_error(self, error: Exception):
@@ -202,7 +204,9 @@ class MockTelemetryRepository:
     def assert_called(self, method: str):
         """Assert that a method was called"""
         called_methods = [c["method"] for c in self._call_log]
-        assert method in called_methods, f"Expected {method} to be called, but got {called_methods}"
+        assert (
+            method in called_methods
+        ), f"Expected {method} to be called, but got {called_methods}"
 
     def assert_called_with(self, method: str, **kwargs):
         """Assert that a method was called with specific kwargs"""
@@ -210,14 +214,18 @@ class MockTelemetryRepository:
             if call["method"] == method:
                 for key, value in kwargs.items():
                     assert key in call["kwargs"], f"Expected kwarg {key} not found"
-                    assert call["kwargs"][key] == value, f"Expected {key}={value}, got {call['kwargs'][key]}"
+                    assert (
+                        call["kwargs"][key] == value
+                    ), f"Expected {key}={value}, got {call['kwargs'][key]}"
                 return
         raise AssertionError(f"Expected {method} to be called with {kwargs}")
 
     def assert_not_called(self, method: str):
         """Assert that a method was not called"""
         called_methods = [c["method"] for c in self._call_log]
-        assert method not in called_methods, f"Expected {method} not to be called, but it was"
+        assert (
+            method not in called_methods
+        ), f"Expected {method} not to be called, but it was"
 
     def get_call_count(self, method: str) -> int:
         """Get the number of times a method was called"""
@@ -230,15 +238,20 @@ class MockTelemetryRepository:
         self._metric_by_name.clear()
         self._alert_rules.clear()
         self._alerts.clear()
+        self._realtime_subscriptions.clear()
         self._stats.clear()
         self._error = None
         self._call_log.clear()
 
     # Repository interface methods
 
-    async def ingest_data_points(self, device_id: str, data_points: List) -> Dict[str, Any]:
+    async def ingest_data_points(
+        self, device_id: str, data_points: List
+    ) -> Dict[str, Any]:
         """Ingest telemetry data points"""
-        self._log_call("ingest_data_points", device_id=device_id, data_points=data_points)
+        self._log_call(
+            "ingest_data_points", device_id=device_id, data_points=data_points
+        )
 
         if self._error:
             raise self._error
@@ -252,7 +265,9 @@ class MockTelemetryRepository:
                 "time": point.timestamp,
                 "device_id": device_id,
                 "metric_name": point.metric_name,
-                "value_numeric": point.value if isinstance(point.value, (int, float)) else None,
+                "value_numeric": (
+                    point.value if isinstance(point.value, (int, float)) else None
+                ),
                 "value_string": point.value if isinstance(point.value, str) else None,
                 "value_boolean": point.value if isinstance(point.value, bool) else None,
                 "unit": point.unit,
@@ -274,7 +289,7 @@ class MockTelemetryRepository:
         metric_names: List[str],
         start_time: datetime,
         end_time: datetime,
-        limit: int = 1000
+        limit: int = 1000,
     ) -> List[Dict]:
         """Query telemetry data"""
         self._log_call(
@@ -283,7 +298,7 @@ class MockTelemetryRepository:
             metric_names=metric_names,
             start_time=start_time,
             end_time=end_time,
-            limit=limit
+            limit=limit,
         )
 
         if self._error:
@@ -305,7 +320,9 @@ class MockTelemetryRepository:
 
         return results[:limit]
 
-    async def create_metric_definition(self, metric_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_metric_definition(
+        self, metric_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Create metric definition"""
         self._log_call("create_metric_definition", metric_data=metric_data)
 
@@ -327,7 +344,9 @@ class MockTelemetryRepository:
 
         return metric_def
 
-    async def get_metric_definition_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+    async def get_metric_definition_by_name(
+        self, name: str
+    ) -> Optional[Dict[str, Any]]:
         """Get metric definition by name"""
         self._log_call("get_metric_definition_by_name", name=name)
 
@@ -349,9 +368,7 @@ class MockTelemetryRepository:
         return self._metric_definitions.get(metric_id)
 
     async def list_metric_definitions(
-        self,
-        limit: int = 100,
-        offset: int = 0
+        self, limit: int = 100, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """List metric definitions"""
         self._log_call("list_metric_definitions", limit=limit, offset=offset)
@@ -360,7 +377,7 @@ class MockTelemetryRepository:
             raise self._error
 
         definitions = list(self._metric_definitions.values())
-        return definitions[offset:offset + limit]
+        return definitions[offset : offset + limit]
 
     async def create_alert_rule(self, rule_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create alert rule"""
@@ -385,12 +402,12 @@ class MockTelemetryRepository:
         return alert_rule
 
     async def get_alert_rules(
-        self,
-        metric_name: Optional[str] = None,
-        enabled_only: bool = False
+        self, metric_name: Optional[str] = None, enabled_only: bool = False
     ) -> List[Dict[str, Any]]:
         """Get alert rules"""
-        self._log_call("get_alert_rules", metric_name=metric_name, enabled_only=enabled_only)
+        self._log_call(
+            "get_alert_rules", metric_name=metric_name, enabled_only=enabled_only
+        )
 
         if self._error:
             raise self._error
@@ -414,7 +431,9 @@ class MockTelemetryRepository:
 
         return self._alert_rules.get(rule_id)
 
-    async def update_alert_rule(self, rule_id: str, update_data: Dict[str, Any]) -> bool:
+    async def update_alert_rule(
+        self, rule_id: str, update_data: Dict[str, Any]
+    ) -> bool:
         """Update alert rule"""
         self._log_call("update_alert_rule", rule_id=rule_id, update_data=update_data)
 
@@ -438,7 +457,9 @@ class MockTelemetryRepository:
         if rule_id not in self._alert_rules:
             return False
 
-        self._alert_rules[rule_id]["total_triggers"] = self._alert_rules[rule_id].get("total_triggers", 0) + 1
+        self._alert_rules[rule_id]["total_triggers"] = (
+            self._alert_rules[rule_id].get("total_triggers", 0) + 1
+        )
         self._alert_rules[rule_id]["last_triggered"] = datetime.now(timezone.utc)
         return True
 
@@ -469,7 +490,7 @@ class MockTelemetryRepository:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Get alerts"""
         self._log_call(
@@ -479,7 +500,7 @@ class MockTelemetryRepository:
             start_time=start_time,
             end_time=end_time,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
 
         if self._error:
@@ -494,21 +515,36 @@ class MockTelemetryRepository:
             alerts = [a for a in alerts if a.get("level") == level]
 
         if start_time:
-            alerts = [a for a in alerts if a.get("triggered_at", datetime.min.replace(tzinfo=timezone.utc)) >= start_time]
+            alerts = [
+                a
+                for a in alerts
+                if a.get("triggered_at", datetime.min.replace(tzinfo=timezone.utc))
+                >= start_time
+            ]
 
         if end_time:
-            alerts = [a for a in alerts if a.get("triggered_at", datetime.max.replace(tzinfo=timezone.utc)) <= end_time]
+            alerts = [
+                a
+                for a in alerts
+                if a.get("triggered_at", datetime.max.replace(tzinfo=timezone.utc))
+                <= end_time
+            ]
 
-        return alerts[offset:offset + limit]
+        return alerts[offset : offset + limit]
 
     async def get_alerts_by_device(
         self,
         device_id: str,
         start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         """Get alerts by device"""
-        self._log_call("get_alerts_by_device", device_id=device_id, start_time=start_time, end_time=end_time)
+        self._log_call(
+            "get_alerts_by_device",
+            device_id=device_id,
+            start_time=start_time,
+            end_time=end_time,
+        )
 
         if self._error:
             raise self._error
@@ -516,10 +552,20 @@ class MockTelemetryRepository:
         alerts = [a for a in self._alerts.values() if a.get("device_id") == device_id]
 
         if start_time:
-            alerts = [a for a in alerts if a.get("triggered_at", datetime.min.replace(tzinfo=timezone.utc)) >= start_time]
+            alerts = [
+                a
+                for a in alerts
+                if a.get("triggered_at", datetime.min.replace(tzinfo=timezone.utc))
+                >= start_time
+            ]
 
         if end_time:
-            alerts = [a for a in alerts if a.get("triggered_at", datetime.max.replace(tzinfo=timezone.utc)) <= end_time]
+            alerts = [
+                a
+                for a in alerts
+                if a.get("triggered_at", datetime.max.replace(tzinfo=timezone.utc))
+                <= end_time
+            ]
 
         return alerts
 
@@ -549,15 +595,18 @@ class MockTelemetryRepository:
         if not points:
             return None
 
-        metrics = list(set(p.get("metric_name") for p in points if p.get("metric_name")))
-        last_update = max((p.get("time") for p in points if p.get("time")), default=None)
+        metrics = list(
+            set(p.get("metric_name") for p in points if p.get("metric_name"))
+        )
+        last_update = max(
+            (p.get("time") for p in points if p.get("time")), default=None
+        )
 
         # Calculate 24h points
         now = datetime.now(timezone.utc)
         last_24h = now - timedelta(hours=24)
         last_24h_points = sum(
-            1 for p in points
-            if p.get("time") and p["time"] >= last_24h
+            1 for p in points if p.get("time") and p["time"] >= last_24h
         )
 
         return {
@@ -593,7 +642,8 @@ class MockTelemetryRepository:
         now = datetime.now(timezone.utc)
         last_24h = now - timedelta(hours=24)
         last_24h_points = sum(
-            1 for points in self._data_points.values()
+            1
+            for points in self._data_points.values()
             for p in points
             if p.get("time") and p["time"] >= last_24h
         )
@@ -604,6 +654,207 @@ class MockTelemetryRepository:
             "total_points": total_points,
             "last_24h_points": last_24h_points,
         }
+
+    async def create_real_time_subscription(
+        self, subscription_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persist a realtime subscription in the mock repository."""
+        self._log_call(
+            "create_real_time_subscription", subscription_data=subscription_data
+        )
+
+        if self._error:
+            raise self._error
+
+        row = {
+            "subscription_id": subscription_data["subscription_id"],
+            "user_id": subscription_data["user_id"],
+            "device_ids": subscription_data.get("device_ids", []),
+            "metric_names": subscription_data.get("metric_names", []),
+            "tags": subscription_data.get("tags", {}),
+            "filter_condition": subscription_data.get("filter_condition"),
+            "max_frequency": subscription_data.get("max_frequency", 1000),
+            "created_at": subscription_data.get(
+                "created_at", datetime.now(timezone.utc)
+            ),
+            "last_sent": subscription_data.get("last_sent", datetime.now(timezone.utc)),
+            "expires_at": subscription_data.get(
+                "expires_at", datetime.now(timezone.utc) + timedelta(hours=24)
+            ),
+            "active": subscription_data.get("active", True),
+            "websocket_id": subscription_data.get("websocket_id"),
+            "metadata": dict(subscription_data.get("metadata", {})),
+        }
+        self._realtime_subscriptions[row["subscription_id"]] = row
+        return row
+
+    async def get_real_time_subscription(
+        self, subscription_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a realtime subscription."""
+        self._log_call("get_real_time_subscription", subscription_id=subscription_id)
+
+        if self._error:
+            raise self._error
+
+        row = self._realtime_subscriptions.get(subscription_id)
+        return dict(row) if row else None
+
+    async def delete_real_time_subscription(
+        self, subscription_id: str, user_id: Optional[str] = None
+    ) -> bool:
+        """Delete a realtime subscription."""
+        self._log_call(
+            "delete_real_time_subscription",
+            subscription_id=subscription_id,
+            user_id=user_id,
+        )
+
+        if self._error:
+            raise self._error
+
+        row = self._realtime_subscriptions.get(subscription_id)
+        if not row:
+            return False
+        if user_id is not None and row.get("user_id") != user_id:
+            return False
+
+        del self._realtime_subscriptions[subscription_id]
+        return True
+
+    async def bind_real_time_subscription_connection(
+        self,
+        subscription_id: str,
+        websocket_id: str,
+        bound_instance_id: str,
+        connection_expires_at: datetime,
+    ) -> Optional[Dict[str, Any]]:
+        """Bind a websocket connection to a realtime subscription."""
+        self._log_call(
+            "bind_real_time_subscription_connection",
+            subscription_id=subscription_id,
+            websocket_id=websocket_id,
+            bound_instance_id=bound_instance_id,
+            connection_expires_at=connection_expires_at,
+        )
+
+        row = self._realtime_subscriptions.get(subscription_id)
+        if not row:
+            return None
+
+        row["websocket_id"] = websocket_id
+        row.setdefault("metadata", {})
+        row["metadata"].update(
+            {
+                "bound_instance_id": bound_instance_id,
+                "connection_expires_at": connection_expires_at.isoformat(),
+                "last_websocket_seen_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return dict(row)
+
+    async def refresh_real_time_subscription_connection(
+        self,
+        subscription_id: str,
+        websocket_id: str,
+        connection_expires_at: datetime,
+    ) -> bool:
+        """Refresh a websocket lease."""
+        self._log_call(
+            "refresh_real_time_subscription_connection",
+            subscription_id=subscription_id,
+            websocket_id=websocket_id,
+            connection_expires_at=connection_expires_at,
+        )
+
+        row = self._realtime_subscriptions.get(subscription_id)
+        if not row or row.get("websocket_id") != websocket_id:
+            return False
+
+        row.setdefault("metadata", {})
+        row["metadata"].update(
+            {
+                "connection_expires_at": connection_expires_at.isoformat(),
+                "last_websocket_seen_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return True
+
+    async def clear_real_time_subscription_connection(
+        self, subscription_id: str, websocket_id: Optional[str] = None
+    ) -> bool:
+        """Clear a websocket binding."""
+        self._log_call(
+            "clear_real_time_subscription_connection",
+            subscription_id=subscription_id,
+            websocket_id=websocket_id,
+        )
+
+        row = self._realtime_subscriptions.get(subscription_id)
+        if not row:
+            return False
+        if websocket_id is not None and row.get("websocket_id") != websocket_id:
+            return False
+
+        row["websocket_id"] = None
+        row.setdefault("metadata", {})
+        row["metadata"].update(
+            {
+                "bound_instance_id": None,
+                "connection_expires_at": None,
+                "last_websocket_seen_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return True
+
+    async def list_matching_real_time_subscriptions(
+        self, device_id: str, metric_name: str, now: datetime
+    ) -> List[Dict[str, Any]]:
+        """List coarse-filter matching realtime subscriptions."""
+        self._log_call(
+            "list_matching_real_time_subscriptions",
+            device_id=device_id,
+            metric_name=metric_name,
+            now=now,
+        )
+
+        matched = []
+        for row in self._realtime_subscriptions.values():
+            if not row.get("active", True):
+                continue
+            if row.get("expires_at") and row["expires_at"] <= now:
+                continue
+            if row.get("device_ids") and device_id not in row["device_ids"]:
+                continue
+            if row.get("metric_names") and metric_name not in row["metric_names"]:
+                continue
+            matched.append(dict(row))
+        return matched
+
+    async def record_real_time_delivery(
+        self, subscription_id: str, websocket_id: str
+    ) -> bool:
+        """Track a successful realtime delivery."""
+        self._log_call(
+            "record_real_time_delivery",
+            subscription_id=subscription_id,
+            websocket_id=websocket_id,
+        )
+
+        row = self._realtime_subscriptions.get(subscription_id)
+        if not row or row.get("websocket_id") != websocket_id:
+            return False
+
+        now = datetime.now(timezone.utc)
+        row["last_sent"] = now
+        row.setdefault("metadata", {})
+        row["metadata"].update(
+            {
+                "last_delivery_at": now.isoformat(),
+                "last_websocket_seen_at": now.isoformat(),
+            }
+        )
+        return True
 
 
 class MockEventBus:
@@ -639,12 +890,18 @@ class MockEventBus:
         """Assert that an event was published"""
         assert len(self.published_events) > 0, "No events were published"
         if event_type:
-            event_types = [getattr(e, "event_type", str(e)) for e in self.published_events]
-            assert event_type in str(event_types), f"Expected {event_type} event, got {event_types}"
+            event_types = [
+                getattr(e, "event_type", str(e)) for e in self.published_events
+            ]
+            assert event_type in str(
+                event_types
+            ), f"Expected {event_type} event, got {event_types}"
 
     def assert_not_published(self):
         """Assert that no events were published"""
-        assert len(self.published_events) == 0, f"Expected no events, but {len(self.published_events)} were published"
+        assert (
+            len(self.published_events) == 0
+        ), f"Expected no events, but {len(self.published_events)} were published"
 
     def get_published_events(self) -> List[Any]:
         """Get all published events"""

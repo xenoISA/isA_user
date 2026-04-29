@@ -11,12 +11,10 @@ import pytest
 import httpx
 import os
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 from tests.contracts.telemetry.data_contract import (
     TelemetryTestDataFactory,
-    DataType,
-    MetricType,
     AlertLevel,
     AlertStatus,
     AggregationType,
@@ -33,6 +31,7 @@ API_BASE = f"{TELEMETRY_SERVICE_URL}/api/v1/telemetry"
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 async def http_client():
@@ -52,7 +51,7 @@ async def auth_token(http_client) -> Optional[str]:
                 "user_id": TelemetryTestDataFactory.make_user_id(),
                 "email": TelemetryTestDataFactory.make_email(),
             },
-            headers={"X-Internal-Call": "true"}
+            headers={"X-Internal-Call": "true"},
         )
         if response.status_code == 200:
             return response.json().get("access_token")
@@ -83,6 +82,7 @@ def internal_headers() -> Dict[str, str]:
 # Authentication Tests
 # =============================================================================
 
+
 class TestTelemetryAuthenticationAPI:
     """Test API authentication requirements"""
 
@@ -96,7 +96,7 @@ class TestTelemetryAuthenticationAPI:
         """API: Request with invalid token returns 401"""
         response = await http_client.get(
             f"{API_BASE}/metrics",
-            headers={"Authorization": "Bearer invalid_token_12345"}
+            headers={"Authorization": "Bearer invalid_token_12345"},
         )
 
         assert response.status_code == 401
@@ -107,18 +107,14 @@ class TestTelemetryAuthenticationAPI:
         expired_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfMTIzIiwiZXhwIjoxNjAwMDAwMDAwfQ.invalid"
 
         response = await http_client.get(
-            f"{API_BASE}/metrics",
-            headers={"Authorization": f"Bearer {expired_token}"}
+            f"{API_BASE}/metrics", headers={"Authorization": f"Bearer {expired_token}"}
         )
 
         assert response.status_code == 401
 
     async def test_internal_call_bypasses_auth(self, http_client, internal_headers):
         """API: X-Internal-Call header bypasses authentication"""
-        response = await http_client.get(
-            f"{API_BASE}/stats",
-            headers=internal_headers
-        )
+        response = await http_client.get(f"{API_BASE}/stats", headers=internal_headers)
 
         # Should succeed without token
         assert response.status_code == 200
@@ -127,6 +123,7 @@ class TestTelemetryAuthenticationAPI:
 # =============================================================================
 # Telemetry Ingest API Tests
 # =============================================================================
+
 
 class TestTelemetryIngestAPI:
     """Test telemetry data ingestion API"""
@@ -137,12 +134,16 @@ class TestTelemetryIngestAPI:
         data_point = TelemetryTestDataFactory.make_data_point_dict()
 
         # Use internal headers if no auth token available
-        headers = auth_headers if auth_headers.get("Authorization") else {"X-Internal-Call": "true", "Content-Type": "application/json"}
+        headers = (
+            auth_headers
+            if auth_headers.get("Authorization")
+            else {"X-Internal-Call": "true", "Content-Type": "application/json"}
+        )
 
         response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=headers
+            headers=headers,
         )
 
         assert response.status_code in [200, 201]
@@ -155,7 +156,7 @@ class TestTelemetryIngestAPI:
         response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 422
@@ -164,14 +165,13 @@ class TestTelemetryIngestAPI:
         """API: POST telemetry returns ingestion statistics"""
         device_id = TelemetryTestDataFactory.make_device_id()
         data_points = [
-            TelemetryTestDataFactory.make_data_point_dict()
-            for _ in range(3)
+            TelemetryTestDataFactory.make_data_point_dict() for _ in range(3)
         ]
 
         response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": data_points},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code in [200, 201]
@@ -183,6 +183,7 @@ class TestTelemetryIngestAPI:
 # =============================================================================
 # Telemetry Query API Tests
 # =============================================================================
+
 
 class TestTelemetryQueryAPI:
     """Test telemetry query API"""
@@ -198,9 +199,7 @@ class TestTelemetryQueryAPI:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         # May return 200 with data or 404 if no data
@@ -216,9 +215,7 @@ class TestTelemetryQueryAPI:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         assert response.status_code == 422
@@ -234,9 +231,7 @@ class TestTelemetryQueryAPI:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         # May return 200 with data or 404 if no data
@@ -257,9 +252,7 @@ class TestTelemetryQueryAPI:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         # May return 200 with data or 404 if no data
@@ -274,6 +267,7 @@ class TestTelemetryQueryAPI:
 # Metric Definition API Tests
 # =============================================================================
 
+
 class TestMetricDefinitionAPI:
     """Test metric definition API"""
 
@@ -285,14 +279,16 @@ class TestMetricDefinitionAPI:
         response = await http_client.post(
             f"{API_BASE}/metrics",
             json=metric_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         assert response.status_code in [200, 201]
         result = response.json()
         assert "metric_id" in result
 
-    async def test_create_metric_validates_data_type(self, http_client, internal_headers):
+    async def test_create_metric_validates_data_type(
+        self, http_client, internal_headers
+    ):
         """API: POST metric validates data_type field"""
         user_id = TelemetryTestDataFactory.make_user_id()
         metric_data = {
@@ -303,7 +299,7 @@ class TestMetricDefinitionAPI:
         response = await http_client.post(
             f"{API_BASE}/metrics",
             json=metric_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         assert response.status_code == 422
@@ -311,8 +307,7 @@ class TestMetricDefinitionAPI:
     async def test_list_metrics_returns_array(self, http_client, internal_headers):
         """API: GET metrics returns array or paginated response"""
         response = await http_client.get(
-            f"{API_BASE}/metrics",
-            headers=internal_headers
+            f"{API_BASE}/metrics", headers=internal_headers
         )
 
         assert response.status_code == 200
@@ -326,8 +321,7 @@ class TestMetricDefinitionAPI:
         fake_name = f"nonexistent_metric_{TelemetryTestDataFactory.make_metric_id()}"
 
         response = await http_client.get(
-            f"{API_BASE}/metrics/{fake_name}",
-            headers=internal_headers
+            f"{API_BASE}/metrics/{fake_name}", headers=internal_headers
         )
 
         # May return 404 (not found) or 500 (implementation error)
@@ -337,6 +331,7 @@ class TestMetricDefinitionAPI:
 # =============================================================================
 # Alert Rule API Tests
 # =============================================================================
+
 
 class TestAlertRuleAPI:
     """Test alert rule API"""
@@ -349,7 +344,7 @@ class TestAlertRuleAPI:
         response = await http_client.post(
             f"{API_BASE}/alerts/rules",
             json=rule_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         assert response.status_code in [200, 201]
@@ -369,7 +364,7 @@ class TestAlertRuleAPI:
         response = await http_client.post(
             f"{API_BASE}/alerts/rules",
             json=rule_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         # Should either validate and reject or accept (depending on service impl)
@@ -378,8 +373,7 @@ class TestAlertRuleAPI:
     async def test_list_rules_returns_array(self, http_client, internal_headers):
         """API: GET alert rules returns array or paginated response"""
         response = await http_client.get(
-            f"{API_BASE}/alerts/rules",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules", headers=internal_headers
         )
 
         assert response.status_code == 200
@@ -391,8 +385,7 @@ class TestAlertRuleAPI:
         fake_id = TelemetryTestDataFactory.make_rule_id()
 
         response = await http_client.get(
-            f"{API_BASE}/alerts/rules/{fake_id}",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules/{fake_id}", headers=internal_headers
         )
 
         # May return 404 (not found) or 500 (implementation error)
@@ -403,15 +396,13 @@ class TestAlertRuleAPI:
 # Alert API Tests
 # =============================================================================
 
+
 class TestAlertAPI:
     """Test alert API"""
 
     async def test_list_alerts_succeeds(self, http_client, internal_headers):
         """API: GET alerts returns list"""
-        response = await http_client.get(
-            f"{API_BASE}/alerts",
-            headers=internal_headers
-        )
+        response = await http_client.get(f"{API_BASE}/alerts", headers=internal_headers)
 
         assert response.status_code == 200
 
@@ -420,7 +411,7 @@ class TestAlertAPI:
         response = await http_client.get(
             f"{API_BASE}/alerts",
             params={"status": AlertStatus.ACTIVE.value},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 200
@@ -430,7 +421,7 @@ class TestAlertAPI:
         response = await http_client.get(
             f"{API_BASE}/alerts",
             params={"level": AlertLevel.CRITICAL.value},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 200
@@ -440,6 +431,7 @@ class TestAlertAPI:
 # Device Stats API Tests
 # =============================================================================
 
+
 class TestDeviceStatsAPI:
     """Test device stats API"""
 
@@ -448,14 +440,15 @@ class TestDeviceStatsAPI:
         device_id = TelemetryTestDataFactory.make_device_id()
 
         response = await http_client.get(
-            f"{API_BASE}/devices/{device_id}/stats",
-            headers=internal_headers
+            f"{API_BASE}/devices/{device_id}/stats", headers=internal_headers
         )
 
         # Should return stats or 404 if no data
         assert response.status_code in [200, 404]
 
-    async def test_get_device_stats_returns_structure(self, http_client, internal_headers):
+    async def test_get_device_stats_returns_structure(
+        self, http_client, internal_headers
+    ):
         """API: GET device stats returns expected structure"""
         # Ingest some data first
         device_id = TelemetryTestDataFactory.make_device_id()
@@ -464,12 +457,11 @@ class TestDeviceStatsAPI:
         await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         response = await http_client.get(
-            f"{API_BASE}/devices/{device_id}/stats",
-            headers=internal_headers
+            f"{API_BASE}/devices/{device_id}/stats", headers=internal_headers
         )
 
         assert response.status_code == 200
@@ -481,15 +473,13 @@ class TestDeviceStatsAPI:
 # Service Stats API Tests
 # =============================================================================
 
+
 class TestServiceStatsAPI:
     """Test service stats API"""
 
     async def test_get_stats_succeeds(self, http_client, internal_headers):
         """API: GET stats returns service statistics"""
-        response = await http_client.get(
-            f"{API_BASE}/stats",
-            headers=internal_headers
-        )
+        response = await http_client.get(f"{API_BASE}/stats", headers=internal_headers)
 
         assert response.status_code == 200
         result = response.json()
@@ -500,6 +490,7 @@ class TestServiceStatsAPI:
 # =============================================================================
 # Aggregation API Tests
 # =============================================================================
+
 
 class TestAggregationAPI:
     """Test aggregation API"""
@@ -518,13 +509,15 @@ class TestAggregationAPI:
                 "start_time": (now - timedelta(hours=1)).isoformat(),
                 "end_time": now.isoformat(),
             },
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         # May return 200, 404 (no data), or 500 (aggregation issue)
         assert response.status_code in [200, 404, 500]
 
-    async def test_aggregate_validates_aggregation_type(self, http_client, internal_headers):
+    async def test_aggregate_validates_aggregation_type(
+        self, http_client, internal_headers
+    ):
         """API: GET aggregated validates aggregation_type"""
         now = datetime.now(timezone.utc)
 
@@ -538,7 +531,7 @@ class TestAggregationAPI:
                 "start_time": (now - timedelta(hours=1)).isoformat(),
                 "end_time": now.isoformat(),
             },
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 422
@@ -547,6 +540,7 @@ class TestAggregationAPI:
 # =============================================================================
 # Subscription API Tests
 # =============================================================================
+
 
 class TestSubscriptionAPI:
     """Test real-time subscription API"""
@@ -559,14 +553,14 @@ class TestSubscriptionAPI:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/subscribe",
-            json=subscription_data,
-            headers=internal_headers
+            f"{API_BASE}/subscribe", json=subscription_data, headers=internal_headers
         )
 
         assert response.status_code in [200, 201]
         result = response.json()
         assert "subscription_id" in result
+        assert "connect_token" in result
+        assert result["websocket_url"].endswith(result["subscription_id"])
 
     async def test_delete_subscription_succeeds(self, http_client, internal_headers):
         """API: DELETE subscription removes subscription"""
@@ -574,9 +568,7 @@ class TestSubscriptionAPI:
         subscription_data = {"device_ids": []}
 
         create_response = await http_client.post(
-            f"{API_BASE}/subscribe",
-            json=subscription_data,
-            headers=internal_headers
+            f"{API_BASE}/subscribe", json=subscription_data, headers=internal_headers
         )
 
         if create_response.status_code not in [200, 201]:
@@ -586,8 +578,7 @@ class TestSubscriptionAPI:
 
         # Delete
         response = await http_client.delete(
-            f"{API_BASE}/subscribe/{subscription_id}",
-            headers=internal_headers
+            f"{API_BASE}/subscribe/{subscription_id}", headers=internal_headers
         )
 
         assert response.status_code in [200, 204]
@@ -597,6 +588,7 @@ class TestSubscriptionAPI:
 # Error Response Tests
 # =============================================================================
 
+
 class TestErrorResponsesAPI:
     """Test API error response formats"""
 
@@ -605,8 +597,7 @@ class TestErrorResponsesAPI:
         fake_name = f"nonexistent_metric_{TelemetryTestDataFactory.make_metric_id()}"
 
         response = await http_client.get(
-            f"{API_BASE}/metrics/{fake_name}",
-            headers=internal_headers
+            f"{API_BASE}/metrics/{fake_name}", headers=internal_headers
         )
 
         assert response.status_code in [404, 500]
@@ -619,7 +610,7 @@ class TestErrorResponsesAPI:
         response = await http_client.post(
             f"{API_BASE}/query",
             json={"devices": [], "metrics": [], "start_time": "invalid"},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 422
@@ -631,6 +622,7 @@ class TestErrorResponsesAPI:
 # =============================================================================
 # Health Endpoint Tests
 # =============================================================================
+
 
 class TestHealthAPI:
     """Test health endpoint API"""
@@ -653,4 +645,5 @@ class TestHealthAPI:
 
 if __name__ == "__main__":
     import sys
+
     pytest.main([__file__, "-v", "-s", "--tb=short"] + sys.argv[1:])
