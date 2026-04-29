@@ -39,4 +39,3 @@ def test_subscription_matches_tags_requires_subset_match():
 def test_subscription_matches_tags_rejects_missing_or_mismatched_tags():
     assert not subscription_matches_tags({"site": "lab"}, {})
     assert not subscription_matches_tags({"site": "lab"}, {"site": "prod"})
-

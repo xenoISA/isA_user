@@ -1142,10 +1142,10 @@ class TelemetryRepository:
                     if result.get("notification_channels") is None:
                         result["notification_channels"] = []
                     else:
-                        result["notification_channels"] = (
-                            self._convert_protobuf_to_native(
-                                result["notification_channels"]
-                            )
+                        result[
+                            "notification_channels"
+                        ] = self._convert_protobuf_to_native(
+                            result["notification_channels"]
                         )
                     if result.get("tags") is None:
                         result["tags"] = []

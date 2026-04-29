@@ -38,6 +38,7 @@ API_BASE = f"{TELEMETRY_SERVICE_URL}/api/v1/telemetry"
 # Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def internal_headers() -> Dict[str, str]:
     """Headers for internal service calls (bypass auth)"""
@@ -82,25 +83,26 @@ def cleanup_alert_ids():
 # Health Check Tests
 # =============================================================================
 
+
 class TestTelemetryHealthIntegration:
     """Test telemetry service health endpoints"""
 
     async def test_health_check_returns_healthy(self, http_client, internal_headers):
         """Integration: Health check returns healthy status"""
         response = await http_client.get(
-            f"{TELEMETRY_SERVICE_URL}/health",
-            headers=internal_headers
+            f"{TELEMETRY_SERVICE_URL}/health", headers=internal_headers
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data.get("status") == "healthy"
 
-    async def test_health_check_includes_service_info(self, http_client, internal_headers):
+    async def test_health_check_includes_service_info(
+        self, http_client, internal_headers
+    ):
         """Integration: Health check includes service name and port"""
         response = await http_client.get(
-            f"{TELEMETRY_SERVICE_URL}/health",
-            headers=internal_headers
+            f"{TELEMETRY_SERVICE_URL}/health", headers=internal_headers
         )
 
         assert response.status_code == 200
@@ -111,6 +113,7 @@ class TestTelemetryHealthIntegration:
 # =============================================================================
 # Telemetry Data Ingestion Tests
 # =============================================================================
+
 
 class TestTelemetryIngestIntegration:
     """Test telemetry data ingestion endpoints"""
@@ -123,7 +126,7 @@ class TestTelemetryIngestIntegration:
         response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code in [200, 201]
@@ -134,21 +137,22 @@ class TestTelemetryIngestIntegration:
         """Integration: Ingest multiple telemetry data points"""
         device_id = TelemetryTestDataFactory.make_device_id()
         data_points = [
-            TelemetryTestDataFactory.make_data_point_dict()
-            for _ in range(5)
+            TelemetryTestDataFactory.make_data_point_dict() for _ in range(5)
         ]
 
         response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": data_points},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code in [200, 201]
         result = response.json()
         assert result.get("ingested_count", 0) >= 5 or result.get("success") is True
 
-    async def test_ingest_with_different_data_types(self, http_client, internal_headers):
+    async def test_ingest_with_different_data_types(
+        self, http_client, internal_headers
+    ):
         """Integration: Ingest data points with different value types"""
         device_id = TelemetryTestDataFactory.make_device_id()
 
@@ -170,7 +174,7 @@ class TestTelemetryIngestIntegration:
         response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": [numeric_point, string_point, boolean_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code in [200, 201]
@@ -183,20 +187,22 @@ class TestTelemetryIngestIntegration:
         response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json=batch_data,
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         # Batch endpoint might return 200 or 201
         assert response.status_code in [200, 201, 202]
 
-    async def test_ingest_empty_batch_returns_validation_error(self, http_client, internal_headers):
+    async def test_ingest_empty_batch_returns_validation_error(
+        self, http_client, internal_headers
+    ):
         """Integration: Empty batch returns validation error (min 1 item required)"""
         device_id = TelemetryTestDataFactory.make_device_id()
 
         response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": []},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         # Empty batch should be rejected with 422 validation error
@@ -206,6 +212,7 @@ class TestTelemetryIngestIntegration:
 # =============================================================================
 # Telemetry Query Tests
 # =============================================================================
+
 
 class TestTelemetryQueryIntegration:
     """Test telemetry data query endpoints"""
@@ -218,14 +225,13 @@ class TestTelemetryQueryIntegration:
         now = datetime.now(timezone.utc)
 
         data_point = TelemetryTestDataFactory.make_data_point_dict(
-            metric_name=metric_name,
-            timestamp=now.isoformat()
+            metric_name=metric_name, timestamp=now.isoformat()
         )
 
         await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         # Query the data
@@ -237,9 +243,7 @@ class TestTelemetryQueryIntegration:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         # May return 200 with data or 404 if data not yet available
@@ -262,9 +266,7 @@ class TestTelemetryQueryIntegration:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         # May return 200 (with empty results) or 404 (no data found)
@@ -281,12 +283,12 @@ class TestTelemetryQueryIntegration:
             data_point = TelemetryTestDataFactory.make_data_point_dict(
                 metric_name=metric_name,
                 value=float(10 + i),
-                timestamp=(now - timedelta(minutes=i)).isoformat()
+                timestamp=(now - timedelta(minutes=i)).isoformat(),
             )
             await http_client.post(
                 f"{API_BASE}/devices/{device_id}/telemetry/batch",
                 json={"data_points": [data_point]},
-                headers=internal_headers
+                headers=internal_headers,
             )
 
         # Query with aggregation (use GET with query params)
@@ -300,7 +302,7 @@ class TestTelemetryQueryIntegration:
                 "start_time": (now - timedelta(hours=1)).isoformat(),
                 "end_time": (now + timedelta(hours=1)).isoformat(),
             },
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         # May return 200 with data, 404 if no data, or 500 if aggregation not fully implemented
@@ -320,9 +322,7 @@ class TestTelemetryQueryIntegration:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         # May return 200 with empty results or 404 if no data
@@ -330,17 +330,22 @@ class TestTelemetryQueryIntegration:
         if response.status_code == 200:
             result = response.json()
             # Should return empty or zero count
-            assert result.get("count", 0) == 0 or len(result.get("data_points", [])) == 0
+            assert (
+                result.get("count", 0) == 0 or len(result.get("data_points", [])) == 0
+            )
 
 
 # =============================================================================
 # Metric Definition Tests
 # =============================================================================
 
+
 class TestMetricDefinitionIntegration:
     """Test metric definition CRUD operations"""
 
-    async def test_create_metric_definition(self, http_client, internal_headers, cleanup_metric_ids):
+    async def test_create_metric_definition(
+        self, http_client, internal_headers, cleanup_metric_ids
+    ):
         """Integration: Create metric definition"""
         user_id = TelemetryTestDataFactory.make_user_id()
         metric_data = TelemetryTestDataFactory.make_metric_definition_create_dict()
@@ -348,7 +353,7 @@ class TestMetricDefinitionIntegration:
         response = await http_client.post(
             f"{API_BASE}/metrics",
             json=metric_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         assert response.status_code in [200, 201]
@@ -356,7 +361,9 @@ class TestMetricDefinitionIntegration:
         assert "metric_id" in result
         cleanup_metric_ids.append(result["metric_id"])
 
-    async def test_get_metric_definition(self, http_client, internal_headers, cleanup_metric_ids):
+    async def test_get_metric_definition(
+        self, http_client, internal_headers, cleanup_metric_ids
+    ):
         """Integration: Get metric definition by ID"""
         # Create first
         user_id = TelemetryTestDataFactory.make_user_id()
@@ -365,7 +372,7 @@ class TestMetricDefinitionIntegration:
         create_response = await http_client.post(
             f"{API_BASE}/metrics",
             json=metric_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         if create_response.status_code not in [200, 201]:
@@ -377,8 +384,7 @@ class TestMetricDefinitionIntegration:
 
         # Get it by name (API uses /metrics/{metric_name})
         response = await http_client.get(
-            f"{API_BASE}/metrics/{metric_name}",
-            headers=internal_headers
+            f"{API_BASE}/metrics/{metric_name}", headers=internal_headers
         )
 
         assert response.status_code == 200
@@ -388,15 +394,16 @@ class TestMetricDefinitionIntegration:
     async def test_list_metric_definitions(self, http_client, internal_headers):
         """Integration: List metric definitions"""
         response = await http_client.get(
-            f"{API_BASE}/metrics",
-            headers=internal_headers
+            f"{API_BASE}/metrics", headers=internal_headers
         )
 
         assert response.status_code == 200
         result = response.json()
         assert "items" in result or "metrics" in result or isinstance(result, list)
 
-    async def test_update_metric_definition(self, http_client, internal_headers, cleanup_metric_ids):
+    async def test_update_metric_definition(
+        self, http_client, internal_headers, cleanup_metric_ids
+    ):
         """Integration: Update metric definition"""
         # First create a metric
         user_id = TelemetryTestDataFactory.make_user_id()
@@ -405,7 +412,7 @@ class TestMetricDefinitionIntegration:
         create_response = await http_client.post(
             f"{API_BASE}/metrics",
             json=metric_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         if create_response.status_code not in [200, 201]:
@@ -421,13 +428,13 @@ class TestMetricDefinitionIntegration:
             **metric_data,
             "description": "Updated description",
             "unit": "updated_unit",
-            "retention_days": 180
+            "retention_days": 180,
         }
 
         update_response = await http_client.put(
             f"{API_BASE}/metrics/{metric_name}",
             json=update_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         assert update_response.status_code == 200
@@ -436,7 +443,11 @@ class TestMetricDefinitionIntegration:
         assert updated["unit"] == "updated_unit"
         assert updated["retention_days"] == 180
         # data_type should remain unchanged
-        assert updated["data_type"] == metric_data["data_type"].value if hasattr(metric_data["data_type"], 'value') else metric_data["data_type"]
+        assert (
+            updated["data_type"] == metric_data["data_type"].value
+            if hasattr(metric_data["data_type"], "value")
+            else metric_data["data_type"]
+        )
 
     async def test_delete_metric_definition(self, http_client, internal_headers):
         """Integration: Delete metric definition by name"""
@@ -447,7 +458,7 @@ class TestMetricDefinitionIntegration:
         create_response = await http_client.post(
             f"{API_BASE}/metrics",
             json=metric_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         if create_response.status_code not in [200, 201]:
@@ -457,8 +468,7 @@ class TestMetricDefinitionIntegration:
 
         # Delete by name
         response = await http_client.delete(
-            f"{API_BASE}/metrics/{metric_name}",
-            headers=internal_headers
+            f"{API_BASE}/metrics/{metric_name}", headers=internal_headers
         )
 
         assert response.status_code in [200, 204]
@@ -468,10 +478,13 @@ class TestMetricDefinitionIntegration:
 # Alert Rule Tests
 # =============================================================================
 
+
 class TestAlertRuleIntegration:
     """Test alert rule CRUD operations"""
 
-    async def test_create_alert_rule(self, http_client, internal_headers, cleanup_rule_ids):
+    async def test_create_alert_rule(
+        self, http_client, internal_headers, cleanup_rule_ids
+    ):
         """Integration: Create alert rule"""
         user_id = TelemetryTestDataFactory.make_user_id()
         rule_data = TelemetryTestDataFactory.make_alert_rule_create_dict()
@@ -479,7 +492,7 @@ class TestAlertRuleIntegration:
         response = await http_client.post(
             f"{API_BASE}/alerts/rules",
             json=rule_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         assert response.status_code in [200, 201]
@@ -487,7 +500,9 @@ class TestAlertRuleIntegration:
         assert "rule_id" in result
         cleanup_rule_ids.append(result["rule_id"])
 
-    async def test_get_alert_rule(self, http_client, internal_headers, cleanup_rule_ids):
+    async def test_get_alert_rule(
+        self, http_client, internal_headers, cleanup_rule_ids
+    ):
         """Integration: Get alert rule by ID"""
         # Create first
         user_id = TelemetryTestDataFactory.make_user_id()
@@ -496,7 +511,7 @@ class TestAlertRuleIntegration:
         create_response = await http_client.post(
             f"{API_BASE}/alerts/rules",
             json=rule_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         if create_response.status_code not in [200, 201]:
@@ -507,8 +522,7 @@ class TestAlertRuleIntegration:
 
         # Get it
         response = await http_client.get(
-            f"{API_BASE}/alerts/rules/{rule_id}",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules/{rule_id}", headers=internal_headers
         )
 
         assert response.status_code == 200
@@ -518,15 +532,16 @@ class TestAlertRuleIntegration:
     async def test_list_alert_rules(self, http_client, internal_headers):
         """Integration: List alert rules"""
         response = await http_client.get(
-            f"{API_BASE}/alerts/rules",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules", headers=internal_headers
         )
 
         assert response.status_code == 200
         result = response.json()
         assert "items" in result or "rules" in result or isinstance(result, list)
 
-    async def test_enable_disable_alert_rule(self, http_client, internal_headers, cleanup_rule_ids):
+    async def test_enable_disable_alert_rule(
+        self, http_client, internal_headers, cleanup_rule_ids
+    ):
         """Integration: Enable/disable alert rule via PUT /alerts/rules/{rule_id}/enable"""
         # Create first
         user_id = TelemetryTestDataFactory.make_user_id()
@@ -535,7 +550,7 @@ class TestAlertRuleIntegration:
         create_response = await http_client.post(
             f"{API_BASE}/alerts/rules",
             json=rule_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         if create_response.status_code not in [200, 201]:
@@ -548,7 +563,7 @@ class TestAlertRuleIntegration:
         response = await http_client.put(
             f"{API_BASE}/alerts/rules/{rule_id}/enable",
             json={"enabled": False},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 200
@@ -562,7 +577,7 @@ class TestAlertRuleIntegration:
         create_response = await http_client.post(
             f"{API_BASE}/alerts/rules",
             json=rule_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         if create_response.status_code not in [200, 201]:
@@ -573,8 +588,7 @@ class TestAlertRuleIntegration:
 
         # Delete the alert rule
         delete_response = await http_client.delete(
-            f"{API_BASE}/alerts/rules/{rule_id}",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules/{rule_id}", headers=internal_headers
         )
 
         assert delete_response.status_code == 200
@@ -583,8 +597,7 @@ class TestAlertRuleIntegration:
 
         # Verify it's deleted
         get_response = await http_client.get(
-            f"{API_BASE}/alerts/rules/{rule_id}",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules/{rule_id}", headers=internal_headers
         )
         assert get_response.status_code == 404
 
@@ -593,15 +606,13 @@ class TestAlertRuleIntegration:
 # Alert Tests
 # =============================================================================
 
+
 class TestAlertIntegration:
     """Test alert operations"""
 
     async def test_list_alerts(self, http_client, internal_headers):
         """Integration: List alerts"""
-        response = await http_client.get(
-            f"{API_BASE}/alerts",
-            headers=internal_headers
-        )
+        response = await http_client.get(f"{API_BASE}/alerts", headers=internal_headers)
 
         assert response.status_code == 200
         result = response.json()
@@ -612,7 +623,7 @@ class TestAlertIntegration:
         response = await http_client.get(
             f"{API_BASE}/alerts",
             params={"status": AlertStatus.ACTIVE.value},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 200
@@ -622,7 +633,7 @@ class TestAlertIntegration:
         response = await http_client.get(
             f"{API_BASE}/alerts",
             params={"level": AlertLevel.WARNING.value},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 200
@@ -633,7 +644,7 @@ class TestAlertIntegration:
         list_response = await http_client.get(
             f"{API_BASE}/alerts",
             params={"status": AlertStatus.ACTIVE.value},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         if list_response.status_code != 200:
@@ -652,7 +663,7 @@ class TestAlertIntegration:
         response = await http_client.post(
             f"{API_BASE}/alerts/{alert_id}/acknowledge",
             json={"acknowledged_by": user_id},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code in [200, 204]
@@ -663,7 +674,7 @@ class TestAlertIntegration:
         list_response = await http_client.get(
             f"{API_BASE}/alerts",
             params={"status": AlertStatus.ACTIVE.value},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         if list_response.status_code != 200:
@@ -683,7 +694,7 @@ class TestAlertIntegration:
         response = await http_client.post(
             f"{API_BASE}/alerts/{alert_id}/resolve",
             json={"resolved_by": user_id, "resolution_note": resolution_note},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code in [200, 204]
@@ -692,6 +703,7 @@ class TestAlertIntegration:
 # =============================================================================
 # Device Stats Tests
 # =============================================================================
+
 
 class TestDeviceStatsIntegration:
     """Test device telemetry stats endpoints"""
@@ -705,12 +717,11 @@ class TestDeviceStatsIntegration:
         await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         response = await http_client.get(
-            f"{API_BASE}/devices/{device_id}/stats",
-            headers=internal_headers
+            f"{API_BASE}/devices/{device_id}/stats", headers=internal_headers
         )
 
         assert response.status_code == 200
@@ -722,8 +733,7 @@ class TestDeviceStatsIntegration:
         device_id = TelemetryTestDataFactory.make_device_id()
 
         response = await http_client.get(
-            f"{API_BASE}/devices/{device_id}/stats",
-            headers=internal_headers
+            f"{API_BASE}/devices/{device_id}/stats", headers=internal_headers
         )
 
         # Should return 200 with zero stats or 404
@@ -734,28 +744,33 @@ class TestDeviceStatsIntegration:
 # Service Stats Tests
 # =============================================================================
 
+
 class TestServiceStatsIntegration:
     """Test service-wide statistics endpoints"""
 
     async def test_get_service_stats(self, http_client, internal_headers):
         """Integration: Get telemetry service stats"""
-        response = await http_client.get(
-            f"{API_BASE}/stats",
-            headers=internal_headers
-        )
+        response = await http_client.get(f"{API_BASE}/stats", headers=internal_headers)
 
         assert response.status_code == 200
         result = response.json()
         # Should have some stats fields
-        assert any(key in result for key in [
-            "total_devices", "total_metrics", "total_data_points",
-            "total_points", "active_devices"
-        ])
+        assert any(
+            key in result
+            for key in [
+                "total_devices",
+                "total_metrics",
+                "total_data_points",
+                "total_points",
+                "active_devices",
+            ]
+        )
 
 
 # =============================================================================
 # Real-Time Subscription Tests
 # =============================================================================
+
 
 class TestRealTimeSubscriptionIntegration:
     """Test real-time data subscription endpoints"""
@@ -768,9 +783,7 @@ class TestRealTimeSubscriptionIntegration:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/subscribe",
-            json=subscription_data,
-            headers=internal_headers
+            f"{API_BASE}/subscribe", json=subscription_data, headers=internal_headers
         )
 
         assert response.status_code in [200, 201]
@@ -787,9 +800,7 @@ class TestRealTimeSubscriptionIntegration:
         }
 
         create_response = await http_client.post(
-            f"{API_BASE}/subscribe",
-            json=subscription_data,
-            headers=internal_headers
+            f"{API_BASE}/subscribe", json=subscription_data, headers=internal_headers
         )
 
         if create_response.status_code not in [200, 201]:
@@ -799,8 +810,7 @@ class TestRealTimeSubscriptionIntegration:
 
         # Delete
         response = await http_client.delete(
-            f"{API_BASE}/subscribe/{subscription_id}",
-            headers=internal_headers
+            f"{API_BASE}/subscribe/{subscription_id}", headers=internal_headers
         )
 
         assert response.status_code in [200, 204]
@@ -810,16 +820,18 @@ class TestRealTimeSubscriptionIntegration:
 # Error Handling Tests
 # =============================================================================
 
+
 class TestErrorHandlingIntegration:
     """Test error handling in integration scenarios"""
 
     async def test_get_nonexistent_metric(self, http_client, internal_headers):
         """Integration: Get non-existent metric returns 404 or 500"""
-        fake_metric_name = f"nonexistent_metric_{TelemetryTestDataFactory.make_metric_id()}"
+        fake_metric_name = (
+            f"nonexistent_metric_{TelemetryTestDataFactory.make_metric_id()}"
+        )
 
         response = await http_client.get(
-            f"{API_BASE}/metrics/{fake_metric_name}",
-            headers=internal_headers
+            f"{API_BASE}/metrics/{fake_metric_name}", headers=internal_headers
         )
 
         # May return 404 (not found) or 500 (implementation raises exception)
@@ -830,8 +842,7 @@ class TestErrorHandlingIntegration:
         fake_rule_id = TelemetryTestDataFactory.make_rule_id()
 
         response = await http_client.get(
-            f"{API_BASE}/alerts/rules/{fake_rule_id}",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules/{fake_rule_id}", headers=internal_headers
         )
 
         # May return 404 (not found) or 500 (implementation raises exception)
@@ -845,9 +856,7 @@ class TestErrorHandlingIntegration:
         }
 
         response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         assert response.status_code == 422
@@ -866,7 +875,7 @@ class TestErrorHandlingIntegration:
                 "start_time": (now - timedelta(hours=1)).isoformat(),
                 "end_time": now.isoformat(),
             },
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert response.status_code == 422
@@ -875,6 +884,7 @@ class TestErrorHandlingIntegration:
 # =============================================================================
 # Full Lifecycle Tests
 # =============================================================================
+
 
 class TestTelemetryFullLifecycleIntegration:
     """Test full telemetry data lifecycle"""
@@ -891,15 +901,13 @@ class TestTelemetryFullLifecycleIntegration:
 
         # 1. INGEST
         data_point = TelemetryTestDataFactory.make_data_point_dict(
-            metric_name=metric_name,
-            value=expected_value,
-            timestamp=now.isoformat()
+            metric_name=metric_name, value=expected_value, timestamp=now.isoformat()
         )
 
         ingest_response = await http_client.post(
             f"{API_BASE}/devices/{device_id}/telemetry/batch",
             json={"data_points": [data_point]},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert ingest_response.status_code in [200, 201]
@@ -916,9 +924,7 @@ class TestTelemetryFullLifecycleIntegration:
         }
 
         query_response = await http_client.post(
-            f"{API_BASE}/query",
-            json=query_params,
-            headers=internal_headers
+            f"{API_BASE}/query", json=query_params, headers=internal_headers
         )
 
         # Query may return 200 with data or 404 if not found
@@ -944,7 +950,7 @@ class TestTelemetryFullLifecycleIntegration:
         create_response = await http_client.post(
             f"{API_BASE}/alerts/rules",
             json=rule_data,
-            headers={**internal_headers, "X-User-ID": user_id}
+            headers={**internal_headers, "X-User-ID": user_id},
         )
 
         if create_response.status_code not in [200, 201]:
@@ -954,8 +960,7 @@ class TestTelemetryFullLifecycleIntegration:
 
         # 2. READ
         get_response = await http_client.get(
-            f"{API_BASE}/alerts/rules/{rule_id}",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules/{rule_id}", headers=internal_headers
         )
 
         assert get_response.status_code == 200
@@ -965,15 +970,14 @@ class TestTelemetryFullLifecycleIntegration:
         enable_response = await http_client.put(
             f"{API_BASE}/alerts/rules/{rule_id}/enable",
             json={"enabled": False},
-            headers=internal_headers
+            headers=internal_headers,
         )
 
         assert enable_response.status_code == 200
 
         # Note: DELETE endpoint not implemented, so we verify the rule was disabled
         verify_response = await http_client.get(
-            f"{API_BASE}/alerts/rules/{rule_id}",
-            headers=internal_headers
+            f"{API_BASE}/alerts/rules/{rule_id}", headers=internal_headers
         )
 
         assert verify_response.status_code == 200
@@ -984,4 +988,5 @@ class TestTelemetryFullLifecycleIntegration:
 
 if __name__ == "__main__":
     import sys
+
     pytest.main([__file__, "-v", "-s", "--tb=short"] + sys.argv[1:])
