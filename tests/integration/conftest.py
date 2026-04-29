@@ -43,7 +43,7 @@ class TestConfig:
     """测试配置"""
 
     # Service URLs (通过 APISIX Gateway 或直接访问)
-    # Authoritative source: config/ports.yaml
+    # Authoritative source: deployment/k8s/build-all-images.sh
     # Port order: 8201-8230 (sequential by service priority)
     AUTH_URL = os.getenv("AUTH_BASE_URL", "http://localhost:8201")
     ACCOUNT_URL = os.getenv("ACCOUNT_BASE_URL", "http://localhost:8202")
