@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from microservices.telemetry_service.realtime import (
     hash_connect_token,
     subscription_matches_tags,

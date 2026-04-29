@@ -11,12 +11,10 @@ import pytest
 import httpx
 import os
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 from tests.contracts.telemetry.data_contract import (
     TelemetryTestDataFactory,
-    DataType,
-    MetricType,
     AlertLevel,
     AlertStatus,
     AggregationType,

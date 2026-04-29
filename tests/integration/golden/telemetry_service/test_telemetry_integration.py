@@ -12,19 +12,14 @@ import pytest
 import httpx
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict
 import os
 
 from tests.contracts.telemetry.data_contract import (
     TelemetryTestDataFactory,
-    DataType,
-    MetricType,
     AlertLevel,
     AlertStatus,
     AggregationType,
-    TelemetryDataPointBuilder,
-    AlertRuleCreateRequestBuilder,
-    TelemetryQueryRequestBuilder,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.golden, pytest.mark.asyncio]
