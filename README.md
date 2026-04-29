@@ -624,8 +624,11 @@ kubectl apply -f deployment/k8s/ -n isa-cloud-staging
 
 ### Production (Kubernetes)
 ```bash
-kubectl apply -f deployment/k8s/ -n isa-cloud-production
+kubectl apply -f deployment/k8s/ -n isa-cloud-prod
 ```
+
+Canonical Kubernetes namespaces are defined in `config/ports.yaml`. The
+production namespace is `isa-cloud-prod`.
 
 ## 📈 Monitoring & Observability
 

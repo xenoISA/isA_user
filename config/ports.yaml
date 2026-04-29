@@ -13,6 +13,7 @@
 
 # Kubernetes Namespace Configuration
 kubernetes:
+  # Canonical namespaces for deploy workflows, Helm scripts, and production env config.
   staging_namespace: "isa-cloud-staging"
   production_namespace: "isa-cloud-prod"
   default_namespace: "isa-cloud-staging"

@@ -25,12 +25,46 @@ class DeployTarget:
     port: int
 
 
+def _read_config_lines(config_path: Path = PORTS_CONFIG_PATH) -> list[str]:
+    return config_path.read_text(encoding="utf-8").splitlines()
+
+
+def _parse_top_level_mapping_section(
+    section_name: str,
+    config_path: Path = PORTS_CONFIG_PATH,
+) -> dict[str, str]:
+    section_values: dict[str, str] = {}
+    current_section: str | None = None
+
+    for raw_line in _read_config_lines(config_path):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+
+        if indent == 0:
+            current_section = stripped[:-1] if stripped.endswith(":") else None
+            continue
+
+        if current_section != section_name or indent != 2 or ":" not in stripped:
+            continue
+
+        key, _, raw_value = stripped.partition(":")
+        section_values[key] = raw_value.strip().strip('"').strip("'")
+
+    if not section_values:
+        raise ValueError(f"Missing '{section_name}' mapping in {config_path}")
+
+    return section_values
+
+
 def _load_microservice_config(config_path: Path = PORTS_CONFIG_PATH) -> dict[str, dict]:
     microservices: dict[str, dict] = {}
     current_service: str | None = None
     in_microservices = False
 
-    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
+    for raw_line in _read_config_lines(config_path):
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -64,6 +98,10 @@ def _load_microservice_config(config_path: Path = PORTS_CONFIG_PATH) -> dict[str
     return microservices
 
 
+def _load_kubernetes_config(config_path: Path = PORTS_CONFIG_PATH) -> dict[str, str]:
+    return _parse_top_level_mapping_section("kubernetes", config_path=config_path)
+
+
 def _build_short_name_index(
     microservices: dict[str, dict],
 ) -> dict[str, str]:
@@ -95,6 +133,38 @@ def list_service_directories(
         if path.is_dir() and path.name.endswith("_service")
         and path.name in configured_service_dirs
     )
+
+
+def get_kubernetes_namespace(
+    environment: str,
+    config_path: Path = PORTS_CONFIG_PATH,
+) -> str:
+    normalized_environment = environment.strip().lower()
+    if normalized_environment not in {"staging", "production", "default"}:
+        raise ValueError(
+            f"Unknown kubernetes namespace environment '{environment}'. "
+            "Expected one of: staging, production, default."
+        )
+
+    kubernetes_config = _load_kubernetes_config(config_path)
+    namespace_key = (
+        "default_namespace"
+        if normalized_environment == "default"
+        else f"{normalized_environment}_namespace"
+    )
+    namespace = kubernetes_config.get(namespace_key)
+    if not namespace:
+        raise ValueError(f"Missing {namespace_key} in {config_path}")
+    return namespace
+
+
+def build_k8s_service_fqdn(
+    service_name: str,
+    environment: str,
+    config_path: Path = PORTS_CONFIG_PATH,
+) -> str:
+    namespace = get_kubernetes_namespace(environment, config_path=config_path)
+    return f"{service_name}.{namespace}.svc.cluster.local"
 
 
 def resolve_deploy_target(
@@ -189,6 +259,11 @@ def main() -> int:
         help="List discovered *_service directories after validating config mappings.",
     )
     parser.add_argument(
+        "--namespace",
+        choices=("staging", "production", "default"),
+        help="Print the canonical kubernetes namespace for the selected environment.",
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "env", "csv"),
         default="json",
@@ -198,10 +273,17 @@ def main() -> int:
 
     selected_operations = sum(
         bool(option)
-        for option in (args.service, args.normalize_list, args.list_service_dirs)
+        for option in (
+            args.service,
+            args.normalize_list,
+            args.list_service_dirs,
+            args.namespace,
+        )
     )
     if selected_operations != 1:
-        parser.error("Provide exactly one of: SERVICE, --normalize-list, --list-service-dirs")
+        parser.error(
+            "Provide exactly one of: SERVICE, --normalize-list, --list-service-dirs, --namespace"
+        )
 
     if args.list_service_dirs:
         service_dirs = list_service_directories()
@@ -217,6 +299,10 @@ def main() -> int:
             print(",".join(service_dirs))
         else:
             print(json.dumps(service_dirs))
+        return 0
+
+    if args.namespace:
+        print(get_kubernetes_namespace(args.namespace))
         return 0
 
     target = resolve_deploy_target(args.service)

@@ -11,10 +11,10 @@
 #     --set name=user-auth-service \
 #     --set image.repository=isa/user-auth \
 #     --set port=8201 \
-#     -n isa-cloud-production
+#     -n isa-cloud-prod
 # =============================================================================
 
-namespace: isa-cloud-production
+namespace: isa-cloud-prod
 
 image:
   registry: harbor.isa.io
@@ -73,7 +73,7 @@ env:
 
   # --- Consul ---
   - name: CONSUL_HOST
-    value: "consul-server.isa-cloud-production.svc.cluster.local"
+    value: "consul-server.isa-cloud-prod.svc.cluster.local"
   - name: CONSUL_PORT
     value: "8500"
   - name: CONSUL_ENABLED
@@ -81,7 +81,7 @@ env:
 
   # --- PostgreSQL (native asyncpg - 5432) ---
   - name: POSTGRES_HOST
-    value: "postgresql.isa-cloud-production.svc.cluster.local"
+    value: "postgresql.isa-cloud-prod.svc.cluster.local"
   - name: POSTGRES_PORT
     value: "5432"
   - name: POSTGRES_DB
@@ -99,7 +99,7 @@ env:
 
   # --- Redis (native - 6379) ---
   - name: REDIS_HOST
-    value: "redis-master.isa-cloud-production.svc.cluster.local"
+    value: "redis-master.isa-cloud-prod.svc.cluster.local"
   - name: REDIS_PORT
     value: "6379"
   - name: REDIS_DB
@@ -112,13 +112,13 @@ env:
 
   # --- Qdrant (native HTTP - 6333) ---
   - name: QDRANT_HOST
-    value: "qdrant.isa-cloud-production.svc.cluster.local"
+    value: "qdrant.isa-cloud-prod.svc.cluster.local"
   - name: QDRANT_PORT
     value: "6333"
 
   # --- Neo4j (native bolt - 7687) ---
   - name: NEO4J_HOST
-    value: "neo4j.isa-cloud-production.svc.cluster.local"
+    value: "neo4j.isa-cloud-prod.svc.cluster.local"
   - name: NEO4J_PORT
     value: "7687"
   - name: NEO4J_USER
@@ -131,15 +131,15 @@ env:
 
   # --- NATS (native - 4222) ---
   - name: NATS_HOST
-    value: "nats.isa-cloud-production.svc.cluster.local"
+    value: "nats.isa-cloud-prod.svc.cluster.local"
   - name: NATS_PORT
     value: "4222"
   - name: NATS_URL
-    value: "nats://nats.isa-cloud-production.svc.cluster.local:4222"
+    value: "nats://nats.isa-cloud-prod.svc.cluster.local:4222"
 
   # --- MinIO (S3 - 9000) ---
   - name: MINIO_HOST
-    value: "minio.isa-cloud-production.svc.cluster.local"
+    value: "minio.isa-cloud-prod.svc.cluster.local"
   - name: MINIO_PORT
     value: "9000"
   - name: MINIO_SECURE
@@ -157,7 +157,7 @@ env:
 
   # --- MQTT (EMQX - 1883) ---
   - name: MQTT_HOST
-    value: "emqx.isa-cloud-production.svc.cluster.local"
+    value: "emqx.isa-cloud-prod.svc.cluster.local"
   - name: MQTT_PORT
     value: "1883"
 
