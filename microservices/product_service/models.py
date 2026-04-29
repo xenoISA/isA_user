@@ -909,8 +909,23 @@ class CostLookupRequest(BaseModel):
     provider: Optional[str] = None
     model_name: Optional[str] = None
     operation_type: Optional[str] = None
+    service_surface: Optional[str] = None
     backend: Optional[str] = None
     engine_used: Optional[str] = None
+    gpu_type: Optional[str] = None
+    gpu_count: Optional[int] = None
+    prefill_seconds: Optional[float] = None
+    generation_seconds: Optional[float] = None
+    queue_seconds: Optional[float] = None
+    cold_start_seconds: Optional[float] = None
+    warm_path: Optional[bool] = None
+    kv_cache_peak_bytes: Optional[int] = None
+    kv_cache_gib_seconds: Optional[float] = None
+    scheduler_share: Optional[float] = None
+    batch_share: Optional[float] = None
+    tenancy_mode: Optional[str] = None
+    region: Optional[str] = None
+    preemptible: Optional[bool] = None
 
 
 class CostLookupResponse(BaseModel):
