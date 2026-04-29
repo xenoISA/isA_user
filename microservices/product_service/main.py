@@ -428,7 +428,9 @@ async def lookup_cost_definition(
     provider: Optional[str] = Query(None, description="Provider name"),
     model_name: Optional[str] = Query(None, description="Model identifier"),
     operation_type: Optional[str] = Query(None, description="Operation identifier"),
-    service_surface: Optional[str] = Query(None, description="Customer-facing service surface"),
+    service_surface: Optional[str] = Query(
+        None, description="Customer-facing service surface"
+    ),
     backend: Optional[str] = Query(None, description="Runtime backend identifier"),
     engine_used: Optional[str] = Query(None, description="Runtime engine identifier"),
     gpu_type: Optional[str] = Query(None, description="GPU type"),
@@ -439,7 +441,9 @@ async def lookup_cost_definition(
     cold_start_seconds: Optional[float] = Query(None, description="Cold start seconds"),
     warm_path: Optional[bool] = Query(None, description="Warm-path execution"),
     kv_cache_peak_bytes: Optional[int] = Query(None, description="Peak KV cache bytes"),
-    kv_cache_gib_seconds: Optional[float] = Query(None, description="KV cache GiB-seconds"),
+    kv_cache_gib_seconds: Optional[float] = Query(
+        None, description="KV cache GiB-seconds"
+    ),
     scheduler_share: Optional[float] = Query(None, description="Scheduler share"),
     batch_share: Optional[float] = Query(None, description="Batch share"),
     tenancy_mode: Optional[str] = Query(None, description="Tenancy mode"),
