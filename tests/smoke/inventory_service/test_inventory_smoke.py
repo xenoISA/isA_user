@@ -5,15 +5,19 @@ Port: 8252 (PORT env var)
 Routes: /api/v1/inventory/...
 """
 
-import os
 import uuid
 
 import httpx
 import pytest
 
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
+
 pytestmark = pytest.mark.smoke
 
-BASE_URL = os.getenv("INVENTORY_SERVICE_URL", "http://localhost:8252")
+BASE_URL = resolve_base_url("inventory_service", "INVENTORY_SERVICE_URL")
+HEALTH_URL = resolve_service_url(
+    "inventory_service", "/health", "INVENTORY_SERVICE_URL"
+)
 TIMEOUT = 15.0
 
 INTERNAL_HEADERS = {
@@ -30,7 +34,7 @@ class TestInventoryHealthSmoke:
     @pytest.mark.asyncio
     async def test_health(self):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(f"{BASE_URL}/health")
+            resp = await client.get(HEALTH_URL)
             assert resp.status_code == 200
 
 
@@ -47,14 +51,13 @@ class TestInventoryReservationSmoke:
                 json={
                     "order_id": order_id,
                     "user_id": "smoke-test-user",
-                    "items": [
-                        {"sku": "SMOKE-ITEM-001", "quantity": 1}
-                    ],
+                    "items": [{"sku": "SMOKE-ITEM-001", "quantity": 1}],
                 },
             )
-            assert resp.status_code in (200, 201), (
-                f"Reserve failed: {resp.status_code} {resp.text[:200]}"
-            )
+            assert resp.status_code in (
+                200,
+                201,
+            ), f"Reserve failed: {resp.status_code} {resp.text[:200]}"
             data = resp.json()
             _state["reservation_id"] = data.get("reservation_id") or data.get("id")
 
@@ -109,7 +112,9 @@ class TestInventoryReservationSmoke:
             if reserve_resp.status_code not in (200, 201):
                 pytest.skip("Cannot create reservation for release test")
 
-            reservation_id = reserve_resp.json().get("reservation_id") or reserve_resp.json().get("id")
+            reservation_id = reserve_resp.json().get(
+                "reservation_id"
+            ) or reserve_resp.json().get("id")
 
             # Release
             release_resp = await client.post(

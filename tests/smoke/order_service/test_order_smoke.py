@@ -21,23 +21,30 @@ Environment Variables:
     ORDER_BASE_URL: Base URL for order service (default: http://localhost:8210)
 """
 
-import os
+import httpx
 import pytest
 import uuid
-import httpx
-from datetime import datetime
+
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
 
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("ORDER_BASE_URL", "http://localhost:8210")
+BASE_URL = resolve_base_url("order_service", "ORDER_BASE_URL")
 API_V1 = f"{BASE_URL}/api/v1/orders"
+HEALTH_URL = resolve_service_url("order_service", "/health", "ORDER_BASE_URL")
+HEALTH_DETAILED_URL = resolve_service_url(
+    "order_service",
+    "/health/detailed",
+    "ORDER_BASE_URL",
+)
 TIMEOUT = 10.0
 
 
 # =============================================================================
 # Test Data Generators
 # =============================================================================
+
 
 def unique_user_id() -> str:
     """Generate unique user ID for smoke tests"""
@@ -63,6 +70,7 @@ def unique_subscription_id() -> str:
 # Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 async def http_client():
     """Async HTTP client for smoke tests"""
@@ -74,34 +82,40 @@ async def http_client():
 # SMOKE TEST 1: Health Checks
 # =============================================================================
 
+
 class TestHealthSmoke:
     """Smoke: Health endpoint sanity checks"""
 
     async def test_health_endpoint_responds(self, http_client):
         """SMOKE: GET /health returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health")
-        assert response.status_code == 200, \
-            f"Health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_URL)
+        assert (
+            response.status_code == 200
+        ), f"Health check failed: {response.status_code}"
 
     async def test_health_detailed_responds(self, http_client):
         """SMOKE: GET /health/detailed returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health/detailed")
+        response = await http_client.get(HEALTH_DETAILED_URL)
         # Could be 200 or 404 if not implemented
-        assert response.status_code in [200, 404], \
-            f"Detailed health check failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            404,
+        ], f"Detailed health check failed: {response.status_code}"
 
     async def test_health_returns_valid_json(self, http_client):
         """SMOKE: GET /health returns valid JSON with expected fields"""
-        response = await http_client.get(f"{BASE_URL}/health")
+        response = await http_client.get(HEALTH_URL)
         if response.status_code == 200:
             data = response.json()
-            assert "status" in data or "service" in data, \
-                "Health response missing status or service field"
+            assert (
+                "status" in data or "service" in data
+            ), "Health response missing status or service field"
 
 
 # =============================================================================
 # SMOKE TEST 2: Order Creation
 # =============================================================================
+
 
 class TestOrderCreationSmoke:
     """Smoke: Order creation sanity checks"""
@@ -119,12 +133,15 @@ class TestOrderCreationSmoke:
                 "order_type": "purchase",
                 "total_amount": 99.99,
                 "currency": "USD",
-            }
+            },
         )
 
         # Service returns 200 with success=false for empty user_id
-        assert response.status_code in [200, 400, 422], \
-            f"Expected 200/400/422, got {response.status_code}"
+        assert response.status_code in [
+            200,
+            400,
+            422,
+        ], f"Expected 200/400/422, got {response.status_code}"
         if response.status_code == 200:
             data = response.json()
             assert data.get("success") is False, "Empty user_id should fail"
@@ -138,11 +155,13 @@ class TestOrderCreationSmoke:
                 "order_type": "purchase",
                 "total_amount": -10.00,  # Negative amount
                 "currency": "USD",
-            }
+            },
         )
 
-        assert response.status_code in [400, 422], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+        ], f"Expected 400/422, got {response.status_code}"
 
     async def test_create_order_works(self, http_client):
         """SMOKE: POST /orders creates order successfully"""
@@ -153,19 +172,26 @@ class TestOrderCreationSmoke:
                 "order_type": "purchase",
                 "total_amount": 49.99,
                 "currency": "USD",
-                "items": [{"product_id": "prod_test", "quantity": 1, "unit_price": "49.99"}],
-            }
+                "items": [
+                    {"product_id": "prod_test", "quantity": 1, "unit_price": "49.99"}
+                ],
+            },
         )
 
         # Should succeed or require auth. Note: may return 200 with success=false
         # if downstream service (account/wallet) is unavailable.
-        assert response.status_code in [200, 201, 401, 403], \
-            f"Create order failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            201,
+            401,
+            403,
+        ], f"Create order failed unexpectedly: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 3: Order Retrieval
 # =============================================================================
+
 
 class TestOrderRetrievalSmoke:
     """Smoke: Order retrieval sanity checks"""
@@ -175,8 +201,11 @@ class TestOrderRetrievalSmoke:
         response = await http_client.get(f"{API_V1}")
 
         # Accept success or auth required
-        assert response.status_code in [200, 401, 403], \
-            f"List orders failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+        ], f"List orders failed unexpectedly: {response.status_code}"
 
     async def test_get_order_handles_not_found(self, http_client):
         """SMOKE: GET /orders/{id} handles non-existent order"""
@@ -185,38 +214,44 @@ class TestOrderRetrievalSmoke:
         response = await http_client.get(f"{API_V1}/{order_id}")
 
         # Service returns 500 for not-found orders (wraps 404 in exception)
-        assert response.status_code in [200, 401, 403, 404, 500], \
-            f"Get order failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+            500,
+        ], f"Get order failed unexpectedly: {response.status_code}"
 
     async def test_get_user_orders_works(self, http_client):
         """SMOKE: GET /orders?user_id={user_id} returns user orders"""
         user_id = unique_user_id()
 
-        response = await http_client.get(
-            f"{API_V1}",
-            params={"user_id": user_id}
-        )
+        response = await http_client.get(f"{API_V1}", params={"user_id": user_id})
 
-        assert response.status_code in [200, 401, 403, 404], \
-            f"Get user orders failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+        ], f"Get user orders failed unexpectedly: {response.status_code}"
 
     async def test_list_orders_with_filters(self, http_client):
         """SMOKE: GET /orders with filters works"""
         response = await http_client.get(
-            f"{API_V1}",
-            params={
-                "status": "pending",
-                "limit": 10
-            }
+            f"{API_V1}", params={"status": "pending", "limit": 10}
         )
 
-        assert response.status_code in [200, 401, 403], \
-            f"List orders with filters failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+        ], f"List orders with filters failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 4: Order Updates
 # =============================================================================
+
 
 class TestOrderUpdateSmoke:
     """Smoke: Order update sanity checks"""
@@ -229,17 +264,23 @@ class TestOrderUpdateSmoke:
             f"{API_V1}/{order_id}",
             json={
                 "status": "processing",
-            }
+            },
         )
 
         # Service may return 200 (upsert behavior) or 404 for non-existent order
-        assert response.status_code in [200, 401, 403, 404, 500], \
-            f"Update order failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+            500,
+        ], f"Update order failed unexpectedly: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 5: Order Cancellation
 # =============================================================================
+
 
 class TestOrderCancellationSmoke:
     """Smoke: Order cancellation sanity checks"""
@@ -252,17 +293,23 @@ class TestOrderCancellationSmoke:
             f"{API_V1}/{order_id}/cancel",
             json={
                 "reason": "User requested cancellation",
-            }
+            },
         )
 
         # Service may return 200 (accepts cancel for any order_id) or 404
-        assert response.status_code in [200, 401, 403, 404, 500], \
-            f"Cancel order failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+            500,
+        ], f"Cancel order failed unexpectedly: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 6: Order Completion
 # =============================================================================
+
 
 class TestOrderCompletionSmoke:
     """Smoke: Order completion sanity checks"""
@@ -276,12 +323,17 @@ class TestOrderCompletionSmoke:
             json={
                 "payment_confirmed": True,
                 "transaction_id": "txn_test_123",
-            }
+            },
         )
 
         # Service may return 200 (accepts complete for any order_id) or 404
-        assert response.status_code in [200, 401, 403, 404, 500], \
-            f"Complete order failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+            500,
+        ], f"Complete order failed unexpectedly: {response.status_code}"
 
     async def test_complete_order_validates_payment(self, http_client):
         """SMOKE: POST /orders/{id}/complete validates payment_confirmed"""
@@ -293,8 +345,10 @@ class TestOrderCompletionSmoke:
                 "order_type": "purchase",
                 "total_amount": 29.99,
                 "currency": "USD",
-                "items": [{"product_id": "prod_test", "quantity": 1, "unit_price": "29.99"}],
-            }
+                "items": [
+                    {"product_id": "prod_test", "quantity": 1, "unit_price": "29.99"}
+                ],
+            },
         )
 
         if create_response.status_code not in [200, 201]:
@@ -310,36 +364,44 @@ class TestOrderCompletionSmoke:
 
         # Try to complete without payment_confirmed=True
         complete_response = await http_client.post(
-            f"{API_V1}/{order_id}/complete",
-            json={"payment_confirmed": False}
+            f"{API_V1}/{order_id}/complete", json={"payment_confirmed": False}
         )
 
         # Service may accept completion regardless of payment_confirmed flag
-        assert complete_response.status_code in [200, 400, 401, 403, 422, 500], \
-            f"Complete order failed unexpectedly: {complete_response.status_code}"
+        assert complete_response.status_code in [
+            200,
+            400,
+            401,
+            403,
+            422,
+            500,
+        ], f"Complete order failed unexpectedly: {complete_response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 7: Order Search
 # =============================================================================
 
+
 class TestOrderSearchSmoke:
     """Smoke: Order search sanity checks"""
 
     async def test_search_orders_works(self, http_client):
         """SMOKE: GET /orders/search returns results"""
-        response = await http_client.get(
-            f"{API_V1}/search",
-            params={"query": "test"}
-        )
+        response = await http_client.get(f"{API_V1}/search", params={"query": "test"})
 
-        assert response.status_code in [200, 401, 403, 404], \
-            f"Search orders failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+        ], f"Search orders failed unexpectedly: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 8: Statistics
 # =============================================================================
+
 
 class TestStatisticsSmoke:
     """Smoke: Statistics endpoint sanity checks"""
@@ -349,13 +411,18 @@ class TestStatisticsSmoke:
         response = await http_client.get(f"{API_V1}/statistics")
 
         # Should return 200 or require auth
-        assert response.status_code in [200, 401, 403, 404], \
-            f"Get statistics failed unexpectedly: {response.status_code}"
+        assert response.status_code in [
+            200,
+            401,
+            403,
+            404,
+        ], f"Get statistics failed unexpectedly: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 9: Critical User Flow
 # =============================================================================
+
 
 class TestCriticalFlowSmoke:
     """Smoke: Critical order flow end-to-end"""
@@ -376,34 +443,51 @@ class TestCriticalFlowSmoke:
                 "order_type": "purchase",
                 "total_amount": 79.99,
                 "currency": "USD",
-                "items": [{"product_id": "prod_123", "quantity": 1, "unit_price": "79.99"}],
-            }
+                "items": [
+                    {"product_id": "prod_123", "quantity": 1, "unit_price": "79.99"}
+                ],
+            },
         )
-        assert create_response.status_code in [200, 201, 401, 403], \
-            f"Create order failed: {create_response.status_code}"
+        assert create_response.status_code in [
+            200,
+            201,
+            401,
+            403,
+        ], f"Create order failed: {create_response.status_code}"
 
         # Step 2: List user orders (via query param, not /user/{user_id})
         list_response = await http_client.get(f"{API_V1}", params={"user_id": user_id})
-        assert list_response.status_code in [200, 401, 403, 404], \
-            f"List orders failed: {list_response.status_code}"
+        assert list_response.status_code in [
+            200,
+            401,
+            403,
+            404,
+        ], f"List orders failed: {list_response.status_code}"
 
         # Step 3: List all orders with filter
         filter_response = await http_client.get(
-            f"{API_V1}",
-            params={"user_id": user_id, "limit": 10}
+            f"{API_V1}", params={"user_id": user_id, "limit": 10}
         )
-        assert filter_response.status_code in [200, 401, 403], \
-            f"Filter orders failed: {filter_response.status_code}"
+        assert filter_response.status_code in [
+            200,
+            401,
+            403,
+        ], f"Filter orders failed: {filter_response.status_code}"
 
         # Step 4: Get statistics
         stats_response = await http_client.get(f"{API_V1}/statistics")
-        assert stats_response.status_code in [200, 401, 403, 404], \
-            f"Get stats failed: {stats_response.status_code}"
+        assert stats_response.status_code in [
+            200,
+            401,
+            403,
+            404,
+        ], f"Get stats failed: {stats_response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 10: Error Handling
 # =============================================================================
+
 
 class TestErrorHandlingSmoke:
     """Smoke: Error handling sanity checks"""
@@ -416,29 +500,32 @@ class TestErrorHandlingSmoke:
         """
         response = await http_client.get(f"{API_V1}/nonexistent_endpoint")
 
-        assert response.status_code in [404, 500], \
-            f"Expected 404/500, got {response.status_code}"
+        assert response.status_code in [
+            404,
+            500,
+        ], f"Expected 404/500, got {response.status_code}"
 
     async def test_invalid_json_returns_error(self, http_client):
         """SMOKE: Invalid JSON returns 400 or 422"""
         response = await http_client.post(
             f"{API_V1}",
             content="not valid json",
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
 
-        assert response.status_code in [400, 422], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+        ], f"Expected 400/422, got {response.status_code}"
 
     async def test_missing_required_fields_returns_422(self, http_client):
         """SMOKE: Missing required fields returns 422"""
-        response = await http_client.post(
-            f"{API_V1}",
-            json={}
-        )
+        response = await http_client.post(f"{API_V1}", json={})
 
-        assert response.status_code in [400, 422], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+        ], f"Expected 400/422, got {response.status_code}"
 
     async def test_invalid_order_type_returns_422(self, http_client):
         """SMOKE: Invalid order_type returns 422"""
@@ -448,11 +535,13 @@ class TestErrorHandlingSmoke:
                 "user_id": unique_user_id(),
                 "order_type": "invalid_type",
                 "total_amount": 49.99,
-            }
+            },
         )
 
-        assert response.status_code in [400, 422], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+        ], f"Expected 400/422, got {response.status_code}"
 
 
 # =============================================================================

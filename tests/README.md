@@ -80,7 +80,9 @@ source deployment/environments/test.env
 # 6. Run tests
 pytest tests/integration -v       # Direct service access
 pytest tests/api -v               # Direct service access
-./tests/smoke/{service}/smoke_test.sh  # Via APISIX gateway
+pytest tests/smoke/{service}_service -v                 # Direct mode
+SMOKE_MODE=gateway pytest tests/smoke/{service}_service -v  # Via APISIX gateway
+./tests/smoke/{service}/smoke_test.sh                   # Bash smoke via APISIX gateway
 ```
 
 ### Quick Verification
@@ -1332,7 +1334,7 @@ pytest tests/*/golden -v
 
 ### Health Route 问题
 
-> **重要**: `/health` 端点不会同步到 APISIX 网关！
+> **重要**: 服务根路径上的 `/health` 端点不会直接同步到 APISIX 网关！
 
 **原因**: Consul → APISIX 同步脚本只同步有 `api_path` 元数据的路由。`/health` 不在 `api_path` 中。
 
@@ -1344,6 +1346,17 @@ curl http://localhost:8224/health  # 需要单独 port-forward 服务
 # 方式 2: 通过网关检查 API 可用性
 curl http://localhost:8000/api/v1/locations  # 检查 API 而非 health
 ```
+
+Python smoke suites now handle this automatically:
+
+- `SMOKE_MODE=direct` → `http://localhost:{service-port}/health`
+- `SMOKE_MODE=gateway` → `http://localhost:8000/api/v1/{route-prefix}/health`
+- regular API calls keep their existing `/api/v1/...` paths in both modes
+
+Known gateway limitation:
+
+- admin-only or service-root utility routes that are not registered in APISIX still need direct-mode coverage or explicit route documentation
+- current examples: `document_service /` and `vault_service /info` remain direct-only unless a suite overrides `*_BASE_URL` explicitly
 
 ### Service Ports
 

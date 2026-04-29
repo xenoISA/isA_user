@@ -5,15 +5,19 @@ Port: 8254 (PORT env var)
 Routes: /api/v1/fulfillment/...
 """
 
-import os
 import uuid
 
 import httpx
 import pytest
 
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
+
 pytestmark = pytest.mark.smoke
 
-BASE_URL = os.getenv("FULFILLMENT_SERVICE_URL", "http://localhost:8254")
+BASE_URL = resolve_base_url("fulfillment_service", "FULFILLMENT_SERVICE_URL")
+HEALTH_URL = resolve_service_url(
+    "fulfillment_service", "/health", "FULFILLMENT_SERVICE_URL"
+)
 TIMEOUT = 15.0
 
 INTERNAL_HEADERS = {
@@ -30,7 +34,7 @@ class TestFulfillmentHealthSmoke:
     @pytest.mark.asyncio
     async def test_health(self):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(f"{BASE_URL}/health")
+            resp = await client.get(HEALTH_URL)
             assert resp.status_code == 200
 
 
@@ -59,9 +63,10 @@ class TestShipmentCRUDSmoke:
                     },
                 },
             )
-            assert resp.status_code in (200, 201), (
-                f"Create shipment failed: {resp.status_code} {resp.text[:200]}"
-            )
+            assert resp.status_code in (
+                200,
+                201,
+            ), f"Create shipment failed: {resp.status_code} {resp.text[:200]}"
             data = resp.json()
             _state["shipment_id"] = data.get("id") or data.get("shipment_id")
 

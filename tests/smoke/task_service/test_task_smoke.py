@@ -21,23 +21,30 @@ Environment Variables:
     TASK_BASE_URL: Base URL for task service (default: http://localhost:8211)
 """
 
-import os
+import httpx
 import pytest
 import uuid
-import httpx
-from datetime import datetime
+
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
 
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("TASK_BASE_URL", "http://localhost:8211")
+BASE_URL = resolve_base_url("task_service", "TASK_BASE_URL")
 API_V1 = f"{BASE_URL}/api/v1/tasks"
+HEALTH_URL = resolve_service_url("task_service", "/health", "TASK_BASE_URL")
+HEALTH_DETAILED_URL = resolve_service_url(
+    "task_service",
+    "/health/detailed",
+    "TASK_BASE_URL",
+)
 TIMEOUT = 10.0
 
 
 # =============================================================================
 # Test Data Generators
 # =============================================================================
+
 
 def unique_user_id() -> str:
     """Generate unique user ID for smoke tests"""
@@ -89,7 +96,7 @@ async def test_task(http_client):
             "priority": "medium",
             "description": "Smoke test task",
         },
-        headers={"X-User-ID": user_id}
+        headers={"X-User-ID": user_id},
     )
 
     if response.status_code in [200, 201]:
@@ -101,38 +108,43 @@ async def test_task(http_client):
         try:
             task_id = task_data["task_id"]
             await http_client.delete(
-                f"{API_V1}/{task_id}",
-                headers={"X-User-ID": user_id}
+                f"{API_V1}/{task_id}", headers={"X-User-ID": user_id}
             )
         except Exception:
             pass  # Ignore cleanup errors
     else:
-        pytest.skip(f"Could not create test task: {response.status_code} (external service dependencies may be unavailable)")
+        pytest.skip(
+            f"Could not create test task: {response.status_code} (external service dependencies may be unavailable)"
+        )
 
 
 # =============================================================================
 # SMOKE TEST 1: Health Checks
 # =============================================================================
 
+
 class TestHealthSmoke:
     """Smoke: Health endpoint sanity checks"""
 
     async def test_health_endpoint_responds(self, http_client):
         """SMOKE: GET /health returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health")
-        assert response.status_code == 200, \
-            f"Health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_URL)
+        assert (
+            response.status_code == 200
+        ), f"Health check failed: {response.status_code}"
 
     async def test_health_detailed_responds(self, http_client):
         """SMOKE: GET /health/detailed returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health/detailed")
-        assert response.status_code == 200, \
-            f"Detailed health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_DETAILED_URL)
+        assert (
+            response.status_code == 200
+        ), f"Detailed health check failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 2: Task CRUD
 # =============================================================================
+
 
 class TestTaskCRUDSmoke:
     """Smoke: Task CRUD operation sanity checks"""
@@ -148,12 +160,16 @@ class TestTaskCRUDSmoke:
                 "task_type": "todo",
                 "priority": "medium",
             },
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
         # Accept 500/503 when external service dependencies (auth, DB) are unavailable
-        assert response.status_code in [200, 201, 500, 503], \
-            f"Create task failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+            500,
+            503,
+        ], f"Create task failed: {response.status_code} - {response.text}"
 
         if response.status_code in [200, 201]:
             data = response.json()
@@ -163,8 +179,7 @@ class TestTaskCRUDSmoke:
 
             # Cleanup
             await http_client.delete(
-                f"{API_V1}/{data['task_id']}",
-                headers={"X-User-ID": user_id}
+                f"{API_V1}/{data['task_id']}", headers={"X-User-ID": user_id}
             )
 
     async def test_get_task_works(self, http_client, test_task):
@@ -173,12 +188,10 @@ class TestTaskCRUDSmoke:
         user_id = test_task["_test_user_id"]
 
         response = await http_client.get(
-            f"{API_V1}/{task_id}",
-            headers={"X-User-ID": user_id}
+            f"{API_V1}/{task_id}", headers={"X-User-ID": user_id}
         )
 
-        assert response.status_code == 200, \
-            f"Get task failed: {response.status_code}"
+        assert response.status_code == 200, f"Get task failed: {response.status_code}"
 
         data = response.json()
         assert data["task_id"] == task_id
@@ -187,13 +200,9 @@ class TestTaskCRUDSmoke:
         """SMOKE: GET /tasks returns task list"""
         user_id = test_task["_test_user_id"]
 
-        response = await http_client.get(
-            API_V1,
-            headers={"X-User-ID": user_id}
-        )
+        response = await http_client.get(API_V1, headers={"X-User-ID": user_id})
 
-        assert response.status_code == 200, \
-            f"List tasks failed: {response.status_code}"
+        assert response.status_code == 200, f"List tasks failed: {response.status_code}"
 
         data = response.json()
         assert "tasks" in data, "Response missing tasks field"
@@ -207,11 +216,12 @@ class TestTaskCRUDSmoke:
         response = await http_client.put(
             f"{API_V1}/{task_id}",
             json={"priority": "high"},
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
-        assert response.status_code == 200, \
-            f"Update task failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Update task failed: {response.status_code}"
 
         data = response.json()
         assert data["priority"] == "high"
@@ -224,27 +234,30 @@ class TestTaskCRUDSmoke:
         create_response = await http_client.post(
             API_V1,
             json={"name": unique_task_name(), "task_type": "todo"},
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
         if create_response.status_code not in [200, 201]:
-            pytest.skip(f"Could not create task for delete test: {create_response.status_code} - {create_response.text}")
+            pytest.skip(
+                f"Could not create task for delete test: {create_response.status_code} - {create_response.text}"
+            )
 
         task_id = create_response.json()["task_id"]
 
         # Delete task
         response = await http_client.delete(
-            f"{API_V1}/{task_id}",
-            headers={"X-User-ID": user_id}
+            f"{API_V1}/{task_id}", headers={"X-User-ID": user_id}
         )
 
-        assert response.status_code == 200, \
-            f"Delete task failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Delete task failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 3: Task Execution
 # =============================================================================
+
 
 class TestTaskExecutionSmoke:
     """Smoke: Task execution sanity checks"""
@@ -257,11 +270,13 @@ class TestTaskExecutionSmoke:
         response = await http_client.post(
             f"{API_V1}/{task_id}/execute",
             json={"trigger_type": "manual"},
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
-        assert response.status_code in [200, 201], \
-            f"Execute task failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+        ], f"Execute task failed: {response.status_code} - {response.text}"
 
         data = response.json()
         assert "execution_id" in data, "Response missing execution_id"
@@ -275,17 +290,17 @@ class TestTaskExecutionSmoke:
         await http_client.post(
             f"{API_V1}/{task_id}/execute",
             json={"trigger_type": "manual"},
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
         # Get executions
         response = await http_client.get(
-            f"{API_V1}/{task_id}/executions",
-            headers={"X-User-ID": user_id}
+            f"{API_V1}/{task_id}/executions", headers={"X-User-ID": user_id}
         )
 
-        assert response.status_code == 200, \
-            f"Get executions failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get executions failed: {response.status_code}"
 
         data = response.json()
         assert isinstance(data, list)
@@ -294,6 +309,7 @@ class TestTaskExecutionSmoke:
 # =============================================================================
 # SMOKE TEST 4: Task Templates
 # =============================================================================
+
 
 class TestTaskTemplatesSmoke:
     """Smoke: Task template sanity checks"""
@@ -304,12 +320,13 @@ class TestTaskTemplatesSmoke:
 
         # Templates endpoint is at /api/v1/templates (not under /tasks)
         response = await http_client.get(
-            f"{BASE_URL}/api/v1/templates",
-            headers={"X-User-ID": user_id}
+            f"{BASE_URL}/api/v1/templates", headers={"X-User-ID": user_id}
         )
 
-        assert response.status_code in [200, 503], \
-            f"Get templates failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"Get templates failed: {response.status_code}"
 
         if response.status_code == 200:
             data = response.json()
@@ -320,6 +337,7 @@ class TestTaskTemplatesSmoke:
 # SMOKE TEST 5: Task Analytics
 # =============================================================================
 
+
 class TestTaskAnalyticsSmoke:
     """Smoke: Task analytics sanity checks"""
 
@@ -329,12 +347,12 @@ class TestTaskAnalyticsSmoke:
 
         # Analytics endpoint is at /api/v1/analytics (not under /tasks)
         response = await http_client.get(
-            f"{BASE_URL}/api/v1/analytics",
-            headers={"X-User-ID": user_id}
+            f"{BASE_URL}/api/v1/analytics", headers={"X-User-ID": user_id}
         )
 
-        assert response.status_code == 200, \
-            f"Get analytics failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get analytics failed: {response.status_code}"
 
         data = response.json()
         assert "total_tasks" in data
@@ -344,6 +362,7 @@ class TestTaskAnalyticsSmoke:
 # =============================================================================
 # SMOKE TEST 6: Critical User Flow
 # =============================================================================
+
 
 class TestCriticalFlowSmoke:
     """Smoke: Critical user flow end-to-end"""
@@ -367,10 +386,12 @@ class TestCriticalFlowSmoke:
                     "priority": "high",
                     "description": "Smoke test lifecycle task",
                 },
-                headers={"X-User-ID": user_id}
+                headers={"X-User-ID": user_id},
             )
             if create_response.status_code in [500, 503]:
-                pytest.skip(f"Task creation returned {create_response.status_code} (external service dependencies unavailable)")
+                pytest.skip(
+                    f"Task creation returned {create_response.status_code} (external service dependencies unavailable)"
+                )
             assert create_response.status_code in [200, 201], "Failed to create task"
             task_id = create_response.json()["task_id"]
 
@@ -378,7 +399,7 @@ class TestCriticalFlowSmoke:
             exec_response = await http_client.post(
                 f"{API_V1}/{task_id}/execute",
                 json={"trigger_type": "manual"},
-                headers={"X-User-ID": user_id}
+                headers={"X-User-ID": user_id},
             )
             assert exec_response.status_code in [200, 201], "Failed to execute task"
 
@@ -386,42 +407,40 @@ class TestCriticalFlowSmoke:
             update_response = await http_client.put(
                 f"{API_V1}/{task_id}",
                 json={"status": "completed"},
-                headers={"X-User-ID": user_id}
+                headers={"X-User-ID": user_id},
             )
             assert update_response.status_code == 200, "Failed to update task"
             assert update_response.json()["status"] == "completed"
 
             # Step 4: Verify task is completed
             get_response = await http_client.get(
-                f"{API_V1}/{task_id}",
-                headers={"X-User-ID": user_id}
+                f"{API_V1}/{task_id}", headers={"X-User-ID": user_id}
             )
             assert get_response.status_code == 200
             assert get_response.json()["status"] == "completed"
 
             # Step 5: Delete task
             delete_response = await http_client.delete(
-                f"{API_V1}/{task_id}",
-                headers={"X-User-ID": user_id}
+                f"{API_V1}/{task_id}", headers={"X-User-ID": user_id}
             )
             assert delete_response.status_code == 200, "Failed to delete task"
 
             # Step 6: Verify task is deleted
             # NOTE: Service returns 500 instead of expected 404 for deleted tasks
             final_response = await http_client.get(
-                f"{API_V1}/{task_id}",
-                headers={"X-User-ID": user_id}
+                f"{API_V1}/{task_id}", headers={"X-User-ID": user_id}
             )
-            assert final_response.status_code in [404, 500], \
-                f"Task should be deleted, got {final_response.status_code}"
+            assert final_response.status_code in [
+                404,
+                500,
+            ], f"Task should be deleted, got {final_response.status_code}"
 
         finally:
             # Cleanup if task was created but test failed mid-way
             if task_id:
                 try:
                     await http_client.delete(
-                        f"{API_V1}/{task_id}",
-                        headers={"X-User-ID": user_id}
+                        f"{API_V1}/{task_id}", headers={"X-User-ID": user_id}
                     )
                 except Exception:
                     pass
@@ -430,6 +449,7 @@ class TestCriticalFlowSmoke:
 # =============================================================================
 # SMOKE TEST 7: Error Handling
 # =============================================================================
+
 
 class TestErrorHandlingSmoke:
     """Smoke: Error handling sanity checks"""
@@ -440,14 +460,16 @@ class TestErrorHandlingSmoke:
         fake_task_id = str(uuid.uuid4())  # Use proper UUID format
 
         response = await http_client.get(
-            f"{API_V1}/{fake_task_id}",
-            headers={"X-User-ID": user_id}
+            f"{API_V1}/{fake_task_id}", headers={"X-User-ID": user_id}
         )
 
         # NOTE: Expected behavior is 404, but service returns 500 for non-existent tasks
         # or 503 when service dependencies (auth) are unavailable
-        assert response.status_code in [404, 500, 503], \
-            f"Expected 404 (or 500/503), got {response.status_code}"
+        assert response.status_code in [
+            404,
+            500,
+            503,
+        ], f"Expected 404 (or 500/503), got {response.status_code}"
 
     async def test_invalid_request_returns_error(self, http_client):
         """SMOKE: Invalid request returns 400 or 422"""
@@ -456,12 +478,15 @@ class TestErrorHandlingSmoke:
         response = await http_client.post(
             API_V1,
             json={"name": "", "task_type": "todo"},  # Empty name
-            headers={"X-User-ID": user_id}
+            headers={"X-User-ID": user_id},
         )
 
         # 503 when service dependencies (auth) are unavailable
-        assert response.status_code in [400, 422, 503], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+            503,
+        ], f"Expected 400/422, got {response.status_code}"
 
 
 # =============================================================================

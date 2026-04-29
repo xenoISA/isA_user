@@ -5,15 +5,18 @@ Port: 8251 (SERVICE_PORT env var)
 Routes: /api/v1/campaigns/...
 """
 
-import os
 import uuid
 
 import httpx
 import pytest
 
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
+
 pytestmark = pytest.mark.smoke
 
-BASE_URL = os.getenv("CAMPAIGN_SERVICE_URL", "http://localhost:8251")
+BASE_URL = resolve_base_url("campaign_service", "CAMPAIGN_SERVICE_URL")
+HEALTH_URL = resolve_service_url("campaign_service", "/health", "CAMPAIGN_SERVICE_URL")
+API_HEALTH_URL = f"{BASE_URL}/api/v1/campaigns/health"
 TIMEOUT = 15.0
 
 INTERNAL_HEADERS = {
@@ -30,20 +33,22 @@ class TestCampaignHealthSmoke:
     @pytest.mark.asyncio
     async def test_health(self):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(f"{BASE_URL}/health")
+            resp = await client.get(HEALTH_URL)
             assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_readiness(self):
+    async def test_api_health_alias(self):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(f"{BASE_URL}/health/ready")
+            resp = await client.get(API_HEALTH_URL)
             assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_liveness(self):
+    async def test_health_response_shape(self):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(f"{BASE_URL}/health/live")
+            resp = await client.get(HEALTH_URL)
             assert resp.status_code == 200
+            data = resp.json()
+            assert "status" in data or "service" in data
 
 
 class TestCampaignCRUDSmoke:
@@ -60,9 +65,10 @@ class TestCampaignCRUDSmoke:
                     "description": "Created by smoke test",
                 },
             )
-            assert resp.status_code in (200, 201), (
-                f"Create failed: {resp.status_code} {resp.text[:200]}"
-            )
+            assert resp.status_code in (
+                200,
+                201,
+            ), f"Create failed: {resp.status_code} {resp.text[:200]}"
             data = resp.json()
             _state["campaign_id"] = data.get("id") or data.get("campaign_id")
             assert _state["campaign_id"]
@@ -92,7 +98,11 @@ class TestCampaignCRUDSmoke:
             assert resp.status_code == 200
             data = resp.json()
             # List response — array or object with items
-            items = data if isinstance(data, list) else data.get("items", data.get("campaigns", []))
+            items = (
+                data
+                if isinstance(data, list)
+                else data.get("items", data.get("campaigns", []))
+            )
             assert isinstance(items, list)
 
     @pytest.mark.asyncio

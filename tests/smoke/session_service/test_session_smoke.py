@@ -21,23 +21,30 @@ Environment Variables:
     SESSION_BASE_URL: Base URL for session service (default: http://localhost:8205)
 """
 
-import os
+import httpx
 import pytest
 import uuid
-import httpx
-from datetime import datetime
+
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
 
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("SESSION_BASE_URL", "http://localhost:8203")
+BASE_URL = resolve_base_url("session_service", "SESSION_BASE_URL")
 API_V1 = f"{BASE_URL}/api/v1/sessions"
+HEALTH_URL = resolve_service_url("session_service", "/health", "SESSION_BASE_URL")
+HEALTH_DETAILED_URL = resolve_service_url(
+    "session_service",
+    "/health/detailed",
+    "SESSION_BASE_URL",
+)
 TIMEOUT = 10.0
 
 
 # =============================================================================
 # Test Data Generators
 # =============================================================================
+
 
 def unique_user_id() -> str:
     """Generate unique user ID for smoke tests"""
@@ -52,6 +59,7 @@ def unique_session_id() -> str:
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 async def http_client():
@@ -76,8 +84,8 @@ async def test_session(http_client):
         json={
             "user_id": user_id,
             "conversation_data": {"type": "smoke_test"},
-            "metadata": {"created_by": "smoke_test"}
-        }
+            "metadata": {"created_by": "smoke_test"},
+        },
     )
 
     if response.status_code in [200, 201]:
@@ -99,25 +107,29 @@ async def test_session(http_client):
 # SMOKE TEST 1: Health Checks
 # =============================================================================
 
+
 class TestHealthSmoke:
     """Smoke: Health endpoint sanity checks"""
 
     async def test_health_endpoint_responds(self, http_client):
         """SMOKE: GET /health returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health")
-        assert response.status_code == 200, \
-            f"Health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_URL)
+        assert (
+            response.status_code == 200
+        ), f"Health check failed: {response.status_code}"
 
     async def test_health_detailed_responds(self, http_client):
         """SMOKE: GET /health/detailed returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health/detailed")
-        assert response.status_code == 200, \
-            f"Detailed health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_DETAILED_URL)
+        assert (
+            response.status_code == 200
+        ), f"Detailed health check failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 2: Session CRUD
 # =============================================================================
+
 
 class TestSessionCRUDSmoke:
     """Smoke: Session CRUD operation sanity checks"""
@@ -126,13 +138,13 @@ class TestSessionCRUDSmoke:
         """SMOKE: POST /sessions creates a session"""
         user_id = unique_user_id()
 
-        response = await http_client.post(
-            API_V1,
-            json={"user_id": user_id}
-        )
+        response = await http_client.post(API_V1, json={"user_id": user_id})
 
-        assert response.status_code in [200, 201, 503], \
-            f"Create session failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+            503,
+        ], f"Create session failed: {response.status_code} - {response.text}"
 
         if response.status_code in [200, 201]:
             data = response.json()
@@ -148,12 +160,11 @@ class TestSessionCRUDSmoke:
         session_id = test_session["session_id"]
         user_id = test_session["_test_user_id"]
 
-        response = await http_client.get(
-            f"{API_V1}/{session_id}?user_id={user_id}"
-        )
+        response = await http_client.get(f"{API_V1}/{session_id}?user_id={user_id}")
 
-        assert response.status_code == 200, \
-            f"Get session failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get session failed: {response.status_code}"
 
         data = response.json()
         assert data["session_id"] == session_id
@@ -164,8 +175,9 @@ class TestSessionCRUDSmoke:
 
         response = await http_client.get(f"{API_V1}?user_id={user_id}")
 
-        assert response.status_code == 200, \
-            f"List sessions failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"List sessions failed: {response.status_code}"
 
         data = response.json()
         assert "sessions" in data, "Response missing sessions field"
@@ -177,12 +189,12 @@ class TestSessionCRUDSmoke:
         user_id = test_session["_test_user_id"]
 
         response = await http_client.put(
-            f"{API_V1}/{session_id}?user_id={user_id}",
-            json={"status": "completed"}
+            f"{API_V1}/{session_id}?user_id={user_id}", json={"status": "completed"}
         )
 
-        assert response.status_code == 200, \
-            f"Update session failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Update session failed: {response.status_code}"
 
         data = response.json()
         assert data["status"] == "completed"
@@ -192,26 +204,23 @@ class TestSessionCRUDSmoke:
         user_id = unique_user_id()
 
         # Create session to end
-        create_response = await http_client.post(
-            API_V1,
-            json={"user_id": user_id}
-        )
+        create_response = await http_client.post(API_V1, json={"user_id": user_id})
         if create_response.status_code not in [200, 201]:
             pytest.skip(f"Could not create session: {create_response.status_code}")
         session_id = create_response.json()["session_id"]
 
         # End session
-        response = await http_client.delete(
-            f"{API_V1}/{session_id}?user_id={user_id}"
-        )
+        response = await http_client.delete(f"{API_V1}/{session_id}?user_id={user_id}")
 
-        assert response.status_code == 200, \
-            f"End session failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"End session failed: {response.status_code}"
 
 
 # =============================================================================
 # SMOKE TEST 3: Message Operations
 # =============================================================================
+
 
 class TestMessageSmoke:
     """Smoke: Message operation sanity checks"""
@@ -228,19 +237,25 @@ class TestMessageSmoke:
                 "content": "Smoke test message",
                 "message_type": "chat",
                 "tokens_used": 10,
-                "cost_usd": 0.001
-            }
+                "cost_usd": 0.001,
+            },
         )
 
-        assert response.status_code in [200, 201, 500, 503], \
-            f"Add message failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+            500,
+            503,
+        ], f"Add message failed: {response.status_code} - {response.text}"
 
         if response.status_code in [200, 201]:
             data = response.json()
             assert "message_id" in data, "Response missing message_id"
             assert data["role"] == "user"
         else:
-            pytest.skip(f"Message creation returned {response.status_code} — session/service issue")
+            pytest.skip(
+                f"Message creation returned {response.status_code} — session/service issue"
+            )
 
     async def test_get_messages_works(self, http_client, test_session):
         """SMOKE: GET /sessions/{id}/messages retrieves messages"""
@@ -253,8 +268,8 @@ class TestMessageSmoke:
             json={
                 "role": "user",
                 "content": "Test message for retrieval",
-                "message_type": "chat"
-            }
+                "message_type": "chat",
+            },
         )
 
         # Get messages
@@ -262,8 +277,11 @@ class TestMessageSmoke:
             f"{API_V1}/{session_id}/messages?user_id={user_id}"
         )
 
-        assert response.status_code in [200, 500, 503], \
-            f"Get messages failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            500,
+            503,
+        ], f"Get messages failed: {response.status_code}"
 
         if response.status_code == 200:
             data = response.json()
@@ -273,6 +291,7 @@ class TestMessageSmoke:
 # =============================================================================
 # SMOKE TEST 4: Session Summary
 # =============================================================================
+
 
 class TestSummarySmoke:
     """Smoke: Session summary sanity checks"""
@@ -286,8 +305,9 @@ class TestSummarySmoke:
             f"{API_V1}/{session_id}/summary?user_id={user_id}"
         )
 
-        assert response.status_code == 200, \
-            f"Get summary failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get summary failed: {response.status_code}"
 
         data = response.json()
         assert "session_id" in data
@@ -299,6 +319,7 @@ class TestSummarySmoke:
 # SMOKE TEST 5: Stats
 # =============================================================================
 
+
 class TestStatsSmoke:
     """Smoke: Service stats sanity checks"""
 
@@ -306,8 +327,10 @@ class TestStatsSmoke:
         """SMOKE: GET /stats returns service statistics"""
         response = await http_client.get(f"{API_V1}/stats")
 
-        assert response.status_code in [200, 503], \
-            f"Get stats failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            503,
+        ], f"Get stats failed: {response.status_code}"
 
         if response.status_code == 200:
             data = response.json()
@@ -318,6 +341,7 @@ class TestStatsSmoke:
 # =============================================================================
 # SMOKE TEST 6: Critical User Flow
 # =============================================================================
+
 
 class TestCriticalFlowSmoke:
     """Smoke: Critical user flow end-to-end"""
@@ -334,11 +358,7 @@ class TestCriticalFlowSmoke:
         try:
             # Step 1: Create session
             create_response = await http_client.post(
-                API_V1,
-                json={
-                    "user_id": user_id,
-                    "metadata": {"flow_test": True}
-                }
+                API_V1, json={"user_id": user_id, "metadata": {"flow_test": True}}
             )
             if create_response.status_code not in [200, 201]:
                 pytest.skip(f"Session creation returned {create_response.status_code}")
@@ -352,11 +372,13 @@ class TestCriticalFlowSmoke:
                     "role": "user",
                     "content": "Hello, I need help",
                     "message_type": "chat",
-                    "tokens_used": 10
-                }
+                    "tokens_used": 10,
+                },
             )
             if msg1_response.status_code not in [200, 201]:
-                pytest.skip(f"Message creation returned {msg1_response.status_code} — session/service issue")
+                pytest.skip(
+                    f"Message creation returned {msg1_response.status_code} — session/service issue"
+                )
 
             # Step 3: Add assistant message
             msg2_response = await http_client.post(
@@ -365,10 +387,13 @@ class TestCriticalFlowSmoke:
                     "role": "assistant",
                     "content": "Hello! How can I assist you today?",
                     "message_type": "chat",
-                    "tokens_used": 15
-                }
+                    "tokens_used": 15,
+                },
             )
-            assert msg2_response.status_code in [200, 201], "Failed to add assistant message"
+            assert msg2_response.status_code in [
+                200,
+                201,
+            ], "Failed to add assistant message"
 
             # Step 4: Get session summary
             summary_response = await http_client.get(
@@ -407,6 +432,7 @@ class TestCriticalFlowSmoke:
 # SMOKE TEST 7: Error Handling
 # =============================================================================
 
+
 class TestErrorHandlingSmoke:
     """Smoke: Error handling sanity checks"""
 
@@ -416,18 +442,20 @@ class TestErrorHandlingSmoke:
 
         response = await http_client.get(f"{API_V1}/{fake_session_id}")
 
-        assert response.status_code in [404, 503], \
-            f"Expected 404, got {response.status_code}"
+        assert response.status_code in [
+            404,
+            503,
+        ], f"Expected 404, got {response.status_code}"
 
     async def test_invalid_request_returns_error(self, http_client):
         """SMOKE: Invalid request returns 400 or 422"""
-        response = await http_client.post(
-            API_V1,
-            json={"user_id": ""}  # Empty user_id
-        )
+        response = await http_client.post(API_V1, json={"user_id": ""})  # Empty user_id
 
-        assert response.status_code in [400, 422, 503], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+            503,
+        ], f"Expected 400/422, got {response.status_code}"
 
 
 # =============================================================================

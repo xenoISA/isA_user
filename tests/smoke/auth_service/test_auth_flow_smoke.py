@@ -26,16 +26,15 @@ import uuid
 import httpx
 import pytest
 
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
+
 pytestmark = pytest.mark.smoke
 
 # ── Configuration ──
 
-SMOKE_MODE = os.getenv("SMOKE_MODE", "direct")
-AUTH_PORT = 8201
-GATEWAY_PORT = 8000
-HOST = os.getenv("HEALTH_HOST", "localhost")
 TIMEOUT = 15.0
 BOOTSTRAP_SECRET = os.getenv("ADMIN_BOOTSTRAP_SECRET", "dev-bootstrap-secret")
+HEALTH_URL = resolve_service_url("auth_service", "/health")
 
 # Internal service headers for bypassing gateway auth on admin endpoints
 INTERNAL_HEADERS = {
@@ -46,9 +45,7 @@ INTERNAL_HEADERS = {
 
 
 def _base_url() -> str:
-    if SMOKE_MODE == "gateway":
-        return f"http://{HOST}:{GATEWAY_PORT}"
-    return f"http://{HOST}:{AUTH_PORT}"
+    return resolve_base_url("auth_service")
 
 
 # ── Shared state across ordered tests ──
@@ -85,7 +82,7 @@ class TestAuthHealthSmoke:
     @pytest.mark.asyncio
     async def test_health(self, base_url):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(f"{base_url}/health")
+            resp = await client.get(HEALTH_URL)
             assert resp.status_code == 200
             data = resp.json()
             assert "status" in data
@@ -123,9 +120,9 @@ class TestAdminBootstrapSmoke:
                     "set ADMIN_BOOTSTRAP_SECRET env var"
                 )
 
-            assert resp.status_code == 200, (
-                f"Admin bootstrap failed: {resp.status_code} {resp.text}"
-            )
+            assert (
+                resp.status_code == 200
+            ), f"Admin bootstrap failed: {resp.status_code} {resp.text}"
             data = resp.json()
             # Schema shape assertion
             assert "access_token" in data
@@ -168,9 +165,11 @@ class TestAuthRegistrationSmoke:
                 },
             )
             # 200/201 = new registration, 409 = already registered (idempotent)
-            assert resp.status_code in (200, 201, 409), (
-                f"Registration failed: {resp.status_code} {resp.text}"
-            )
+            assert resp.status_code in (
+                200,
+                201,
+                409,
+            ), f"Registration failed: {resp.status_code} {resp.text}"
             if resp.status_code in (200, 201):
                 data = resp.json()
                 # Schema shape: pending registration
@@ -205,9 +204,9 @@ class TestAuthRegistrationSmoke:
                     "code": str(code),
                 },
             )
-            assert resp.status_code == 200, (
-                f"Verification failed: {resp.status_code} {resp.text}"
-            )
+            assert (
+                resp.status_code == 200
+            ), f"Verification failed: {resp.status_code} {resp.text}"
             data = resp.json()
             assert data.get("success") is True
             # Schema shape: verified registration returns tokens
@@ -232,9 +231,9 @@ class TestAuthLoginSmoke:
                     "password": test_password,
                 },
             )
-            assert resp.status_code == 200, (
-                f"Login failed: {resp.status_code} {resp.text}"
-            )
+            assert (
+                resp.status_code == 200
+            ), f"Login failed: {resp.status_code} {resp.text}"
             data = resp.json()
             # Schema shape assertion
             assert "access_token" in data or "token" in data
@@ -379,9 +378,10 @@ class TestAuthApiKeySmoke:
                     **INTERNAL_HEADERS,
                 },
             )
-            assert resp.status_code in (200, 201), (
-                f"API key creation failed: {resp.status_code} {resp.text}"
-            )
+            assert resp.status_code in (
+                200,
+                201,
+            ), f"API key creation failed: {resp.status_code} {resp.text}"
             data = resp.json()
             # Schema shape: API key response
             api_key = data.get("key") or data.get("api_key")

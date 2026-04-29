@@ -1,7 +1,8 @@
 """
 Shared fixtures for isA_user smoke tests.
 
-Supports SMOKE_MODE=gateway|direct to route tests through APISIX or direct to service ports.
+Supports SMOKE_MODE=gateway|direct to route tests through APISIX or direct to
+service ports.
 
 Usage:
     pytest tests/smoke/ -v                          # direct mode (default)
@@ -9,6 +10,7 @@ Usage:
 """
 
 import os
+from typing import Optional
 
 import pytest
 
@@ -44,8 +46,10 @@ SERVICE_ROUTING = {
     "compliance_service": (8226, "compliance"),
     "document_service": (8227, "documents"),
     "subscription_service": (8228, "subscriptions"),
+    "credit_service": (8229, "credits"),
     "event_service": (8230, "events"),
     # Newer services (not in TestConfig.SERVICES)
+    "membership_service": (8250, "membership"),
     "campaign_service": (8251, "campaigns"),
     "inventory_service": (8252, "inventory"),
     "tax_service": (8253, "tax"),
@@ -83,6 +87,63 @@ def base_url_for(service_name: str, mode: str = None) -> str:
     return f"http://{HOST}:{port}"
 
 
+def gateway_prefix_for(service_name: str) -> str:
+    """Return the APISIX route segment for a service."""
+    routing = SERVICE_ROUTING.get(service_name)
+    if not routing:
+        raise ValueError(f"Unknown service: {service_name}. Add it to SERVICE_ROUTING.")
+    _port, prefix = routing
+    return prefix
+
+
+def resolve_base_url(
+    service_name: str,
+    env_var_name: Optional[str] = None,
+    mode: str = None,
+) -> str:
+    """
+    Resolve the root base URL for a smoke-tested service.
+
+    Explicit per-service environment variables win over SMOKE_MODE so callers
+    can still point a single suite at a custom host during debugging.
+    """
+    if env_var_name:
+        explicit = os.getenv(env_var_name)
+        if explicit:
+            return explicit.rstrip("/")
+    return base_url_for(service_name, mode).rstrip("/")
+
+
+def resolve_service_url(
+    service_name: str,
+    path: str,
+    env_var_name: Optional[str] = None,
+    mode: str = None,
+) -> str:
+    """
+    Resolve a full URL for a service path in direct or gateway mode.
+
+    - Direct mode keeps service-local paths unchanged.
+    - Gateway mode rewrites raw /health[*] requests to the APISIX path
+      /api/v1/{prefix}/health[*], because APISIX does not expose service-root
+      health endpoints.
+    """
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    base_url = resolve_base_url(service_name, env_var_name=env_var_name, mode=mode)
+
+    if env_var_name and os.getenv(env_var_name):
+        return f"{base_url}{normalized_path}"
+
+    if mode is None:
+        mode = os.getenv("SMOKE_MODE", "direct")
+
+    if mode == "gateway" and normalized_path.startswith("/health"):
+        prefix = gateway_prefix_for(service_name)
+        return f"{base_url}/api/v1/{prefix}{normalized_path}"
+
+    return f"{base_url}{normalized_path}"
+
+
 def api_path_for(service_name: str, path: str, mode: str = None) -> str:
     """
     Get the full URL for an API path based on smoke mode.
@@ -95,5 +156,4 @@ def api_path_for(service_name: str, path: str, mode: str = None) -> str:
         → gateway: http://localhost:8000/api/v1/auth/health
         → direct:  http://localhost:8201/api/v1/auth/health
     """
-    base = base_url_for(service_name, mode)
-    return f"{base}{path}"
+    return resolve_service_url(service_name, path, mode=mode)

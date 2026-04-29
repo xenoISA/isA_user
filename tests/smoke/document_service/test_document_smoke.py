@@ -21,22 +21,41 @@ Environment Variables:
     DOCUMENT_BASE_URL: Base URL for document service (default: http://localhost:8227)
 """
 
+import httpx
 import os
 import pytest
 import uuid
-import httpx
+
+from tests.smoke.conftest import resolve_base_url, resolve_service_url
 
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
 # Configuration
-BASE_URL = os.getenv("DOCUMENT_BASE_URL", "http://localhost:8227")
+BASE_URL = resolve_base_url("document_service", "DOCUMENT_BASE_URL")
 API_V1 = f"{BASE_URL}/api/v1/documents"
+HEALTH_URL = resolve_service_url("document_service", "/health", "DOCUMENT_BASE_URL")
 TIMEOUT = 15.0
+
+
+def _service_root_url() -> str:
+    """Document service root is only available on the direct service port."""
+    if os.getenv("DOCUMENT_BASE_URL"):
+        return f"{resolve_base_url('document_service', 'DOCUMENT_BASE_URL')}/"
+    return (
+        f"{resolve_base_url('document_service', 'DOCUMENT_BASE_URL', mode='direct')}/"
+    )
+
+
+def _root_endpoint_requires_direct_mode() -> bool:
+    return os.getenv("SMOKE_MODE", "direct") == "gateway" and not os.getenv(
+        "DOCUMENT_BASE_URL"
+    )
 
 
 # =============================================================================
 # Test Data Generators
 # =============================================================================
+
 
 def unique_user_id() -> str:
     """Generate unique user ID for smoke tests"""
@@ -67,6 +86,7 @@ def make_document_request(**overrides) -> dict:
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 async def http_client():
@@ -125,21 +145,29 @@ async def test_document(http_client, internal_headers):
         except Exception:
             pass  # Ignore cleanup errors
     else:
-        pytest.skip(f"Could not create test document: {response.status_code} - {response.text}")
+        pytest.skip(
+            f"Could not create test document: {response.status_code} - {response.text}"
+        )
 
 
 # =============================================================================
 # SMOKE TEST 1: Health Checks
 # =============================================================================
 
+
 class TestHealthSmoke:
     """Smoke: Health endpoint sanity checks"""
 
     async def test_root_endpoint_responds(self, http_client):
         """SMOKE: GET / returns 200"""
-        response = await http_client.get(f"{BASE_URL}/")
-        assert response.status_code == 200, \
-            f"Root check failed: {response.status_code}"
+        if _root_endpoint_requires_direct_mode():
+            pytest.skip(
+                "document_service root endpoint is not exposed through APISIX; "
+                "use direct mode or set DOCUMENT_BASE_URL explicitly"
+            )
+
+        response = await http_client.get(_service_root_url())
+        assert response.status_code == 200, f"Root check failed: {response.status_code}"
 
         data = response.json()
         assert data["service"] == "document_service"
@@ -147,9 +175,11 @@ class TestHealthSmoke:
 
     async def test_health_endpoint_responds(self, http_client):
         """SMOKE: GET /health returns 200"""
-        response = await http_client.get(f"{BASE_URL}/health")
-        assert response.status_code in [200, 503], \
-            f"Health check failed: {response.status_code}"
+        response = await http_client.get(HEALTH_URL)
+        assert response.status_code in [
+            200,
+            503,
+        ], f"Health check failed: {response.status_code}"
 
         data = response.json()
         assert data["service"] == "document_service"
@@ -160,6 +190,7 @@ class TestHealthSmoke:
 # =============================================================================
 # SMOKE TEST 2: Document CRUD
 # =============================================================================
+
 
 class TestDocumentCRUDSmoke:
     """Smoke: Document CRUD operation sanity checks"""
@@ -176,8 +207,12 @@ class TestDocumentCRUDSmoke:
         )
 
         # May return 500 if DB schema/write fails, 503 if service shutting down
-        assert response.status_code in [200, 201, 500, 503], \
-            f"Create document failed: {response.status_code} - {response.text}"
+        assert response.status_code in [
+            200,
+            201,
+            500,
+            503,
+        ], f"Create document failed: {response.status_code} - {response.text}"
 
         if response.status_code in [200, 201]:
             data = response.json()
@@ -192,7 +227,9 @@ class TestDocumentCRUDSmoke:
                 headers=internal_headers,
             )
 
-    async def test_get_document_works(self, http_client, internal_headers, test_document):
+    async def test_get_document_works(
+        self, http_client, internal_headers, test_document
+    ):
         """SMOKE: GET /documents/{id} retrieves document"""
         doc_id = test_document["doc_id"]
         user_id = test_document["_test_user_id"]
@@ -203,13 +240,16 @@ class TestDocumentCRUDSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code == 200, \
-            f"Get document failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get document failed: {response.status_code}"
 
         data = response.json()
         assert data["doc_id"] == doc_id
 
-    async def test_list_documents_works(self, http_client, internal_headers, test_document):
+    async def test_list_documents_works(
+        self, http_client, internal_headers, test_document
+    ):
         """SMOKE: GET /documents returns document list"""
         user_id = test_document["_test_user_id"]
 
@@ -219,8 +259,9 @@ class TestDocumentCRUDSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code == 200, \
-            f"List documents failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"List documents failed: {response.status_code}"
 
         data = response.json()
         assert isinstance(data, list)
@@ -249,8 +290,9 @@ class TestDocumentCRUDSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code == 200, \
-            f"Delete document failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Delete document failed: {response.status_code}"
 
         # Verify deletion
         get_response = await http_client.get(
@@ -265,10 +307,13 @@ class TestDocumentCRUDSmoke:
 # SMOKE TEST 3: Permission Management
 # =============================================================================
 
+
 class TestPermissionSmoke:
     """Smoke: Permission operation sanity checks"""
 
-    async def test_get_permissions_works(self, http_client, internal_headers, test_document):
+    async def test_get_permissions_works(
+        self, http_client, internal_headers, test_document
+    ):
         """SMOKE: GET /documents/{id}/permissions returns permissions"""
         doc_id = test_document["doc_id"]
         user_id = test_document["_test_user_id"]
@@ -279,15 +324,18 @@ class TestPermissionSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code == 200, \
-            f"Get permissions failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Get permissions failed: {response.status_code}"
 
         data = response.json()
         assert data["doc_id"] == doc_id
         assert "access_level" in data
         assert "allowed_users" in data
 
-    async def test_update_permissions_works(self, http_client, internal_headers, test_document):
+    async def test_update_permissions_works(
+        self, http_client, internal_headers, test_document
+    ):
         """SMOKE: PUT /documents/{id}/permissions updates permissions"""
         doc_id = test_document["doc_id"]
         user_id = test_document["_test_user_id"]
@@ -305,8 +353,9 @@ class TestPermissionSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code == 200, \
-            f"Update permissions failed: {response.status_code}"
+        assert (
+            response.status_code == 200
+        ), f"Update permissions failed: {response.status_code}"
 
         data = response.json()
         assert data["access_level"] == "team"
@@ -316,6 +365,7 @@ class TestPermissionSmoke:
 # =============================================================================
 # SMOKE TEST 4: Statistics
 # =============================================================================
+
 
 class TestStatsSmoke:
     """Smoke: Statistics sanity checks"""
@@ -330,8 +380,7 @@ class TestStatsSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code == 200, \
-            f"Get stats failed: {response.status_code}"
+        assert response.status_code == 200, f"Get stats failed: {response.status_code}"
 
         data = response.json()
         assert data["user_id"] == user_id
@@ -342,6 +391,7 @@ class TestStatsSmoke:
 # =============================================================================
 # SMOKE TEST 5: RAG Operations
 # =============================================================================
+
 
 class TestRAGSmoke:
     """Smoke: RAG operation sanity checks"""
@@ -361,8 +411,10 @@ class TestRAGSmoke:
         )
 
         # RAG may fail if Digital Analytics is not available, but endpoint should respond
-        assert response.status_code in [200, 500], \
-            f"RAG query endpoint failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            500,
+        ], f"RAG query endpoint failed: {response.status_code}"
 
         if response.status_code == 200:
             data = response.json()
@@ -384,8 +436,10 @@ class TestRAGSmoke:
         )
 
         # Search may fail if Digital Analytics is not available
-        assert response.status_code in [200, 500], \
-            f"Search endpoint failed: {response.status_code}"
+        assert response.status_code in [
+            200,
+            500,
+        ], f"Search endpoint failed: {response.status_code}"
 
         if response.status_code == 200:
             data = response.json()
@@ -396,6 +450,7 @@ class TestRAGSmoke:
 # =============================================================================
 # SMOKE TEST 6: Critical User Flow
 # =============================================================================
+
 
 class TestCriticalFlowSmoke:
     """Smoke: Critical user flow end-to-end"""
@@ -419,7 +474,10 @@ class TestCriticalFlowSmoke:
             )
             if create_response.status_code == 500:
                 pytest.skip("Document creation failed (DB write error)")
-            assert create_response.status_code in [200, 201], "Failed to create document"
+            assert create_response.status_code in [
+                200,
+                201,
+            ], "Failed to create document"
             resp_data = create_response.json()
             doc_id = resp_data.get("doc_id") or resp_data.get("document_id")
 
@@ -486,6 +544,7 @@ class TestCriticalFlowSmoke:
 # SMOKE TEST 7: Error Handling
 # =============================================================================
 
+
 class TestErrorHandlingSmoke:
     """Smoke: Error handling sanity checks"""
 
@@ -500,8 +559,10 @@ class TestErrorHandlingSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code in [404, 403], \
-            f"Expected 404/403, got {response.status_code}"
+        assert response.status_code in [
+            404,
+            403,
+        ], f"Expected 404/403, got {response.status_code}"
 
     async def test_invalid_request_returns_error(self, http_client, internal_headers):
         """SMOKE: Invalid request returns 400 or 422"""
@@ -514,8 +575,10 @@ class TestErrorHandlingSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code in [400, 422], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+        ], f"Expected 400/422, got {response.status_code}"
 
     async def test_invalid_doc_type_returns_error(self, http_client, internal_headers):
         """SMOKE: Invalid doc_type returns validation error"""
@@ -528,8 +591,10 @@ class TestErrorHandlingSmoke:
             headers=internal_headers,
         )
 
-        assert response.status_code in [400, 422], \
-            f"Expected 400/422, got {response.status_code}"
+        assert response.status_code in [
+            400,
+            422,
+        ], f"Expected 400/422, got {response.status_code}"
 
 
 # =============================================================================
