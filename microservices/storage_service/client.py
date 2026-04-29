@@ -9,8 +9,7 @@ import os
 from core.service_discovery import get_service_discovery
 from core.auth_dependencies import INTERNAL_SERVICE_SECRET
 import logging
-from typing import Optional, List, Dict, Any, BinaryIO
-from datetime import datetime
+from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -328,9 +327,9 @@ class StorageServiceClient:
             data = {
                 "shared_by": shared_by,
                 "view": permissions.get("view", True) if permissions else True,
-                "download": permissions.get("download", False)
-                if permissions
-                else False,
+                "download": (
+                    permissions.get("download", False) if permissions else False
+                ),
                 "delete": permissions.get("delete", False) if permissions else False,
                 "expires_hours": expires_hours,
             }
@@ -1006,7 +1005,7 @@ class StorageServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

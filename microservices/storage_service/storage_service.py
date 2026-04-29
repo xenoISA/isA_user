@@ -21,10 +21,9 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from core.config_manager import ConfigManager
-from core.nats_client import Event
 from fastapi import HTTPException, UploadFile
 
 # Use isa-common's AsyncMinIOClient for async gRPC
@@ -32,7 +31,6 @@ from isa_common import AsyncMinIOClient
 
 from .clients import StorageOrganizationClient
 from .models import (
-    FileAccessLevel,
     FileInfoResponse,
     FileListRequest,
     FileShare,
@@ -89,7 +87,6 @@ class StorageService:
         )
 
         # Get MinIO credentials from environment
-        import os
 
         minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
         minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
