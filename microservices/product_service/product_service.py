@@ -14,13 +14,9 @@ from .product_repository import ProductRepository
 from .models import (
     Product,
     ProductCategory,
-    PricingModel,
-    ServicePlan,
     UserSubscription,
-    SubscriptionUsage,
     ProductUsageRecord,
     ProductType,
-    PricingType,
     SubscriptionStatus,
     BillingCycle,
     Currency,
@@ -947,9 +943,6 @@ class ProductService:
         try:
             # 获取基本统计
             current_time = datetime.utcnow()
-            last_24h = current_time - timedelta(hours=24)
-            last_7d = current_time - timedelta(days=7)
-            last_30d = current_time - timedelta(days=30)
 
             # 这里可以实现更详细的统计逻辑
             return {
