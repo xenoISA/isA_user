@@ -12,14 +12,19 @@ import uuid
 
 from .product_repository import ProductRepository
 from .models import (
-    Product, ProductCategory, PricingModel, ServicePlan, UserSubscription,
-    SubscriptionUsage, ProductUsageRecord,
-    ProductType, PricingType, SubscriptionStatus, BillingCycle, Currency
+    Product,
+    ProductCategory,
+    UserSubscription,
+    ProductUsageRecord,
+    ProductType,
+    SubscriptionStatus,
+    BillingCycle,
+    Currency,
 )
 from .events.publishers import (
     publish_subscription_created,
     publish_subscription_status_changed,
-    publish_product_usage_recorded
+    publish_product_usage_recorded,
 )
 from .clients import AccountClient, OrganizationClient
 
@@ -36,7 +41,7 @@ class ProductService:
         repository: ProductRepository,
         event_bus=None,
         account_client: Optional[AccountClient] = None,
-        organization_client: Optional[OrganizationClient] = None
+        organization_client: Optional[OrganizationClient] = None,
     ):
         """
         Initialize Product Service
@@ -70,14 +75,12 @@ class ProductService:
         self,
         category_id: Optional[str] = None,
         product_type: Optional[ProductType] = None,
-        is_active: bool = True
+        is_active: bool = True,
     ) -> List[Product]:
         """获取产品列表"""
         try:
             return await self.repository.get_products(
-                category=category_id,
-                product_type=product_type,
-                is_active=is_active
+                category=category_id, product_type=product_type, is_active=is_active
             )
         except Exception as e:
             logger.error(f"Error getting products: {e}")
@@ -95,14 +98,12 @@ class ProductService:
         self,
         product_id: str,
         user_id: Optional[str] = None,
-        subscription_id: Optional[str] = None
+        subscription_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """获取产品定价信息"""
         try:
             return await self.repository.get_product_pricing(
-                product_id=product_id,
-                user_id=user_id,
-                subscription_id=subscription_id
+                product_id=product_id, user_id=user_id, subscription_id=subscription_id
             )
         except Exception as e:
             logger.error(f"Error getting product pricing for {product_id}: {e}")
@@ -114,8 +115,23 @@ class ProductService:
         provider: Optional[str] = None,
         model_name: Optional[str] = None,
         operation_type: Optional[str] = None,
+        service_surface: Optional[str] = None,
         backend: Optional[str] = None,
         engine_used: Optional[str] = None,
+        gpu_type: Optional[str] = None,
+        gpu_count: Optional[int] = None,
+        prefill_seconds: Optional[float] = None,
+        generation_seconds: Optional[float] = None,
+        queue_seconds: Optional[float] = None,
+        cold_start_seconds: Optional[float] = None,
+        warm_path: Optional[bool] = None,
+        kv_cache_peak_bytes: Optional[int] = None,
+        kv_cache_gib_seconds: Optional[float] = None,
+        scheduler_share: Optional[float] = None,
+        batch_share: Optional[float] = None,
+        tenancy_mode: Optional[str] = None,
+        region: Optional[str] = None,
+        preemptible: Optional[bool] = None,
         tool_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lookup an active cost definition in a shape compatible with isa_model."""
@@ -185,8 +201,12 @@ class ProductService:
                 product=product,
                 pricing_row=selected_row,
             )
-            unit_price = Decimal(str(selected_row.get("unit_price", product.base_price)))
-            total_price = (quantity * unit_price).quantize(self._QUANTIZE_PRICE, rounding=ROUND_HALF_UP)
+            unit_price = Decimal(
+                str(selected_row.get("unit_price", product.base_price))
+            )
+            total_price = (quantity * unit_price).quantize(
+                self._QUANTIZE_PRICE, rounding=ROUND_HALF_UP
+            )
 
             tier_breakdown = [
                 {
@@ -254,8 +274,7 @@ class ProductService:
         candidates = cost_definitions
         if model_name:
             candidates = [
-                item for item in candidates
-                if item.get("model_name") == model_name
+                item for item in candidates if item.get("model_name") == model_name
             ]
 
         operation_candidates = ProductService._operation_candidates(
@@ -274,11 +293,19 @@ class ProductService:
         return None
 
     @staticmethod
-    def _operation_candidates(service_type: str, operation_type: Optional[str]) -> List[str]:
+    def _operation_candidates(
+        service_type: str, operation_type: Optional[str]
+    ) -> List[str]:
         if not operation_type:
             return []
         aliases = {
-            ("mcp_service", "tool_call"): ["request", "execution", "minute", "image", "character"],
+            ("mcp_service", "tool_call"): [
+                "request",
+                "execution",
+                "minute",
+                "image",
+                "character",
+            ],
             ("storage_minio", "download"): ["egress_gb"],
             ("storage_minio", "storage_month"): ["storage_gb_month"],
         }
@@ -345,7 +372,9 @@ class ProductService:
             if item_provider not in allowed_providers and item_provider is not None:
                 return None
 
-        item_backend, item_engine = self._extract_model_inference_runtime(cost_definition)
+        item_backend, item_engine = self._extract_model_inference_runtime(
+            cost_definition
+        )
         if requested_engine and item_engine not in (None, requested_engine):
             return None
         if requested_backend and item_backend not in (None, requested_backend):
@@ -465,13 +494,17 @@ class ProductService:
                     resolved_output.get("cost_per_unit") if resolved_output else 0
                 ),
                 "input_unit_size": (
-                    resolved_input.get("unit_size") if resolved_input else primary.get("unit_size")
+                    resolved_input.get("unit_size")
+                    if resolved_input
+                    else primary.get("unit_size")
                 ),
                 "output_unit_size": (
                     resolved_output.get("unit_size") if resolved_output else 0
                 ),
                 "input_unit_type": (
-                    resolved_input.get("unit_type") if resolved_input else primary.get("unit_type")
+                    resolved_input.get("unit_type")
+                    if resolved_input
+                    else primary.get("unit_type")
                 ),
                 "output_unit_type": (
                     resolved_output.get("unit_type") if resolved_output else None
@@ -487,9 +520,13 @@ class ProductService:
         unit_type: Optional[str],
         tier_code: Optional[str],
     ) -> Dict[str, Any]:
-        resolved_unit_type = unit_type or self._infer_unit_type_from_billing_interval(product.billing_interval)
+        resolved_unit_type = unit_type or self._infer_unit_type_from_billing_interval(
+            product.billing_interval
+        )
         unit_price = Decimal(str(product.base_price))
-        total_price = (quantity * unit_price).quantize(self._QUANTIZE_PRICE, rounding=ROUND_HALF_UP)
+        total_price = (quantity * unit_price).quantize(
+            self._QUANTIZE_PRICE, rounding=ROUND_HALF_UP
+        )
         return {
             "success": True,
             "product_id": product.product_id,
@@ -545,6 +582,7 @@ class ProductService:
         if isinstance(metadata, str):
             try:
                 import json as _json
+
                 metadata = _json.loads(metadata)
             except Exception:
                 metadata = {}
@@ -576,21 +614,20 @@ class ProductService:
     # ====================
 
     async def get_user_subscriptions(
-        self,
-        user_id: str,
-        status: Optional[SubscriptionStatus] = None
+        self, user_id: str, status: Optional[SubscriptionStatus] = None
     ) -> List[UserSubscription]:
         """获取用户订阅列表"""
         try:
             return await self.repository.get_user_subscriptions(
-                user_id=user_id,
-                status=status
+                user_id=user_id, status=status
             )
         except Exception as e:
             logger.error(f"Error getting user subscriptions for {user_id}: {e}")
             raise
 
-    async def get_subscription(self, subscription_id: str) -> Optional[UserSubscription]:
+    async def get_subscription(
+        self, subscription_id: str
+    ) -> Optional[UserSubscription]:
         """获取订阅详情"""
         try:
             return await self.repository.get_subscription(subscription_id)
@@ -604,7 +641,7 @@ class ProductService:
         plan_id: str,
         organization_id: Optional[str] = None,
         billing_cycle: BillingCycle = BillingCycle.MONTHLY,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> UserSubscription:
         """创建新订阅"""
         try:
@@ -613,18 +650,26 @@ class ProductService:
                 try:
                     user_exists = await self.account_client.get_user(user_id)
                     if not user_exists:
-                        logger.warning(f"User {user_id} not found, but proceeding with subscription creation")
+                        logger.warning(
+                            f"User {user_id} not found, but proceeding with subscription creation"
+                        )
                 except Exception as e:
                     logger.warning(f"User validation error: {e}, proceeding anyway")
 
             # Validate organization if provided
             if organization_id and self.organization_client:
                 try:
-                    org_exists = await self.organization_client.get_organization(organization_id)
+                    org_exists = await self.organization_client.get_organization(
+                        organization_id
+                    )
                     if not org_exists:
-                        logger.warning(f"Organization {organization_id} not found, but proceeding")
+                        logger.warning(
+                            f"Organization {organization_id} not found, but proceeding"
+                        )
                 except Exception as e:
-                    logger.warning(f"Organization validation error: {e}, proceeding anyway")
+                    logger.warning(
+                        f"Organization validation error: {e}, proceeding anyway"
+                    )
 
             # Query the service plan to get its tier
             service_plan = await self.repository.get_service_plan(plan_id)
@@ -641,10 +686,12 @@ class ProductService:
                 current_period_start=datetime.utcnow(),
                 current_period_end=self._calculate_period_end(billing_cycle),
                 billing_cycle=billing_cycle,
-                metadata=metadata or {}
+                metadata=metadata or {},
             )
 
-            created_subscription = await self.repository.create_subscription(subscription)
+            created_subscription = await self.repository.create_subscription(
+                subscription
+            )
 
             # Publish subscription.created event via publisher
             await publish_subscription_created(
@@ -658,7 +705,7 @@ class ProductService:
                 status=created_subscription.status.value,
                 current_period_start=created_subscription.current_period_start,
                 current_period_end=created_subscription.current_period_end,
-                metadata=metadata
+                metadata=metadata,
             )
 
             return created_subscription
@@ -679,9 +726,7 @@ class ProductService:
             return now + timedelta(days=30)  # 默认月度
 
     async def update_subscription_status(
-        self,
-        subscription_id: str,
-        status: SubscriptionStatus
+        self, subscription_id: str, status: SubscriptionStatus
     ) -> bool:
         """更新订阅状态"""
         try:
@@ -696,15 +741,16 @@ class ProductService:
 
             # Update the subscription status in repository
             success = await self.repository.update_subscription_status(
-                subscription_id=subscription_id,
-                new_status=status.value
+                subscription_id=subscription_id, new_status=status.value
             )
 
             if not success:
                 logger.error(f"Failed to update subscription {subscription_id} status")
                 return False
 
-            logger.info(f"Updated subscription {subscription_id} from {old_status} to {status.value}")
+            logger.info(
+                f"Updated subscription {subscription_id} from {old_status} to {status.value}"
+            )
 
             # Publish subscription status change event via publisher
             await publish_subscription_status_changed(
@@ -714,7 +760,7 @@ class ProductService:
                 organization_id=subscription.organization_id,
                 plan_id=subscription.plan_id,
                 old_status=old_status,
-                new_status=status.value
+                new_status=status.value,
             )
 
             return True
@@ -736,7 +782,7 @@ class ProductService:
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         usage_details: Optional[Dict[str, Any]] = None,
-        usage_timestamp: Optional[datetime] = None
+        usage_timestamp: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """记录产品使用量"""
         try:
@@ -745,18 +791,26 @@ class ProductService:
                 try:
                     user_valid = await self.account_client.validate_user(user_id)
                     if not user_valid:
-                        logger.warning(f"User {user_id} validation failed, but proceeding with usage recording")
+                        logger.warning(
+                            f"User {user_id} validation failed, but proceeding with usage recording"
+                        )
                 except Exception as e:
                     logger.warning(f"User validation error: {e}, proceeding anyway")
 
             # Validate organization if provided (fail-open for testing)
             if organization_id and self.organization_client:
                 try:
-                    org_valid = await self.organization_client.validate_organization(organization_id)
+                    org_valid = await self.organization_client.validate_organization(
+                        organization_id
+                    )
                     if not org_valid:
-                        logger.warning(f"Organization {organization_id} validation failed, but proceeding")
+                        logger.warning(
+                            f"Organization {organization_id} validation failed, but proceeding"
+                        )
                 except Exception as e:
-                    logger.warning(f"Organization validation error: {e}, proceeding anyway")
+                    logger.warning(
+                        f"Organization validation error: {e}, proceeding anyway"
+                    )
 
             # 验证产品是否存在
             product = await self.repository.get_product(product_id)
@@ -764,7 +818,7 @@ class ProductService:
                 return {
                     "success": False,
                     "message": f"Product {product_id} not found",
-                    "usage_record_id": None
+                    "usage_record_id": None,
                 }
 
             # 验证订阅（如果提供）
@@ -774,13 +828,13 @@ class ProductService:
                     return {
                         "success": False,
                         "message": f"Subscription {subscription_id} not found",
-                        "usage_record_id": None
+                        "usage_record_id": None,
                     }
                 if subscription.status != SubscriptionStatus.ACTIVE:
                     return {
                         "success": False,
                         "message": f"Subscription {subscription_id} is not active",
-                        "usage_record_id": None
+                        "usage_record_id": None,
                     }
 
             # 记录使用量
@@ -793,10 +847,12 @@ class ProductService:
                 session_id=session_id,
                 request_id=request_id,
                 usage_details=usage_details,
-                usage_timestamp=usage_timestamp
+                usage_timestamp=usage_timestamp,
             )
 
-            logger.info(f"Recorded usage for user {user_id}, product {product_id}, amount {usage_amount}")
+            logger.info(
+                f"Recorded usage for user {user_id}, product {product_id}, amount {usage_amount}"
+            )
 
             # Publish product.usage.recorded event via publisher
             await publish_product_usage_recorded(
@@ -810,7 +866,7 @@ class ProductService:
                 session_id=session_id,
                 request_id=request_id,
                 usage_details=usage_details,
-                timestamp=usage_timestamp
+                timestamp=usage_timestamp,
             )
 
             return {
@@ -819,7 +875,7 @@ class ProductService:
                 "usage_record_id": usage_record_id,
                 "product": product.model_dump(),
                 "recorded_amount": float(usage_amount),
-                "timestamp": usage_timestamp or datetime.utcnow()
+                "timestamp": usage_timestamp or datetime.utcnow(),
             }
 
         except Exception as e:
@@ -827,7 +883,7 @@ class ProductService:
             return {
                 "success": False,
                 "message": f"Failed to record usage: {str(e)}",
-                "usage_record_id": None
+                "usage_record_id": None,
             }
 
     async def get_usage_records(
@@ -839,7 +895,7 @@ class ProductService:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[ProductUsageRecord]:
         """获取使用量记录"""
         try:
@@ -851,7 +907,7 @@ class ProductService:
                 start_date=start_date,
                 end_date=end_date,
                 limit=limit,
-                offset=offset
+                offset=offset,
             )
         except Exception as e:
             logger.error(f"Error getting usage records: {e}")
@@ -867,7 +923,7 @@ class ProductService:
         organization_id: Optional[str] = None,
         product_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """获取使用量统计"""
         try:
@@ -876,7 +932,7 @@ class ProductService:
                 organization_id=organization_id,
                 product_id=product_id,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
             )
         except Exception as e:
             logger.error(f"Error getting usage statistics: {e}")
@@ -887,9 +943,6 @@ class ProductService:
         try:
             # 获取基本统计
             current_time = datetime.utcnow()
-            last_24h = current_time - timedelta(hours=24)
-            last_7d = current_time - timedelta(days=7)
-            last_30d = current_time - timedelta(days=30)
 
             # 这里可以实现更详细的统计逻辑
             return {
@@ -899,9 +952,9 @@ class ProductService:
                     "active_subscriptions": 0,  # 可以从数据库获取
                     "usage_records_24h": 0,  # 可以从数据库获取
                     "usage_records_7d": 0,
-                    "usage_records_30d": 0
+                    "usage_records_30d": 0,
                 },
-                "timestamp": current_time
+                "timestamp": current_time,
             }
         except Exception as e:
             logger.error(f"Error getting service statistics: {e}")
@@ -920,7 +973,9 @@ class ProductService:
                 name=data["product_name"],
                 product_code=data.get("product_code"),
                 description=data.get("description"),
-                product_type=ProductType(data["product_type"]) if isinstance(data["product_type"], str) else data["product_type"],
+                product_type=ProductType(data["product_type"])
+                if isinstance(data["product_type"], str)
+                else data["product_type"],
                 base_price=Decimal(str(data.get("base_price", 0))),
                 currency=Currency(data.get("currency", "USD")),
                 billing_interval=data.get("billing_interval"),
@@ -935,7 +990,9 @@ class ProductService:
             logger.error(f"Error in admin_create_product: {e}")
             raise
 
-    async def admin_update_product(self, product_id: str, data: Dict[str, Any]) -> Optional[Product]:
+    async def admin_update_product(
+        self, product_id: str, data: Dict[str, Any]
+    ) -> Optional[Product]:
         """Update a product via admin API"""
         try:
             existing = await self.repository.get_product(product_id)
@@ -983,7 +1040,9 @@ class ProductService:
             logger.error(f"Error in admin_delete_product: {e}")
             raise
 
-    async def admin_create_pricing(self, product_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def admin_create_pricing(
+        self, product_id: str, data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Create a pricing tier via admin API"""
         try:
             product = await self.repository.get_product(product_id)
@@ -1004,7 +1063,9 @@ class ProductService:
             logger.error(f"Error in admin_create_pricing: {e}")
             raise
 
-    async def admin_update_pricing(self, pricing_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def admin_update_pricing(
+        self, pricing_id: str, data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Update a pricing tier via admin API"""
         try:
             existing = await self.repository.admin_get_pricing(pricing_id)
@@ -1024,8 +1085,12 @@ class ProductService:
     # Cost Definition Admin
     # ====================
 
-    async def admin_get_cost_definitions(self, is_active=None, provider=None, service_type=None):
-        return await self.repository.get_cost_definitions(is_active=is_active, provider=provider, service_type=service_type)
+    async def admin_get_cost_definitions(
+        self, is_active=None, provider=None, service_type=None
+    ):
+        return await self.repository.get_cost_definitions(
+            is_active=is_active, provider=provider, service_type=service_type
+        )
 
     async def admin_create_cost_definition(self, data):
         effective_from = data.get("effective_from")
@@ -1037,7 +1102,8 @@ class ProductService:
 
     async def admin_update_cost_definition(self, cost_id, data):
         existing = await self.repository.get_cost_definition(cost_id)
-        if not existing: return None
+        if not existing:
+            return None
         return await self.repository.update_cost_definition(cost_id, data)
 
     async def admin_rotate_cost_definitions(self, rotations):
@@ -1045,20 +1111,27 @@ class ProductService:
         for r in rotations:
             cost_id = r["cost_id"]
             eff = r.get("effective_from")
-            if isinstance(eff, str): eff = datetime.fromisoformat(eff)
+            if isinstance(eff, str):
+                eff = datetime.fromisoformat(eff)
             if eff and eff < datetime.utcnow():
                 raise ValueError(f"effective_from for {cost_id} cannot be in the past")
             old = await self.repository.get_cost_definition(cost_id)
-            if not old: raise ValueError(f"Cost definition {cost_id} not found")
+            if not old:
+                raise ValueError(f"Cost definition {cost_id} not found")
             await self.repository.expire_cost_definition(cost_id, eff)
             new_data = {
                 "cost_id": f"{cost_id}_v{int(datetime.utcnow().timestamp())}",
-                "product_id": old.get("product_id"), "service_type": old["service_type"],
-                "provider": old.get("provider"), "model_name": old.get("model_name"),
+                "product_id": old.get("product_id"),
+                "service_type": old["service_type"],
+                "provider": old.get("provider"),
+                "model_name": old.get("model_name"),
                 "operation_type": old.get("operation_type"),
                 "cost_per_unit": r.get("new_cost_per_unit", old["cost_per_unit"]),
-                "unit_type": old["unit_type"], "unit_size": old.get("unit_size", 1),
-                "original_cost_usd": r.get("new_original_cost_usd", old.get("original_cost_usd")),
+                "unit_type": old["unit_type"],
+                "unit_size": old.get("unit_size", 1),
+                "original_cost_usd": r.get(
+                    "new_original_cost_usd", old.get("original_cost_usd")
+                ),
                 "margin_percentage": old.get("margin_percentage", 30.0),
                 "effective_from": eff,
                 "free_tier_limit": old.get("free_tier_limit", 0),
@@ -1084,36 +1157,24 @@ class ProductService:
     # ====================
 
     async def check_product_availability(
-        self,
-        product_id: str,
-        user_id: str,
-        organization_id: Optional[str] = None
+        self, product_id: str, user_id: str, organization_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """检查产品可用性"""
         try:
             product = await self.repository.get_product(product_id)
             if not product:
-                return {
-                    "available": False,
-                    "reason": "Product not found"
-                }
+                return {"available": False, "reason": "Product not found"}
 
             if not product.is_active:
-                return {
-                    "available": False,
-                    "reason": "Product is not active"
-                }
+                return {"available": False, "reason": "Product is not active"}
 
             # 可以添加更多检查逻辑，比如用户权限、地区限制等
-            
-            return {
-                "available": True,
-                "product": product.model_dump()
-            }
+
+            return {"available": True, "product": product.model_dump()}
 
         except Exception as e:
             logger.error(f"Error checking product availability: {e}")
             return {
                 "available": False,
-                "reason": f"Error checking availability: {str(e)}"
+                "reason": f"Error checking availability: {str(e)}",
             }
