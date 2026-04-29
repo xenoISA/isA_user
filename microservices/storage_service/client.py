@@ -5,7 +5,9 @@ Client library for other microservices to interact with storage service
 """
 
 import httpx
+import os
 from core.service_discovery import get_service_discovery
+from core.auth_dependencies import INTERNAL_SERVICE_SECRET
 import logging
 from typing import Optional, List, Dict, Any, BinaryIO
 from datetime import datetime
@@ -23,8 +25,9 @@ class StorageServiceClient:
         Args:
             base_url: Storage service base URL, defaults to service discovery
         """
-        if base_url:
-            self.base_url = base_url.rstrip('/')
+        configured_base_url = base_url or os.getenv("STORAGE_SERVICE_URL")
+        if configured_base_url:
+            self.base_url = configured_base_url.rstrip('/')
         else:
             # Use service discovery
             try:
@@ -35,6 +38,10 @@ class StorageServiceClient:
                 self.base_url = "http://localhost:8209"
 
         self.client = httpx.AsyncClient(timeout=60.0)
+        self._internal_headers = {
+            "X-Internal-Service": "true",
+            "X-Internal-Service-Secret": INTERNAL_SERVICE_SECRET,
+        }
 
     async def close(self):
         """Close HTTP client"""
@@ -114,7 +121,8 @@ class StorageServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/storage/files/upload",
                 files=files,
-                data=data
+                data=data,
+                headers=self._internal_headers,
             )
             response.raise_for_status()
             return response.json()
@@ -267,7 +275,8 @@ class StorageServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/v1/storage/files/{file_id}",
-                params={"user_id": user_id, "permanent": permanent}
+                params={"user_id": user_id, "permanent": permanent},
+                headers=self._internal_headers,
             )
             response.raise_for_status()
             return True

@@ -104,7 +104,7 @@ class StorageService:
         )
         self._bucket_initialized = False  # Lazy init flag
 
-        self.bucket_name = getattr(config, "minio_bucket_name", "isa-storage")
+        self.bucket_name = getattr(config, "minio_bucket_name", None) or "isa-storage"
 
         # 文件配置
         self.allowed_types = [

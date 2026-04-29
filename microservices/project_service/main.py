@@ -21,6 +21,7 @@ from core.config_manager import ConfigManager
 from core.logger import setup_service_logger
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.health import HealthCheck
+from isa_common.consul_client import ConsulRegistry
 
 from .models import (
     CreateProjectRequest,
@@ -40,11 +41,14 @@ from .protocols import (
     ProjectStorageError,
 )
 from .factory import create_project_service
+from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 config_manager = ConfigManager("project_service")
+config = config_manager.get_service_config()
 logger = setup_service_logger("project_service")
 
 project_service = None
+consul_registry = None
 shutdown_manager = GracefulShutdown("project_service")
 
 
@@ -56,7 +60,7 @@ shutdown_manager = GracefulShutdown("project_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     shutdown_manager.install_signal_handlers()
-    global project_service
+    global project_service, consul_registry
     logger.info("Starting Project Service on port 8260...")
 
     # Wire event bus if NATS is available
@@ -73,8 +77,41 @@ async def lifespan(app: FastAPI):
         config_manager=config_manager,
         event_bus=event_bus,
     )
+    repository = getattr(project_service, "repository", None)
+    if repository and hasattr(repository, "initialize"):
+        await repository.initialize()
+
+    if config.consul_enabled:
+        try:
+            route_meta = get_routes_for_consul()
+            consul_meta = {
+                "version": SERVICE_METADATA["version"],
+                "capabilities": ",".join(SERVICE_METADATA["capabilities"]),
+                **route_meta,
+            }
+            consul_registry = ConsulRegistry(
+                service_name=SERVICE_METADATA["service_name"],
+                service_port=config.service_port,
+                consul_host=config.consul_host,
+                consul_port=config.consul_port,
+                tags=SERVICE_METADATA["tags"],
+                meta=consul_meta,
+                health_check_type="ttl",
+            )
+            consul_registry.register()
+            consul_registry.start_maintenance()
+            shutdown_manager.set_consul_registry(consul_registry)
+            logger.info(
+                "Service registered with Consul: %s routes",
+                route_meta.get("route_count", "0"),
+            )
+        except Exception as e:
+            logger.warning("Failed to register with Consul: %s", e)
+            consul_registry = None
+
     logger.info("Project Service ready")
     yield
+    await shutdown_manager.shutdown_with_timeout()
     logger.info("Project Service shutting down")
 
 
