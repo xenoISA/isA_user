@@ -26,6 +26,7 @@ sys.path.insert(0, _current_dir)
 # NATS imports - optional, may not be available locally
 try:
     from core.nats_client import Event, get_event_bus
+
     NATS_AVAILABLE = True
 except ImportError:
     NATS_AVAILABLE = False
@@ -36,6 +37,7 @@ except ImportError:
 
 
 # ==================== 环境配置 ====================
+
 
 class TestConfig:
     """测试配置"""
@@ -89,6 +91,7 @@ class TestConfig:
 
 # ==================== Event Collector ====================
 
+
 class EventCollector:
     """
     事件收集器 - 用于集成测试中验证事件发布
@@ -123,8 +126,8 @@ class EventCollector:
             event_time_str = event.timestamp
             if isinstance(event_time_str, str):
                 # 移除时区后缀以便比较 (简化处理)
-                event_time_str = event_time_str.replace('+00:00', '').replace('Z', '')
-                if '.' in event_time_str:
+                event_time_str = event_time_str.replace("+00:00", "").replace("Z", "")
+                if "." in event_time_str:
                     event_time = datetime.fromisoformat(event_time_str)
                 else:
                     event_time = datetime.fromisoformat(event_time_str)
@@ -137,14 +140,16 @@ class EventCollector:
             pass  # 如果解析失败，仍然收集事件
 
         async with self._lock:
-            self.events.append({
-                "id": event.id,
-                "type": event.type,
-                "source": event.source,
-                "data": event.data,
-                "timestamp": event.timestamp,
-                "received_at": datetime.utcnow().isoformat()
-            })
+            self.events.append(
+                {
+                    "id": event.id,
+                    "type": event.type,
+                    "source": event.source,
+                    "data": event.data,
+                    "timestamp": event.timestamp,
+                    "received_at": datetime.utcnow().isoformat(),
+                }
+            )
 
     def get_by_type(self, event_type: str) -> list[Dict[str, Any]]:
         """按类型获取事件"""
@@ -167,10 +172,7 @@ class EventCollector:
         return False
 
     async def wait_for_event(
-        self,
-        event_type: str,
-        timeout: float = 10.0,
-        data_match: Optional[Dict] = None
+        self, event_type: str, timeout: float = 10.0, data_match: Optional[Dict] = None
     ) -> Optional[Dict[str, Any]]:
         """等待特定事件"""
         start = asyncio.get_event_loop().time()
@@ -199,6 +201,7 @@ class EventCollector:
 
 
 # ==================== Test Data Generator ====================
+
 
 class TestDataGenerator:
     """测试数据生成器"""
@@ -237,6 +240,7 @@ class TestDataGenerator:
 
 
 # ==================== Pytest Fixtures ====================
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -347,13 +351,13 @@ async def event_collector(event_bus) -> AsyncGenerator[EventCollector, None]:
         for pattern in event_patterns:
             try:
                 # 使用唯一的 consumer 名称，格式: {prefix}-test-{uuid}
-                prefix = pattern.split('.')[0]
+                prefix = pattern.split(".")[0]
                 durable_name = f"{prefix}-test-{test_id}"
                 await event_bus.subscribe_to_events(
                     pattern=pattern,
                     handler=collector.collect,
                     durable=durable_name,
-                    delivery_policy='new'  # 只接收新事件，跳过历史积压
+                    delivery_policy="new",  # 只接收新事件，跳过历史积压
                 )
             except Exception as e:
                 # 某些 stream 可能不存在，忽略错误
@@ -372,13 +376,34 @@ async def db_pools(config: TestConfig) -> AsyncGenerator[Dict[str, asyncpg.Pool]
     """数据库连接池"""
     pools = {}
     databases = [
-        "auth_db", "account_db", "device_db", "organization_db",
-        "billing_db", "wallet_db", "payment_db", "order_db",
-        "subscription_db", "product_db", "session_db", "notification_db",
-        "storage_db", "media_db", "album_db", "location_db",
-        "ota_db", "telemetry_db", "memory_db", "vault_db",
-        "audit_db", "compliance_db", "document_db", "calendar_db",
-        "task_db", "invitation_db", "authorization_db", "event_db"
+        "auth_db",
+        "account_db",
+        "device_db",
+        "organization_db",
+        "billing_db",
+        "wallet_db",
+        "payment_db",
+        "order_db",
+        "subscription_db",
+        "product_db",
+        "session_db",
+        "notification_db",
+        "storage_db",
+        "media_db",
+        "album_db",
+        "location_db",
+        "ota_db",
+        "telemetry_db",
+        "memory_db",
+        "vault_db",
+        "audit_db",
+        "compliance_db",
+        "document_db",
+        "calendar_db",
+        "task_db",
+        "invitation_db",
+        "authorization_db",
+        "event_db",
     ]
 
     for db_name in databases:
@@ -390,7 +415,7 @@ async def db_pools(config: TestConfig) -> AsyncGenerator[Dict[str, asyncpg.Pool]
                 password=config.POSTGRES_PASSWORD,
                 database=db_name,
                 min_size=1,
-                max_size=2
+                max_size=2,
             )
             pools[db_name] = pool
         except Exception as e:
@@ -410,14 +435,11 @@ def test_data():
 
 # ==================== Pytest Markers ====================
 
+
 def pytest_configure(config):
     """配置自定义 markers"""
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "slow: marks tests as slow running"
-    )
+    config.addinivalue_line("markers", "integration: marks tests as integration tests")
+    config.addinivalue_line("markers", "slow: marks tests as slow running")
     config.addinivalue_line(
         "markers", "requires_nats: marks tests that require NATS connection"
     )
@@ -428,22 +450,26 @@ def pytest_configure(config):
 
 # ==================== Test Helpers ====================
 
+
 async def assert_event_published(
     collector: EventCollector,
     event_type: str,
     timeout: float = 10.0,
-    data_match: Optional[Dict] = None
+    data_match: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """断言事件已发布"""
     event = await collector.wait_for_event(event_type, timeout, data_match)
-    assert event is not None, f"Expected event {event_type} was not published within {timeout}s"
+    assert (
+        event is not None
+    ), f"Expected event {event_type} was not published within {timeout}s"
     return event
 
 
 async def assert_http_success(response: httpx.Response, expected_status: int = 200):
     """断言 HTTP 请求成功"""
-    assert response.status_code == expected_status, \
-        f"Expected status {expected_status}, got {response.status_code}: {response.text}"
+    assert (
+        response.status_code == expected_status
+    ), f"Expected status {expected_status}, got {response.status_code}: {response.text}"
     return response.json() if response.content else None
 
 

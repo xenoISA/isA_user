@@ -8,6 +8,7 @@ Test Layers (Top-Down TDD):
     - unit/       : Unit tests (pure functions, no I/O)
     - eval/       : DeepEval LLM quality tests
 """
+
 import asyncio
 import os
 import sys
@@ -58,6 +59,7 @@ make_user = make_account
 # =============================================================================
 # Test Configuration
 # =============================================================================
+
 
 class TestConfig:
     """Centralized test configuration"""
@@ -128,6 +130,7 @@ def test_config() -> TestConfig:
 # Event Loop Configuration
 # =============================================================================
 
+
 @pytest.fixture(scope="session")
 def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     """Create event loop for async tests"""
@@ -139,6 +142,7 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 # =============================================================================
 # Test Data Generators
 # =============================================================================
+
 
 class TestDataGenerator:
     """Generate unique test data"""
@@ -185,6 +189,7 @@ def generate() -> TestDataGenerator:
 # Sample Data Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def sample_user(generate: TestDataGenerator) -> Dict[str, Any]:
     """Generate a sample user dict"""
@@ -224,14 +229,16 @@ def sample_billing_request(sample_user: Dict) -> Dict[str, Any]:
 # Assertion Helpers
 # =============================================================================
 
+
 class AssertionHelpers:
     """Custom assertion helpers for tests"""
 
     @staticmethod
     def assert_http_success(response, expected_status: int = 200):
         """Assert HTTP response is successful"""
-        assert response.status_code == expected_status, \
-            f"Expected {expected_status}, got {response.status_code}: {response.text}"
+        assert (
+            response.status_code == expected_status
+        ), f"Expected {expected_status}, got {response.status_code}: {response.text}"
 
     @staticmethod
     def assert_has_fields(data: Dict, fields: List[str]):
@@ -263,6 +270,7 @@ def assertions() -> AssertionHelpers:
 # =============================================================================
 # Skip Markers Based on Environment
 # =============================================================================
+
 
 def pytest_configure(config):
     """Configure pytest with custom markers and skip logic"""
@@ -299,6 +307,7 @@ def pytest_collection_modifyitems(config, items):
 # =============================================================================
 # Logging Configuration
 # =============================================================================
+
 
 @pytest.fixture(autouse=True)
 def test_logger(request):

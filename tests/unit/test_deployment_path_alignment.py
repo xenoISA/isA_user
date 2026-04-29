@@ -5,7 +5,6 @@ import subprocess
 import tempfile
 import unittest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_DEPLOYMENT_PATH = "deployment/k8s/"
 MACHINE_SPECIFIC_REPO_PATH = "/Users/xenodennis/Documents/Fun/isA_user"
@@ -42,9 +41,9 @@ class TestDeploymentPathAlignment(unittest.TestCase):
         workflow_text = (REPO_ROOT / ".github" / "workflows" / "deploy.yml").read_text(
             encoding="utf-8"
         )
-        redeploy_script_text = (
-            REPO_ROOT / "scripts" / "redeploy_k8s.sh"
-        ).read_text(encoding="utf-8")
+        redeploy_script_text = (REPO_ROOT / "scripts" / "redeploy_k8s.sh").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("deployment/docker/Dockerfile.base", workflow_text)
         self.assertIn("deployment/docker/Dockerfile.microservice", workflow_text)
@@ -84,9 +83,7 @@ class TestDeploymentPathAlignment(unittest.TestCase):
             helm_log = temp_path / "helm.log"
             helm_path = bin_dir / "helm"
             helm_path.write_text(
-                "#!/bin/sh\n"
-                "printf '%s\\n' \"$@\" >> \"$HELM_LOG\"\n"
-                "exit 0\n",
+                "#!/bin/sh\n" 'printf \'%s\\n\' "$@" >> "$HELM_LOG"\n' "exit 0\n",
                 encoding="utf-8",
             )
             helm_path.chmod(helm_path.stat().st_mode | stat.S_IEXEC)
