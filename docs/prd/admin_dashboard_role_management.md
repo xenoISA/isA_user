@@ -76,7 +76,7 @@ Flow:
 3. Admin toggles checkboxes. A live preview shows the pending diff ("+ product_admin", "− billing_admin").
 4. Admin clicks **Save**. A confirmation modal enumerates every delta and requires the admin to type the target user's email to confirm.
 5. On confirm, UI calls `PUT /api/v1/account/admin/accounts/{user_id}/roles` with the full new `admin_roles` array.
-6. On 200, the row refreshes and a toast reports success. On 403 (`only_super_admin_can_assign`) or 400 (`invalid_platform_role`), the UI surfaces the server's `rule`/`message` verbatim.
+6. On 200, the row refreshes and a toast reports success. On 403 (`only_super_admin_can_assign`) or 400 (`invalid_platform_role`), the UI surfaces the backend `detail` string verbatim.
 7. Every mutation emits a `role.assigned` or `role.revoked` audit event (see #280); the UI does not need to write audit data itself.
 
 ASCII wireframe:
@@ -266,7 +266,7 @@ export type CanonicalRole = PlatformAdminRole | 'owner' | 'admin' | 'member' | '
 | `GET` | `/api/v1/account/admin/accounts` | Paginated list of accounts. **Extended** with `admin_role` query param (value ∈ `PlatformAdminRole`) to filter by role and an `has_any_admin_role=true` flag to list every platform admin. | any admin_role | Existing endpoint; query params are the delta this surface needs. |
 | `GET` | `/api/v1/account/admin/accounts/{user_id}` | Account detail — includes `admin_roles: PlatformAdminRole[]`, `is_active`, `created_at`, `updated_at`. | any admin_role | Existing. |
 | `PUT` | `/api/v1/account/admin/accounts/{user_id}/roles` | Replace `admin_roles[]` on a user. Body: `{ admin_roles: PlatformAdminRole[] }`. | super_admin only | Existing. Backend enforces `only_super_admin_can_assign` (403) and `invalid_platform_role` (400). Emits `role.assigned` / `role.revoked` per delta. |
-| `PUT` | `/api/v1/accounts/status/{user_id}` | Suspend / activate / delete. | super_admin · support_admin | Used from the "Manage roles" page for account-level actions adjacent to role changes. |
+| `PUT` | `/api/v1/account/admin/accounts/{user_id}/status` | Suspend / activate / delete. | super_admin · support_admin | Used from the "Manage roles" page for account-level actions adjacent to role changes. |
 
 Example `PUT /api/v1/account/admin/accounts/{user_id}/roles`:
 
@@ -298,10 +298,7 @@ Response (403) when caller is not `super_admin`:
 
 ```json
 {
-  "detail": {
-    "rule": "only_super_admin_can_assign",
-    "message": "only super_admin can assign platform admin roles"
-  }
+  "detail": "only_super_admin_can_assign: only super_admin can assign or revoke platform admin roles"
 }
 ```
 
