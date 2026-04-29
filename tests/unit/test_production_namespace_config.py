@@ -6,7 +6,6 @@ from core.deployment_targets import (
     get_kubernetes_namespace,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_NAMESPACE = "isa-cloud-production"
 CANONICAL_PRODUCTION_NAMESPACE = "isa-cloud-prod"
@@ -48,9 +47,9 @@ class TestProductionNamespaceConfig(unittest.TestCase):
             )
 
     def test_workflow_and_helm_deploy_script_resolve_namespaces_from_config(self):
-        workflow_text = (
-            REPO_ROOT / ".github" / "workflows" / "deploy.yml"
-        ).read_text(encoding="utf-8")
+        workflow_text = (REPO_ROOT / ".github" / "workflows" / "deploy.yml").read_text(
+            encoding="utf-8"
+        )
         deploy_script_text = (
             REPO_ROOT / "deployment" / "helm" / "deploy.sh"
         ).read_text(encoding="utf-8")
