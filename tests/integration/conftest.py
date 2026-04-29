@@ -359,7 +359,7 @@ async def event_collector(event_bus) -> AsyncGenerator[EventCollector, None]:
                     durable=durable_name,
                     delivery_policy="new",  # 只接收新事件，跳过历史积压
                 )
-            except Exception as e:
+            except Exception:
                 # 某些 stream 可能不存在，忽略错误
                 pass
 

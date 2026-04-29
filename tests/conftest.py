@@ -9,12 +9,13 @@ Test Layers (Top-Down TDD):
     - eval/       : DeepEval LLM quality tests
 """
 
+# ruff: noqa: E402, F401
+
 import asyncio
 import os
 import sys
 from datetime import datetime
-from decimal import Decimal
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List
 
 import pytest
 
