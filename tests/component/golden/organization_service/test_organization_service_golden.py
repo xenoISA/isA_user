@@ -9,7 +9,7 @@ Usage:
 """
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 from .mocks import MockOrganizationRepository, MockEventBus
 
@@ -19,6 +19,7 @@ pytestmark = [pytest.mark.component, pytest.mark.golden, pytest.mark.asyncio]
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def mock_repo():
@@ -37,19 +38,19 @@ def mock_repo_with_org():
         plan="free",
         status="active",
         member_count=2,
-        created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)
+        created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
     )
     repo.set_member(
         organization_id="org_test_123",
         user_id="usr_owner",
         role="owner",
-        status="active"
+        status="active",
     )
     repo.set_member(
         organization_id="org_test_123",
         user_id="usr_member",
         role="member",
-        status="active"
+        status="active",
     )
     return repo
 
@@ -64,24 +65,25 @@ def mock_event_bus():
 # OrganizationService.create_organization() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceCreateGolden:
     """Golden: OrganizationService.create_organization() current behavior"""
 
-    async def test_create_organization_returns_response(self, mock_repo, mock_event_bus):
+    async def test_create_organization_returns_response(
+        self, mock_repo, mock_event_bus
+    ):
         """GOLDEN: create_organization creates org and returns OrganizationResponse"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
         from microservices.organization_service.models import (
             OrganizationCreateRequest,
-            OrganizationResponse
+            OrganizationResponse,
         )
 
-        service = OrganizationService(
-            repository=mock_repo,
-            event_bus=mock_event_bus
-        )
+        service = OrganizationService(repository=mock_repo, event_bus=mock_event_bus)
         request = OrganizationCreateRequest(
-            name="New Organization",
-            billing_email="billing@neworg.com"
+            name="New Organization", billing_email="billing@neworg.com"
         )
 
         result = await service.create_organization(request, "usr_owner_123")
@@ -96,16 +98,14 @@ class TestOrganizationServiceCreateGolden:
 
     async def test_create_organization_publishes_event(self, mock_repo, mock_event_bus):
         """GOLDEN: create_organization publishes organization.created event"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
         from microservices.organization_service.models import OrganizationCreateRequest
 
-        service = OrganizationService(
-            repository=mock_repo,
-            event_bus=mock_event_bus
-        )
+        service = OrganizationService(repository=mock_repo, event_bus=mock_event_bus)
         request = OrganizationCreateRequest(
-            name="Test Org",
-            billing_email="test@example.com"
+            name="Test Org", billing_email="test@example.com"
         )
 
         await service.create_organization(request, "usr_123")
@@ -116,7 +116,7 @@ class TestOrganizationServiceCreateGolden:
         """GOLDEN: create_organization rejects empty name"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationValidationError
+            OrganizationValidationError,
         )
 
         service = OrganizationService(repository=mock_repo)
@@ -133,7 +133,7 @@ class TestOrganizationServiceCreateGolden:
         """GOLDEN: create_organization rejects empty billing_email"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationValidationError
+            OrganizationValidationError,
         )
 
         service = OrganizationService(repository=mock_repo)
@@ -151,12 +151,15 @@ class TestOrganizationServiceCreateGolden:
 # OrganizationService.get_organization() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceGetGolden:
     """Golden: OrganizationService.get_organization() current behavior"""
 
     async def test_get_organization_returns_response(self, mock_repo_with_org):
         """GOLDEN: get_organization returns OrganizationResponse"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
         from microservices.organization_service.models import OrganizationResponse
 
         service = OrganizationService(repository=mock_repo_with_org)
@@ -170,23 +173,29 @@ class TestOrganizationServiceGetGolden:
         """GOLDEN: get_organization raises OrganizationNotFoundError when not found"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationNotFoundError
+            OrganizationNotFoundError,
         )
 
         service = OrganizationService(repository=mock_repo)
 
         # Use internal-service to bypass access check and verify NotFoundError
         with pytest.raises(OrganizationNotFoundError):
-            await service.get_organization("org_nonexistent", user_id="internal-service")
+            await service.get_organization(
+                "org_nonexistent", user_id="internal-service"
+            )
 
     async def test_get_organization_internal_service_bypass(self, mock_repo_with_org):
         """GOLDEN: Internal service calls bypass access checks"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
 
         service = OrganizationService(repository=mock_repo_with_org)
 
         # Using internal-service user_id should bypass access checks
-        result = await service.get_organization("org_test_123", user_id="internal-service")
+        result = await service.get_organization(
+            "org_test_123", user_id="internal-service"
+        )
 
         assert result.organization_id == "org_test_123"
 
@@ -195,20 +204,24 @@ class TestOrganizationServiceGetGolden:
 # OrganizationService.update_organization() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceUpdateGolden:
     """Golden: OrganizationService.update_organization() current behavior"""
 
-    async def test_update_organization_returns_updated(self, mock_repo_with_org, mock_event_bus):
+    async def test_update_organization_returns_updated(
+        self, mock_repo_with_org, mock_event_bus
+    ):
         """GOLDEN: update_organization returns updated OrganizationResponse"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
         from microservices.organization_service.models import (
             OrganizationUpdateRequest,
-            OrganizationResponse
+            OrganizationResponse,
         )
 
         service = OrganizationService(
-            repository=mock_repo_with_org,
-            event_bus=mock_event_bus
+            repository=mock_repo_with_org, event_bus=mock_event_bus
         )
         request = OrganizationUpdateRequest(name="Updated Name")
         result = await service.update_organization("org_test_123", request, "usr_owner")
@@ -221,7 +234,7 @@ class TestOrganizationServiceUpdateGolden:
         """GOLDEN: update_organization raises AccessDenied for non-admin"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationAccessDeniedError
+            OrganizationAccessDeniedError,
         )
         from microservices.organization_service.models import OrganizationUpdateRequest
 
@@ -236,16 +249,20 @@ class TestOrganizationServiceUpdateGolden:
 # OrganizationService.delete_organization() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceDeleteGolden:
     """Golden: OrganizationService.delete_organization() current behavior"""
 
-    async def test_delete_organization_owner_succeeds(self, mock_repo_with_org, mock_event_bus):
+    async def test_delete_organization_owner_succeeds(
+        self, mock_repo_with_org, mock_event_bus
+    ):
         """GOLDEN: delete_organization by owner returns True"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
 
         service = OrganizationService(
-            repository=mock_repo_with_org,
-            event_bus=mock_event_bus
+            repository=mock_repo_with_org, event_bus=mock_event_bus
         )
 
         result = await service.delete_organization("org_test_123", "usr_owner")
@@ -257,7 +274,7 @@ class TestOrganizationServiceDeleteGolden:
         """GOLDEN: delete_organization by non-owner raises AccessDenied"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationAccessDeniedError
+            OrganizationAccessDeniedError,
         )
 
         service = OrganizationService(repository=mock_repo_with_org)
@@ -265,13 +282,16 @@ class TestOrganizationServiceDeleteGolden:
         with pytest.raises(OrganizationAccessDeniedError):
             await service.delete_organization("org_test_123", "usr_member")
 
-    async def test_delete_organization_publishes_event(self, mock_repo_with_org, mock_event_bus):
+    async def test_delete_organization_publishes_event(
+        self, mock_repo_with_org, mock_event_bus
+    ):
         """GOLDEN: delete_organization publishes organization.deleted event"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
 
         service = OrganizationService(
-            repository=mock_repo_with_org,
-            event_bus=mock_event_bus
+            repository=mock_repo_with_org, event_bus=mock_event_bus
         )
 
         await service.delete_organization("org_test_123", "usr_owner")
@@ -283,25 +303,31 @@ class TestOrganizationServiceDeleteGolden:
 # OrganizationService.add_organization_member() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceAddMemberGolden:
     """Golden: OrganizationService.add_organization_member() current behavior"""
 
-    async def test_add_member_returns_response(self, mock_repo_with_org, mock_event_bus):
+    async def test_add_member_returns_response(
+        self, mock_repo_with_org, mock_event_bus
+    ):
         """GOLDEN: add_organization_member returns OrganizationMemberResponse"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
         from microservices.organization_service.models import (
             OrganizationMemberAddRequest,
             OrganizationMemberResponse,
-            OrganizationRole
+            OrganizationRole,
         )
 
         service = OrganizationService(
-            repository=mock_repo_with_org,
-            event_bus=mock_event_bus
+            repository=mock_repo_with_org, event_bus=mock_event_bus
         )
         request = OrganizationMemberAddRequest(user_id="usr_new")
 
-        result = await service.add_organization_member("org_test_123", request, "usr_owner")
+        result = await service.add_organization_member(
+            "org_test_123", request, "usr_owner"
+        )
 
         assert isinstance(result, OrganizationMemberResponse)
         assert result.user_id == "usr_new"
@@ -311,9 +337,11 @@ class TestOrganizationServiceAddMemberGolden:
         """GOLDEN: add_organization_member by non-admin raises AccessDenied"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationAccessDeniedError
+            OrganizationAccessDeniedError,
         )
-        from microservices.organization_service.models import OrganizationMemberAddRequest
+        from microservices.organization_service.models import (
+            OrganizationMemberAddRequest,
+        )
 
         service = OrganizationService(repository=mock_repo_with_org)
         request = OrganizationMemberAddRequest(user_id="usr_new")
@@ -325,7 +353,7 @@ class TestOrganizationServiceAddMemberGolden:
         """GOLDEN: add_organization_member validates user_id is provided"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationValidationError
+            OrganizationValidationError,
         )
 
         service = OrganizationService(repository=mock_repo_with_org)
@@ -344,16 +372,20 @@ class TestOrganizationServiceAddMemberGolden:
 # OrganizationService.remove_organization_member() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceRemoveMemberGolden:
     """Golden: OrganizationService.remove_organization_member() current behavior"""
 
-    async def test_remove_member_owner_succeeds(self, mock_repo_with_org, mock_event_bus):
+    async def test_remove_member_owner_succeeds(
+        self, mock_repo_with_org, mock_event_bus
+    ):
         """GOLDEN: Owner can remove members"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
 
         service = OrganizationService(
-            repository=mock_repo_with_org,
-            event_bus=mock_event_bus
+            repository=mock_repo_with_org, event_bus=mock_event_bus
         )
 
         result = await service.remove_organization_member(
@@ -362,13 +394,16 @@ class TestOrganizationServiceRemoveMemberGolden:
 
         assert result is True
 
-    async def test_remove_member_self_removal_succeeds(self, mock_repo_with_org, mock_event_bus):
+    async def test_remove_member_self_removal_succeeds(
+        self, mock_repo_with_org, mock_event_bus
+    ):
         """GOLDEN: Member can remove themselves"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
 
         service = OrganizationService(
-            repository=mock_repo_with_org,
-            event_bus=mock_event_bus
+            repository=mock_repo_with_org, event_bus=mock_event_bus
         )
 
         result = await service.remove_organization_member(
@@ -381,7 +416,7 @@ class TestOrganizationServiceRemoveMemberGolden:
         """GOLDEN: Member cannot remove other members"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationAccessDeniedError
+            OrganizationAccessDeniedError,
         )
 
         # Add another member
@@ -389,7 +424,7 @@ class TestOrganizationServiceRemoveMemberGolden:
             organization_id="org_test_123",
             user_id="usr_another",
             role="member",
-            status="active"
+            status="active",
         )
 
         service = OrganizationService(repository=mock_repo_with_org)
@@ -404,17 +439,24 @@ class TestOrganizationServiceRemoveMemberGolden:
 # OrganizationService.switch_user_context() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceContextGolden:
     """Golden: OrganizationService.switch_user_context() current behavior"""
 
     async def test_switch_to_organization_context(self, mock_repo_with_org):
         """GOLDEN: switch_user_context returns organization context"""
-        from microservices.organization_service.organization_service import OrganizationService
-        from microservices.organization_service.models import OrganizationContextResponse
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
+        from microservices.organization_service.models import (
+            OrganizationContextResponse,
+        )
 
         service = OrganizationService(repository=mock_repo_with_org)
 
-        result = await service.switch_user_context("usr_owner", organization_id="org_test_123")
+        result = await service.switch_user_context(
+            "usr_owner", organization_id="org_test_123"
+        )
 
         assert isinstance(result, OrganizationContextResponse)
         assert result.context_type == "organization"
@@ -423,8 +465,12 @@ class TestOrganizationServiceContextGolden:
 
     async def test_switch_to_personal_context(self, mock_repo):
         """GOLDEN: switch_user_context with None returns individual context"""
-        from microservices.organization_service.organization_service import OrganizationService
-        from microservices.organization_service.models import OrganizationContextResponse
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
+        from microservices.organization_service.models import (
+            OrganizationContextResponse,
+        )
 
         service = OrganizationService(repository=mock_repo)
 
@@ -438,25 +484,30 @@ class TestOrganizationServiceContextGolden:
         """GOLDEN: switch_user_context by non-member raises AccessDenied"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationAccessDeniedError
+            OrganizationAccessDeniedError,
         )
 
         service = OrganizationService(repository=mock_repo_with_org)
 
         with pytest.raises(OrganizationAccessDeniedError):
-            await service.switch_user_context("usr_nonmember", organization_id="org_test_123")
+            await service.switch_user_context(
+                "usr_nonmember", organization_id="org_test_123"
+            )
 
 
 # =============================================================================
 # OrganizationService.get_organization_stats() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceStatsGolden:
     """Golden: OrganizationService.get_organization_stats() current behavior"""
 
     async def test_get_stats_returns_response(self, mock_repo_with_org):
         """GOLDEN: get_organization_stats returns OrganizationStatsResponse"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
         from microservices.organization_service.models import OrganizationStatsResponse
 
         service = OrganizationService(repository=mock_repo_with_org)
@@ -472,13 +523,18 @@ class TestOrganizationServiceStatsGolden:
 # OrganizationService.get_organization_members() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceMembersListGolden:
     """Golden: OrganizationService.get_organization_members() current behavior"""
 
     async def test_get_members_returns_list(self, mock_repo_with_org):
         """GOLDEN: get_organization_members returns OrganizationMemberListResponse"""
-        from microservices.organization_service.organization_service import OrganizationService
-        from microservices.organization_service.models import OrganizationMemberListResponse
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
+        from microservices.organization_service.models import (
+            OrganizationMemberListResponse,
+        )
 
         service = OrganizationService(repository=mock_repo_with_org)
 
@@ -492,7 +548,7 @@ class TestOrganizationServiceMembersListGolden:
         """GOLDEN: get_organization_members by non-member raises AccessDenied"""
         from microservices.organization_service.organization_service import (
             OrganizationService,
-            OrganizationAccessDeniedError
+            OrganizationAccessDeniedError,
         )
 
         service = OrganizationService(repository=mock_repo_with_org)
@@ -505,12 +561,15 @@ class TestOrganizationServiceMembersListGolden:
 # OrganizationService.get_user_organizations() Tests
 # =============================================================================
 
+
 class TestOrganizationServiceUserOrgsGolden:
     """Golden: OrganizationService.get_user_organizations() current behavior"""
 
     async def test_get_user_organizations_returns_list(self, mock_repo_with_org):
         """GOLDEN: get_user_organizations returns OrganizationListResponse"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
         from microservices.organization_service.models import OrganizationListResponse
 
         service = OrganizationService(repository=mock_repo_with_org)
@@ -523,7 +582,9 @@ class TestOrganizationServiceUserOrgsGolden:
 
     async def test_get_user_organizations_empty(self, mock_repo):
         """GOLDEN: get_user_organizations returns empty list for user without orgs"""
-        from microservices.organization_service.organization_service import OrganizationService
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
 
         service = OrganizationService(repository=mock_repo)
 
@@ -531,3 +592,19 @@ class TestOrganizationServiceUserOrgsGolden:
 
         assert len(result.organizations) == 0
         assert result.total == 0
+
+    async def test_get_user_organizations_includes_user_role(self, mock_repo_with_org):
+        """Issue #293: get_user_organizations exposes the caller's role per org."""
+        from microservices.organization_service.organization_service import (
+            OrganizationService,
+        )
+
+        service = OrganizationService(repository=mock_repo_with_org)
+
+        owner_result = await service.get_user_organizations("usr_owner")
+        assert len(owner_result.organizations) == 1
+        assert owner_result.organizations[0].user_role == "owner"
+
+        member_result = await service.get_user_organizations("usr_member")
+        assert len(member_result.organizations) == 1
+        assert member_result.organizations[0].user_role == "member"

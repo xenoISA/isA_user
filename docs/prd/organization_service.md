@@ -189,7 +189,9 @@ The Organization Service provides multi-tenancy and group management capabilitie
 **HTTP Codes**: 200 (OK), 403 (Forbidden), 404 (Not Found), 500 (Server Error)
 
 #### GET /api/v1/organizations
-**Description**: Get user's organizations
+**Description**: Get user's organizations. Each entry includes the caller's
+membership role (`user_role`) so that clients can gate org-admin UI on the
+caller's role within `currentOrgId` without a follow-up lookup (issue #293).
 **Authentication**: Required
 **Response Schema**:
 ```json
@@ -198,6 +200,7 @@ The Organization Service provides multi-tenancy and group management capabilitie
     {
       "organization_id": "org_abc123",
       "name": "My Organization",
+      "user_role": "owner",
       ...
     }
   ],
