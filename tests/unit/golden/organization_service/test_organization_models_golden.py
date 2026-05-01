@@ -44,14 +44,14 @@ pytestmark = [pytest.mark.unit, pytest.mark.golden]
 # OrganizationCreateRequest - Current Behavior
 # =============================================================================
 
+
 class TestOrganizationCreateRequestChar:
     """Characterization: OrganizationCreateRequest current behavior"""
 
     def test_accepts_valid_data(self):
         """CHAR: Valid request is accepted"""
         req = OrganizationCreateRequest(
-            name="Test Organization",
-            billing_email="billing@example.com"
+            name="Test Organization", billing_email="billing@example.com"
         )
         assert req.name == "Test Organization"
         assert req.billing_email == "billing@example.com"
@@ -70,39 +70,30 @@ class TestOrganizationCreateRequestChar:
         """CHAR: Name max length is 100"""
         with pytest.raises(ValidationError):
             OrganizationCreateRequest(
-                name="x" * 101,
-                billing_email="billing@example.com"
+                name="x" * 101, billing_email="billing@example.com"
             )
 
     def test_name_min_length_1(self):
         """CHAR: Name min length is 1"""
         with pytest.raises(ValidationError):
-            OrganizationCreateRequest(
-                name="",
-                billing_email="billing@example.com"
-            )
+            OrganizationCreateRequest(name="", billing_email="billing@example.com")
 
     def test_validates_email_format(self):
         """CHAR: billing_email must contain @"""
         with pytest.raises(ValidationError):
-            OrganizationCreateRequest(
-                name="Test Org",
-                billing_email="invalid-email"
-            )
+            OrganizationCreateRequest(name="Test Org", billing_email="invalid-email")
 
     def test_email_normalized_to_lowercase(self):
         """CHAR: billing_email is normalized to lowercase"""
         req = OrganizationCreateRequest(
-            name="Test Org",
-            billing_email="BILLING@EXAMPLE.COM"
+            name="Test Org", billing_email="BILLING@EXAMPLE.COM"
         )
         assert req.billing_email == "billing@example.com"
 
     def test_default_plan_is_free(self):
         """CHAR: Default plan is FREE"""
         req = OrganizationCreateRequest(
-            name="Test Org",
-            billing_email="billing@example.com"
+            name="Test Org", billing_email="billing@example.com"
         )
         assert req.plan == OrganizationPlan.FREE
 
@@ -111,15 +102,14 @@ class TestOrganizationCreateRequestChar:
         req = OrganizationCreateRequest(
             name="Test Org",
             billing_email="billing@example.com",
-            settings={"feature_x": True}
+            settings={"feature_x": True},
         )
         assert req.settings["feature_x"] is True
 
     def test_settings_defaults_to_empty_dict(self):
         """CHAR: Settings defaults to empty dict"""
         req = OrganizationCreateRequest(
-            name="Test Org",
-            billing_email="billing@example.com"
+            name="Test Org", billing_email="billing@example.com"
         )
         assert req.settings == {}
 
@@ -127,6 +117,7 @@ class TestOrganizationCreateRequestChar:
 # =============================================================================
 # OrganizationUpdateRequest - Current Behavior
 # =============================================================================
+
 
 class TestOrganizationUpdateRequestChar:
     """Characterization: OrganizationUpdateRequest current behavior"""
@@ -160,6 +151,7 @@ class TestOrganizationUpdateRequestChar:
 # OrganizationMemberAddRequest - Current Behavior
 # =============================================================================
 
+
 class TestOrganizationMemberAddRequestChar:
     """Characterization: OrganizationMemberAddRequest current behavior"""
 
@@ -181,17 +173,13 @@ class TestOrganizationMemberAddRequestChar:
     def test_cannot_add_owner_role(self):
         """CHAR: Cannot directly add owner role"""
         with pytest.raises(ValidationError) as exc_info:
-            OrganizationMemberAddRequest(
-                user_id="usr_123",
-                role=OrganizationRole.OWNER
-            )
+            OrganizationMemberAddRequest(user_id="usr_123", role=OrganizationRole.OWNER)
         assert "owner" in str(exc_info.value).lower()
 
     def test_accepts_admin_role(self):
         """CHAR: Can add admin role"""
         req = OrganizationMemberAddRequest(
-            user_id="usr_123",
-            role=OrganizationRole.ADMIN
+            user_id="usr_123", role=OrganizationRole.ADMIN
         )
         assert req.role == OrganizationRole.ADMIN
 
@@ -203,8 +191,7 @@ class TestOrganizationMemberAddRequestChar:
     def test_accepts_custom_permissions(self):
         """CHAR: Accepts custom permissions list"""
         req = OrganizationMemberAddRequest(
-            user_id="usr_123",
-            permissions=["read_reports", "manage_billing"]
+            user_id="usr_123", permissions=["read_reports", "manage_billing"]
         )
         assert "read_reports" in req.permissions
 
@@ -212,6 +199,7 @@ class TestOrganizationMemberAddRequestChar:
 # =============================================================================
 # OrganizationMemberUpdateRequest - Current Behavior
 # =============================================================================
+
 
 class TestOrganizationMemberUpdateRequestChar:
     """Characterization: OrganizationMemberUpdateRequest current behavior"""
@@ -238,6 +226,7 @@ class TestOrganizationMemberUpdateRequestChar:
 # OrganizationSwitchRequest - Current Behavior
 # =============================================================================
 
+
 class TestOrganizationSwitchRequestChar:
     """Characterization: OrganizationSwitchRequest current behavior"""
 
@@ -256,6 +245,7 @@ class TestOrganizationSwitchRequestChar:
 # OrganizationResponse - Current Behavior
 # =============================================================================
 
+
 class TestOrganizationResponseChar:
     """Characterization: OrganizationResponse current behavior"""
 
@@ -269,7 +259,7 @@ class TestOrganizationResponseChar:
             status=OrganizationStatus.ACTIVE,
             member_count=5,
             credits_pool=Decimal("100.00"),
-            created_at=datetime(2024, 1, 1)
+            created_at=datetime(2024, 1, 1),
         )
         assert resp.organization_id == "org_123"
         assert resp.name == "Test Org"
@@ -283,7 +273,7 @@ class TestOrganizationResponseChar:
             billing_email="billing@example.com",
             plan=OrganizationPlan.FREE,
             status=OrganizationStatus.ACTIVE,
-            created_at=datetime(2024, 1, 1)
+            created_at=datetime(2024, 1, 1),
         )
         assert resp.member_count == 0
 
@@ -295,7 +285,7 @@ class TestOrganizationResponseChar:
             billing_email="billing@example.com",
             plan=OrganizationPlan.FREE,
             status=OrganizationStatus.ACTIVE,
-            created_at=datetime(2024, 1, 1)
+            created_at=datetime(2024, 1, 1),
         )
         assert resp.credits_pool == Decimal(0)
 
@@ -307,7 +297,7 @@ class TestOrganizationResponseChar:
             billing_email="billing@example.com",
             plan=OrganizationPlan.FREE,
             status=OrganizationStatus.ACTIVE,
-            created_at=datetime(2024, 1, 1)
+            created_at=datetime(2024, 1, 1),
         )
         assert resp.settings == {}
 
@@ -344,6 +334,7 @@ class TestOrganizationResponseChar:
 # OrganizationMemberResponse - Current Behavior
 # =============================================================================
 
+
 class TestOrganizationMemberResponseChar:
     """Characterization: OrganizationMemberResponse current behavior"""
 
@@ -354,7 +345,7 @@ class TestOrganizationMemberResponseChar:
             organization_id="org_123",
             role=OrganizationRole.MEMBER,
             status=MemberStatus.ACTIVE,
-            joined_at=datetime(2024, 1, 1)
+            joined_at=datetime(2024, 1, 1),
         )
         assert resp.user_id == "usr_123"
         assert resp.role == OrganizationRole.MEMBER
@@ -367,7 +358,7 @@ class TestOrganizationMemberResponseChar:
             organization_id="org_123",
             role=OrganizationRole.MEMBER,
             status=MemberStatus.ACTIVE,
-            joined_at=datetime(2024, 1, 1)
+            joined_at=datetime(2024, 1, 1),
         )
         assert resp.permissions == []
 
@@ -376,14 +367,13 @@ class TestOrganizationMemberResponseChar:
 # OrganizationContextResponse - Current Behavior
 # =============================================================================
 
+
 class TestOrganizationContextResponseChar:
     """Characterization: OrganizationContextResponse current behavior"""
 
     def test_individual_context(self):
         """CHAR: Individual context has minimal fields"""
-        resp = OrganizationContextResponse(
-            context_type="individual"
-        )
+        resp = OrganizationContextResponse(context_type="individual")
         assert resp.context_type == "individual"
         assert resp.organization_id is None
         assert resp.user_role is None
@@ -397,7 +387,7 @@ class TestOrganizationContextResponseChar:
             organization_name="Test Org",
             user_role=OrganizationRole.ADMIN,
             permissions=["read", "write"],
-            credits_available=Decimal("100.00")
+            credits_available=Decimal("100.00"),
         )
         assert resp.context_type == "organization"
         assert resp.organization_id == "org_123"
@@ -407,6 +397,7 @@ class TestOrganizationContextResponseChar:
 # =============================================================================
 # Enum Values - Current Behavior
 # =============================================================================
+
 
 class TestOrganizationPlanEnum:
     """Characterization: OrganizationPlan enum values"""

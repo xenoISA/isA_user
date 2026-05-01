@@ -41,7 +41,7 @@ class MockOrganizationRepository:
         member_count: int = 1,
         credits_pool: float = 0.0,
         settings: Optional[Dict] = None,
-        created_at: Optional[datetime] = None
+        created_at: Optional[datetime] = None,
     ):
         """Add an organization to the mock repository"""
         self._organizations[organization_id] = {
@@ -54,7 +54,7 @@ class MockOrganizationRepository:
             "credits_pool": credits_pool,
             "settings": settings or {},
             "created_at": created_at or datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc)
+            "updated_at": datetime.now(timezone.utc),
         }
 
     def set_member(
@@ -64,20 +64,22 @@ class MockOrganizationRepository:
         role: str = "member",
         status: str = "active",
         permissions: Optional[List[str]] = None,
-        joined_at: Optional[datetime] = None
+        joined_at: Optional[datetime] = None,
     ):
         """Add a member to the mock repository"""
         if organization_id not in self._members:
             self._members[organization_id] = []
 
-        self._members[organization_id].append({
-            "user_id": user_id,
-            "organization_id": organization_id,
-            "role": role,
-            "status": status,
-            "permissions": permissions or [],
-            "joined_at": joined_at or datetime.now(timezone.utc)
-        })
+        self._members[organization_id].append(
+            {
+                "user_id": user_id,
+                "organization_id": organization_id,
+                "role": role,
+                "status": status,
+                "permissions": permissions or [],
+                "joined_at": joined_at or datetime.now(timezone.utc),
+            }
+        )
 
     def set_error(self, error: Exception):
         """Set an error to be raised on operations"""
@@ -90,7 +92,9 @@ class MockOrganizationRepository:
     def assert_called(self, method: str):
         """Assert that a method was called"""
         called_methods = [c["method"] for c in self._call_log]
-        assert method in called_methods, f"Expected {method} to be called, but got {called_methods}"
+        assert (
+            method in called_methods
+        ), f"Expected {method} to be called, but got {called_methods}"
 
     def assert_called_with(self, method: str, **kwargs):
         """Assert that a method was called with specific kwargs"""
@@ -98,14 +102,14 @@ class MockOrganizationRepository:
             if call["method"] == method:
                 for key, value in kwargs.items():
                     assert key in call["kwargs"], f"Expected kwarg {key} not found"
-                    assert call["kwargs"][key] == value, f"Expected {key}={value}, got {call['kwargs'][key]}"
+                    assert (
+                        call["kwargs"][key] == value
+                    ), f"Expected {key}={value}, got {call['kwargs'][key]}"
                 return
         raise AssertionError(f"Expected {method} to be called with {kwargs}")
 
     async def create_organization(
-        self,
-        data: Dict[str, Any],
-        owner_user_id: str
+        self, data: Dict[str, Any], owner_user_id: str
     ) -> OrganizationResponse:
         """Create organization and add owner as member"""
         self._log_call("create_organization", data=data, owner_user_id=owner_user_id)
@@ -127,7 +131,7 @@ class MockOrganizationRepository:
             "credits_pool": 0,
             "settings": data.get("settings", {}),
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
 
         self._organizations[org_id] = org_data
@@ -137,7 +141,9 @@ class MockOrganizationRepository:
 
         return OrganizationResponse(**org_data)
 
-    async def get_organization(self, organization_id: str) -> Optional[OrganizationResponse]:
+    async def get_organization(
+        self, organization_id: str
+    ) -> Optional[OrganizationResponse]:
         """Get organization by ID"""
         self._log_call("get_organization", organization_id=organization_id)
 
@@ -150,12 +156,14 @@ class MockOrganizationRepository:
         return None
 
     async def update_organization(
-        self,
-        organization_id: str,
-        update_data: Dict[str, Any]
+        self, organization_id: str, update_data: Dict[str, Any]
     ) -> Optional[OrganizationResponse]:
         """Update organization"""
-        self._log_call("update_organization", organization_id=organization_id, update_data=update_data)
+        self._log_call(
+            "update_organization",
+            organization_id=organization_id,
+            update_data=update_data,
+        )
 
         if organization_id not in self._organizations:
             return None
@@ -202,7 +210,7 @@ class MockOrganizationRepository:
         organization_id: str,
         user_id: str,
         role: OrganizationRole,
-        permissions: Optional[List[str]] = None
+        permissions: Optional[List[str]] = None,
     ) -> Optional[OrganizationMemberResponse]:
         """Add member to organization"""
         self._log_call(
@@ -210,14 +218,14 @@ class MockOrganizationRepository:
             organization_id=organization_id,
             user_id=user_id,
             role=role,
-            permissions=permissions
+            permissions=permissions,
         )
 
         if organization_id not in self._organizations:
             return None
 
         now = datetime.now(timezone.utc)
-        role_value = role.value if hasattr(role, 'value') else role
+        role_value = role.value if hasattr(role, "value") else role
 
         member_data = {
             "user_id": user_id,
@@ -225,16 +233,14 @@ class MockOrganizationRepository:
             "role": OrganizationRole(role_value),
             "status": MemberStatus.ACTIVE,
             "permissions": permissions or [],
-            "joined_at": now
+            "joined_at": now,
         }
 
         if organization_id not in self._members:
             self._members[organization_id] = []
-        self._members[organization_id].append({
-            **member_data,
-            "role": role_value,
-            "status": "active"
-        })
+        self._members[organization_id].append(
+            {**member_data, "role": role_value, "status": "active"}
+        )
 
         # Update member count
         self._organizations[organization_id]["member_count"] += 1
@@ -242,17 +248,14 @@ class MockOrganizationRepository:
         return OrganizationMemberResponse(**member_data)
 
     async def update_organization_member(
-        self,
-        organization_id: str,
-        user_id: str,
-        update_data: Dict[str, Any]
+        self, organization_id: str, user_id: str, update_data: Dict[str, Any]
     ) -> Optional[OrganizationMemberResponse]:
         """Update organization member"""
         self._log_call(
             "update_organization_member",
             organization_id=organization_id,
             user_id=user_id,
-            update_data=update_data
+            update_data=update_data,
         )
 
         if organization_id not in self._members:
@@ -262,7 +265,9 @@ class MockOrganizationRepository:
             if member["user_id"] == user_id:
                 for key, value in update_data.items():
                     if key in member:
-                        member[key] = value if not hasattr(value, 'value') else value.value
+                        member[key] = (
+                            value if not hasattr(value, "value") else value.value
+                        )
 
                 return OrganizationMemberResponse(
                     user_id=member["user_id"],
@@ -270,21 +275,19 @@ class MockOrganizationRepository:
                     role=OrganizationRole(member["role"]),
                     status=MemberStatus(member["status"]),
                     permissions=member.get("permissions", []),
-                    joined_at=member["joined_at"]
+                    joined_at=member["joined_at"],
                 )
 
         return None
 
     async def remove_organization_member(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> bool:
         """Remove member from organization"""
         self._log_call(
             "remove_organization_member",
             organization_id=organization_id,
-            user_id=user_id
+            user_id=user_id,
         )
 
         if organization_id not in self._members:
@@ -304,7 +307,7 @@ class MockOrganizationRepository:
         organization_id: str,
         limit: int = 100,
         offset: int = 0,
-        role_filter: Optional[OrganizationRole] = None
+        role_filter: Optional[OrganizationRole] = None,
     ) -> List[OrganizationMemberResponse]:
         """Get organization members"""
         self._log_call(
@@ -312,39 +315,41 @@ class MockOrganizationRepository:
             organization_id=organization_id,
             limit=limit,
             offset=offset,
-            role_filter=role_filter
+            role_filter=role_filter,
         )
 
         if organization_id not in self._members:
             return []
 
         results = []
-        filter_role = role_filter.value if hasattr(role_filter, 'value') else role_filter
+        filter_role = (
+            role_filter.value if hasattr(role_filter, "value") else role_filter
+        )
 
         for member in self._members[organization_id]:
             if filter_role and member["role"] != filter_role:
                 continue
-            results.append(OrganizationMemberResponse(
-                user_id=member["user_id"],
-                organization_id=organization_id,
-                role=OrganizationRole(member["role"]),
-                status=MemberStatus(member["status"]),
-                permissions=member.get("permissions", []),
-                joined_at=member["joined_at"]
-            ))
+            results.append(
+                OrganizationMemberResponse(
+                    user_id=member["user_id"],
+                    organization_id=organization_id,
+                    role=OrganizationRole(member["role"]),
+                    status=MemberStatus(member["status"]),
+                    permissions=member.get("permissions", []),
+                    joined_at=member["joined_at"],
+                )
+            )
 
-        return results[offset:offset + limit]
+        return results[offset : offset + limit]
 
     async def get_user_organization_role(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> Optional[Dict]:
         """Get user's role in organization"""
         self._log_call(
             "get_user_organization_role",
             organization_id=organization_id,
-            user_id=user_id
+            user_id=user_id,
         )
 
         if organization_id not in self._members:
@@ -355,7 +360,7 @@ class MockOrganizationRepository:
                 return {
                     "role": member["role"],
                     "status": member["status"],
-                    "permissions": member.get("permissions", [])
+                    "permissions": member.get("permissions", []),
                 }
 
         return None
@@ -382,7 +387,7 @@ class MockOrganizationRepository:
             "credits_used_this_month": 0,
             "storage_used_gb": 0.0,
             "api_calls_this_month": 0,
-            "created_at": org["created_at"]
+            "created_at": org["created_at"],
         }
 
     async def list_all_organizations(
@@ -391,7 +396,7 @@ class MockOrganizationRepository:
         offset: int = 0,
         search: Optional[str] = None,
         plan_filter: Optional[str] = None,
-        status_filter: Optional[str] = None
+        status_filter: Optional[str] = None,
     ) -> List[OrganizationResponse]:
         """List all organizations with filters"""
         self._log_call(
@@ -400,7 +405,7 @@ class MockOrganizationRepository:
             offset=offset,
             search=search,
             plan_filter=plan_filter,
-            status_filter=status_filter
+            status_filter=status_filter,
         )
 
         results = []
@@ -415,7 +420,7 @@ class MockOrganizationRepository:
 
             results.append(OrganizationResponse(**org_data))
 
-        return results[offset:offset + limit]
+        return results[offset : offset + limit]
 
 
 class MockEventBus:
@@ -445,16 +450,18 @@ class MockEventBus:
                 # Handle enum types by getting their name or value
                 if isinstance(et, str):
                     event_types.append(et)
-                elif hasattr(et, 'name'):
+                elif hasattr(et, "name"):
                     event_types.append(et.name)
-                elif hasattr(et, 'value'):
+                elif hasattr(et, "value"):
                     event_types.append(str(et.value))
                 else:
                     event_types.append(str(et))
             # Check if event_type matches (case-insensitive, supports partial match)
             event_type_lower = event_type.lower().replace("_", ".")
-            assert any(event_type_lower in et.lower() or event_type.upper() in et.upper()
-                      for et in event_types), f"Expected {event_type} event, got {event_types}"
+            assert any(
+                event_type_lower in et.lower() or event_type.upper() in et.upper()
+                for et in event_types
+            ), f"Expected {event_type} event, got {event_types}"
 
     def get_published_events(self) -> List[Any]:
         """Get all published events"""
