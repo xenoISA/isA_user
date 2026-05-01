@@ -12,8 +12,6 @@ import uuid
 from microservices.organization_service.models import (
     OrganizationResponse,
     OrganizationMemberResponse,
-    OrganizationPlan,
-    OrganizationStatus,
     OrganizationRole,
     MemberStatus,
 )
