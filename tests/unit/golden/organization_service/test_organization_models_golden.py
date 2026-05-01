@@ -311,6 +311,34 @@ class TestOrganizationResponseChar:
         )
         assert resp.settings == {}
 
+    def test_user_role_defaults_to_none(self):
+        """Issue #293: user_role is optional and defaults to None"""
+        resp = OrganizationResponse(
+            organization_id="org_123",
+            name="Test Org",
+            billing_email="billing@example.com",
+            plan=OrganizationPlan.FREE,
+            status=OrganizationStatus.ACTIVE,
+            created_at=datetime(2024, 1, 1),
+        )
+        assert resp.user_role is None
+
+    def test_user_role_carried_through(self):
+        """Issue #293: user_role round-trips and appears in model_dump()"""
+        resp = OrganizationResponse(
+            organization_id="org_123",
+            name="Test Org",
+            billing_email="billing@example.com",
+            plan=OrganizationPlan.FREE,
+            status=OrganizationStatus.ACTIVE,
+            created_at=datetime(2024, 1, 1),
+            user_role="owner",
+        )
+        assert resp.user_role == "owner"
+        dumped = resp.model_dump()
+        assert "user_role" in dumped
+        assert dumped["user_role"] == "owner"
+
 
 # =============================================================================
 # OrganizationMemberResponse - Current Behavior

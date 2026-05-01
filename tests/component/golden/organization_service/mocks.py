@@ -180,7 +180,12 @@ class MockOrganizationRepository:
         return True
 
     async def get_user_organizations(self, user_id: str) -> List[Dict]:
-        """Get all organizations for a user"""
+        """Get all organizations for a user.
+
+        Mirrors the real repository, which injects ``user_role`` per-org for
+        the caller (see ``organization_repository.py``) so that downstream
+        consumers can gate UI on the caller's membership role (#293).
+        """
         self._log_call("get_user_organizations", user_id=user_id)
 
         results = []
@@ -189,7 +194,7 @@ class MockOrganizationRepository:
                 if member["user_id"] == user_id and member["status"] == "active":
                     org_data = self._organizations.get(org_id)
                     if org_data and org_data["status"] == "active":
-                        results.append(org_data)
+                        results.append({**org_data, "user_role": member["role"]})
         return results
 
     async def add_organization_member(

@@ -531,3 +531,17 @@ class TestOrganizationServiceUserOrgsGolden:
 
         assert len(result.organizations) == 0
         assert result.total == 0
+
+    async def test_get_user_organizations_includes_user_role(self, mock_repo_with_org):
+        """Issue #293: get_user_organizations exposes the caller's role per org."""
+        from microservices.organization_service.organization_service import OrganizationService
+
+        service = OrganizationService(repository=mock_repo_with_org)
+
+        owner_result = await service.get_user_organizations("usr_owner")
+        assert len(owner_result.organizations) == 1
+        assert owner_result.organizations[0].user_role == "owner"
+
+        member_result = await service.get_user_organizations("usr_member")
+        assert len(member_result.organizations) == 1
+        assert member_result.organizations[0].user_role == "member"

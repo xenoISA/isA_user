@@ -146,6 +146,9 @@ class OrganizationResponse(BaseModel):
     settings: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # Plain string rather than OrganizationRole enum — legacy rows may carry
+    # roles outside the current taxonomy and a list response must not 500 on them.
+    user_role: Optional[str] = None
 
     class Config:
         json_encoders = {
