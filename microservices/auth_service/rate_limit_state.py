@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-import os
 from typing import Any, Dict, Mapping, Optional, Tuple
 
+from core.rate_limit_backend import (
+    FallbackRateLimitBackend as _FallbackRateLimitBackend,
+    build_sliding_window_counter,
+)
 from core.rate_limiter import (
     InMemoryBackend,
     RateLimitConfig,
@@ -192,64 +195,13 @@ class RequestRateLimiter:
         return f"auth_rate_limit:{field}:{scope}"
 
 
-class _FallbackRateLimitBackend:
-    """Use Redis counters when healthy, then fall back to process-local memory."""
-
-    def __init__(self, primary, fallback: InMemoryBackend):
-        self._primary = primary
-        self._fallback = fallback
-        self._primary_available = True
-
-    async def increment(self, key: str, window: float) -> int:
-        return await self._call("increment", key, window)
-
-    async def get_ttl(self, key: str) -> float:
-        return await self._call("get_ttl", key)
-
-    async def get_count(self, key: str, window: float) -> int:
-        return await self._call("get_count", key, window)
-
-    async def _call(self, method_name: str, *args):
-        if self._primary_available:
-            try:
-                method = getattr(self._primary, method_name)
-                return await method(*args)
-            except Exception as exc:
-                self._primary_available = False
-                logger.warning(
-                    "Redis unavailable for auth rate limits; falling back to memory: %s",
-                    exc,
-                )
-
-        method = getattr(self._fallback, method_name)
-        return await method(*args)
-
-
 def _build_default_counter() -> SlidingWindowCounter:
     """Build the default auth rate-limit counter.
 
-    Production/staging deployments can share counters across auth_service
-    replicas via Redis. Local/dev installs remain dependency-light and use the
-    in-memory backend when no Redis URL is configured or Redis is unavailable.
+    Refs #208: delegates to ``core.rate_limit_backend.build_sliding_window_counter``
+    so api-key quotas, HTTP rate limits, and other services share one Redis-vs-
+    memory selection policy. Local/dev installs remain dependency-light and use
+    the in-memory backend when no Redis URL is configured.
     """
 
-    redis_url = os.getenv("AUTH_RATE_LIMIT_REDIS_URL") or os.getenv("REDIS_URL")
-    if not redis_url:
-        return SlidingWindowCounter(InMemoryBackend())
-
-    try:
-        import redis.asyncio as redis
-
-        redis_client = redis.from_url(redis_url, decode_responses=True)
-        backend = _FallbackRateLimitBackend(
-            RedisBackend(redis_client),
-            InMemoryBackend(),
-        )
-        logger.info("Auth API-key rate limits configured with Redis backend")
-        return SlidingWindowCounter(backend)
-    except Exception as exc:
-        logger.warning(
-            "Failed to initialize Redis auth rate-limit backend; using memory: %s",
-            exc,
-        )
-        return SlidingWindowCounter(InMemoryBackend())
+    return build_sliding_window_counter(service_name="auth_service")
