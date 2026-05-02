@@ -1,0 +1,74 @@
+[tool.ruff]
+# Establish the lint baseline for core/ and microservices/ (issue #214).
+# This is *not* a packaging file -- it only configures linters.
+target-version = "py311"
+line-length = 120
+
+# By default we lint everything in core/ and microservices/. Tests, generated
+# code, and migrations have separate enforcement (see ci.yml).
+src = ["core", "microservices"]
+
+extend-exclude = [
+    "**/migrations/",
+    "**/.venv/",
+    "**/__pycache__/",
+    "alembic/versions/",
+]
+
+[tool.ruff.lint]
+# Baseline rule set:
+#   E,W -- PEP 8 errors / warnings
+#   F   -- pyflakes (undefined names, unused imports, dead code)
+#
+# These were the rules already enforced by the legacy CI step before #214.
+# We keep them stable here so the gate is deterministic and the active set
+# is documented.
+select = ["E", "W", "F"]
+
+# Per-rule ignores. Anything listed here MUST have a justification comment.
+ignore = [
+    "E501",   # line-too-long: black handles this; long URLs/log strings exempted
+    "E741",   # ambiguous variable name (l, I, O): legacy callsites, low signal
+    # F841 (unused-variable) is currently noisy in service handlers where the
+    # variable documents intent or guards a future use. Tracked for follow-up;
+    # see #214. Re-enable once handlers are cleaned up.
+    "F841",
+    # E701/E702 (multiple statements on one line): handful of legacy sites;
+    # not worth a behavioural sweep right now. Tracked for follow-up.
+    "E701",
+    "E702",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Service-to-service client wrappers use the canonical pattern:
+#   sys.path.insert(0, parent_dir)
+#   from microservices.<other>.client import ...
+# This intentionally happens after the path manipulation, so E402 is expected.
+"microservices/*/clients/*.py" = ["E402"]
+
+# blockchain_integration.py imports `fastapi` only inside the FastAPI router
+# section, after the standalone helpers. Acceptable for a layered file.
+"microservices/payment_service/blockchain_integration.py" = ["E402"]
+
+# campaign_repository.py performs sys.path.append before importing the
+# in-repo `isa_common` package, mirroring the clients pattern.
+"microservices/campaign_service/campaign_repository.py" = ["E402"]
+
+# account_service/models.py declares the alias ADMIN_ROLES below the model
+# definitions to avoid a circular import with role_validator.
+"microservices/account_service/models.py" = ["E402"]
+
+# F811 redefinitions:
+#   billing_repository.py:get_user_quotas -- duplicate definition (#214 follow-up)
+#   episodic_service.py:vector_search -- duplicate definition (#214 follow-up)
+"microservices/billing_service/billing_repository.py" = ["F811"]
+"microservices/memory_service/episodic_service.py" = ["F811"]
+
+# F601 dictionary key literal repeated -- routes_registry has duplicate
+# 'GET /health' entry; tracked for follow-up.
+"microservices/document_service/routes_registry.py" = ["F601"]
+
+[tool.ruff.lint.pyupgrade]
+# Don't rewrite Optional[X] -> X | None in this baseline; it would touch
+# thousands of public model signatures. Tracked separately.
+keep-runtime-typing = true

@@ -37,7 +37,7 @@ async def publish_device_registered(
 ):
     """
     Publish device.registered event
-    
+
     Args:
         event_bus: NATS event bus instance
         device_id: Device ID
@@ -53,17 +53,17 @@ async def publish_device_registered(
             device_type=device_type,
             owner_id=owner_id
         )
-        
+
         event = Event(
             event_id=event_id,
             event_type="device.registered",
             source="device_service",
             data=event_data.model_dump()
         )
-        
+
         await event_bus.publish(event)
         logger.info(f"Published device.registered for device {device_id}")
-        
+
     except Exception as e:
         logger.error(f"Failed to publish device.registered: {e}")
         raise
@@ -79,7 +79,7 @@ async def publish_device_status_changed(
 ):
     """
     Publish device.status.changed event
-    
+
     Args:
         event_bus: NATS event bus instance
         device_id: Device ID
@@ -95,17 +95,17 @@ async def publish_device_status_changed(
             new_status=new_status,
             reason=reason
         )
-        
+
         event = Event(
             event_id=event_id,
             event_type="device.status.changed",
             source="device_service",
             data=event_data.model_dump()
         )
-        
+
         await event_bus.publish(event)
         logger.info(f"Published device.status.changed for device {device_id}: {old_status} -> {new_status}")
-        
+
     except Exception as e:
         logger.error(f"Failed to publish device.status.changed: {e}")
         raise
@@ -121,7 +121,7 @@ async def publish_device_paired(
 ):
     """
     Publish device.paired event
-    
+
     Args:
         event_bus: NATS event bus instance
         device_id: Device ID
@@ -137,17 +137,17 @@ async def publish_device_paired(
             device_name=device_name,
             device_type=device_type
         )
-        
+
         event = Event(
             event_id=event_id,
             event_type="device.paired",
             source="device_service",
             data=event_data.model_dump()
         )
-        
+
         await event_bus.publish(event)
         logger.info(f"Published device.paired for device {device_id}, user {user_id}")
-        
+
     except Exception as e:
         logger.error(f"Failed to publish device.paired: {e}")
         raise
@@ -163,7 +163,7 @@ async def publish_device_firmware_updated(
 ):
     """
     Publish device.firmware.updated event
-    
+
     Args:
         event_bus: NATS event bus instance
         device_id: Device ID
@@ -179,14 +179,14 @@ async def publish_device_firmware_updated(
             new_version=new_version,
             update_id=update_id
         )
-        
+
         event = Event(
             event_id=event_id,
             event_type="device.firmware.updated",
             source="device_service",
             data=event_data.model_dump()
         )
-        
+
         await event_bus.publish(event)
         logger.info(f"Published device.firmware.updated for device {device_id}: {old_version} -> {new_version}")
 

@@ -54,7 +54,7 @@ class OTAService:
         self.storage_client = storage_client
         self.notification_client = notification_client
         self.event_bus = event_bus
-        
+
     async def upload_firmware(self, user_id: str, firmware_data: Dict[str, Any], file_content: bytes) -> Optional[FirmwareResponse]:
         """上传固件文件"""
         try:
@@ -191,7 +191,7 @@ class OTAService:
         except Exception as e:
             logger.error(f"Error uploading firmware: {e}")
             return None
-    
+
     async def create_update_campaign(self, user_id: str, campaign_data: Dict[str, Any]) -> Optional[UpdateCampaignResponse]:
         """创建更新活动"""
         try:
@@ -316,7 +316,7 @@ class OTAService:
             import traceback
             traceback.print_exc()
             return None
-    
+
     async def start_campaign(self, campaign_id: str) -> bool:
         """启动更新活动"""
         try:
@@ -324,11 +324,11 @@ class OTAService:
             campaign = await self.get_campaign(campaign_id)
             if not campaign:
                 return False
-            
+
             # 更新活动状态
             campaign.status = UpdateStatus.IN_PROGRESS
             campaign.actual_start = datetime.utcnow()
-            
+
             # 开始分批更新设备
             await self._start_batch_updates(campaign)
 
@@ -352,7 +352,7 @@ class OTAService:
         except Exception as e:
             logger.error(f"Error starting campaign: {e}")
             return False
-    
+
     async def update_single_device(self, device_id: str, update_data: Dict[str, Any]) -> Optional[DeviceUpdateResponse]:
         """更新单个设备"""
         try:
@@ -459,7 +459,7 @@ class OTAService:
             import traceback
             traceback.print_exc()
             return None
-    
+
     async def get_update_progress(self, update_id: str) -> Optional[DeviceUpdateResponse]:
         """获取更新进度"""
         try:
@@ -508,7 +508,7 @@ class OTAService:
         except Exception as e:
             logger.error(f"Error getting update progress {update_id}: {e}")
             return None
-    
+
     async def cancel_update(self, update_id: str) -> bool:
         """取消更新"""
         try:
@@ -538,12 +538,12 @@ class OTAService:
         except Exception as e:
             logger.error(f"Error cancelling update: {e}")
             return False
-    
+
     async def rollback_update(self, device_id: str, to_version: str) -> Optional[RollbackResponse]:
         """回滚更新"""
         try:
             rollback_id = secrets.token_hex(16)
-            
+
             rollback = RollbackResponse(
                 rollback_id=rollback_id,
                 campaign_id="",  # 如果是活动回滚
@@ -558,7 +558,7 @@ class OTAService:
                 success=False,
                 error_message=None
             )
-            
+
             # 开始回滚过程
             await self._start_rollback_process(rollback)
 
@@ -582,7 +582,7 @@ class OTAService:
         except Exception as e:
             logger.error(f"Error rolling back update: {e}")
             return None
-    
+
     async def get_update_stats(self) -> Optional[UpdateStatsResponse]:
         """获取更新统计"""
         try:
@@ -642,7 +642,7 @@ class OTAService:
         except Exception as e:
             logger.error(f"Error getting update stats: {e}")
             return None
-    
+
     async def get_firmware(self, firmware_id: str) -> Optional[FirmwareResponse]:
         """获取固件信息"""
         try:
@@ -736,20 +736,20 @@ class OTAService:
             import traceback
             traceback.print_exc()
             return None
-    
+
     # Private helper methods
-    
+
     def _generate_firmware_id(self, name: str, version: str, model: str) -> str:
         """生成固件ID - 基于 name:version:model 的确定性哈希"""
         # Use deterministic hash without timestamp so same firmware gets same ID
         unique_string = f"{name}:{version}:{model}"
         return hashlib.sha256(unique_string.encode()).hexdigest()[:32]
-    
+
     async def _calculate_target_devices(self, device_ids: List[str], group_ids: List[str], filters: Dict[str, Any]) -> int:
         """计算目标设备数量"""
         # 实际应该查询设备管理服务
         return len(device_ids) + len(group_ids) * 20  # 模拟计算
-    
+
     async def _start_batch_updates(self, campaign: UpdateCampaignResponse):
         """开始分批更新"""
         try:
@@ -759,7 +759,7 @@ class OTAService:
             logger.info(f"Starting batch updates for campaign {campaign.campaign_id}")
         except Exception as e:
             logger.error(f"Error in batch updates: {e}")
-    
+
     async def _start_device_update(self, device_update: DeviceUpdateResponse):
         """开始设备更新过程"""
         try:
@@ -769,15 +769,15 @@ class OTAService:
             # 3. 安装固件
             # 4. 重启设备
             # 5. 验证更新结果
-            
+
             device_update.status = UpdateStatus.IN_PROGRESS
             device_update.started_at = datetime.utcnow()
             device_update.current_phase = "downloading"
-            
+
             logger.info(f"Device update process started: {device_update.update_id}")
         except Exception as e:
             logger.error(f"Error in device update process: {e}")
-    
+
     async def _start_rollback_process(self, rollback: RollbackResponse):
         """开始回滚过程"""
         try:

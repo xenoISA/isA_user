@@ -43,7 +43,7 @@ class BlockchainNetwork(str, Enum):
 class WalletBalance(BaseModel):
     """Wallet balance information"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     wallet_id: str
     user_id: str
     balance: Decimal = Field(decimal_places=8, ge=0)
@@ -52,7 +52,7 @@ class WalletBalance(BaseModel):
     currency: str = "CREDIT"  # Can be CREDIT, TOKEN, ETH, etc.
     wallet_type: WalletType = WalletType.FIAT
     last_updated: datetime
-    
+
     # Blockchain fields (optional)
     blockchain_address: Optional[str] = None
     blockchain_network: Optional[BlockchainNetwork] = None
@@ -63,7 +63,7 @@ class WalletBalance(BaseModel):
 class WalletTransaction(BaseModel):
     """Wallet transaction record"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     transaction_id: str
     wallet_id: str
     user_id: str
@@ -72,23 +72,23 @@ class WalletTransaction(BaseModel):
     balance_before: Decimal = Field(decimal_places=8)
     balance_after: Decimal = Field(decimal_places=8)
     fee: Decimal = Field(decimal_places=8, default=Decimal(0))
-    
+
     # Transaction details
     description: Optional[str] = None
     reference_id: Optional[str] = None  # External reference (e.g., payment ID)
     usage_record_id: Optional[int] = None  # Link to usage tracking
-    
+
     # Transfer fields
     from_wallet_id: Optional[str] = None
     to_wallet_id: Optional[str] = None
-    
+
     # Blockchain fields
     blockchain_tx_hash: Optional[str] = None
     blockchain_network: Optional[BlockchainNetwork] = None
     blockchain_status: Optional[str] = None  # pending, confirmed, failed
     blockchain_confirmations: Optional[int] = None
     gas_fee: Optional[Decimal] = None
-    
+
     # Metadata
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -122,14 +122,14 @@ class TransactionCreate(BaseModel):
     description: Optional[str] = None
     reference_id: Optional[str] = None
     usage_record_id: Optional[int] = None
-    
+
     # Transfer specific
     to_wallet_id: Optional[str] = None
-    
+
     # Blockchain specific
     blockchain_tx_hash: Optional[str] = None
     blockchain_network: Optional[BlockchainNetwork] = None
-    
+
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -193,11 +193,11 @@ class WalletStatistics(BaseModel):
     total_transfers_in: Decimal
     total_transfers_out: Decimal
     transaction_count: int
-    
+
     # Blockchain stats
     blockchain_transactions: Optional[int] = None
     total_gas_fees: Optional[Decimal] = None
-    
+
     # Time-based stats
     period_start: Optional[datetime] = None
     period_end: Optional[datetime] = None

@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
 
-# Database client setup  
+# Database client setup
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -59,7 +59,7 @@ class SessionRepository:
         )
         self.schema = "session"
         self.sessions_table = "sessions"
-    
+
     async def create_session(self, session_data: Dict[str, Any]) -> Optional[Session]:
         """创建会话"""
         try:
@@ -115,7 +115,7 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error getting session: {e}")
             return None
-    
+
     async def get_user_sessions(
         self,
         user_id: str,
@@ -155,7 +155,7 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error getting user sessions: {e}")
             return []
-    
+
     async def update_session_status(self, session_id: str, status: str) -> bool:
         """更新会话状态"""
         try:
@@ -195,7 +195,7 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error updating session status: {e}")
             return False
-    
+
     async def update_session_activity(self, session_id: str) -> bool:
         """更新会话活动时间"""
         try:
@@ -215,7 +215,7 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error updating session activity: {e}")
             return False
-    
+
     async def increment_message_count(self, session_id: str, tokens_used: int = 0, cost_usd: float = 0.0) -> bool:
         """增加消息计数和统计信息"""
         try:
@@ -251,7 +251,7 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error incrementing message count: {e}")
             return False
-    
+
     async def expire_old_sessions(self, hours_old: int = 24) -> int:
         """过期旧会话"""
         try:
@@ -360,7 +360,7 @@ class SessionMessageRepository:
         )
         self.schema = "session"
         self.messages_table = "session_messages"
-    
+
     async def create_message(self, message_data: Dict[str, Any]) -> Optional[SessionMessage]:
         """创建消息"""
         try:
@@ -417,7 +417,7 @@ class SessionMessageRepository:
         except Exception as e:
             logger.error(f"Error creating message: {e}")
             return None
-    
+
     async def get_session_messages(
         self,
         session_id: str,

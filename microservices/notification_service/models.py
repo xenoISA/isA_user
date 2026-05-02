@@ -77,20 +77,20 @@ class NotificationTemplate(BaseModel):
     name: str = Field(..., description="模板名称")
     description: Optional[str] = None
     type: NotificationType = Field(..., description="通知类型")
-    
+
     # 模板内容
     subject: Optional[str] = Field(None, description="邮件主题（邮件类型使用）")
     content: str = Field(..., description="模板内容（支持变量替换）")
     html_content: Optional[str] = Field(None, description="HTML内容（邮件类型使用）")
-    
+
     # 配置
     variables: List[str] = Field(default_factory=list, description="模板变量列表")
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    
+
     # 状态
     status: TemplateStatus = TemplateStatus.ACTIVE
     version: int = Field(default=1, description="模板版本")
-    
+
     # 时间戳
     created_by: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -101,42 +101,42 @@ class Notification(BaseModel):
     """通知模型"""
     id: Optional[int] = None
     notification_id: str = Field(..., description="通知ID")
-    
+
     # 基本信息
     type: NotificationType = Field(..., description="通知类型")
     priority: NotificationPriority = NotificationPriority.NORMAL
-    
+
     # 接收者
     recipient_type: RecipientType = RecipientType.USER
     recipient_id: Optional[str] = Field(None, description="接收者ID（用户/组ID）")
     recipient_email: Optional[EmailStr] = Field(None, description="接收者邮箱")
     recipient_phone: Optional[str] = Field(None, description="接收者电话")
-    
+
     # 内容
     template_id: Optional[str] = Field(None, description="使用的模板ID")
     subject: Optional[str] = Field(None, description="通知主题")
     content: str = Field(..., description="通知内容")
     html_content: Optional[str] = Field(None, description="HTML内容")
     variables: Dict[str, Any] = Field(default_factory=dict, description="模板变量值")
-    
+
     # 发送配置
     scheduled_at: Optional[datetime] = Field(None, description="计划发送时间")
     expires_at: Optional[datetime] = Field(None, description="过期时间")
     retry_count: int = Field(default=0, description="重试次数")
     max_retries: int = Field(default=3, description="最大重试次数")
-    
+
     # 状态
     status: NotificationStatus = NotificationStatus.PENDING
     error_message: Optional[str] = None
-    
+
     # 追踪
     provider: Optional[str] = Field(None, description="发送提供商")
     provider_message_id: Optional[str] = Field(None, description="提供商消息ID")
-    
+
     # 元数据
     metadata: Dict[str, Any] = Field(default_factory=dict)
     tags: List[str] = Field(default_factory=list)
-    
+
     # 时间戳
     created_at: Optional[datetime] = None
     sent_at: Optional[datetime] = None
@@ -150,22 +150,22 @@ class InAppNotification(BaseModel):
     id: Optional[int] = None
     notification_id: str = Field(..., description="通知ID")
     user_id: str = Field(..., description="用户ID")
-    
+
     # 内容
     title: str = Field(..., description="通知标题")
     message: str = Field(..., description="通知消息")
     icon: Optional[str] = Field(None, description="图标")
     image_url: Optional[str] = Field(None, description="图片URL")
     action_url: Optional[str] = Field(None, description="点击动作URL")
-    
+
     # 分类
     category: Optional[str] = Field(None, description="通知分类")
     priority: NotificationPriority = NotificationPriority.NORMAL
-    
+
     # 状态
     is_read: bool = Field(default=False)
     is_archived: bool = Field(default=False)
-    
+
     # 时间戳
     created_at: Optional[datetime] = None
     read_at: Optional[datetime] = None
@@ -177,26 +177,26 @@ class NotificationBatch(BaseModel):
     id: Optional[int] = None
     batch_id: str = Field(..., description="批次ID")
     name: Optional[str] = Field(None, description="批次名称")
-    
+
     # 配置
     template_id: str = Field(..., description="模板ID")
     type: NotificationType = Field(..., description="通知类型")
     priority: NotificationPriority = NotificationPriority.NORMAL
-    
+
     # 接收者
     recipients: List[Dict[str, Any]] = Field(..., description="接收者列表")
     total_recipients: int = Field(..., description="总接收者数")
-    
+
     # 状态统计
     sent_count: int = Field(default=0)
     delivered_count: int = Field(default=0)
     failed_count: int = Field(default=0)
-    
+
     # 时间
     scheduled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    
+
     # 元数据
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_by: Optional[str] = None

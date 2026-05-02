@@ -37,27 +37,27 @@ def _mark_event_processed(event_id: str):
 def get_event_handlers(auth_service, device_auth_service, event_bus):
     """
     Get event handlers for auth service
-    
+
     Args:
         auth_service: AuthenticationService instance
         device_auth_service: DeviceAuthService instance
         event_bus: Event bus instance
-        
+
     Returns:
         Dict of event type to handler function
     """
-    
+
     # Currently auth_service doesn't need to subscribe to other service events
     # for device pairing. All pairing logic is initiated by API calls.
-    
+
     # If needed in the future, add handlers here:
     # handlers = {
     #     "device.registered": handle_device_registered,
     #     "user.deleted": handle_user_deleted,
     # }
-    
+
     handlers = {}
-    
+
     logger.info("Auth service event handlers registered")
     return handlers
 
@@ -74,7 +74,7 @@ async def handle_device_registered(
 ):
     """
     Handle device.registered event
-    
+
     This is an example handler that could be used if auth_service
     needs to react to device registration events.
     """
@@ -83,14 +83,14 @@ async def handle_device_registered(
         if _is_event_processed(event_id):
             logger.debug(f"Event {event_id} already processed, skipping")
             return
-            
+
         device_id = event_data.get("device_id")
         logger.info(f"Handling device.registered event for device {device_id}")
-        
+
         # Process the event
         # ...
-        
+
         _mark_event_processed(event_id)
-        
+
     except Exception as e:
         logger.error(f"Error handling device.registered event: {e}", exc_info=True)

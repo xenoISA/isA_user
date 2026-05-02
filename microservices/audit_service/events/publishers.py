@@ -26,7 +26,7 @@ async def publish_audit_event_recorded(
 ):
     """
     Publish audit.event_recorded event
-    
+
     Args:
         event_bus: NATS event bus instance
         event_id: Audit event ID

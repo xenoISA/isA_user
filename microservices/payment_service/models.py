@@ -107,20 +107,20 @@ class SubscriptionPlan(BaseModel):
     price: Decimal = Field(..., ge=0, description="价格")
     currency: Currency = Currency.USD
     billing_cycle: BillingCycle
-    
+
     # 计划特性
     features: Dict[str, Any] = Field(default_factory=dict)
     credits_included: int = Field(default=0, description="包含的积分数")
     max_users: Optional[int] = None
     max_storage_gb: Optional[int] = None
-    
+
     # 试用期设置
     trial_days: int = Field(default=0, description="试用天数")
-    
+
     # Stripe集成
     stripe_price_id: Optional[str] = None
     stripe_product_id: Optional[str] = None
-    
+
     # 状态和时间戳
     is_active: bool = True
     is_public: bool = True
@@ -135,34 +135,34 @@ class Subscription(BaseModel):
     user_id: str = Field(..., description="用户ID")
     organization_id: Optional[str] = None
     plan_id: str = Field(..., description="计划ID")
-    
+
     # 订阅状态
     status: SubscriptionStatus
     tier: SubscriptionTier
-    
+
     # 计费周期
     current_period_start: datetime
     current_period_end: datetime
     billing_cycle: BillingCycle
-    
+
     # 试用期
     trial_start: Optional[datetime] = None
     trial_end: Optional[datetime] = None
-    
+
     # 取消设置
     cancel_at_period_end: bool = False
     canceled_at: Optional[datetime] = None
     cancellation_reason: Optional[str] = None
-    
+
     # 支付信息
     payment_method_id: Optional[str] = None
     last_payment_date: Optional[datetime] = None
     next_payment_date: Optional[datetime] = None
-    
+
     # Stripe集成
     stripe_subscription_id: Optional[str] = None
     stripe_customer_id: Optional[str] = None
-    
+
     # 元数据
     metadata: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
@@ -176,7 +176,7 @@ class Payment(BaseModel):
     user_id: str = Field(..., description="用户ID")
     organization_id: Optional[str] = None
     order_id: Optional[str] = None
-    
+
     # 支付详情
     amount: Decimal = Field(..., ge=0, description="支付金额")
     currency: Currency = Currency.USD
@@ -185,24 +185,24 @@ class Payment(BaseModel):
     shipping_amount: Decimal = Field(default=Decimal("0"), ge=0)
     discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
     description: Optional[str] = None
-    
+
     # 支付状态
     status: PaymentStatus
     payment_method: PaymentMethod
-    
+
     # 关联信息
     subscription_id: Optional[str] = None
     invoice_id: Optional[str] = None
-    
+
     # 支付处理
     processor: str = Field(default="stripe", description="支付处理器")
     processor_payment_id: Optional[str] = None
     processor_response: Optional[Dict[str, Any]] = None
-    
+
     # 失败信息
     failure_reason: Optional[str] = None
     failure_code: Optional[str] = None
-    
+
     # 时间戳
     created_at: Optional[datetime] = None
     paid_at: Optional[datetime] = None
@@ -214,33 +214,33 @@ class Invoice(BaseModel):
     id: Optional[str] = None
     invoice_id: str = Field(..., description="发票ID")
     invoice_number: str = Field(..., description="发票号")
-    
+
     # 关联信息
     user_id: str
     organization_id: Optional[str] = None
     subscription_id: Optional[str] = None
-    
+
     # 发票详情
     status: InvoiceStatus
     amount_total: Decimal = Field(..., ge=0)
     amount_paid: Decimal = Field(default=Decimal("0"), ge=0)
     amount_due: Decimal = Field(..., ge=0)
     currency: Currency = Currency.USD
-    
+
     # 计费周期
     billing_period_start: datetime
     billing_period_end: datetime
-    
+
     # 支付信息
     payment_method_id: Optional[str] = None
     payment_intent_id: Optional[str] = None
-    
+
     # 行项目
     line_items: List[Dict[str, Any]] = Field(default_factory=list)
-    
+
     # Stripe集成
     stripe_invoice_id: Optional[str] = None
-    
+
     # 时间戳
     due_date: Optional[datetime] = None
     paid_at: Optional[datetime] = None
@@ -254,22 +254,22 @@ class Refund(BaseModel):
     refund_id: str = Field(..., description="退款ID")
     payment_id: str = Field(..., description="原支付ID")
     user_id: str
-    
+
     # 退款详情
     amount: Decimal = Field(..., ge=0, description="退款金额")
     currency: Currency = Currency.USD
     reason: Optional[str] = None
     status: RefundStatus
-    
+
     # 处理信息
     processor: str = Field(default="stripe")
     processor_refund_id: Optional[str] = None
     processor_response: Optional[Dict[str, Any]] = None
-    
+
     # 审批信息
     requested_by: Optional[str] = None
     approved_by: Optional[str] = None
-    
+
     # 时间戳
     requested_at: datetime = Field(default_factory=datetime.utcnow)
     processed_at: Optional[datetime] = None
@@ -281,23 +281,23 @@ class PaymentMethodInfo(BaseModel):
     id: Optional[str] = None
     user_id: str
     method_type: PaymentMethod
-    
+
     # 卡片信息（如果是卡支付）
     card_brand: Optional[str] = None
     card_last4: Optional[str] = None
     card_exp_month: Optional[int] = None
     card_exp_year: Optional[int] = None
-    
+
     # 银行信息（如果是银行转账）
     bank_name: Optional[str] = None
     bank_account_last4: Optional[str] = None
-    
+
     # 第三方支付信息
     external_account_id: Optional[str] = None
-    
+
     # Stripe信息
     stripe_payment_method_id: Optional[str] = None
-    
+
     # 状态
     is_default: bool = False
     is_verified: bool = False

@@ -45,46 +45,46 @@ class CalendarEvent(BaseModel):
     event_id: str = Field(..., description="事件唯一标识")
     user_id: str = Field(..., description="用户ID")
     organization_id: Optional[str] = None
-    
+
     # 事件基本信息
     title: str = Field(..., description="事件标题")
     description: Optional[str] = None
     location: Optional[str] = None
-    
+
     # 时间信息
     start_time: datetime = Field(..., description="开始时间")
     end_time: datetime = Field(..., description="结束时间")
     all_day: bool = Field(False, description="是否全天事件")
     timezone: str = Field("UTC", description="时区")
-    
+
     # 分类和样式
     category: EventCategory = EventCategory.OTHER
     color: Optional[str] = Field(None, description="事件颜色 (#RRGGBB)")
-    
+
     # 重复设置
     recurrence_type: RecurrenceType = RecurrenceType.NONE
     recurrence_end_date: Optional[datetime] = None
     recurrence_rule: Optional[str] = None  # iCalendar RRULE format
-    
+
     # 提醒设置
     reminders: List[int] = Field(default_factory=list, description="提醒时间（分钟）")
-    
+
     # 同步信息
     sync_provider: SyncProvider = SyncProvider.LOCAL
     external_event_id: Optional[str] = None
     last_synced_at: Optional[datetime] = None
-    
+
     # 共享设置
     is_shared: bool = False
     shared_with: List[str] = Field(default_factory=list)
-    
+
     # 元数据
     metadata: Optional[Dict[str, Any]] = None
-    
+
     # 时间戳
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 

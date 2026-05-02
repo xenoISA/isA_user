@@ -84,7 +84,7 @@ class BillingRecord(BaseModel):
     """计费记录模型"""
     id: Optional[int] = None
     billing_id: str = Field(..., description="计费记录ID")
-    
+
     # 关联信息
     user_id: str = Field(..., description="用户ID")
     actor_user_id: Optional[str] = None
@@ -94,29 +94,29 @@ class BillingRecord(BaseModel):
     agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
     usage_record_id: str = Field(..., description="使用记录ID")
-    
+
     # 产品信息
     product_id: str = Field(..., description="产品ID")
     service_type: ServiceType
-    
+
     # 计费详情
     usage_amount: Decimal = Field(..., ge=0, description="使用量")
     unit_price: Decimal = Field(..., ge=0, description="单价")
     total_amount: Decimal = Field(..., ge=0, description="总金额")
     currency: Currency = Currency.CREDIT
-    
+
     # 计费方式和状态
     billing_method: BillingMethod
     billing_status: BillingStatus = BillingStatus.PENDING
-    
+
     # 处理信息
     processed_at: Optional[datetime] = None
     failure_reason: Optional[str] = None
-    
+
     # 关联的钱包/支付记录
     wallet_transaction_id: Optional[str] = None
     payment_transaction_id: Optional[str] = None
-    
+
     # 元数据
     billing_metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -132,11 +132,11 @@ class BillingEvent(BaseModel):
     """计费事件模型"""
     id: Optional[int] = None
     event_id: str = Field(..., description="事件ID")
-    
+
     # 事件详情
     event_type: EventType
     event_source: str = Field(..., description="事件源")
-    
+
     # 关联实体
     user_id: Optional[str] = None
     actor_user_id: Optional[str] = None
@@ -166,7 +166,7 @@ class UsageAggregation(BaseModel):
     """使用量聚合模型"""
     id: Optional[int] = None
     aggregation_id: str = Field(..., description="聚合ID")
-    
+
     # 聚合维度
     user_id: Optional[str] = None
     actor_user_id: Optional[str] = None
@@ -177,28 +177,28 @@ class UsageAggregation(BaseModel):
     subscription_id: Optional[str] = None
     service_type: Optional[ServiceType] = None
     product_id: Optional[str] = None
-    
+
     # 时间周期
     period_start: datetime
     period_end: datetime
     period_type: str = Field(..., description="周期类型：hourly, daily, monthly")
-    
+
     # 聚合数据
     total_usage_count: int = Field(default=0, ge=0)
     total_usage_amount: Decimal = Field(default=Decimal("0"), ge=0)
     total_usage: Decimal = Field(default=Decimal("0"), ge=0)  # For compatibility
     total_cost: Decimal = Field(default=Decimal("0"), ge=0)
-    
+
     # 服务详细使用量
     service_breakdown: Dict[str, Any] = Field(
         default_factory=dict,
         description="服务使用量详细分解"
     )
-    
+
     # 计费状态
     is_billed: bool = False
     billed_at: Optional[datetime] = None
-    
+
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -207,31 +207,31 @@ class BillingQuota(BaseModel):
     """计费配额模型"""
     id: Optional[int] = None
     quota_id: str = Field(..., description="配额ID")
-    
+
     # 配额所有者
     user_id: Optional[str] = None
     organization_id: Optional[str] = None
     subscription_id: Optional[str] = None
-    
+
     # 配额范围
     service_type: ServiceType
     product_id: Optional[str] = None
-    
+
     # 配额设置
     quota_limit: Decimal = Field(..., ge=0, description="配额限制")
     quota_used: Decimal = Field(default=Decimal("0"), ge=0, description="已使用配额")
     quota_remaining: Decimal = Field(default=Decimal("0"), ge=0, description="剩余配额")
     quota_period: str = Field(default="monthly", description="配额周期")
-    
+
     # 重置设置
     reset_date: datetime = Field(..., description="下次重置日期")
     last_reset_date: Optional[datetime] = None
     auto_reset: bool = True
-    
+
     # 状态
     is_active: bool = True
     is_exceeded: bool = False
-    
+
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -249,7 +249,7 @@ class RecordUsageRequest(BaseModel):
     organization_id: Optional[str] = None
     agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
-    
+
     # 产品使用信息
     product_id: str
     service_type: ServiceType
@@ -265,7 +265,7 @@ class RecordUsageRequest(BaseModel):
     # 会话信息
     session_id: Optional[str] = None
     request_id: Optional[str] = None
-    
+
     # 使用详情
     usage_details: Optional[Dict[str, Any]] = None
     usage_timestamp: Optional[datetime] = None
@@ -340,15 +340,15 @@ class ProcessBillingResponse(BaseModel):
     success: bool
     message: str
     billing_record_id: Optional[str] = None
-    
+
     # 处理结果
     amount_charged: Optional[Decimal] = None
     billing_method_used: Optional[BillingMethod] = None
-    
+
     # 余额信息
     remaining_wallet_balance: Optional[Decimal] = None
     remaining_credit_balance: Optional[Decimal] = None
-    
+
     # 关联的交易ID
     wallet_transaction_id: Optional[str] = None
     payment_transaction_id: Optional[str] = None
@@ -362,7 +362,7 @@ class UsageStatsRequest(BaseModel):
     subscription_id: Optional[str] = None
     service_type: Optional[ServiceType] = None
     product_id: Optional[str] = None
-    
+
     # 时间范围
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
@@ -374,18 +374,18 @@ class UsageStatsResponse(BaseModel):
     period_start: datetime
     period_end: datetime
     period_type: str
-    
+
     # 总体统计
     total_usage_records: int
     total_cost: Decimal
     total_usage_amount: Decimal
-    
+
     # 服务分解
     service_breakdown: Dict[str, Dict[str, Any]]
-    
+
     # 时间趋势
     time_series: List[Dict[str, Any]]
-    
+
     # 计费方式分解
     billing_method_breakdown: Dict[BillingMethod, Decimal]
 
@@ -407,14 +407,14 @@ class QuotaCheckResponse(BaseModel):
     """配额检查响应"""
     allowed: bool
     message: str
-    
+
     # 配额信息
     quota_limit: Optional[Decimal] = None
     quota_used: Optional[Decimal] = None
     quota_remaining: Optional[Decimal] = None
     quota_period: Optional[str] = None
     next_reset_date: Optional[datetime] = None
-    
+
     # 如果超出配额的建议
     suggested_actions: List[str] = Field(default_factory=list)
 
@@ -462,16 +462,16 @@ class BillingStats(BaseModel):
     pending_billing_records: int
     completed_billing_records: int
     failed_billing_records: int
-    
+
     # 金额统计
     total_revenue: Decimal
     revenue_by_service: Dict[ServiceType, Decimal]
     revenue_by_method: Dict[BillingMethod, Decimal]
-    
+
     # 用户统计
     active_users: int
     active_organizations: int
-    
+
     # 时间范围
     stats_period_start: datetime
     stats_period_end: datetime

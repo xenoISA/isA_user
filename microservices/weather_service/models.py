@@ -44,7 +44,7 @@ class WeatherData(BaseModel):
     location: str = Field(..., description="Location name")
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    
+
     # Current weather
     temperature: float = Field(..., description="Temperature in Celsius")
     feels_like: Optional[float] = Field(None, description="Feels like temperature")
@@ -52,32 +52,32 @@ class WeatherData(BaseModel):
     pressure: Optional[int] = Field(None, description="Atmospheric pressure in hPa")
     wind_speed: Optional[float] = Field(None, description="Wind speed in m/s")
     wind_direction: Optional[int] = Field(None, ge=0, le=360, description="Wind direction in degrees")
-    
+
     # Conditions
     condition: str = Field(..., description="Weather condition")
     description: Optional[str] = Field(None, description="Weather description")
     icon: Optional[str] = Field(None, description="Weather icon code")
-    
+
     # Additional data
     visibility: Optional[float] = Field(None, description="Visibility in km")
     uv_index: Optional[float] = Field(None, description="UV index")
     clouds: Optional[int] = Field(None, ge=0, le=100, description="Cloudiness percentage")
-    
+
     # Timestamps
     observed_at: datetime = Field(..., description="Observation time")
     sunrise: Optional[datetime] = None
     sunset: Optional[datetime] = None
-    
+
     # Provider info
     provider: str = Field(WeatherProvider.OPENWEATHERMAP.value, description="Data provider")
-    
+
     # Metadata
     metadata: Optional[Dict[str, Any]] = None
-    
+
     # Cache info
     cached_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -90,7 +90,7 @@ class WeatherForecast(BaseModel):
     forecast_days: List["ForecastDay"] = Field(default_factory=list)
     provider: str = WeatherProvider.OPENWEATHERMAP.value
     generated_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
         from_attributes = True
 
@@ -108,7 +108,7 @@ class ForecastDay(BaseModel):
     wind_speed: Optional[float] = None
     precipitation_chance: Optional[int] = Field(None, ge=0, le=100, description="Chance of precipitation %")
     precipitation_amount: Optional[float] = Field(None, description="Precipitation in mm")
-    
+
     class Config:
         from_attributes = True
 
@@ -125,7 +125,7 @@ class WeatherAlert(BaseModel):
     end_time: datetime
     source: str = Field(..., description="Alert source/provider")
     created_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -140,7 +140,7 @@ class FavoriteLocation(BaseModel):
     is_default: bool = False
     nickname: Optional[str] = None
     created_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -184,7 +184,7 @@ class WeatherCurrentResponse(BaseModel):
     wind_speed: Optional[float]
     observed_at: datetime
     cached: bool = False
-    
+
     class Config:
         from_attributes = True
 
@@ -195,7 +195,7 @@ class WeatherForecastResponse(BaseModel):
     forecast: List[ForecastDay]
     generated_at: datetime
     cached: bool = False
-    
+
     class Config:
         from_attributes = True
 

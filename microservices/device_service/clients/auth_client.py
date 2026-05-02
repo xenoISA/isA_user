@@ -15,28 +15,28 @@ logger = logging.getLogger(__name__)
 class AuthServiceClient:
     """
     HTTP client for auth_service
-    
+
     Handles synchronous communication with auth_service for:
     - Device pairing token verification
     - Device authentication
     - Token revocation
     """
-    
+
     def __init__(self, base_url: str = "http://localhost:8001"):
         """
         Initialize auth service client
-        
+
         Args:
             base_url: Base URL of auth_service (default: http://localhost:8001)
         """
         self.base_url = base_url.rstrip('/')
         self.client = httpx.AsyncClient(timeout=10.0)
         logger.info(f"AuthServiceClient initialized with base_url: {self.base_url}")
-    
+
     async def close(self):
         """Close the HTTP client"""
         await self.client.aclose()
-    
+
     async def verify_pairing_token(
         self,
         device_id: str,
@@ -45,12 +45,12 @@ class AuthServiceClient:
     ) -> Dict[str, Any]:
         """
         Verify device pairing token
-        
+
         Args:
             device_id: Device ID
             pairing_token: Pairing token to verify
             user_id: User ID attempting to pair
-            
+
         Returns:
             Dict with verification result:
             {
@@ -68,16 +68,16 @@ class AuthServiceClient:
                 "pairing_token": pairing_token,
                 "user_id": user_id
             }
-            
+
             logger.debug(f"Verifying pairing token for device {device_id}, user {user_id}")
-            
+
             response = await self.client.post(url, json=payload)
             response.raise_for_status()
-            
+
             result = response.json()
             logger.info(f"Pairing token verification result: {result.get('valid', False)}")
             return result
-            
+
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error verifying pairing token: {e.response.status_code}")
             return {
@@ -90,7 +90,7 @@ class AuthServiceClient:
                 "valid": False,
                 "error": str(e)
             }
-    
+
     async def revoke_device_token(
         self,
         device_id: str,
@@ -98,11 +98,11 @@ class AuthServiceClient:
     ) -> Dict[str, Any]:
         """
         Revoke device authentication token
-        
+
         Args:
             device_id: Device ID
             auth_token: Optional authentication token for authorization
-            
+
         Returns:
             Dict with revocation result:
             {
@@ -116,19 +116,19 @@ class AuthServiceClient:
             headers = {}
             if auth_token:
                 headers["Authorization"] = f"Bearer {auth_token}"
-            
+
             logger.debug(f"Revoking device token for device {device_id}")
-            
+
             response = await self.client.delete(url, headers=headers)
             response.raise_for_status()
-            
+
             result = response.json()
             logger.info(f"Device token revoked for device {device_id}")
             return {
                 "success": True,
                 "message": result.get("message", "Token revoked successfully")
             }
-            
+
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error revoking device token: {e.response.status_code}")
             return {
@@ -141,7 +141,7 @@ class AuthServiceClient:
                 "success": False,
                 "error": str(e)
             }
-    
+
     async def authenticate_device(
         self,
         device_id: str,
@@ -149,11 +149,11 @@ class AuthServiceClient:
     ) -> Dict[str, Any]:
         """
         Authenticate device with auth_service
-        
+
         Args:
             device_id: Device ID
             device_secret: Device secret
-            
+
         Returns:
             Dict with authentication result:
             {
@@ -170,19 +170,19 @@ class AuthServiceClient:
                 "device_id": device_id,
                 "device_secret": device_secret
             }
-            
+
             logger.debug(f"Authenticating device {device_id}")
-            
+
             response = await self.client.post(url, json=payload)
             response.raise_for_status()
-            
+
             result = response.json()
             logger.info(f"Device {device_id} authenticated successfully")
             return {
                 "success": True,
                 **result
             }
-            
+
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error authenticating device: {e.response.status_code}")
             return {
@@ -204,10 +204,10 @@ _auth_client: Optional[AuthServiceClient] = None
 def get_auth_client(base_url: str = "http://localhost:8001") -> AuthServiceClient:
     """
     Get singleton auth service client
-    
+
     Args:
         base_url: Base URL of auth_service
-        
+
     Returns:
         AuthServiceClient instance
     """

@@ -38,27 +38,27 @@ def _mark_event_processed(event_id: str):
 def get_event_handlers(device_service: 'DeviceService', event_bus):
     """
     Get event handlers for device service
-    
+
     Args:
         device_service: DeviceService instance
         event_bus: Event bus instance
-        
+
     Returns:
         Dict of event type to handler function
     """
-    
+
     async def handle_firmware_uploaded_wrapper(event_data: Dict[str, Any]):
         await handle_firmware_uploaded(event_data, device_service, event_bus)
-    
+
     async def handle_update_completed_wrapper(event_data: Dict[str, Any]):
         await handle_update_completed(event_data, device_service, event_bus)
-    
+
     async def handle_telemetry_data_wrapper(event_data: Dict[str, Any]):
         await handle_telemetry_data(event_data, device_service, event_bus)
-    
+
     async def handle_device_pairing_completed_wrapper(event_data: Dict[str, Any]):
         await handle_device_pairing_completed(event_data, device_service, event_bus)
-    
+
     handlers = {
         "firmware.uploaded": handle_firmware_uploaded_wrapper,
         "FIRMWARE_UPLOADED": handle_firmware_uploaded_wrapper,
@@ -69,7 +69,7 @@ def get_event_handlers(device_service: 'DeviceService', event_bus):
         "device.pairing.completed": handle_device_pairing_completed_wrapper,
         "DEVICE_PAIRING_COMPLETED": handle_device_pairing_completed_wrapper,
     }
-    
+
     logger.info("Device service event handlers registered")
     return handlers
 
@@ -85,7 +85,7 @@ async def handle_firmware_uploaded(
 ):
     """
     Handle firmware.uploaded event - Update device firmware info
-    
+
     When new firmware is uploaded for a device model, update all compatible
     devices to show that a firmware update is available.
     """
@@ -94,30 +94,30 @@ async def handle_firmware_uploaded(
         if event_id and _is_event_processed(event_id):
             logger.debug(f"Event {event_id} already processed, skipping")
             return
-        
+
         firmware_id = event_data.get("firmware_id")
         device_model = event_data.get("device_model")
         version = event_data.get("version")
-        
+
         if not firmware_id or not device_model or not version:
             logger.warning("firmware.uploaded event missing required fields")
             return
-        
+
         logger.info(
             f"Handling firmware.uploaded event for model={device_model}, version={version}"
         )
-        
+
         # TODO: Implement repository method to find devices by model
         # devices = await device_service.device_repo.find_devices_by_model(device_model)
-        
+
         logger.info(
             f"New firmware {version} available for device model {device_model}. "
             f"Devices should be notified of available update."
         )
-        
+
         if event_id:
             _mark_event_processed(event_id)
-        
+
     except Exception as e:
         logger.error(f"Error handling firmware.uploaded event: {e}", exc_info=True)
 
@@ -129,7 +129,7 @@ async def handle_update_completed(
 ):
     """
     Handle update.completed event - Update device firmware version
-    
+
     When an OTA update completes successfully, update the device's
     firmware_version field to reflect the new version.
     """
@@ -138,39 +138,39 @@ async def handle_update_completed(
         if event_id and _is_event_processed(event_id):
             logger.debug(f"Event {event_id} already processed, skipping")
             return
-        
+
         device_id = event_data.get("device_id")
         firmware_version = event_data.get("firmware_version")
         update_id = event_data.get("update_id")
-        
+
         if not device_id or not firmware_version:
             logger.warning("update.completed event missing device_id or firmware_version")
             return
-        
+
         logger.info(
             f"Handling update.completed event for device={device_id}, "
             f"new_version={firmware_version}, update_id={update_id}"
         )
-        
+
         # Update device firmware version
         device = await device_service.device_repo.get_device(device_id)
         if not device:
             logger.warning(f"Device {device_id} not found")
             return
-        
+
         old_version = device.firmware_version
         await device_service.device_repo.update_device(
             device_id,
             {"firmware_version": firmware_version}
         )
-        
+
         logger.info(
             f"Updated device {device_id} firmware version: {old_version} → {firmware_version}"
         )
-        
+
         if event_id:
             _mark_event_processed(event_id)
-        
+
     except Exception as e:
         logger.error(f"Error handling update.completed event: {e}", exc_info=True)
 
@@ -182,7 +182,7 @@ async def handle_telemetry_data(
 ):
     """
     Handle telemetry.data.received event - Update device health status
-    
+
     When telemetry data is received, optionally update device last_seen
     timestamp and health metrics.
     """
@@ -191,39 +191,39 @@ async def handle_telemetry_data(
         if event_id and _is_event_processed(event_id):
             logger.debug(f"Event {event_id} already processed, skipping")
             return
-        
+
         device_id = event_data.get("device_id")
         metric_name = event_data.get("metric_name")
         value = event_data.get("value")
-        
+
         if not device_id:
             logger.warning("telemetry.data.received event missing device_id")
             return
-        
+
         logger.debug(
             f"Handling telemetry.data.received event for device={device_id}, "
             f"metric={metric_name}, value={value}"
         )
-        
+
         device = await device_service.device_repo.get_device(device_id)
         if not device:
             logger.debug(f"Device {device_id} not found (may not be registered)")
             return
-        
+
         # Update last_seen
         await device_service.device_repo.update_device(
             device_id,
             {"last_seen": datetime.now(timezone.utc)}
         )
-        
+
         # Update device status to ACTIVE if it was INACTIVE
         if device.status == "inactive":
             await device_service.update_device_status(device_id, "active")
             logger.info(f"Device {device_id} status changed to active based on telemetry")
-        
+
         if event_id:
             _mark_event_processed(event_id)
-        
+
     except Exception as e:
         logger.error(f"Error handling telemetry.data.received event: {e}", exc_info=True)
 
@@ -235,7 +235,7 @@ async def handle_device_pairing_completed(
 ):
     """
     Handle device.pairing.completed event from auth_service
-    
+
     When a device is successfully paired with a user, update device status
     and owner information.
     """
@@ -244,24 +244,24 @@ async def handle_device_pairing_completed(
         if event_id and _is_event_processed(event_id):
             logger.debug(f"Event {event_id} already processed, skipping")
             return
-        
+
         device_id = event_data.get("device_id")
         user_id = event_data.get("user_id")
-        
+
         if not device_id or not user_id:
             logger.warning("device.pairing.completed event missing device_id or user_id")
             return
-        
+
         logger.info(
             f"Handling device.pairing.completed event for device={device_id}, user={user_id}"
         )
-        
+
         # Update device with owner and set status to active
         device = await device_service.device_repo.get_device(device_id)
         if not device:
             logger.warning(f"Device {device_id} not found")
             return
-        
+
         old_status = device.status
         await device_service.device_repo.update_device(
             device_id,
@@ -270,14 +270,14 @@ async def handle_device_pairing_completed(
                 "status": "active"
             }
         )
-        
+
         logger.info(
             f"Device {device_id} paired with user {user_id}, status: {old_status} -> active"
         )
-        
+
         if event_id:
             _mark_event_processed(event_id)
-        
+
     except Exception as e:
         logger.error(f"Error handling device.pairing.completed event: {e}", exc_info=True)
 

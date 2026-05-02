@@ -117,7 +117,7 @@ class BulkCommandRequest(BaseModel):
     timeout: int = Field(default=30, ge=1, le=300)
     priority: int = Field(default=5, ge=1, le=10)
     require_ack: bool = Field(default=True)
-    
+
     model_config = {"populate_by_name": True}
 
 
@@ -157,12 +157,12 @@ class DeviceResponse(BaseModel):
     updated_at: datetime
     user_id: str
     organization_id: Optional[str]
-    
+
     # 统计信息
     total_commands: int = 0
     total_telemetry_points: int = 0
     uptime_percentage: float = 0.0
-    
+
 
 class DeviceAuthResponse(BaseModel):
     """设备认证响应"""
@@ -254,19 +254,19 @@ class FrameOrientation(str, Enum):
 class FrameConfig(BaseModel):
     """智能相框配置"""
     device_id: str = Field(..., description="设备ID")
-    
+
     # Display settings
     brightness: int = Field(80, ge=0, le=100, description="亮度 (0-100)")
     contrast: int = Field(100, ge=0, le=200, description="对比度 (0-200)")
     auto_brightness: bool = Field(True, description="自动亮度")
     orientation: FrameOrientation = Field(FrameOrientation.AUTO, description="显示方向")
-    
+
     # Slideshow settings
     slideshow_interval: int = Field(30, ge=5, le=3600, description="幻灯片间隔(秒)")
     slideshow_transition: str = Field("fade", description="过渡效果")
     shuffle_photos: bool = Field(True, description="随机播放")
     show_metadata: bool = Field(False, description="显示照片信息")
-    
+
     # Power management
     sleep_schedule: Dict[str, str] = Field(
         default_factory=lambda: {"start": "23:00", "end": "07:00"},
@@ -274,15 +274,15 @@ class FrameConfig(BaseModel):
     )
     auto_sleep: bool = Field(True, description="自动休眠")
     motion_detection: bool = Field(True, description="动作检测唤醒")
-    
+
     # Sync settings
     auto_sync_albums: List[str] = Field(default_factory=list, description="自动同步的相册ID列表")
     sync_frequency: str = Field("hourly", description="同步频率")
     wifi_only_sync: bool = Field(True, description="仅Wi-Fi同步")
-    
+
     # Display mode
     display_mode: FrameDisplayMode = Field(FrameDisplayMode.PHOTO_SLIDESHOW, description="显示模式")
-    
+
     # Location and environment
     location: Optional[Dict[str, float]] = Field(None, description="位置信息")
     timezone: str = Field("UTC", description="时区")
@@ -293,15 +293,15 @@ class DisplayCommand(BaseModel):
     command_type: str = Field(..., description="命令类型")
     command_id: str = Field(..., description="命令ID")
     device_id: str = Field(..., description="目标设备ID")
-    
+
     # Command parameters
     parameters: Dict[str, Any] = Field(default_factory=dict, description="命令参数")
-    
+
     # Execution settings
     priority: str = Field("normal", description="优先级: low, normal, high, urgent")
     timeout_seconds: int = Field(30, description="超时时间(秒)")
     retry_count: int = Field(3, description="重试次数")
-    
+
     # Scheduling
     execute_at: Optional[datetime] = Field(None, description="定时执行时间")
     expires_at: Optional[datetime] = Field(None, description="命令过期时间")
@@ -310,34 +310,34 @@ class DisplayCommand(BaseModel):
 class FrameStatus(BaseModel):
     """智能相框状态"""
     device_id: str
-    
+
     # Basic status
     is_online: bool
     current_mode: FrameDisplayMode
     brightness_level: int
-    
+
     # Display info
     current_photo: Optional[str] = Field(None, description="当前显示的照片ID")
     slideshow_active: bool = False
     total_photos: int = 0
-    
+
     # Hardware status
     cpu_usage: Optional[float] = None
     memory_usage: Optional[float] = None
     storage_used: Optional[float] = None
     storage_total: Optional[float] = None
     temperature: Optional[float] = None
-    
+
     # Network and sync
     wifi_signal: Optional[int] = None
     last_sync_time: Optional[datetime] = None
     sync_status: str = "idle"  # idle, syncing, error
     pending_sync_items: int = 0
-    
+
     # Sensors
     ambient_light: Optional[float] = None
     motion_detected: bool = False
-    
+
     # Timestamps
     last_seen: datetime
     uptime_seconds: int = 0
@@ -352,19 +352,19 @@ class FrameRegistrationRequest(BaseModel):
     model: str = Field("SmartFrame", description="型号")
     serial_number: str = Field(..., description="序列号")
     mac_address: str = Field(..., description="MAC地址")
-    
+
     # Frame specific info
     screen_size: str = Field(..., description="屏幕尺寸")
     resolution: str = Field(..., description="分辨率")
     supported_formats: List[str] = Field(default_factory=lambda: ["jpg", "png", "mp4"], description="支持的文件格式")
-    
+
     # Network info
     connectivity_type: ConnectivityType = Field(ConnectivityType.WIFI, description="连接类型")
-    
+
     # Location and organization
     location: Optional[Dict[str, float]] = Field(None, description="位置信息")
     organization_id: Optional[str] = Field(None, description="组织ID")
-    
+
     # Initial config
     initial_config: Optional[FrameConfig] = Field(None, description="初始配置")
 
@@ -395,11 +395,11 @@ class FrameResponse(BaseModel):
     status: DeviceStatus
     frame_status: FrameStatus
     config: FrameConfig
-    
+
     # Family sharing info (from organization_service)
     is_family_shared: bool = False
     sharing_info: Optional[Dict[str, Any]] = None
-    
+
     # Registration info
     registered_at: datetime
     last_seen: datetime

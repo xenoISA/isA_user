@@ -13,7 +13,7 @@ from .models import (
     BillingEvent,
     BillingQuota,
     BillingRecord,
-    BillingStatus, 
+    BillingStatus,
     ServiceType,
 )
 

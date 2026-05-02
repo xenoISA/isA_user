@@ -21,23 +21,23 @@ class EventType(str, Enum):
     USER_REGISTER = "user_register"
     USER_UPDATE = "user_update"
     USER_DELETE = "user_delete"
-    
+
     PERMISSION_GRANT = "permission_grant"
     PERMISSION_REVOKE = "permission_revoke"
     PERMISSION_UPDATE = "permission_update"
     PERMISSION_CHECK = "permission_check"
-    
+
     RESOURCE_CREATE = "resource_create"
     RESOURCE_UPDATE = "resource_update"
     RESOURCE_DELETE = "resource_delete"
     RESOURCE_ACCESS = "resource_access"
-    
+
     ORGANIZATION_CREATE = "organization_create"
     ORGANIZATION_UPDATE = "organization_update"
     ORGANIZATION_DELETE = "organization_delete"
     ORGANIZATION_JOIN = "organization_join"
     ORGANIZATION_LEAVE = "organization_leave"
-    
+
     SYSTEM_ERROR = "system_error"
     SECURITY_ALERT = "security_alert"
     COMPLIANCE_CHECK = "compliance_check"
@@ -81,40 +81,40 @@ class AuditEvent(BaseModel):
     category: AuditCategory
     severity: EventSeverity = EventSeverity.LOW
     status: EventStatus = EventStatus.SUCCESS
-    
+
     # 事件主体信息
     user_id: Optional[str] = None
     session_id: Optional[str] = None
     organization_id: Optional[str] = None
-    
+
     # 资源相关信息
     resource_type: Optional[str] = None
     resource_id: Optional[str] = None
     resource_name: Optional[str] = None
-    
+
     # 事件描述
     action: str = Field(..., description="执行的操作")
     description: Optional[str] = None
-    
+
     # 技术信息
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     api_endpoint: Optional[str] = None
     http_method: Optional[str] = None
-    
+
     # 结果信息
     success: bool = True
     error_code: Optional[str] = None
     error_message: Optional[str] = None
-    
+
     # 元数据
     metadata: Optional[Dict[str, Any]] = None
     tags: Optional[List[str]] = None
-    
+
     # 时间戳
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     created_at: Optional[datetime] = None
-    
+
     # 合规相关
     retention_policy: Optional[str] = None
     compliance_flags: Optional[List[str]] = None
@@ -139,24 +139,24 @@ class SecurityEvent(BaseModel):
     event_type: EventType
     severity: EventSeverity
     threat_level: str = "low"  # low, medium, high, critical
-    
+
     # 事件详情
     source_ip: Optional[str] = None
     target_resource: Optional[str] = None
     attack_vector: Optional[str] = None
-    
+
     # 检测信息
     detection_method: Optional[str] = None
     confidence_score: Optional[float] = None
-    
+
     # 响应信息
     response_action: Optional[str] = None
     investigation_status: str = "open"  # open, investigating, resolved, false_positive
-    
+
     # 时间戳
     detected_at: datetime = Field(default_factory=datetime.utcnow)
     resolved_at: Optional[datetime] = None
-    
+
     # 关联信息
     related_events: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -167,26 +167,26 @@ class ComplianceReport(BaseModel):
     id: Optional[str] = None
     report_type: str
     compliance_standard: str  # GDPR, SOX, HIPAA, etc.
-    
+
     # 报告期间
     period_start: datetime
     period_end: datetime
-    
+
     # 统计信息
     total_events: int = 0
     compliant_events: int = 0
     non_compliant_events: int = 0
     compliance_score: float = 0.0
-    
+
     # 详细信息
     findings: Optional[List[Dict[str, Any]]] = None
     recommendations: Optional[List[str]] = None
     risk_assessment: Optional[Dict[str, Any]] = None
-    
+
     # 时间戳
     generated_at: datetime = Field(default_factory=datetime.utcnow)
     generated_by: Optional[str] = None
-    
+
     # 状态
     status: str = "draft"  # draft, final, published
     metadata: Optional[Dict[str, Any]] = None
@@ -203,24 +203,24 @@ class AuditEventCreateRequest(BaseModel):
     severity: EventSeverity = EventSeverity.LOW
     action: str
     description: Optional[str] = None
-    
+
     user_id: Optional[str] = None
     session_id: Optional[str] = None
     organization_id: Optional[str] = None
-    
+
     resource_type: Optional[str] = None
     resource_id: Optional[str] = None
     resource_name: Optional[str] = None
-    
+
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     api_endpoint: Optional[str] = None
     http_method: Optional[str] = None
-    
+
     success: bool = True
     error_code: Optional[str] = None
     error_message: Optional[str] = None
-    
+
     metadata: Optional[Dict[str, Any]] = None
     tags: Optional[List[str]] = None
 
@@ -234,12 +234,12 @@ class AuditEventResponse(BaseModel):
     status: EventStatus
     action: str
     description: Optional[str] = None
-    
+
     user_id: Optional[str] = None
     organization_id: Optional[str] = None
     resource_type: Optional[str] = None
     resource_name: Optional[str] = None
-    
+
     success: bool
     timestamp: datetime
     metadata: Optional[Dict[str, Any]] = None
@@ -250,23 +250,23 @@ class AuditQueryRequest(BaseModel):
     event_types: Optional[List[EventType]] = None
     categories: Optional[List[AuditCategory]] = None
     severities: Optional[List[EventSeverity]] = None
-    
+
     user_id: Optional[str] = None
     organization_id: Optional[str] = None
     resource_type: Optional[str] = None
-    
+
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
-    
+
     success_only: Optional[bool] = None
     failure_only: Optional[bool] = None
-    
+
     ip_address: Optional[str] = None
     tags: Optional[List[str]] = None
-    
+
     limit: int = Field(default=100, le=1000)
     offset: int = Field(default=0, ge=0)
-    
+
     sort_by: str = "timestamp"
     sort_order: str = "desc"  # asc, desc
 

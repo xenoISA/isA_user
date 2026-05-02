@@ -54,7 +54,7 @@ class DevicePairingTokenGeneratedEventData(BaseModel):
     pairing_token: str = Field(..., description="Temporary pairing token")
     expires_at: datetime = Field(..., description="Token expiration time")
     generated_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -75,7 +75,7 @@ class DevicePairingTokenVerifiedEventData(BaseModel):
     user_id: str = Field(..., description="User ID attempting to pair")
     pairing_token: str = Field(..., description="Verified pairing token")
     verified_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -97,7 +97,7 @@ class DevicePairingCompletedEventData(BaseModel):
     device_name: Optional[str] = Field(None, description="Device name")
     device_type: Optional[str] = Field(None, description="Device type (frame/mobile/tablet)")
     paired_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
         json_schema_extra = {
             "example": {

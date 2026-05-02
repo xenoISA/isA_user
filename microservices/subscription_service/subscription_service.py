@@ -43,7 +43,7 @@ from .models import (
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
     pass
-    
+
 
 logger = logging.getLogger(__name__)
 

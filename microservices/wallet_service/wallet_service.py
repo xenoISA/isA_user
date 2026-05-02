@@ -103,7 +103,7 @@ class WalletService:
         except Exception as e:
             logger.warning(f"Failed to validate user: {e}")
             return True  # Allow operation to proceed if validation fails
-    
+
     async def create_wallet(self, wallet_data: WalletCreate) -> WalletResponse:
         """Create a new wallet for user"""
         try:
@@ -111,7 +111,7 @@ class WalletService:
             existing_wallets = await self.repository.get_user_wallets(
                 wallet_data.user_id, wallet_data.wallet_type
             )
-            
+
             if existing_wallets and wallet_data.wallet_type == WalletType.FIAT:
                 # User can only have one fiat wallet
                 return WalletResponse(
@@ -120,7 +120,7 @@ class WalletService:
                     wallet_id=existing_wallets[0].wallet_id,
                     balance=existing_wallets[0].balance
                 )
-                
+
             # Create wallet
             wallet = await self.repository.create_wallet(wallet_data)
 
@@ -159,30 +159,30 @@ class WalletService:
                     success=False,
                     message="Failed to create wallet"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error creating wallet: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error creating wallet: {str(e)}"
             )
-            
+
     async def get_wallet(self, wallet_id: str) -> Optional[WalletBalance]:
         """Get wallet details"""
         return await self.repository.get_wallet(wallet_id)
-        
+
     async def get_user_wallets(self, user_id: str) -> List[WalletBalance]:
         """Get all wallets for a user"""
         return await self.repository.get_user_wallets(user_id)
-        
+
     async def get_balance(self, wallet_id: str) -> WalletResponse:
         """Get wallet balance"""
         try:
             wallet = await self.repository.get_wallet(wallet_id)
-            
+
             if wallet:
                 # Future: blockchain sync
-                    
+
                 return WalletResponse(
                     success=True,
                     message="Balance retrieved successfully",
@@ -201,14 +201,14 @@ class WalletService:
                     success=False,
                     message="Wallet not found"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error getting balance: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error getting balance: {str(e)}"
             )
-            
+
     async def deposit(self, wallet_id: str, request: DepositRequest) -> WalletResponse:
         """Deposit funds to wallet"""
         try:
@@ -257,14 +257,14 @@ class WalletService:
                     success=False,
                     message="Failed to deposit funds"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error depositing funds: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error depositing funds: {str(e)}"
             )
-            
+
     async def withdraw(self, wallet_id: str, request: WithdrawRequest) -> WalletResponse:
         """Withdraw funds from wallet"""
         try:
@@ -272,7 +272,7 @@ class WalletService:
             wallet = await self.repository.get_wallet(wallet_id)
             if not wallet:
                 return WalletResponse(success=False, message="Wallet not found")
-                
+
             # Process withdrawal
             transaction = await self.repository.withdraw(
                 wallet_id=wallet_id,
@@ -321,14 +321,14 @@ class WalletService:
                     success=False,
                     message="Insufficient balance or withdrawal failed"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error withdrawing funds: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error withdrawing funds: {str(e)}"
             )
-            
+
     async def consume(self, wallet_id: str, request: ConsumeRequest) -> WalletResponse:
         """Consume credits/tokens from wallet"""
         try:
@@ -338,7 +338,7 @@ class WalletService:
                     success=False,
                     message="Wallet ID required"
                 )
-                
+
             transaction = await self.repository.consume(
                 wallet_id=wallet_id,
                 amount=request.amount,
@@ -387,14 +387,14 @@ class WalletService:
                     success=False,
                     message="Insufficient balance"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error consuming credits: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error consuming credits: {str(e)}"
             )
-            
+
     async def consume_by_user(self, user_id: str, request: ConsumeRequest) -> WalletResponse:
         """Consume credits from user's primary wallet (backward compatibility)"""
         try:
@@ -413,16 +413,16 @@ class WalletService:
                 if not create_result.success:
                     return create_result
                 wallet = await self.repository.get_primary_wallet(user_id)
-                
+
             return await self.consume(wallet.wallet_id, request)
-            
+
         except Exception as e:
             logger.error(f"Error consuming credits for user: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error consuming credits: {str(e)}"
             )
-            
+
     async def refund(self, original_transaction_id: str, request: RefundRequest) -> WalletResponse:
         """Refund a previous transaction"""
         try:
@@ -470,14 +470,14 @@ class WalletService:
                     success=False,
                     message="Failed to process refund"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error processing refund: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error processing refund: {str(e)}"
             )
-            
+
     async def transfer(self, from_wallet_id: str, request: TransferRequest) -> WalletResponse:
         """Transfer funds between wallets"""
         try:
@@ -533,21 +533,21 @@ class WalletService:
                     success=False,
                     message="Transfer failed - check balance and wallet IDs"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error processing transfer: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error processing transfer: {str(e)}"
             )
-            
+
     async def get_transactions(
         self,
         filter_params: TransactionFilter
     ) -> List[WalletTransaction]:
         """Get filtered transaction history"""
         return await self.repository.get_transactions(filter_params)
-        
+
     async def get_user_transactions(
         self,
         user_id: str,
@@ -567,7 +567,7 @@ class WalletService:
             end_date=end_date
         )
         return await self.repository.get_transactions(filter_params)
-        
+
     async def get_statistics(
         self,
         wallet_id: str,
@@ -576,7 +576,7 @@ class WalletService:
     ) -> Optional[WalletStatistics]:
         """Get wallet statistics"""
         return await self.repository.get_statistics(wallet_id, start_date, end_date)
-        
+
     async def get_user_statistics(
         self,
         user_id: str,
@@ -586,7 +586,7 @@ class WalletService:
         """Get aggregated statistics for all user wallets"""
         try:
             wallets = await self.repository.get_user_wallets(user_id)
-            
+
             total_stats = {
                 "total_balance": Decimal(0),
                 "total_deposits": Decimal(0),
@@ -596,7 +596,7 @@ class WalletService:
                 "transaction_count": 0,
                 "wallets": []
             }
-            
+
             for wallet in wallets:
                 stats = await self.repository.get_statistics(
                     wallet.wallet_id, start_date, end_date
@@ -615,29 +615,29 @@ class WalletService:
                         "balance": float(wallet.balance),
                         "statistics": stats.model_dump()
                     })
-                    
+
             return total_stats
-            
+
         except Exception as e:
             logger.error(f"Error getting user statistics: {e}")
             return {}
-            
+
     async def sync_blockchain(self, request: BlockchainSyncRequest) -> WalletResponse:
         """Sync wallet with blockchain"""
         try:
             wallet = await self.repository.get_wallet(request.wallet_id)
             if not wallet:
                 return WalletResponse(success=False, message="Wallet not found")
-                
+
             # Update blockchain info if needed
             if request.blockchain_address != wallet.blockchain_address:
                 # Update wallet with new blockchain address
                 wallet.blockchain_address = request.blockchain_address
                 wallet.blockchain_network = request.blockchain_network
-                
+
             # Future: blockchain sync
             result = None
-            
+
             if result:
                 return WalletResponse(
                     success=True,
@@ -651,16 +651,16 @@ class WalletService:
                     success=False,
                     message="Blockchain sync failed"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error syncing blockchain: {e}")
             return WalletResponse(
                 success=False,
                 message=f"Error syncing blockchain: {str(e)}"
             )
-            
+
     # Future: blockchain wallet preparation methods will be added here
-            
+
     # Future: blockchain sync methods will be added here
-            
+
     # Future: blockchain transfer methods will be added here

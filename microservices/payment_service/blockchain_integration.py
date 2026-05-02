@@ -43,13 +43,13 @@ async def process_blockchain_payment(
 ) -> dict:
     """
     Process a payment using blockchain
-    
+
     Args:
         user_address: User's blockchain address
         amount: Payment amount in wei
         order_id: Order ID for this payment
         service_id: Service being paid for
-    
+
     Returns:
         Payment transaction details
     """
@@ -58,19 +58,19 @@ async def process_blockchain_payment(
         balance_info = await blockchain_client.get_balance(user_address)
         user_balance = Decimal(balance_info.get("balance", "0"))
         required_amount = Decimal(amount)
-        
+
         if user_balance < required_amount:
             raise InsufficientBalanceError(
                 f"Insufficient balance. Required: {amount}, Available: {user_balance}"
             )
-        
+
         # 2. Process payment
         tx_result = await blockchain_client.charge_for_service(
             user_address=user_address,
             amount=amount,
             service_id=f"{service_id}:{order_id}"
         )
-        
+
         # 3. Store transaction in database
         # This would normally save to your payment database
         payment_record = {
@@ -81,7 +81,7 @@ async def process_blockchain_payment(
             "tx_hash": tx_result.get("transaction_hash"),
             "status": "pending"
         }
-        
+
         # 4. Return transaction details
         return {
             "success": True,
@@ -90,11 +90,11 @@ async def process_blockchain_payment(
             "status": tx_result.get("status"),
             "payment_record": payment_record
         }
-        
+
     except InsufficientBalanceError as e:
         logger.error(f"Insufficient balance for payment: {e}")
         raise HTTPException(status_code=402, detail=str(e))
-        
+
     except Exception as e:
         logger.error(f"Blockchain payment failed: {e}")
         raise HTTPException(status_code=500, detail="Payment processing failed")
@@ -103,11 +103,11 @@ async def process_blockchain_payment(
 async def verify_blockchain_payment(tx_hash: str, expected_amount: str) -> bool:
     """
     Verify a blockchain payment transaction
-    
+
     Args:
         tx_hash: Transaction hash to verify
         expected_amount: Expected payment amount
-        
+
     Returns:
         True if payment is verified
     """
@@ -126,13 +126,13 @@ async def issue_refund(
 ) -> dict:
     """
     Issue a refund to user via blockchain
-    
+
     Args:
         user_address: User's blockchain address
         amount: Refund amount
         order_id: Original order ID
         reason: Reason for refund
-        
+
     Returns:
         Refund transaction details
     """
@@ -143,14 +143,14 @@ async def issue_refund(
             amount=amount,
             reason=f"refund:{order_id}:{reason}"
         )
-        
+
         return {
             "success": True,
             "order_id": order_id,
             "refund_tx_hash": tx_result.get("transaction_hash"),
             "status": tx_result.get("status")
         }
-        
+
     except Exception as e:
         logger.error(f"Refund failed: {e}")
         raise HTTPException(status_code=500, detail="Refund processing failed")
@@ -159,11 +159,11 @@ async def issue_refund(
 async def check_subscription_status(user_address: str, service_id: str) -> dict:
     """
     Check if user has an active subscription (via blockchain NFT or balance)
-    
+
     Args:
         user_address: User's blockchain address
         service_id: Service to check subscription for
-        
+
     Returns:
         Subscription status details
     """
@@ -173,10 +173,10 @@ async def check_subscription_status(user_address: str, service_id: str) -> dict:
             user_address=user_address,
             service_id=service_id
         )
-        
+
         # Get current balance
         balance_info = await blockchain_client.get_balance(user_address)
-        
+
         return {
             "has_access": has_access,
             "service_id": service_id,
@@ -184,7 +184,7 @@ async def check_subscription_status(user_address: str, service_id: str) -> dict:
             "current_balance": balance_info.get("balance"),
             "balance_eth": balance_info.get("eth")
         }
-        
+
     except Exception as e:
         logger.error(f"Subscription check failed: {e}")
         return {

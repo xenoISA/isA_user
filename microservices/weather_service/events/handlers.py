@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 def get_event_handlers(weather_service, event_bus):
     """
     Get event handlers for weather service
-    
+
     Args:
         weather_service: WeatherService instance
         event_bus: NATS event bus instance
-        
+
     Returns:
         Dictionary mapping event patterns to handler functions
     """

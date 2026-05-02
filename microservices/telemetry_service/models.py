@@ -114,18 +114,18 @@ class AlertRuleRequest(BaseModel):
     evaluation_window: int = Field(300, ge=60, le=3600)  # 评估窗口（秒）
     trigger_count: int = Field(1, ge=1, le=100)  # 连续触发次数
     level: AlertLevel = AlertLevel.WARNING
-    
+
     # 目标设备
     device_ids: Optional[List[str]] = []
     device_groups: Optional[List[str]] = []
     device_filters: Optional[Dict[str, Any]] = {}
-    
+
     # 通知配置
     notification_channels: Optional[List[str]] = []
     cooldown_minutes: int = Field(15, ge=1, le=1440)  # 冷却时间
     auto_resolve: bool = True
     auto_resolve_timeout: int = Field(3600, ge=300, le=86400)  # 自动解除时间
-    
+
     enabled: bool = True
     tags: Optional[List[str]] = []
 
@@ -207,11 +207,11 @@ class AlertRuleResponse(BaseModel):
     auto_resolve_timeout: int
     enabled: bool
     tags: List[str]
-    
+
     # 统计信息
     total_triggers: int = 0
     last_triggered: Optional[datetime] = None
-    
+
     created_at: datetime
     updated_at: datetime
     created_by: str
@@ -229,18 +229,18 @@ class AlertResponse(BaseModel):
     message: str
     current_value: Union[int, float, str]
     threshold_value: Union[int, float, str]
-    
+
     # 时间信息
     triggered_at: datetime
     acknowledged_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
     auto_resolve_at: Optional[datetime] = None
-    
+
     # 操作信息
     acknowledged_by: Optional[str] = None
     resolved_by: Optional[str] = None
     resolution_note: Optional[str] = None
-    
+
     # 上下文信息
     affected_devices_count: int = 1
     tags: List[str]
@@ -256,11 +256,11 @@ class DeviceTelemetryStatsResponse(BaseModel):
     last_update: Optional[datetime]
     storage_size: int  # bytes
     avg_frequency: float  # points per minute
-    
+
     # 最近24小时统计
     last_24h_points: int
     last_24h_alerts: int
-    
+
     # 指标分布
     metrics_by_type: Dict[str, int]
     top_metrics: List[Dict[str, Any]]  # 最活跃的指标
@@ -273,17 +273,17 @@ class TelemetryStatsResponse(BaseModel):
     total_metrics: int
     total_data_points: int
     storage_size: int  # bytes
-    
+
     # 数据摄取统计
     points_per_second: float
     avg_latency: float  # milliseconds
     error_rate: float
-    
+
     # 最近24小时统计
     last_24h_points: int
     last_24h_devices: int
     last_24h_alerts: int
-    
+
     # 分布统计
     devices_by_type: Dict[str, int]
     metrics_by_type: Dict[str, int]

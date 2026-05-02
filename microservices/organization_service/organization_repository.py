@@ -55,9 +55,9 @@ class OrganizationRepository:
         self.schema = "organization"
         self.organizations_table = "organizations"
         self.org_members_table = "organization_members"
-    
+
     # ============ Organization CRUD Operations ============
-    
+
     async def create_organization(
         self,
         organization_data: Dict[str, Any],
@@ -117,7 +117,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error creating organization: {e}")
             return None
-    
+
     async def get_organization(self, organization_id: str) -> Optional[OrganizationResponse]:
         """获取组织信息"""
         try:
@@ -140,7 +140,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error getting organization {organization_id}: {e}")
             return None
-    
+
     async def update_organization(
         self,
         organization_id: str,
@@ -193,7 +193,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error updating organization {organization_id}: {e}")
             return None
-    
+
     # ------------------------------------------------------------------
     # Rate Limits (Story xenoISA/isA_Console#461)
     # ------------------------------------------------------------------
@@ -280,7 +280,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error deleting organization {organization_id}: {e}")
             return False
-    
+
     async def get_user_organizations(self, user_id: str) -> List[Dict[str, Any]]:
         """获取用户所属的所有组织"""
         try:
@@ -354,9 +354,9 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error getting user organizations for {user_id}: {e}")
             return []
-    
+
     # ============ Member Management ============
-    
+
     async def add_organization_member(
         self,
         organization_id: str,
@@ -430,7 +430,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error adding member {user_id} to organization {organization_id}: {e}")
             return None
-    
+
     async def update_organization_member(
         self,
         organization_id: str,
@@ -485,7 +485,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error updating member {user_id} in organization {organization_id}: {e}")
             return None
-    
+
     async def remove_organization_member(
         self,
         organization_id: str,
@@ -513,7 +513,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error removing member {user_id} from organization {organization_id}: {e}")
             return False
-    
+
     async def get_organization_member(
         self,
         organization_id: str,
@@ -542,7 +542,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error getting member {user_id} from organization {organization_id}: {e}")
             return None
-    
+
     async def get_organization_members(
         self,
         organization_id: str,
@@ -598,7 +598,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error getting members for organization {organization_id}: {e}")
             return []
-    
+
     async def get_user_organization_role(
         self,
         organization_id: str,
@@ -629,7 +629,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error getting user role for {user_id} in organization {organization_id}: {e}")
             return None
-    
+
     async def get_organization_member_count(self, organization_id: str) -> int:
         """获取组织成员数量"""
         try:
@@ -653,9 +653,9 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error getting member count for organization {organization_id}: {e}")
             return 0
-    
+
     # ============ Statistics and Analytics ============
-    
+
     async def get_organization_stats(self, organization_id: str) -> Dict[str, Any]:
         """获取组织统计信息"""
         try:
@@ -663,14 +663,14 @@ class OrganizationRepository:
             org = await self.get_organization(organization_id)
             if not org:
                 return {}
-            
+
             # 获取成员统计
             total_members = await self.get_organization_member_count(organization_id)
-            
+
             # 获取活跃成员数（最近30天有活动）
             # TODO: 需要从活动日志中获取
             active_members = total_members
-            
+
             return {
                 'organization_id': organization_id,
                 'name': org.name,
@@ -684,11 +684,11 @@ class OrganizationRepository:
                 'api_calls_this_month': 0,  # TODO: 从API日志获取
                 'created_at': org.created_at
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting stats for organization {organization_id}: {e}")
             return {}
-    
+
     async def list_all_organizations(
         self,
         limit: int = 100,

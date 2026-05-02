@@ -58,7 +58,7 @@ class DeviceRegisteredEventData(BaseModel):
     device_type: str = Field(..., description="Device type")
     owner_id: Optional[str] = Field(None, description="Owner user ID")
     registered_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -81,7 +81,7 @@ class DeviceStatusChangedEventData(BaseModel):
     new_status: str = Field(..., description="New status")
     changed_at: datetime = Field(default_factory=datetime.utcnow)
     reason: Optional[str] = Field(None, description="Reason for status change")
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -104,7 +104,7 @@ class DevicePairedEventData(BaseModel):
     device_name: Optional[str] = Field(None, description="Device name")
     device_type: Optional[str] = Field(None, description="Device type")
     paired_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
         json_schema_extra = {
             "example": {

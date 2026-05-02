@@ -14,7 +14,7 @@ class SessionStatus(str, Enum):
     """Session status enumeration"""
     ACTIVE = "active"
     COMPLETED = "completed"
-    ARCHIVED = "archived" 
+    ARCHIVED = "archived"
     ENDED = "ended"
 
 

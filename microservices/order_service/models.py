@@ -164,7 +164,7 @@ class OrderCompleteRequest(BaseModel):
     payment_confirmed: bool = Field(..., description="Payment confirmation status")
     transaction_id: Optional[str] = Field(None, description="Transaction reference")
     credits_added: Optional[Decimal] = Field(None, description="Credits added to wallet")
-    
+
 
 # Response Models
 
@@ -194,7 +194,7 @@ class OrderSummary(BaseModel):
     total_amount: Decimal
     currency: str
     created_at: datetime
-    
+
 
 class OrderSummaryResponse(BaseModel):
     """Order summary response"""

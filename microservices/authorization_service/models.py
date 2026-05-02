@@ -121,7 +121,7 @@ class UserPermissionRecord(BaseModel):
     is_active: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
     @validator('expires_at')
     def validate_expiry(cls, v):
         if v and v <= datetime.utcnow():
@@ -319,7 +319,7 @@ class PermissionCacheEntry(BaseModel):
     permission_source: PermissionSource
     cached_at: datetime = Field(default_factory=datetime.utcnow)
     expires_at: datetime = Field(default_factory=lambda: datetime.utcnow() + timedelta(minutes=15))
-    
+
     @property
     def is_expired(self) -> bool:
         return datetime.utcnow() > self.expires_at

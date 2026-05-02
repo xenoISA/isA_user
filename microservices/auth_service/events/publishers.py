@@ -33,7 +33,7 @@ async def publish_device_pairing_token_generated(
 ):
     """
     Publish device.pairing_token.generated event
-    
+
     Args:
         event_bus: NATS event bus instance
         device_id: Device ID
@@ -47,17 +47,17 @@ async def publish_device_pairing_token_generated(
             pairing_token=pairing_token,
             expires_at=expires_at
         )
-        
+
         event = Event(
             event_id=event_id,
             event_type="device.pairing_token.generated",
             source="auth_service",
             data=event_data.model_dump()
         )
-        
+
         await event_bus.publish(event)
         logger.info(f"Published device.pairing_token.generated for device {device_id}")
-        
+
     except Exception as e:
         logger.error(f"Failed to publish device.pairing_token.generated: {e}")
         raise
@@ -72,7 +72,7 @@ async def publish_device_pairing_token_verified(
 ):
     """
     Publish device.pairing_token.verified event
-    
+
     Args:
         event_bus: NATS event bus instance
         device_id: Device ID
@@ -86,17 +86,17 @@ async def publish_device_pairing_token_verified(
             user_id=user_id,
             pairing_token=pairing_token
         )
-        
+
         event = Event(
             event_id=event_id,
             event_type="device.pairing_token.verified",
             source="auth_service",
             data=event_data.model_dump()
         )
-        
+
         await event_bus.publish(event)
         logger.info(f"Published device.pairing_token.verified for device {device_id}, user {user_id}")
-        
+
     except Exception as e:
         logger.error(f"Failed to publish device.pairing_token.verified: {e}")
         raise
@@ -112,7 +112,7 @@ async def publish_device_pairing_completed(
 ):
     """
     Publish device.pairing.completed event
-    
+
     Args:
         event_bus: NATS event bus instance
         device_id: Device ID
@@ -128,17 +128,17 @@ async def publish_device_pairing_completed(
             device_name=device_name,
             device_type=device_type
         )
-        
+
         event = Event(
             event_id=event_id,
             event_type="device.pairing.completed",
             source="auth_service",
             data=event_data.model_dump()
         )
-        
+
         await event_bus.publish(event)
         logger.info(f"Published device.pairing.completed for device {device_id}, user {user_id}")
-        
+
     except Exception as e:
         logger.error(f"Failed to publish device.pairing.completed: {e}")
         raise
