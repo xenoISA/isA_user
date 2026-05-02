@@ -15,6 +15,7 @@ from core.nats_client import get_event_bus
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
 from core.health import HealthCheck
 from core.metrics import setup_metrics
+from core.rate_limit_backend import build_rate_limit_backend
 from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
 from isa_common.consul_client import ConsulRegistry
 
@@ -282,6 +283,10 @@ app.add_middleware(
         ),
         "/api/v1/payment/webhooks": RateLimitConfig(requests=120, window_seconds=60),
     },
+    # Refs #208: when {PAYMENT_,}RATE_LIMIT_REDIS_URL / REDIS_URL is set, the
+    # middleware shares its sliding-window state across replicas via Redis.
+    # In dev/test it transparently falls back to an in-memory counter.
+    backend=build_rate_limit_backend(service_name="payment_service"),
 )
 
 # CORS handled by Gateway

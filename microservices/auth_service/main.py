@@ -20,7 +20,6 @@ from pydantic import BaseModel, Field
 from datetime import datetime, timezone, timedelta
 import uvicorn
 
-
 # FastAPI imports
 from fastapi import FastAPI, HTTPException, Depends, status, Query, Form, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -36,6 +35,7 @@ from core.health import HealthCheck
 from core.metrics import setup_metrics
 from core.logger import setup_service_logger
 from core.nats_client import NATSEventBus, get_event_bus
+from core.rate_limit_backend import build_rate_limit_backend
 from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
 
 from .api_key_repository import ApiKeyRepository
@@ -478,6 +478,10 @@ app.add_middleware(
         "/api/v1/auth/token": RateLimitConfig(requests=20, window_seconds=60),
         "/api/v1/auth/register": RateLimitConfig(requests=10, window_seconds=60),
     },
+    # Refs #208: per-IP HTTP rate limits now share state across replicas when
+    # {AUTH_,}RATE_LIMIT_REDIS_URL / REDIS_URL is configured. PR #335 already
+    # gave api-key quota counters the same treatment via rate_limit_state.
+    backend=build_rate_limit_backend(service_name="auth_service"),
 )
 
 

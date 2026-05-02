@@ -203,6 +203,9 @@ dev:
     - package: "faker"
       version: ">=22.0.0"
       description: "Fake data generation"
+    - package: "fakeredis"
+      version: ">=2.20.0"
+      description: "In-memory Redis fake for distributed-backend tests"
 
   # Code Formatting & Linting
   linting:
