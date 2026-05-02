@@ -21,11 +21,6 @@ from .models import (
     CampaignVariant,
     CampaignTrigger,
     TriggerCondition,
-    CampaignExecution,
-    CampaignMessage,
-    CampaignMetricsSummary,
-    CampaignConversion,
-    TriggerHistoryRecord,
     CampaignCreateRequest,
     CampaignUpdateRequest,
     CampaignStatus,
@@ -35,10 +30,7 @@ from .models import (
     SegmentType,
     TriggerOperator,
     MessageStatus,
-    ExecutionType,
     ExecutionStatus,
-    MetricType,
-    AttributionModel,
     ThrottleConfig,
     ABTestConfig,
     ConversionConfig,
@@ -55,7 +47,6 @@ from .protocols import (
     InvalidCampaignStateError,
     InvalidCampaignTypeError,
     CampaignValidationError,
-    AudienceResolutionError,
     VariantAllocationError,
 )
 
@@ -77,11 +68,32 @@ class CampaignService:
 
     # Valid state transitions
     VALID_TRANSITIONS = {
-        CampaignStatus.DRAFT: [CampaignStatus.SCHEDULED, CampaignStatus.ACTIVE, CampaignStatus.CANCELLED],
-        CampaignStatus.SCHEDULED: [CampaignStatus.RUNNING, CampaignStatus.DRAFT, CampaignStatus.CANCELLED],
-        CampaignStatus.ACTIVE: [CampaignStatus.RUNNING, CampaignStatus.PAUSED, CampaignStatus.DRAFT, CampaignStatus.CANCELLED],
-        CampaignStatus.RUNNING: [CampaignStatus.PAUSED, CampaignStatus.COMPLETED, CampaignStatus.CANCELLED],
-        CampaignStatus.PAUSED: [CampaignStatus.RUNNING, CampaignStatus.ACTIVE, CampaignStatus.CANCELLED],
+        CampaignStatus.DRAFT: [
+            CampaignStatus.SCHEDULED,
+            CampaignStatus.ACTIVE,
+            CampaignStatus.CANCELLED,
+        ],
+        CampaignStatus.SCHEDULED: [
+            CampaignStatus.RUNNING,
+            CampaignStatus.DRAFT,
+            CampaignStatus.CANCELLED,
+        ],
+        CampaignStatus.ACTIVE: [
+            CampaignStatus.RUNNING,
+            CampaignStatus.PAUSED,
+            CampaignStatus.DRAFT,
+            CampaignStatus.CANCELLED,
+        ],
+        CampaignStatus.RUNNING: [
+            CampaignStatus.PAUSED,
+            CampaignStatus.COMPLETED,
+            CampaignStatus.CANCELLED,
+        ],
+        CampaignStatus.PAUSED: [
+            CampaignStatus.RUNNING,
+            CampaignStatus.ACTIVE,
+            CampaignStatus.CANCELLED,
+        ],
         CampaignStatus.COMPLETED: [],  # Terminal state
         CampaignStatus.CANCELLED: [],  # Terminal state
     }
@@ -143,12 +155,12 @@ class CampaignService:
             updated_by=created_by,
             throttle=request.throttle or ThrottleConfig(),
             ab_test=ABTestConfig(
-                enabled=getattr(request, 'enable_ab_testing', False),
+                enabled=getattr(request, "enable_ab_testing", False),
                 variants=[],
             ),
             conversion=ConversionConfig(
-                event_type=getattr(request, 'conversion_event_type', None),
-                attribution_window_days=getattr(request, 'attribution_window_days', 7),
+                event_type=getattr(request, "conversion_event_type", None),
+                attribution_window_days=getattr(request, "attribution_window_days", 7),
             ),
             created_at=now,
             updated_at=now,
@@ -174,7 +186,9 @@ class CampaignService:
                 )
                 for a in request.audiences
             ]
-            campaign.audiences = await self.repository.save_audiences(campaign_id, audiences)
+            campaign.audiences = await self.repository.save_audiences(
+                campaign_id, audiences
+            )
 
         # Save channels/variants
         if request.variants:
@@ -214,7 +228,8 @@ class CampaignService:
                     delay_minutes=t.delay_minutes,
                     delay_days=t.delay_days,
                     frequency_limit=t.frequency_limit or self.DEFAULT_FREQUENCY_LIMIT,
-                    frequency_window_hours=t.frequency_window_hours or self.DEFAULT_FREQUENCY_WINDOW_HOURS,
+                    frequency_window_hours=t.frequency_window_hours
+                    or self.DEFAULT_FREQUENCY_WINDOW_HOURS,
                     quiet_hours_start=t.quiet_hours_start,
                     quiet_hours_end=t.quiet_hours_end,
                     quiet_hours_timezone=t.quiet_hours_timezone or "user_local",
@@ -224,17 +239,22 @@ class CampaignService:
                 )
                 for t in request.triggers
             ]
-            campaign.triggers = await self.repository.save_triggers(campaign_id, triggers)
+            campaign.triggers = await self.repository.save_triggers(
+                campaign_id, triggers
+            )
 
         # Publish event
-        await self._publish_event("campaign.created", {
-            "campaign_id": campaign_id,
-            "organization_id": organization_id,
-            "name": campaign.name,
-            "campaign_type": campaign.campaign_type.value,
-            "status": campaign.status.value,
-            "created_by": created_by,
-        })
+        await self._publish_event(
+            "campaign.created",
+            {
+                "campaign_id": campaign_id,
+                "organization_id": organization_id,
+                "name": campaign.name,
+                "campaign_type": campaign.campaign_type.value,
+                "status": campaign.status.value,
+                "created_by": created_by,
+            },
+        )
 
         logger.info(f"Campaign created: {campaign_id}")
         return campaign
@@ -246,7 +266,9 @@ class CampaignService:
     ) -> Campaign:
         """Get campaign by ID"""
         if organization_id:
-            campaign = await self.repository.get_campaign_by_org(organization_id, campaign_id)
+            campaign = await self.repository.get_campaign_by_org(
+                organization_id, campaign_id
+            )
         else:
             campaign = await self.repository.get_campaign(campaign_id)
 
@@ -296,18 +318,15 @@ class CampaignService:
         if campaign.status not in [CampaignStatus.DRAFT, CampaignStatus.PAUSED]:
             if campaign.status == CampaignStatus.RUNNING:
                 raise InvalidCampaignStateError(
-                    "Running campaigns cannot be edited, pause first",
-                    campaign.status
+                    "Running campaigns cannot be edited, pause first", campaign.status
                 )
             elif campaign.status == CampaignStatus.COMPLETED:
                 raise InvalidCampaignStateError(
-                    "Completed campaigns cannot be edited, use clone",
-                    campaign.status
+                    "Completed campaigns cannot be edited, use clone", campaign.status
                 )
             elif campaign.status == CampaignStatus.CANCELLED:
                 raise InvalidCampaignStateError(
-                    "Cancelled campaigns cannot be modified",
-                    campaign.status
+                    "Cancelled campaigns cannot be modified", campaign.status
                 )
 
         # Build updates dict
@@ -323,15 +342,19 @@ class CampaignService:
             updates["description"] = request.description
             changed_fields.append("description")
 
-        holdout_pct = getattr(request, 'holdout_percentage', None)
+        holdout_pct = getattr(request, "holdout_percentage", None)
         if holdout_pct is not None:
             self._validate_holdout_percentage(holdout_pct)
             updates["holdout_percentage"] = float(holdout_pct)
             changed_fields.append("holdout_percentage")
 
-        schedule_type = getattr(request, 'schedule_type', None)
+        schedule_type = getattr(request, "schedule_type", None)
         if schedule_type is not None:
-            updates["schedule_type"] = schedule_type.value if hasattr(schedule_type, 'value') else schedule_type
+            updates["schedule_type"] = (
+                schedule_type.value
+                if hasattr(schedule_type, "value")
+                else schedule_type
+            )
             changed_fields.append("schedule_type")
 
         if request.scheduled_at is not None:
@@ -384,16 +407,21 @@ class CampaignService:
                 )
                 for a in request.audiences
             ]
-            campaign.audiences = await self.repository.save_audiences(campaign_id, audiences)
+            campaign.audiences = await self.repository.save_audiences(
+                campaign_id, audiences
+            )
             changed_fields.append("audiences")
 
         # Publish event
         if changed_fields:
-            await self._publish_event("campaign.updated", {
-                "campaign_id": campaign_id,
-                "changed_fields": changed_fields,
-                "updated_by": updated_by,
-            })
+            await self._publish_event(
+                "campaign.updated",
+                {
+                    "campaign_id": campaign_id,
+                    "changed_fields": changed_fields,
+                    "updated_by": updated_by,
+                },
+            )
 
         return campaign
 
@@ -411,8 +439,7 @@ class CampaignService:
 
         if campaign.status == CampaignStatus.RUNNING:
             raise InvalidCampaignStateError(
-                "Cannot delete running campaign, cancel first",
-                campaign.status
+                "Cannot delete running campaign, cancel first", campaign.status
             )
 
         return await self.repository.delete_campaign(campaign_id)
@@ -444,45 +471,40 @@ class CampaignService:
         # Validate campaign type
         if campaign.campaign_type != CampaignType.SCHEDULED:
             raise InvalidCampaignTypeError(
-                "Cannot schedule a triggered campaign",
-                campaign.campaign_type
+                "Cannot schedule a triggered campaign", campaign.campaign_type
             )
 
         # Validate current status
         if campaign.status != CampaignStatus.DRAFT:
             raise InvalidCampaignStateError(
-                "Only draft campaigns can be scheduled",
-                campaign.status
+                "Only draft campaigns can be scheduled", campaign.status
             )
 
         # Validate campaign has audiences
         if not campaign.audiences:
             raise CampaignValidationError(
-                "Campaign must have at least one audience segment",
-                "audiences"
+                "Campaign must have at least one audience segment", "audiences"
             )
 
         # Validate campaign has content
         if not campaign.variants:
             raise CampaignValidationError(
-                "Campaign must have valid content for configured channels",
-                "channels"
+                "Campaign must have valid content for configured channels", "channels"
             )
 
         # Use existing scheduled_at if not provided
         schedule_time = scheduled_at or campaign.scheduled_at
         if not schedule_time:
-            raise CampaignValidationError(
-                "Scheduled time is required",
-                "scheduled_at"
-            )
+            raise CampaignValidationError("Scheduled time is required", "scheduled_at")
 
         # Validate scheduled time is at least 5 minutes in future
-        min_schedule_time = datetime.now(timezone.utc) + timedelta(minutes=self.MIN_SCHEDULE_MINUTES)
+        min_schedule_time = datetime.now(timezone.utc) + timedelta(
+            minutes=self.MIN_SCHEDULE_MINUTES
+        )
         if schedule_time < min_schedule_time:
             raise CampaignValidationError(
                 "Scheduled time must be at least 5 minutes in the future",
-                "scheduled_at"
+                "scheduled_at",
             )
 
         # Create task in task_service
@@ -500,9 +522,13 @@ class CampaignService:
                 task_id = task_result.get("task_id")
             except Exception as e:
                 # Log warning but continue - task_service may be unavailable in dev
-                logger.warning(f"Task service unavailable for campaign {campaign_id}: {e}")
+                logger.warning(
+                    f"Task service unavailable for campaign {campaign_id}: {e}"
+                )
         else:
-            logger.warning(f"No task client configured - campaign {campaign_id} scheduled without task")
+            logger.warning(
+                f"No task client configured - campaign {campaign_id} scheduled without task"
+            )
 
         # Update campaign status
         # Default to one_time schedule if not set
@@ -520,11 +546,14 @@ class CampaignService:
         campaign = await self.repository.update_campaign(campaign_id, updates)
 
         # Publish event
-        await self._publish_event("campaign.scheduled", {
-            "campaign_id": campaign_id,
-            "scheduled_at": schedule_time.isoformat(),
-            "task_id": task_id,
-        })
+        await self._publish_event(
+            "campaign.scheduled",
+            {
+                "campaign_id": campaign_id,
+                "scheduled_at": schedule_time.isoformat(),
+                "task_id": task_id,
+            },
+        )
 
         logger.info(f"Campaign scheduled: {campaign_id} at {schedule_time}")
         return campaign
@@ -548,31 +577,25 @@ class CampaignService:
         # Validate campaign type
         if campaign.campaign_type != CampaignType.TRIGGERED:
             raise InvalidCampaignTypeError(
-                "Cannot activate a scheduled campaign",
-                campaign.campaign_type
+                "Cannot activate a scheduled campaign", campaign.campaign_type
             )
 
         # Validate current status
         if campaign.status != CampaignStatus.DRAFT:
             raise InvalidCampaignStateError(
-                "Only draft campaigns can be activated",
-                campaign.status
+                "Only draft campaigns can be activated", campaign.status
             )
 
         # Validate triggers exist
         if not campaign.triggers:
             raise CampaignValidationError(
-                "Triggered campaigns require at least one trigger",
-                "triggers"
+                "Triggered campaigns require at least one trigger", "triggers"
             )
 
         # Validate each trigger has valid event_type
         for trigger in campaign.triggers:
             if not trigger.event_type:
-                raise CampaignValidationError(
-                    "Invalid trigger event type",
-                    "triggers"
-                )
+                raise CampaignValidationError("Invalid trigger event type", "triggers")
 
         # Update campaign status
         now = datetime.now(timezone.utc)
@@ -585,11 +608,14 @@ class CampaignService:
         campaign = await self.repository.update_campaign(campaign_id, updates)
 
         # Publish event
-        await self._publish_event("campaign.activated", {
-            "campaign_id": campaign_id,
-            "activated_at": now.isoformat(),
-            "trigger_count": len(campaign.triggers),
-        })
+        await self._publish_event(
+            "campaign.activated",
+            {
+                "campaign_id": campaign_id,
+                "activated_at": now.isoformat(),
+                "trigger_count": len(campaign.triggers),
+            },
+        )
 
         logger.info(f"Campaign activated: {campaign_id}")
         return campaign
@@ -611,8 +637,7 @@ class CampaignService:
         # Validate current status
         if campaign.status == CampaignStatus.PAUSED:
             raise InvalidCampaignStateError(
-                "Campaign is already paused",
-                campaign.status
+                "Campaign is already paused", campaign.status
             )
 
         # Allow pausing RUNNING or ACTIVE campaigns
@@ -620,8 +645,7 @@ class CampaignService:
         # RUNNING = campaign currently executing
         if campaign.status not in (CampaignStatus.RUNNING, CampaignStatus.ACTIVE):
             raise InvalidCampaignStateError(
-                "Only running or active campaigns can be paused",
-                campaign.status
+                "Only running or active campaigns can be paused", campaign.status
             )
 
         # Update campaign status
@@ -650,13 +674,16 @@ class CampaignService:
             )
 
         # Publish event
-        await self._publish_event("campaign.paused", {
-            "campaign_id": campaign_id,
-            "execution_id": executions[0].execution_id if executions else None,
-            "paused_by": paused_by,
-            "messages_sent": messages_sent,
-            "messages_remaining": messages_remaining,
-        })
+        await self._publish_event(
+            "campaign.paused",
+            {
+                "campaign_id": campaign_id,
+                "execution_id": executions[0].execution_id if executions else None,
+                "paused_by": paused_by,
+                "messages_sent": messages_sent,
+                "messages_remaining": messages_remaining,
+            },
+        )
 
         logger.info(f"Campaign paused: {campaign_id}")
         return campaign
@@ -677,8 +704,7 @@ class CampaignService:
         # Validate current status
         if campaign.status != CampaignStatus.PAUSED:
             raise InvalidCampaignStateError(
-                "Only paused campaigns can be resumed",
-                campaign.status
+                "Only paused campaigns can be resumed", campaign.status
             )
 
         # Check if scheduled time expired for scheduled campaigns
@@ -719,12 +745,15 @@ class CampaignService:
             )
 
         # Publish event
-        await self._publish_event("campaign.resumed", {
-            "campaign_id": campaign_id,
-            "execution_id": executions[0].execution_id if executions else None,
-            "resumed_by": resumed_by,
-            "messages_remaining": messages_remaining,
-        })
+        await self._publish_event(
+            "campaign.resumed",
+            {
+                "campaign_id": campaign_id,
+                "execution_id": executions[0].execution_id if executions else None,
+                "resumed_by": resumed_by,
+                "messages_remaining": messages_remaining,
+            },
+        )
 
         logger.info(f"Campaign resumed: {campaign_id}")
         return campaign
@@ -746,14 +775,12 @@ class CampaignService:
         # Validate current status
         if campaign.status == CampaignStatus.COMPLETED:
             raise InvalidCampaignStateError(
-                "Cannot cancel a completed campaign",
-                campaign.status
+                "Cannot cancel a completed campaign", campaign.status
             )
 
         if campaign.status == CampaignStatus.CANCELLED:
             raise InvalidCampaignStateError(
-                "Campaign is already cancelled",
-                campaign.status
+                "Campaign is already cancelled", campaign.status
             )
 
         # Cancel scheduled task if exists
@@ -786,12 +813,15 @@ class CampaignService:
         )
 
         # Publish event
-        await self._publish_event("campaign.cancelled", {
-            "campaign_id": campaign_id,
-            "cancelled_by": cancelled_by,
-            "reason": reason,
-            "messages_sent_before_cancel": messages_sent,
-        })
+        await self._publish_event(
+            "campaign.cancelled",
+            {
+                "campaign_id": campaign_id,
+                "cancelled_by": cancelled_by,
+                "reason": reason,
+                "messages_sent_before_cancel": messages_sent,
+            },
+        )
 
         logger.info(f"Campaign cancelled: {campaign_id}")
         return campaign
@@ -865,7 +895,9 @@ class CampaignService:
                 )
                 for a in source.audiences
             ]
-            cloned.audiences = await self.repository.save_audiences(new_campaign_id, audiences)
+            cloned.audiences = await self.repository.save_audiences(
+                new_campaign_id, audiences
+            )
 
         # Clone variants
         if source.variants:
@@ -876,10 +908,7 @@ class CampaignService:
                     description=v.description,
                     allocation_percentage=v.allocation_percentage,
                     is_control=v.is_control,
-                    channels=[
-                        CampaignChannel(**c.model_dump())
-                        for c in v.channels
-                    ],
+                    channels=[CampaignChannel(**c.model_dump()) for c in v.channels],
                     created_at=now,
                     updated_at=now,
                 )
@@ -893,8 +922,7 @@ class CampaignService:
                     trigger_id=f"trg_{uuid.uuid4().hex[:12]}",
                     event_type=t.event_type,
                     conditions=[
-                        TriggerCondition(**c.model_dump())
-                        for c in t.conditions
+                        TriggerCondition(**c.model_dump()) for c in t.conditions
                     ],
                     delay_minutes=t.delay_minutes,
                     delay_days=t.delay_days,
@@ -909,18 +937,23 @@ class CampaignService:
                 )
                 for t in source.triggers
             ]
-            cloned.triggers = await self.repository.save_triggers(new_campaign_id, triggers)
+            cloned.triggers = await self.repository.save_triggers(
+                new_campaign_id, triggers
+            )
 
         # Publish event (campaign.created for the clone)
-        await self._publish_event("campaign.created", {
-            "campaign_id": new_campaign_id,
-            "organization_id": cloned.organization_id,
-            "name": cloned.name,
-            "campaign_type": cloned.campaign_type.value,
-            "status": cloned.status.value,
-            "created_by": cloned_by,
-            "cloned_from_id": campaign_id,
-        })
+        await self._publish_event(
+            "campaign.created",
+            {
+                "campaign_id": new_campaign_id,
+                "organization_id": cloned.organization_id,
+                "name": cloned.name,
+                "campaign_type": cloned.campaign_type.value,
+                "status": cloned.status.value,
+                "created_by": cloned_by,
+                "cloned_from_id": campaign_id,
+            },
+        )
 
         logger.info(f"Campaign cloned: {campaign_id} -> {new_campaign_id}")
         return cloned
@@ -949,7 +982,9 @@ class CampaignService:
 
         # Check max variants
         if len(campaign.variants) >= self.MAX_VARIANTS:
-            raise VariantAllocationError(f"Maximum {self.MAX_VARIANTS} variants per campaign")
+            raise VariantAllocationError(
+                f"Maximum {self.MAX_VARIANTS} variants per campaign"
+            )
 
         # Check control variant
         if is_control:
@@ -1081,16 +1116,22 @@ class CampaignService:
             size = 0
             if self.isa_data_client and audience.segment_id:
                 try:
-                    size = await self.isa_data_client.estimate_segment_size(audience.segment_id)
+                    size = await self.isa_data_client.estimate_segment_size(
+                        audience.segment_id
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to estimate segment {audience.segment_id}: {e}")
+                    logger.warning(
+                        f"Failed to estimate segment {audience.segment_id}: {e}"
+                    )
                     size = audience.estimated_size or 0
 
-            segment_estimates.append({
-                "segment_id": audience.segment_id,
-                "type": audience.segment_type.value,
-                "size": size,
-            })
+            segment_estimates.append(
+                {
+                    "segment_id": audience.segment_id,
+                    "type": audience.segment_type.value,
+                    "size": size,
+                }
+            )
 
             if audience.segment_type == SegmentType.INCLUDE:
                 if total_include == 0:
@@ -1167,7 +1208,9 @@ class CampaignService:
             for audience in campaign.audiences:
                 if audience.segment_type == SegmentType.INCLUDE:
                     try:
-                        segment_users = await self.isa_data_client.get_segment_users(audience.segment_id)
+                        segment_users = await self.isa_data_client.get_segment_users(
+                            audience.segment_id
+                        )
                         if user_id in segment_users:
                             in_segment = True
                             break
@@ -1198,7 +1241,11 @@ class CampaignService:
         elif condition.operator == TriggerOperator.LESS_THAN:
             return value < condition.value if value is not None else False
         elif condition.operator == TriggerOperator.IN:
-            values = condition.value if isinstance(condition.value, list) else [condition.value]
+            values = (
+                condition.value
+                if isinstance(condition.value, list)
+                else [condition.value]
+            )
             return value in values
         elif condition.operator == TriggerOperator.EXISTS:
             return value is not None
@@ -1250,15 +1297,29 @@ class CampaignService:
                     "converted": metrics_summary.converted,
                     "bounced": metrics_summary.bounced,
                     "unsubscribed": metrics_summary.unsubscribed,
-                    "delivery_rate": float(metrics_summary.delivery_rate) if metrics_summary.delivery_rate else None,
-                    "open_rate": float(metrics_summary.open_rate) if metrics_summary.open_rate else None,
-                    "click_rate": float(metrics_summary.click_rate) if metrics_summary.click_rate else None,
-                    "conversion_rate": float(metrics_summary.conversion_rate) if metrics_summary.conversion_rate else None,
-                    "bounce_rate": float(metrics_summary.bounce_rate) if metrics_summary.bounce_rate else None,
-                    "unsubscribe_rate": float(metrics_summary.unsubscribe_rate) if metrics_summary.unsubscribe_rate else None,
+                    "delivery_rate": float(metrics_summary.delivery_rate)
+                    if metrics_summary.delivery_rate
+                    else None,
+                    "open_rate": float(metrics_summary.open_rate)
+                    if metrics_summary.open_rate
+                    else None,
+                    "click_rate": float(metrics_summary.click_rate)
+                    if metrics_summary.click_rate
+                    else None,
+                    "conversion_rate": float(metrics_summary.conversion_rate)
+                    if metrics_summary.conversion_rate
+                    else None,
+                    "bounce_rate": float(metrics_summary.bounce_rate)
+                    if metrics_summary.bounce_rate
+                    else None,
+                    "unsubscribe_rate": float(metrics_summary.unsubscribe_rate)
+                    if metrics_summary.unsubscribe_rate
+                    else None,
                 }
             },
-            "updated_at": (metrics_summary.updated_at or datetime.now(timezone.utc)).isoformat(),
+            "updated_at": (
+                metrics_summary.updated_at or datetime.now(timezone.utc)
+            ).isoformat(),
         }
 
         return result
@@ -1281,15 +1342,32 @@ class CampaignService:
 
         variant_data = {}
         for variant in campaign.variants:
-            variant_messages = [m for m in messages if m.variant_id == variant.variant_id]
+            variant_messages = [
+                m for m in messages if m.variant_id == variant.variant_id
+            ]
             sent = len(variant_messages)
-            delivered = len([m for m in variant_messages if m.status in [
-                MessageStatus.DELIVERED, MessageStatus.OPENED, MessageStatus.CLICKED
-            ]])
-            opened = len([m for m in variant_messages if m.status in [
-                MessageStatus.OPENED, MessageStatus.CLICKED
-            ]])
-            clicked = len([m for m in variant_messages if m.status == MessageStatus.CLICKED])
+            delivered = len(
+                [
+                    m
+                    for m in variant_messages
+                    if m.status
+                    in [
+                        MessageStatus.DELIVERED,
+                        MessageStatus.OPENED,
+                        MessageStatus.CLICKED,
+                    ]
+                ]
+            )
+            opened = len(
+                [
+                    m
+                    for m in variant_messages
+                    if m.status in [MessageStatus.OPENED, MessageStatus.CLICKED]
+                ]
+            )
+            clicked = len(
+                [m for m in variant_messages if m.status == MessageStatus.CLICKED]
+            )
 
             variant_data[variant.variant_id] = {
                 "sent": sent,
@@ -1326,11 +1404,21 @@ class CampaignService:
 
                 # Chi-square test for the target metric
                 if target_metric == "click_rate":
-                    observed = [[data["clicked"], data["delivered"] - data["clicked"]],
-                               [control_data["clicked"], control_data["delivered"] - control_data["clicked"]]]
+                    observed = [
+                        [data["clicked"], data["delivered"] - data["clicked"]],
+                        [
+                            control_data["clicked"],
+                            control_data["delivered"] - control_data["clicked"],
+                        ],
+                    ]
                 else:  # open_rate
-                    observed = [[data["opened"], data["delivered"] - data["opened"]],
-                               [control_data["opened"], control_data["delivered"] - control_data["opened"]]]
+                    observed = [
+                        [data["opened"], data["delivered"] - data["opened"]],
+                        [
+                            control_data["opened"],
+                            control_data["delivered"] - control_data["opened"],
+                        ],
+                    ]
 
                 try:
                     chi2, p_value, _, _ = stats.chi2_contingency(observed)
@@ -1364,7 +1452,9 @@ class CampaignService:
 
         # Get variant
         if variant_id:
-            variant = next((v for v in campaign.variants if v.variant_id == variant_id), None)
+            variant = next(
+                (v for v in campaign.variants if v.variant_id == variant_id), None
+            )
         else:
             variant = campaign.variants[0] if campaign.variants else None
 
@@ -1373,7 +1463,9 @@ class CampaignService:
 
         # Get channel
         if channel_type:
-            channel = next((c for c in variant.channels if c.channel_type == channel_type), None)
+            channel = next(
+                (c for c in variant.channels if c.channel_type == channel_type), None
+            )
         else:
             channel = variant.channels[0] if variant.channels else None
 
@@ -1389,7 +1481,11 @@ class CampaignService:
                 logger.warning(f"Failed to get user 360: {e}")
                 sample_user = {"first_name": "John", "email": "john@example.com"}
         else:
-            sample_user = {"first_name": "John", "last_name": "Doe", "email": "john@example.com"}
+            sample_user = {
+                "first_name": "John",
+                "last_name": "Doe",
+                "email": "john@example.com",
+            }
 
         # Render content with variables
         rendered_content = self._render_content(channel, sample_user)
@@ -1414,15 +1510,23 @@ class CampaignService:
             content = channel.email_content
             result["subject"] = self._substitute_variables(content.subject, user_data)
             if content.body_html:
-                result["body_html"] = self._substitute_variables(content.body_html, user_data)
+                result["body_html"] = self._substitute_variables(
+                    content.body_html, user_data
+                )
             if content.body_text:
-                result["body_text"] = self._substitute_variables(content.body_text, user_data)
+                result["body_text"] = self._substitute_variables(
+                    content.body_text, user_data
+                )
 
         elif channel.channel_type == ChannelType.SMS and channel.sms_content:
-            result["body"] = self._substitute_variables(channel.sms_content.body, user_data)
+            result["body"] = self._substitute_variables(
+                channel.sms_content.body, user_data
+            )
 
         elif channel.channel_type == ChannelType.WHATSAPP and channel.whatsapp_content:
-            result["body"] = self._substitute_variables(channel.whatsapp_content.body, user_data)
+            result["body"] = self._substitute_variables(
+                channel.whatsapp_content.body, user_data
+            )
 
         elif channel.channel_type == ChannelType.IN_APP and channel.in_app_content:
             content = channel.in_app_content
@@ -1440,7 +1544,7 @@ class CampaignService:
             var_name = match.group(1)
             # Support nested keys like custom_field.value
             value = data
-            for key in var_name.split('.'):
+            for key in var_name.split("."):
                 if isinstance(value, dict):
                     value = value.get(key, "")
                 else:
@@ -1448,7 +1552,7 @@ class CampaignService:
                     break
             return str(value) if value else ""
 
-        return re.sub(r'\{\{(\w+(?:\.\w+)*)\}\}', replace_var, template)
+        return re.sub(r"\{\{(\w+(?:\.\w+)*)\}\}", replace_var, template)
 
     # ====================
     # Validation Helpers
@@ -1482,7 +1586,7 @@ class CampaignService:
         if holdout < 0 or holdout > self.MAX_HOLDOUT_PERCENTAGE:
             raise CampaignValidationError(
                 f"Holdout percentage must be between 0 and {self.MAX_HOLDOUT_PERCENTAGE}",
-                "holdout_percentage"
+                "holdout_percentage",
             )
 
     def _validate_audiences(self, audiences: List) -> None:
@@ -1490,13 +1594,15 @@ class CampaignService:
         if len(audiences) > self.MAX_SEGMENTS_PER_CAMPAIGN:
             raise CampaignValidationError(
                 f"Maximum {self.MAX_SEGMENTS_PER_CAMPAIGN} segments per campaign",
-                "audiences"
+                "audiences",
             )
 
     def _validate_variants(self, variants: List) -> None:
         """Validate variants list"""
         if len(variants) > self.MAX_VARIANTS:
-            raise VariantAllocationError(f"Maximum {self.MAX_VARIANTS} variants per campaign")
+            raise VariantAllocationError(
+                f"Maximum {self.MAX_VARIANTS} variants per campaign"
+            )
 
         # Check allocations sum
         total = sum(v.allocation_percentage for v in variants)
@@ -1515,7 +1621,7 @@ class CampaignService:
             if total_delay > self.MAX_TRIGGER_DELAY_DAYS * 24 * 60:
                 raise CampaignValidationError(
                     f"Trigger delay cannot exceed {self.MAX_TRIGGER_DELAY_DAYS} days",
-                    "triggers"
+                    "triggers",
                 )
 
     def _validate_state_transition(

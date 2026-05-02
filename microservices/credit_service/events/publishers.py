@@ -65,7 +65,7 @@ async def publish_credit_allocated(
         event = Event(
             event_type="subscription.credits.allocated",
             source="product_service",  # Using PRODUCT_SERVICE as proxy for credit_service
-            data=event_data.model_dump(mode='json'),
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -111,7 +111,7 @@ async def publish_credit_consumed(
         event = Event(
             event_type="subscription.credits.consumed",
             source="product_service",  # Using PRODUCT_SERVICE as proxy for credit_service
-            data=event_data.model_dump(mode='json'),
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -150,16 +150,15 @@ async def publish_credit_expired(
 
         # Using a custom subject since credit.expired isn't in EventType enum
         # We'll publish with CREDITS_CONSUMED type but different subject
-        from core.nats_client import Event as NATSEvent
 
         await event_bus.publish(
             "credit.expired",
             {
                 "event_type": "CREDIT_EXPIRED",
                 "source": "credit_service",
-                "data": event_data.model_dump(mode='json'),
+                "data": event_data.model_dump(mode="json"),
                 "timestamp": datetime.utcnow().isoformat(),
-            }
+            },
         )
         logger.info(
             f"Published credit.expired for user {user_id}: {amount} {credit_type} credits"
@@ -203,9 +202,9 @@ async def publish_credit_transferred(
             {
                 "event_type": "CREDIT_TRANSFERRED",
                 "source": "credit_service",
-                "data": event_data.model_dump(mode='json'),
+                "data": event_data.model_dump(mode="json"),
                 "timestamp": datetime.utcnow().isoformat(),
-            }
+            },
         )
         logger.info(
             f"Published credit.transferred: {amount} {credit_type} from {from_user_id} to {to_user_id}"
@@ -246,9 +245,9 @@ async def publish_credit_expiring_soon(
             {
                 "event_type": "CREDIT_EXPIRING_SOON",
                 "source": "credit_service",
-                "data": event_data.model_dump(mode='json'),
+                "data": event_data.model_dump(mode="json"),
                 "timestamp": datetime.utcnow().isoformat(),
-            }
+            },
         )
         logger.info(
             f"Published credit.expiring_soon for user {user_id}: {amount} {credit_type} expiring at {expires_at}"
@@ -294,9 +293,9 @@ async def publish_campaign_budget_exhausted(
             {
                 "event_type": "CAMPAIGN_BUDGET_EXHAUSTED",
                 "source": "credit_service",
-                "data": event_data.model_dump(mode='json'),
+                "data": event_data.model_dump(mode="json"),
                 "timestamp": datetime.utcnow().isoformat(),
-            }
+            },
         )
         logger.info(
             f"Published credit.campaign.budget_exhausted for campaign {campaign_id}: {name}"

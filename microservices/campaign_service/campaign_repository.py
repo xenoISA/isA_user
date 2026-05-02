@@ -11,11 +11,11 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
-import uuid
 
 
 class ExtendedJSONEncoder(json.JSONEncoder):
     """JSON encoder that handles Decimal and datetime types"""
+
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
@@ -28,7 +28,10 @@ def json_dumps(obj):
     """JSON dumps with Decimal and datetime support"""
     return json.dumps(obj, cls=ExtendedJSONEncoder)
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -41,8 +44,6 @@ from .models import (
     CampaignExecution,
     CampaignMessage,
     CampaignMetricsSummary,
-    CampaignConversion,
-    CampaignUnsubscribe,
     TriggerHistoryRecord,
     CampaignStatus,
     CampaignType,
@@ -55,8 +56,6 @@ from .models import (
     ThrottleConfig,
     ABTestConfig,
     ConversionConfig,
-    AttributionModel,
-    # Channel content types
     EmailChannelContent,
     SMSChannelContent,
     WhatsAppChannelContent,
@@ -77,11 +76,11 @@ class CampaignRepository:
 
         # Discover PostgreSQL service
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -89,8 +88,8 @@ class CampaignRepository:
             host=host,
             port=port,
             user_id="campaign_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = "campaign"
 
@@ -134,7 +133,7 @@ class CampaignRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.campaigns_table} (
                     campaign_id, organization_id, name, description,
                     campaign_type, status, schedule_type, scheduled_at,
@@ -172,7 +171,7 @@ class CampaignRepository:
                     conversion_config = EXCLUDED.conversion_config,
                     updated_at = EXCLUDED.updated_at
                 RETURNING *
-            '''
+            """
 
             params = [
                 campaign.campaign_id,
@@ -199,9 +198,11 @@ class CampaignRepository:
                 campaign.cloned_from_id,
                 json_dumps(campaign.throttle.model_dump() if campaign.throttle else {}),
                 json_dumps(campaign.ab_test.model_dump() if campaign.ab_test else {}),
-                json_dumps(campaign.conversion.model_dump() if campaign.conversion else {}),
+                json_dumps(
+                    campaign.conversion.model_dump() if campaign.conversion else {}
+                ),
                 campaign.created_at or now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -219,10 +220,10 @@ class CampaignRepository:
     async def get_campaign(self, campaign_id: str) -> Optional[Campaign]:
         """Get campaign by ID"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.campaigns_table}
                 WHERE campaign_id = $1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[campaign_id])
@@ -245,13 +246,15 @@ class CampaignRepository:
     ) -> Optional[Campaign]:
         """Get campaign by organization and ID"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.campaigns_table}
                 WHERE campaign_id = $1 AND organization_id = $2
-            '''
+            """
 
             async with self.db:
-                result = await self.db.query_row(query, params=[campaign_id, organization_id])
+                result = await self.db.query_row(
+                    query, params=[campaign_id, organization_id]
+                )
 
             if result:
                 campaign = self._row_to_campaign(result)
@@ -262,7 +265,9 @@ class CampaignRepository:
             return None
 
         except Exception as e:
-            logger.error(f"Error getting campaign {campaign_id} for org {organization_id}: {e}")
+            logger.error(
+                f"Error getting campaign {campaign_id} for org {organization_id}: {e}"
+            )
             raise
 
     async def list_campaigns(
@@ -306,28 +311,34 @@ class CampaignRepository:
             where_clause = " AND ".join(conditions)
 
             # Validate sort_by to prevent SQL injection
-            valid_sort_fields = ["created_at", "updated_at", "name", "scheduled_at", "status"]
+            valid_sort_fields = [
+                "created_at",
+                "updated_at",
+                "name",
+                "scheduled_at",
+                "status",
+            ]
             if sort_by not in valid_sort_fields:
                 sort_by = "created_at"
             order_direction = "DESC" if sort_order.lower() == "desc" else "ASC"
 
             # Count query
-            count_query = f'''
+            count_query = f"""
                 SELECT COUNT(*) as total FROM {self.schema}.{self.campaigns_table}
                 WHERE {where_clause}
-            '''
+            """
 
             async with self.db:
                 count_result = await self.db.query_row(count_query, params=params)
                 total = count_result.get("total", 0) if count_result else 0
 
             # List query
-            list_query = f'''
+            list_query = f"""
                 SELECT * FROM {self.schema}.{self.campaigns_table}
                 WHERE {where_clause}
                 ORDER BY {sort_by} {order_direction}
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
             params.extend([limit, offset])
 
             async with self.db:
@@ -366,7 +377,7 @@ class CampaignRepository:
                 set_clauses.append(f"{key} = ${param_count}")
                 if isinstance(value, (dict, list)):
                     params.append(json_dumps(value))
-                elif hasattr(value, 'value'):  # Enum
+                elif hasattr(value, "value"):  # Enum
                     params.append(value.value)
                 else:
                     params.append(value)
@@ -378,12 +389,12 @@ class CampaignRepository:
             param_count += 1
             params.append(campaign_id)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.campaigns_table}
                 SET {", ".join(set_clauses)}
                 WHERE campaign_id = ${param_count}
                 RETURNING *
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -411,12 +422,12 @@ class CampaignRepository:
     async def delete_campaign(self, campaign_id: str) -> bool:
         """Soft delete campaign"""
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.campaigns_table}
                 SET deleted_at = $1, updated_at = $1
                 WHERE campaign_id = $2 AND deleted_at IS NULL
                 RETURNING campaign_id
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             async with self.db:
@@ -438,32 +449,34 @@ class CampaignRepository:
         """Save campaign audiences"""
         try:
             # Delete existing audiences
-            delete_query = f'''
+            delete_query = f"""
                 DELETE FROM {self.schema}.{self.audiences_table}
                 WHERE campaign_id = $1
-            '''
+            """
             async with self.db:
                 await self.db.query(delete_query, params=[campaign_id])
 
             # Insert new audiences
             for audience in audiences:
-                insert_query = f'''
+                insert_query = f"""
                     INSERT INTO {self.schema}.{self.audiences_table} (
                         audience_id, campaign_id, segment_type, segment_id,
                         segment_query, name, estimated_size, created_at, updated_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                '''
+                """
                 now = datetime.now(timezone.utc)
                 params = [
                     audience.audience_id,
                     campaign_id,
                     audience.segment_type.value,
                     audience.segment_id,
-                    json_dumps(audience.segment_query) if audience.segment_query else None,
+                    json_dumps(audience.segment_query)
+                    if audience.segment_query
+                    else None,
                     audience.name,
                     audience.estimated_size,
                     now,
-                    now
+                    now,
                 ]
                 async with self.db:
                     await self.db.query(insert_query, params=params)
@@ -477,10 +490,10 @@ class CampaignRepository:
     async def get_audiences(self, campaign_id: str) -> List[CampaignAudience]:
         """Get campaign audiences"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.audiences_table}
                 WHERE campaign_id = $1
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[campaign_id])
@@ -504,7 +517,7 @@ class CampaignRepository:
         """Save campaign variant and its channels"""
         try:
             # Save variant (without channels - they go in separate table)
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.variants_table} (
                     variant_id, campaign_id, name, description,
                     allocation_percentage, is_control,
@@ -517,7 +530,7 @@ class CampaignRepository:
                     is_control = EXCLUDED.is_control,
                     updated_at = EXCLUDED.updated_at
                 RETURNING *
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -528,7 +541,7 @@ class CampaignRepository:
                 float(variant.allocation_percentage),
                 variant.is_control,
                 variant.created_at or now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -537,7 +550,9 @@ class CampaignRepository:
             # Save channels to campaign_channels table with variant_id
             if variant.channels:
                 for channel in variant.channels:
-                    await self._save_variant_channel(campaign_id, variant.variant_id, channel)
+                    await self._save_variant_channel(
+                        campaign_id, variant.variant_id, channel
+                    )
 
             return variant
 
@@ -589,10 +604,14 @@ class CampaignRepository:
             if channel.webhook_content:
                 webhook_url = channel.webhook_content.url
                 webhook_method = channel.webhook_content.method
-                webhook_headers = json_dumps(channel.webhook_content.headers) if channel.webhook_content.headers else None
+                webhook_headers = (
+                    json_dumps(channel.webhook_content.headers)
+                    if channel.webhook_content.headers
+                    else None
+                )
                 webhook_payload_template = channel.webhook_content.payload_template
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.channels_table} (
                     channel_id, campaign_id, variant_id, channel_type, enabled, priority,
                     template_id, email_subject, email_body_html, email_body_text,
@@ -614,7 +633,7 @@ class CampaignRepository:
                     email_body_html = EXCLUDED.email_body_html,
                     email_body_text = EXCLUDED.email_body_text,
                     updated_at = EXCLUDED.updated_at
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -643,23 +662,25 @@ class CampaignRepository:
                 webhook_headers,
                 webhook_payload_template,
                 channel.created_at or now,
-                now
+                now,
             ]
 
             async with self.db:
                 await self.db.query(query, params=params)
 
         except Exception as e:
-            logger.error(f"Error saving channel {channel.channel_id} for variant {variant_id}: {e}")
+            logger.error(
+                f"Error saving channel {channel.channel_id} for variant {variant_id}: {e}"
+            )
             raise
 
     async def get_variants(self, campaign_id: str) -> List[CampaignVariant]:
         """Get campaign variants with their channels"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.variants_table}
                 WHERE campaign_id = $1
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[campaign_id])
@@ -671,7 +692,9 @@ class CampaignRepository:
             for row in results:
                 variant = self._row_to_variant(row)
                 # Load channels for this variant
-                variant.channels = await self._get_variant_channels(campaign_id, variant.variant_id)
+                variant.channels = await self._get_variant_channels(
+                    campaign_id, variant.variant_id
+                )
                 variants.append(variant)
 
             return variants
@@ -680,14 +703,16 @@ class CampaignRepository:
             logger.error(f"Error getting variants for campaign {campaign_id}: {e}")
             return []
 
-    async def _get_variant_channels(self, campaign_id: str, variant_id: str) -> List["CampaignChannel"]:
+    async def _get_variant_channels(
+        self, campaign_id: str, variant_id: str
+    ) -> List["CampaignChannel"]:
         """Get channels for a specific variant"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.channels_table}
                 WHERE campaign_id = $1 AND variant_id = $2
                 ORDER BY priority ASC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[campaign_id, variant_id])
@@ -726,12 +751,12 @@ class CampaignRepository:
 
             params.extend([variant_id, campaign_id])
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.variants_table}
                 SET {", ".join(set_clauses)}
                 WHERE variant_id = ${param_count + 1} AND campaign_id = ${param_count + 2}
                 RETURNING *
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -747,11 +772,11 @@ class CampaignRepository:
     async def delete_variant(self, campaign_id: str, variant_id: str) -> bool:
         """Delete variant"""
         try:
-            query = f'''
+            query = f"""
                 DELETE FROM {self.schema}.{self.variants_table}
                 WHERE variant_id = $1 AND campaign_id = $2
                 RETURNING variant_id
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[variant_id, campaign_id])
@@ -772,27 +797,34 @@ class CampaignRepository:
         """Save campaign channels"""
         try:
             # Delete existing channels
-            delete_query = f'''
+            delete_query = f"""
                 DELETE FROM {self.schema}.{self.channels_table}
                 WHERE campaign_id = $1
-            '''
+            """
             async with self.db:
                 await self.db.query(delete_query, params=[campaign_id])
 
             # Insert new channels
             for channel in channels:
-                insert_query = f'''
+                insert_query = f"""
                     INSERT INTO {self.schema}.{self.channels_table} (
                         channel_id, campaign_id, channel_type, enabled,
                         priority, template_id, content_config,
                         created_at, updated_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                '''
+                """
                 now = datetime.now(timezone.utc)
-                content_config = channel.model_dump(exclude={
-                    "channel_id", "channel_type", "enabled", "priority",
-                    "template_id", "created_at", "updated_at"
-                })
+                content_config = channel.model_dump(
+                    exclude={
+                        "channel_id",
+                        "channel_type",
+                        "enabled",
+                        "priority",
+                        "template_id",
+                        "created_at",
+                        "updated_at",
+                    }
+                )
                 params = [
                     channel.channel_id,
                     campaign_id,
@@ -802,7 +834,7 @@ class CampaignRepository:
                     channel.template_id,
                     json_dumps(content_config),
                     now,
-                    now
+                    now,
                 ]
                 async with self.db:
                     await self.db.query(insert_query, params=params)
@@ -816,11 +848,11 @@ class CampaignRepository:
     async def get_channels(self, campaign_id: str) -> List[CampaignChannel]:
         """Get campaign channels"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.channels_table}
                 WHERE campaign_id = $1
                 ORDER BY priority ASC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[campaign_id])
@@ -844,16 +876,16 @@ class CampaignRepository:
         """Save campaign triggers"""
         try:
             # Delete existing triggers
-            delete_query = f'''
+            delete_query = f"""
                 DELETE FROM {self.schema}.{self.triggers_table}
                 WHERE campaign_id = $1
-            '''
+            """
             async with self.db:
                 await self.db.query(delete_query, params=[campaign_id])
 
             # Insert new triggers
             for trigger in triggers:
-                insert_query = f'''
+                insert_query = f"""
                     INSERT INTO {self.schema}.{self.triggers_table} (
                         trigger_id, campaign_id, event_type, conditions,
                         delay_minutes, delay_days, frequency_limit,
@@ -861,9 +893,11 @@ class CampaignRepository:
                         quiet_hours_end, quiet_hours_timezone, enabled,
                         created_at, updated_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                '''
+                """
                 now = datetime.now(timezone.utc)
-                conditions_json = json_dumps([c.model_dump() for c in trigger.conditions])
+                conditions_json = json_dumps(
+                    [c.model_dump() for c in trigger.conditions]
+                )
                 params = [
                     trigger.trigger_id,
                     campaign_id,
@@ -878,7 +912,7 @@ class CampaignRepository:
                     trigger.quiet_hours_timezone,
                     trigger.enabled,
                     now,
-                    now
+                    now,
                 ]
                 async with self.db:
                     await self.db.query(insert_query, params=params)
@@ -892,10 +926,10 @@ class CampaignRepository:
     async def get_triggers(self, campaign_id: str) -> List[CampaignTrigger]:
         """Get campaign triggers"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.triggers_table}
                 WHERE campaign_id = $1
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[campaign_id])
@@ -916,7 +950,7 @@ class CampaignRepository:
     async def save_execution(self, execution: CampaignExecution) -> CampaignExecution:
         """Save execution"""
         try:
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.executions_table} (
                     execution_id, campaign_id, execution_type,
                     trigger_event_id, status, total_audience_size,
@@ -936,7 +970,7 @@ class CampaignRepository:
                     paused_at = EXCLUDED.paused_at,
                     updated_at = EXCLUDED.updated_at
                 RETURNING *
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -955,7 +989,7 @@ class CampaignRepository:
                 execution.completed_at,
                 execution.paused_at,
                 execution.created_at or now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -972,10 +1006,10 @@ class CampaignRepository:
     async def get_execution(self, execution_id: str) -> Optional[CampaignExecution]:
         """Get execution by ID"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.executions_table}
                 WHERE execution_id = $1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[execution_id])
@@ -993,26 +1027,32 @@ class CampaignRepository:
     ) -> Tuple[List[CampaignExecution], int]:
         """List executions for campaign"""
         try:
-            count_query = f'''
+            count_query = f"""
                 SELECT COUNT(*) as total FROM {self.schema}.{self.executions_table}
                 WHERE campaign_id = $1
-            '''
+            """
 
             async with self.db:
-                count_result = await self.db.query_row(count_query, params=[campaign_id])
+                count_result = await self.db.query_row(
+                    count_query, params=[campaign_id]
+                )
                 total = count_result.get("total", 0) if count_result else 0
 
-            list_query = f'''
+            list_query = f"""
                 SELECT * FROM {self.schema}.{self.executions_table}
                 WHERE campaign_id = $1
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(list_query, params=[campaign_id, limit, offset])
+                results = await self.db.query(
+                    list_query, params=[campaign_id, limit, offset]
+                )
 
-            executions = [self._row_to_execution(row) for row in results] if results else []
+            executions = (
+                [self._row_to_execution(row) for row in results] if results else []
+            )
             return executions, total
 
         except Exception as e:
@@ -1036,12 +1076,12 @@ class CampaignRepository:
             param_count += 1
             params.append(execution_id)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.executions_table}
                 SET {", ".join(set_clauses)}
                 WHERE execution_id = ${param_count}
                 RETURNING *
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -1061,7 +1101,7 @@ class CampaignRepository:
     async def save_message(self, message: CampaignMessage) -> CampaignMessage:
         """Save message"""
         try:
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.messages_table} (
                     message_id, campaign_id, execution_id, variant_id,
                     user_id, channel_type, recipient_address, status,
@@ -1088,7 +1128,7 @@ class CampaignRepository:
                     bounce_type = EXCLUDED.bounce_type,
                     metadata = EXCLUDED.metadata
                 RETURNING *
-            '''
+            """
 
             params = [
                 message.message_id,
@@ -1111,7 +1151,7 @@ class CampaignRepository:
                 message.unsubscribed_at,
                 message.error_message,
                 message.bounce_type.value if message.bounce_type else None,
-                json_dumps(message.metadata)
+                json_dumps(message.metadata),
             ]
 
             async with self.db:
@@ -1128,10 +1168,10 @@ class CampaignRepository:
     async def get_message(self, message_id: str) -> Optional[CampaignMessage]:
         """Get message by ID"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.messages_table}
                 WHERE message_id = $1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[message_id])
@@ -1170,21 +1210,21 @@ class CampaignRepository:
 
             where_clause = " AND ".join(conditions)
 
-            count_query = f'''
+            count_query = f"""
                 SELECT COUNT(*) as total FROM {self.schema}.{self.messages_table}
                 WHERE {where_clause}
-            '''
+            """
 
             async with self.db:
                 count_result = await self.db.query_row(count_query, params=params)
                 total = count_result.get("total", 0) if count_result else 0
 
-            list_query = f'''
+            list_query = f"""
                 SELECT * FROM {self.schema}.{self.messages_table}
                 WHERE {where_clause}
                 ORDER BY queued_at DESC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
             params.extend([limit, offset])
 
             async with self.db:
@@ -1209,7 +1249,7 @@ class CampaignRepository:
             for key, value in kwargs.items():
                 param_count += 1
                 set_clauses.append(f"{key} = ${param_count}")
-                if hasattr(value, 'value'):  # Enum
+                if hasattr(value, "value"):  # Enum
                     params.append(value.value)
                 else:
                     params.append(value)
@@ -1217,12 +1257,12 @@ class CampaignRepository:
             param_count += 1
             params.append(message_id)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.messages_table}
                 SET {", ".join(set_clauses)}
                 WHERE message_id = ${param_count}
                 RETURNING *
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -1244,10 +1284,10 @@ class CampaignRepository:
     ) -> Optional[CampaignMetricsSummary]:
         """Get metrics summary for campaign"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.metrics_table}
                 WHERE campaign_id = $1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[campaign_id])
@@ -1265,7 +1305,7 @@ class CampaignRepository:
     ) -> CampaignMetricsSummary:
         """Save metrics summary"""
         try:
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.metrics_table} (
                     campaign_id, execution_id, sent, delivered, opened,
                     clicked, converted, bounced, failed, unsubscribed,
@@ -1295,7 +1335,7 @@ class CampaignRepository:
                     total_conversion_value = EXCLUDED.total_conversion_value,
                     updated_at = EXCLUDED.updated_at
                 RETURNING *
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -1316,7 +1356,7 @@ class CampaignRepository:
                 float(metrics.bounce_rate) if metrics.bounce_rate else None,
                 float(metrics.unsubscribe_rate) if metrics.unsubscribe_rate else None,
                 float(metrics.total_conversion_value),
-                now
+                now,
             ]
 
             async with self.db:
@@ -1339,14 +1379,14 @@ class CampaignRepository:
     ) -> TriggerHistoryRecord:
         """Save trigger history record"""
         try:
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.trigger_history_table} (
                     history_id, campaign_id, trigger_id, event_id,
                     event_type, user_id, triggered, skip_reason,
                     execution_id, evaluated_at, scheduled_send_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 RETURNING *
-            '''
+            """
 
             params = [
                 history.history_id,
@@ -1359,7 +1399,7 @@ class CampaignRepository:
                 history.skip_reason,
                 history.execution_id,
                 history.evaluated_at,
-                history.scheduled_send_at
+                history.scheduled_send_at,
             ]
 
             async with self.db:
@@ -1382,7 +1422,7 @@ class CampaignRepository:
         try:
             since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.trigger_history_table}
                 WHERE campaign_id = $1
                   AND trigger_id = $2
@@ -1390,7 +1430,7 @@ class CampaignRepository:
                   AND triggered = true
                   AND evaluated_at >= $4
                 ORDER BY evaluated_at DESC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(
@@ -1442,8 +1482,12 @@ class CampaignRepository:
             campaign_type=CampaignType(row.get("campaign_type")),
             status=CampaignStatus(row.get("status")),
             # Default schedule_type to ONE_TIME for scheduled campaigns without it (legacy data)
-            schedule_type=ScheduleType(row.get("schedule_type")) if row.get("schedule_type") else (
-                ScheduleType.ONE_TIME if row.get("campaign_type") == "scheduled" and row.get("status") in ("scheduled", "running", "paused", "completed")
+            schedule_type=ScheduleType(row.get("schedule_type"))
+            if row.get("schedule_type")
+            else (
+                ScheduleType.ONE_TIME
+                if row.get("campaign_type") == "scheduled"
+                and row.get("status") in ("scheduled", "running", "paused", "completed")
                 else None
             ),
             scheduled_at=row.get("scheduled_at"),
@@ -1461,9 +1505,15 @@ class CampaignRepository:
             cancelled_by=row.get("cancelled_by"),
             cancelled_reason=row.get("cancelled_reason"),
             cloned_from_id=row.get("cloned_from_id"),
-            throttle=ThrottleConfig(**throttle_config) if throttle_config else ThrottleConfig(),
-            ab_test=ABTestConfig(**ab_test_config) if ab_test_config else ABTestConfig(),
-            conversion=ConversionConfig(**conversion_config) if conversion_config else ConversionConfig(),
+            throttle=ThrottleConfig(**throttle_config)
+            if throttle_config
+            else ThrottleConfig(),
+            ab_test=ABTestConfig(**ab_test_config)
+            if ab_test_config
+            else ABTestConfig(),
+            conversion=ConversionConfig(**conversion_config)
+            if conversion_config
+            else ConversionConfig(),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at"),
             deleted_at=row.get("deleted_at"),
@@ -1585,7 +1635,9 @@ class CampaignRepository:
         return CampaignTrigger(
             trigger_id=row.get("trigger_id"),
             event_type=row.get("event_type"),
-            conditions=[TriggerCondition(**c) for c in conditions] if conditions else [],
+            conditions=[TriggerCondition(**c) for c in conditions]
+            if conditions
+            else [],
             delay_minutes=row.get("delay_minutes", 0),
             delay_days=row.get("delay_days", 0),
             frequency_limit=row.get("frequency_limit", 1),
@@ -1668,12 +1720,24 @@ class CampaignRepository:
             bounced=row.get("bounced", 0),
             failed=row.get("failed", 0),
             unsubscribed=row.get("unsubscribed", 0),
-            delivery_rate=Decimal(str(row.get("delivery_rate"))) if row.get("delivery_rate") else None,
-            open_rate=Decimal(str(row.get("open_rate"))) if row.get("open_rate") else None,
-            click_rate=Decimal(str(row.get("click_rate"))) if row.get("click_rate") else None,
-            conversion_rate=Decimal(str(row.get("conversion_rate"))) if row.get("conversion_rate") else None,
-            bounce_rate=Decimal(str(row.get("bounce_rate"))) if row.get("bounce_rate") else None,
-            unsubscribe_rate=Decimal(str(row.get("unsubscribe_rate"))) if row.get("unsubscribe_rate") else None,
+            delivery_rate=Decimal(str(row.get("delivery_rate")))
+            if row.get("delivery_rate")
+            else None,
+            open_rate=Decimal(str(row.get("open_rate")))
+            if row.get("open_rate")
+            else None,
+            click_rate=Decimal(str(row.get("click_rate")))
+            if row.get("click_rate")
+            else None,
+            conversion_rate=Decimal(str(row.get("conversion_rate")))
+            if row.get("conversion_rate")
+            else None,
+            bounce_rate=Decimal(str(row.get("bounce_rate")))
+            if row.get("bounce_rate")
+            else None,
+            unsubscribe_rate=Decimal(str(row.get("unsubscribe_rate")))
+            if row.get("unsubscribe_rate")
+            else None,
             total_conversion_value=Decimal(str(row.get("total_conversion_value", 0))),
             updated_at=row.get("updated_at"),
         )

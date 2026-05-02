@@ -10,14 +10,14 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import (
-    ComplianceCheck, CompliancePolicy, ComplianceStatus,
-    RiskLevel, ComplianceCheckType, ContentType
-)
+from .models import ComplianceCheck, CompliancePolicy, ComplianceStatus, RiskLevel
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +33,11 @@ class ComplianceRepository:
         # Discover PostgreSQL service
         # Priority: environment variables → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -45,8 +45,8 @@ class ComplianceRepository:
             host=host,
             port=port,
             user_id="compliance_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = "compliance"
         self.checks_table = "compliance_checks"
@@ -59,7 +59,7 @@ class ComplianceRepository:
     async def create_check(self, check: ComplianceCheck) -> Optional[ComplianceCheck]:
         """创建合规检查记录"""
         try:
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.checks_table} (
                     check_id, check_type, content_type, status, risk_level,
                     user_id, organization_id, session_id, request_id, content_id,
@@ -72,9 +72,10 @@ class ComplianceRepository:
                           $11, $12, $13, $14, $15, $16, $17, $18,
                           $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
                 RETURNING *
-            '''
+            """
 
             import json
+
             now = datetime.now(timezone.utc)
 
             params = [
@@ -94,7 +95,9 @@ class ComplianceRepository:
                 json.dumps(check.violations) if check.violations else "[]",
                 json.dumps(check.warnings) if check.warnings else "[]",
                 json.dumps(check.detected_issues) if check.detected_issues else "{}",
-                json.dumps(check.moderation_categories) if check.moderation_categories else "[]",
+                json.dumps(check.moderation_categories)
+                if check.moderation_categories
+                else "[]",
                 json.dumps(check.detected_pii) if check.detected_pii else "[]",
                 check.action_taken,
                 check.blocked_reason,
@@ -106,7 +109,7 @@ class ComplianceRepository:
                 check.checked_at,
                 check.reviewed_at,
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -124,10 +127,10 @@ class ComplianceRepository:
     async def get_check_by_id(self, check_id: str) -> Optional[ComplianceCheck]:
         """根据ID获取合规检查记录"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.checks_table}
                 WHERE check_id = $1
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, [check_id], schema=self.schema)
@@ -148,7 +151,7 @@ class ComplianceRepository:
         status: Optional[ComplianceStatus] = None,
         risk_level: Optional[RiskLevel] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> List[ComplianceCheck]:
         """获取用户的合规检查记录"""
         try:
@@ -178,12 +181,12 @@ class ComplianceRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.checks_table}
                 WHERE {where_clause}
                 ORDER BY checked_at DESC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
 
             params.extend([limit, offset])
 
@@ -197,23 +200,21 @@ class ComplianceRepository:
             return []
 
     async def get_checks_by_organization(
-        self,
-        organization_id: str,
-        limit: int = 100,
-        offset: int = 0,
-        **filters
+        self, organization_id: str, limit: int = 100, offset: int = 0, **filters
     ) -> List[ComplianceCheck]:
         """获取组织的合规检查记录"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.checks_table}
                 WHERE organization_id = $1
                 ORDER BY checked_at DESC
                 LIMIT $2 OFFSET $3
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [organization_id, limit, offset], schema=self.schema)
+                results = await self.db.query(
+                    query, [organization_id, limit, offset], schema=self.schema
+                )
 
             return [ComplianceCheck(**item) for item in results] if results else []
 
@@ -224,17 +225,19 @@ class ComplianceRepository:
     async def get_pending_reviews(self, limit: int = 50) -> List[ComplianceCheck]:
         """获取需要人工审核的记录"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.checks_table}
                 WHERE human_review_required = TRUE
                   AND status = $1
                   AND reviewed_by IS NULL
                 ORDER BY checked_at ASC
                 LIMIT $2
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [ComplianceStatus.PENDING.value, limit], schema=self.schema)
+                results = await self.db.query(
+                    query, [ComplianceStatus.PENDING.value, limit], schema=self.schema
+                )
 
             return [ComplianceCheck(**item) for item in results] if results else []
 
@@ -247,11 +250,11 @@ class ComplianceRepository:
         check_id: str,
         reviewed_by: str,
         status: ComplianceStatus,
-        review_notes: Optional[str] = None
+        review_notes: Optional[str] = None,
     ) -> bool:
         """更新审核状态"""
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.checks_table}
                 SET status = $1,
                     reviewed_by = $2,
@@ -259,7 +262,7 @@ class ComplianceRepository:
                     review_notes = $4,
                     updated_at = $5
                 WHERE check_id = $6
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [status.value, reviewed_by, now, review_notes, now, check_id]
@@ -281,7 +284,7 @@ class ComplianceRepository:
         self,
         organization_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """获取统计数据"""
         try:
@@ -306,7 +309,7 @@ class ComplianceRepository:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            query = f'''
+            query = f"""
                 SELECT
                     COUNT(*) as total_checks,
                     COUNT(CASE WHEN status = 'pass' THEN 1 END) as passed_checks,
@@ -314,7 +317,7 @@ class ComplianceRepository:
                     COUNT(CASE WHEN status = 'flagged' THEN 1 END) as flagged_checks
                 FROM {self.schema}.{self.checks_table}
                 {where_clause}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -327,7 +330,7 @@ class ComplianceRepository:
                     "failed_checks": stats.get("failed_checks", 0),
                     "flagged_checks": stats.get("flagged_checks", 0),
                     "violations_by_type": {},  # TODO: Aggregate from JSONB
-                    "violations_by_risk": {}
+                    "violations_by_risk": {},
                 }
 
             return {
@@ -336,7 +339,7 @@ class ComplianceRepository:
                 "failed_checks": 0,
                 "flagged_checks": 0,
                 "violations_by_type": {},
-                "violations_by_risk": {}
+                "violations_by_risk": {},
             }
 
         except Exception as e:
@@ -347,20 +350,19 @@ class ComplianceRepository:
                 "failed_checks": 0,
                 "flagged_checks": 0,
                 "violations_by_type": {},
-                "violations_by_risk": {}
+                "violations_by_risk": {},
             }
 
     async def get_violations_summary(
-        self,
-        organization_id: Optional[str] = None,
-        days: int = 30
+        self, organization_id: Optional[str] = None, days: int = 30
     ) -> List[Dict[str, Any]]:
         """获取违规摘要"""
         try:
             from datetime import timedelta
+
             start_date = datetime.now(timezone.utc) - timedelta(days=days)
 
-            conditions = [f"checked_at >= $1"]
+            conditions = ["checked_at >= $1"]
             params = [start_date]
             param_count = 1
 
@@ -371,7 +373,7 @@ class ComplianceRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT
                     check_type,
                     risk_level,
@@ -380,7 +382,7 @@ class ComplianceRepository:
                 WHERE {where_clause} AND status != 'pass'
                 GROUP BY check_type, risk_level
                 ORDER BY count DESC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -395,12 +397,14 @@ class ComplianceRepository:
     # 合规策略管理
     # ====================
 
-    async def create_policy(self, policy: CompliancePolicy) -> Optional[CompliancePolicy]:
+    async def create_policy(
+        self, policy: CompliancePolicy
+    ) -> Optional[CompliancePolicy]:
         """创建合规策略"""
         try:
             import json
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.policies_table} (
                     policy_id, organization_id, policy_name, description, enabled,
                     check_types, content_types, rules, thresholds,
@@ -408,7 +412,7 @@ class ComplianceRepository:
                     created_by, metadata, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 RETURNING *
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -427,7 +431,7 @@ class ComplianceRepository:
                 policy.created_by,
                 json.dumps(policy.metadata) if policy.metadata else "{}",
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -444,10 +448,10 @@ class ComplianceRepository:
     async def get_policy_by_id(self, policy_id: str) -> Optional[CompliancePolicy]:
         """根据ID获取合规策略"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.policies_table}
                 WHERE policy_id = $1
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, [policy_id], schema=self.schema)
@@ -460,25 +464,26 @@ class ComplianceRepository:
             logger.error(f"Error getting policy {policy_id}: {e}")
             return None
 
-    async def get_active_policies(
-        self,
-        organization_id: str
-    ) -> List[CompliancePolicy]:
+    async def get_active_policies(self, organization_id: str) -> List[CompliancePolicy]:
         """获取组织的活跃策略"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.policies_table}
                 WHERE organization_id = $1 AND enabled = TRUE
                 ORDER BY created_at DESC
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [organization_id], schema=self.schema)
+                results = await self.db.query(
+                    query, [organization_id], schema=self.schema
+                )
 
             return [CompliancePolicy(**item) for item in results] if results else []
 
         except Exception as e:
-            logger.error(f"Error getting active policies for org {organization_id}: {e}")
+            logger.error(
+                f"Error getting active policies for org {organization_id}: {e}"
+            )
             return []
 
     # ====================
@@ -488,10 +493,10 @@ class ComplianceRepository:
     async def delete_user_data(self, user_id: str) -> int:
         """删除用户数据（GDPR Article 17: Right to Erasure）"""
         try:
-            query = f'''
+            query = f"""
                 DELETE FROM {self.schema}.{self.checks_table}
                 WHERE user_id = $1
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, [user_id], schema=self.schema)
@@ -509,7 +514,7 @@ class ComplianceRepository:
         consent_type: str,
         granted: bool,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
     ) -> bool:
         """更新用户同意记录（GDPR Article 7: Conditions for consent）
 

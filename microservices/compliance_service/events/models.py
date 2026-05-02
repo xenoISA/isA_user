@@ -6,10 +6,12 @@ Compliance Service Event Models
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import List, Dict, Any, Optional
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class ComplianceEventType(str, Enum):
     """
@@ -18,6 +20,7 @@ class ComplianceEventType(str, Enum):
     Stream: compliance-stream
     Subjects: compliance.>
     """
+
     CHECK_PERFORMED = "compliance.check.performed"
     VIOLATION_DETECTED = "compliance.violation.detected"
     WARNING_ISSUED = "compliance.warning.issued"
@@ -25,19 +28,18 @@ class ComplianceEventType(str, Enum):
 
 class ComplianceSubscribedEventType(str, Enum):
     """Events that compliance_service subscribes to from other services."""
+
     USER_CREATED = "user.created"
     ORDER_COMPLETED = "order.completed"
 
 
 class ComplianceStreamConfig:
     """Stream configuration for compliance_service"""
+
     STREAM_NAME = "compliance-stream"
     SUBJECTS = ["compliance.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "compliance"
-
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 
 class ComplianceCheckPerformedEvent(BaseModel):
@@ -55,7 +57,9 @@ class ComplianceCheckPerformedEvent(BaseModel):
     action_taken: Optional[str] = Field(None, description="采取的措施")
     processing_time_ms: Optional[float] = Field(None, description="处理时间(毫秒)")
     timestamp: str = Field(..., description="事件时间戳")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外元数据")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="额外元数据"
+    )
 
 
 class ComplianceViolationDetectedEvent(BaseModel):
@@ -70,7 +74,9 @@ class ComplianceViolationDetectedEvent(BaseModel):
     requires_review: bool = Field(default=False, description="是否需要人工审核")
     blocked_content: bool = Field(default=False, description="是否阻止了内容")
     timestamp: str = Field(..., description="事件时间戳")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外元数据")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="额外元数据"
+    )
 
 
 class ComplianceWarningIssuedEvent(BaseModel):
@@ -84,4 +90,6 @@ class ComplianceWarningIssuedEvent(BaseModel):
     risk_level: str = Field(default="low", description="风险级别")
     allowed_with_warning: bool = Field(default=True, description="是否允许但带警告")
     timestamp: str = Field(..., description="事件时间戳")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外元数据")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="额外元数据"
+    )

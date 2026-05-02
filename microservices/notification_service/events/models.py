@@ -6,10 +6,12 @@ Defines Pydantic models for events published and consumed by notification_servic
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class NotificationEventType(str, Enum):
     """
@@ -18,6 +20,7 @@ class NotificationEventType(str, Enum):
     Stream: notification-stream
     Subjects: notification.>
     """
+
     NOTIFICATION_SENT = "notification.sent"
     NOTIFICATION_READ = "notification.read"
     NOTIFICATION_DELIVERED = "notification.delivered"
@@ -25,6 +28,7 @@ class NotificationEventType(str, Enum):
 
 class NotificationSubscribedEventType(str, Enum):
     """Events that notification_service subscribes to from other services."""
+
     USER_CREATED = "user.created"
     ORDER_COMPLETED = "order.completed"
     PAYMENT_COMPLETED = "payment.completed"
@@ -32,23 +36,25 @@ class NotificationSubscribedEventType(str, Enum):
 
 class NotificationStreamConfig:
     """Stream configuration for notification_service"""
+
     STREAM_NAME = "notification-stream"
     SUBJECTS = ["notification.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "notification"
-
-from typing import Optional, Dict, Any
-from datetime import datetime
 
 
 # ====================
 # Outbound Event Models (Published by notification_service)
 # ====================
 
+
 class NotificationSentEventData(BaseModel):
     """Data for notification.sent event"""
+
     notification_id: str = Field(..., description="Notification ID")
-    notification_type: str = Field(..., description="Type: email, in_app, push, sms, webhook")
+    notification_type: str = Field(
+        ..., description="Type: email, in_app, push, sms, webhook"
+    )
     recipient_id: Optional[str] = Field(None, description="Recipient user ID")
     recipient_email: Optional[str] = Field(None, description="Recipient email address")
     status: str = Field(..., description="Notification status")
@@ -59,8 +65,11 @@ class NotificationSentEventData(BaseModel):
 
 class NotificationFailedEventData(BaseModel):
     """Data for notification.failed event"""
+
     notification_id: str = Field(..., description="Notification ID")
-    notification_type: str = Field(..., description="Type: email, in_app, push, sms, webhook")
+    notification_type: str = Field(
+        ..., description="Type: email, in_app, push, sms, webhook"
+    )
     recipient_id: Optional[str] = Field(None, description="Recipient user ID")
     recipient_email: Optional[str] = Field(None, description="Recipient email address")
     error_message: str = Field(..., description="Error message")
@@ -70,14 +79,18 @@ class NotificationFailedEventData(BaseModel):
 
 class NotificationDeliveredEventData(BaseModel):
     """Data for notification.delivered event"""
+
     notification_id: str = Field(..., description="Notification ID")
-    notification_type: str = Field(..., description="Type: email, in_app, push, sms, webhook")
+    notification_type: str = Field(
+        ..., description="Type: email, in_app, push, sms, webhook"
+    )
     recipient_id: Optional[str] = Field(None, description="Recipient user ID")
     delivered_at: str = Field(..., description="ISO timestamp of delivery confirmation")
 
 
 class NotificationClickedEventData(BaseModel):
     """Data for notification.clicked event"""
+
     notification_id: str = Field(..., description="Notification ID")
     user_id: str = Field(..., description="User ID who clicked")
     click_url: Optional[str] = Field(None, description="URL that was clicked")
@@ -86,6 +99,7 @@ class NotificationClickedEventData(BaseModel):
 
 class NotificationBatchCompletedEventData(BaseModel):
     """Data for notification.batch_completed event"""
+
     batch_id: str = Field(..., description="Batch ID")
     total_recipients: int = Field(..., description="Total number of recipients")
     sent_count: int = Field(..., description="Successfully sent count")
@@ -98,8 +112,10 @@ class NotificationBatchCompletedEventData(BaseModel):
 # Inbound Event Models (Consumed by notification_service)
 # ====================
 
+
 class UserLoggedInEventData(BaseModel):
     """Data from user.logged_in event"""
+
     user_id: str
     email: Optional[str] = None
     provider: Optional[str] = "email"
@@ -108,6 +124,7 @@ class UserLoggedInEventData(BaseModel):
 
 class UserRegisteredEventData(BaseModel):
     """Data from user.registered event"""
+
     user_id: str
     email: str
     username: Optional[str] = None
@@ -117,6 +134,7 @@ class UserRegisteredEventData(BaseModel):
 
 class UserPasswordResetEventData(BaseModel):
     """Data from user.password_reset event"""
+
     user_id: str
     email: str
     reset_token: str
@@ -126,6 +144,7 @@ class UserPasswordResetEventData(BaseModel):
 
 class PaymentCompletedEventData(BaseModel):
     """Data from payment.completed event"""
+
     payment_id: str
     user_id: str
     amount: float
@@ -137,6 +156,7 @@ class PaymentCompletedEventData(BaseModel):
 
 class OrganizationMemberAddedEventData(BaseModel):
     """Data from organization.member_added event"""
+
     organization_id: str
     organization_name: str
     user_id: str
@@ -147,6 +167,7 @@ class OrganizationMemberAddedEventData(BaseModel):
 
 class DeviceOfflineEventData(BaseModel):
     """Data from device.offline event"""
+
     device_id: str
     device_name: str
     user_id: str
@@ -156,6 +177,7 @@ class DeviceOfflineEventData(BaseModel):
 
 class FileUploadedEventData(BaseModel):
     """Data from file.uploaded event"""
+
     file_id: str
     file_name: str
     user_id: str
@@ -166,6 +188,7 @@ class FileUploadedEventData(BaseModel):
 
 class FileSharedEventData(BaseModel):
     """Data from file.shared event"""
+
     share_id: str
     file_id: str
     file_name: str
@@ -178,6 +201,7 @@ class FileSharedEventData(BaseModel):
 
 class OrderCreatedEventData(BaseModel):
     """Data from order.created event"""
+
     order_id: str
     user_id: str
     customer_email: Optional[str] = None
@@ -189,6 +213,7 @@ class OrderCreatedEventData(BaseModel):
 
 class OrderShippedEventData(BaseModel):
     """Data from order.shipped event"""
+
     order_id: str
     user_id: str
     customer_email: Optional[str] = None
@@ -200,6 +225,7 @@ class OrderShippedEventData(BaseModel):
 
 class TaskAssignedEventData(BaseModel):
     """Data from task.assigned event"""
+
     task_id: str
     task_title: str
     assigned_to: str  # User ID
@@ -211,6 +237,7 @@ class TaskAssignedEventData(BaseModel):
 
 class TaskDueSoonEventData(BaseModel):
     """Data from task.due_soon event"""
+
     task_id: str
     task_title: str
     assigned_to: str  # User ID
@@ -221,6 +248,7 @@ class TaskDueSoonEventData(BaseModel):
 
 class InvitationCreatedEventData(BaseModel):
     """Data from invitation.created event"""
+
     invitation_id: str
     inviter_id: str
     inviter_name: Optional[str] = None
@@ -233,6 +261,7 @@ class InvitationCreatedEventData(BaseModel):
 
 class ComplianceAlertEventData(BaseModel):
     """Data from compliance.alert event"""
+
     alert_id: str
     user_id: str
     violation_type: str
@@ -244,6 +273,7 @@ class ComplianceAlertEventData(BaseModel):
 
 class WalletBalanceLowEventData(BaseModel):
     """Data from wallet.balance_low event"""
+
     wallet_id: str
     user_id: str
     current_balance: float
@@ -254,6 +284,7 @@ class WalletBalanceLowEventData(BaseModel):
 
 class BillingInvoiceReadyEventData(BaseModel):
     """Data from billing.invoice_ready event"""
+
     invoice_id: str
     user_id: str
     customer_email: Optional[str] = None

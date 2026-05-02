@@ -65,7 +65,7 @@ from tests.contracts.campaign.data_contract import (
 )
 
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, List
 from datetime import datetime
 
 
@@ -73,8 +73,10 @@ from datetime import datetime
 # Additional Service Models
 # ====================
 
+
 class HealthResponse(BaseModel):
     """Health check response"""
+
     status: str
     service: str
     port: int
@@ -84,6 +86,7 @@ class HealthResponse(BaseModel):
 
 class ReadinessResponse(BaseModel):
     """Readiness check response"""
+
     ready: bool
     checks: Dict[str, bool] = Field(default_factory=dict)
     details: Dict[str, str] = Field(default_factory=dict)
@@ -91,28 +94,33 @@ class ReadinessResponse(BaseModel):
 
 class LivenessResponse(BaseModel):
     """Liveness check response"""
+
     alive: bool
     uptime_seconds: float
 
 
 class ScheduleRequest(BaseModel):
     """Request to schedule a campaign"""
+
     scheduled_at: Optional[datetime] = None
     timezone: str = "UTC"
 
 
 class CancelRequest(BaseModel):
     """Request to cancel a campaign"""
+
     reason: Optional[str] = Field(None, max_length=500)
 
 
 class CloneRequest(BaseModel):
     """Request to clone a campaign"""
+
     name: Optional[str] = Field(None, min_length=1, max_length=255)
 
 
 class VariantCreateRequest(BaseModel):
     """Request to create a variant"""
+
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     allocation_percentage: float = Field(..., ge=0, le=100)
@@ -122,6 +130,7 @@ class VariantCreateRequest(BaseModel):
 
 class ErrorResponse(BaseModel):
     """Standard error response"""
+
     detail: str
     error_code: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)

@@ -8,17 +8,17 @@ Migrated to AsyncPostgresClient - 2025-11-30
 
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import (
-    StoredFile, FileShare, StorageQuota,
-    FileStatus, StorageProvider, FileAccessLevel
-)
+from .models import StoredFile, FileShare, StorageQuota, FileStatus
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +35,11 @@ class StorageRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -49,7 +49,7 @@ class StorageRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='storage_service',
+            user_id="storage_service",
             min_pool_size=1,
             max_pool_size=2,
         )
@@ -74,24 +74,34 @@ class StorageRepository:
                 "file_size": file_data.file_size,
                 "content_type": file_data.content_type,
                 "file_extension": file_data.file_extension,
-                "storage_provider": file_data.storage_provider.value if hasattr(file_data.storage_provider, 'value') else file_data.storage_provider,
+                "storage_provider": file_data.storage_provider.value
+                if hasattr(file_data.storage_provider, "value")
+                else file_data.storage_provider,
                 "bucket_name": file_data.bucket_name,
                 "object_name": file_data.object_name,
-                "status": file_data.status.value if hasattr(file_data.status, 'value') else file_data.status,
-                "access_level": file_data.access_level.value if hasattr(file_data.access_level, 'value') else file_data.access_level,
+                "status": file_data.status.value
+                if hasattr(file_data.status, "value")
+                else file_data.status,
+                "access_level": file_data.access_level.value
+                if hasattr(file_data.access_level, "value")
+                else file_data.access_level,
                 "checksum": file_data.checksum,
                 "etag": file_data.etag,
                 "version_id": file_data.version_id,
                 "metadata": file_data.metadata or {},
                 "tags": file_data.tags or [],
                 "download_url": file_data.download_url,
-                "download_url_expires_at": file_data.download_url_expires_at if file_data.download_url_expires_at else None,
+                "download_url_expires_at": file_data.download_url_expires_at
+                if file_data.download_url_expires_at
+                else None,
                 "uploaded_at": file_data.uploaded_at or datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.files_table, [data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.files_table, [data], schema=self.schema
+                )
 
             if count and count > 0:
                 # Fetch the created file
@@ -102,7 +112,9 @@ class StorageRepository:
             logger.error(f"Error creating file record: {e}")
             raise
 
-    async def get_file_by_id(self, file_id: str, user_id: Optional[str] = None) -> Optional[StoredFile]:
+    async def get_file_by_id(
+        self, file_id: str, user_id: Optional[str] = None
+    ) -> Optional[StoredFile]:
         """Get file record by file_id"""
         try:
             if user_id:
@@ -137,7 +149,7 @@ class StorageRepository:
         content_type: Optional[str] = None,
         prefix: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[StoredFile]:
         """List files for a user with optional filters"""
         try:
@@ -152,7 +164,7 @@ class StorageRepository:
 
             if status:
                 param_count += 1
-                status_value = status.value if hasattr(status, 'value') else status
+                status_value = status.value if hasattr(status, "value") else status
                 conditions.append(f"status = ${param_count}")
                 params.append(status_value)
 
@@ -177,7 +189,9 @@ class StorageRepository:
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            return [StoredFile.model_validate(row) for row in results] if results else []
+            return (
+                [StoredFile.model_validate(row) for row in results] if results else []
+            )
 
         except Exception as e:
             logger.error(f"Error listing user files: {e}")
@@ -189,11 +203,11 @@ class StorageRepository:
         user_id: str,
         status: FileStatus,
         download_url: Optional[str] = None,
-        download_url_expires_at: Optional[datetime] = None
+        download_url_expires_at: Optional[datetime] = None,
     ) -> bool:
         """Update file status and optionally download URL"""
         try:
-            status_value = status.value if hasattr(status, 'value') else status
+            status_value = status.value if hasattr(status, "value") else status
 
             if download_url:
                 query = f"""
@@ -201,7 +215,14 @@ class StorageRepository:
                     SET status = $1, download_url = $2, download_url_expires_at = $3, updated_at = $4
                     WHERE file_id = $5 AND user_id = $6
                 """
-                params = [status_value, download_url, download_url_expires_at, datetime.now(timezone.utc), file_id, user_id]
+                params = [
+                    status_value,
+                    download_url,
+                    download_url_expires_at,
+                    datetime.now(timezone.utc),
+                    file_id,
+                    user_id,
+                ]
             else:
                 query = f"""
                     UPDATE {self.schema}.{self.files_table}
@@ -265,15 +286,21 @@ class StorageRepository:
                 "max_downloads": share_data.max_downloads,
                 "download_count": share_data.download_count or 0,
                 "expires_at": share_data.expires_at if share_data.expires_at else None,
-                "is_active": share_data.is_active if hasattr(share_data, 'is_active') else True,
+                "is_active": share_data.is_active
+                if hasattr(share_data, "is_active")
+                else True,
                 "created_at": datetime.now(timezone.utc),
-                "accessed_at": None
+                "accessed_at": None,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.shares_table, [data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.shares_table, [data], schema=self.schema
+                )
 
-            logger.info(f"Insert file share result: count={count}, share_id={share_data.share_id}")
+            logger.info(
+                f"Insert file share result: count={count}, share_id={share_data.share_id}"
+            )
 
             if count and count > 0:
                 return await self.get_file_share(share_data.share_id)
@@ -289,11 +316,13 @@ class StorageRepository:
         self,
         share_id: Optional[str] = None,
         file_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> Optional[FileShare]:
         """Get file share by share_id or file_id + user_id"""
         try:
-            logger.info(f"Getting file share: share_id={share_id}, file_id={file_id}, user_id={user_id}")
+            logger.info(
+                f"Getting file share: share_id={share_id}, file_id={file_id}, user_id={user_id}"
+            )
 
             if share_id:
                 query = f"""
@@ -318,8 +347,8 @@ class StorageRepository:
 
             if result:
                 # Convert permissions array to dict format
-                if 'permissions' in result:
-                    permissions_value = result['permissions']
+                if "permissions" in result:
+                    permissions_value = result["permissions"]
                     # Handle both list and protobuf ListValue
                     if isinstance(permissions_value, list):
                         permissions_array = permissions_value
@@ -328,17 +357,18 @@ class StorageRepository:
                         permissions_array = []
                         try:
                             for item in permissions_value:
-                                if hasattr(item, 'string_value'):
+                                if hasattr(item, "string_value"):
                                     permissions_array.append(item.string_value)
                                 else:
                                     permissions_array.append(str(item))
-                        except:
+                        except Exception:
                             permissions_array = []
 
-                    result['permissions'] = {
-                        "view": "read" in permissions_array or "view" in permissions_array,
+                    result["permissions"] = {
+                        "view": "read" in permissions_array
+                        or "view" in permissions_array,
                         "download": "download" in permissions_array,
-                        "delete": "delete" in permissions_array
+                        "delete": "delete" in permissions_array,
                     }
 
                 share = FileShare.model_validate(result)
@@ -351,6 +381,7 @@ class StorageRepository:
         except Exception as e:
             logger.error(f"Error getting file share (share_id={share_id}): {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             return None
 
@@ -358,7 +389,7 @@ class StorageRepository:
         self,
         file_id: Optional[str] = None,
         shared_by: Optional[str] = None,
-        shared_with: Optional[str] = None
+        shared_with: Optional[str] = None,
     ) -> List[FileShare]:
         """List file shares with optional filters"""
         try:
@@ -397,8 +428,8 @@ class StorageRepository:
             # Convert permissions array to dict format for each result
             shares = []
             for row in results:
-                if 'permissions' in row:
-                    permissions_value = row['permissions']
+                if "permissions" in row:
+                    permissions_value = row["permissions"]
                     # Handle both list and protobuf ListValue
                     if isinstance(permissions_value, list):
                         permissions_array = permissions_value
@@ -407,17 +438,18 @@ class StorageRepository:
                         permissions_array = []
                         try:
                             for item in permissions_value:
-                                if hasattr(item, 'string_value'):
+                                if hasattr(item, "string_value"):
                                     permissions_array.append(item.string_value)
                                 else:
                                     permissions_array.append(str(item))
-                        except:
+                        except Exception:
                             permissions_array = []
 
-                    row['permissions'] = {
-                        "view": "read" in permissions_array or "view" in permissions_array,
+                    row["permissions"] = {
+                        "view": "read" in permissions_array
+                        or "view" in permissions_array,
                         "download": "download" in permissions_array,
-                        "delete": "delete" in permissions_array
+                        "delete": "delete" in permissions_array,
                     }
                 shares.append(FileShare.model_validate(row))
 
@@ -449,9 +481,7 @@ class StorageRepository:
     # ==================== Storage Quotas Operations ====================
 
     async def get_storage_quota(
-        self,
-        quota_type: str,
-        entity_id: str
+        self, quota_type: str, entity_id: str
     ) -> Optional[StorageQuota]:
         """Get storage quota for user or organization"""
         try:
@@ -478,7 +508,7 @@ class StorageRepository:
         entity_id: str,
         total_quota_bytes: int = 10737418240,  # 10GB default
         max_file_size: int = 104857600,  # 100MB default
-        max_file_count: int = 10000
+        max_file_count: int = 10000,
     ) -> Optional[StorageQuota]:
         """Create a new storage quota record"""
         try:
@@ -492,11 +522,13 @@ class StorageRepository:
                 "max_file_count": max_file_count,
                 "is_active": True,
                 "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.quotas_table, [data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.quotas_table, [data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 return await self.get_storage_quota(quota_type, entity_id)
@@ -511,7 +543,7 @@ class StorageRepository:
         quota_type: str,
         entity_id: str,
         bytes_delta: int,
-        file_count_delta: int = 0
+        file_count_delta: int = 0,
     ) -> bool:
         """Update storage usage (add or subtract bytes and file count)"""
         try:
@@ -526,7 +558,7 @@ class StorageRepository:
                     entity_id=entity_id,
                     total_quota_bytes=10737418240,  # 10GB default
                     max_file_size=524288000,  # 500MB default
-                    max_file_count=10000
+                    max_file_count=10000,
                 )
 
             # Now update the usage (use COALESCE to handle NULL values)
@@ -538,7 +570,13 @@ class StorageRepository:
                     updated_at = $3
                 WHERE quota_type = $4 AND entity_id = $5
             """
-            params = [bytes_delta, file_count_delta, datetime.now(timezone.utc), quota_type, entity_id]
+            params = [
+                bytes_delta,
+                file_count_delta,
+                datetime.now(timezone.utc),
+                quota_type,
+                entity_id,
+            ]
 
             async with self.db:
                 count = await self.db.execute(query, params=params)
@@ -550,9 +588,7 @@ class StorageRepository:
             raise
 
     async def get_storage_stats(
-        self,
-        user_id: str,
-        organization_id: Optional[str] = None
+        self, user_id: str, organization_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Get storage statistics for user and optionally organization"""
         try:
@@ -560,34 +596,56 @@ class StorageRepository:
                 "user_quota": None,
                 "org_quota": None,
                 "total_files": 0,
-                "total_size": 0
+                "total_size": 0,
             }
 
             # Get user quota
             user_quota = await self.get_storage_quota("user", user_id)
             if user_quota:
-                used_bytes = user_quota.used_bytes if user_quota.used_bytes is not None else 0
-                total_quota_bytes = user_quota.total_quota_bytes if user_quota.total_quota_bytes is not None else 0
+                used_bytes = (
+                    user_quota.used_bytes if user_quota.used_bytes is not None else 0
+                )
+                total_quota_bytes = (
+                    user_quota.total_quota_bytes
+                    if user_quota.total_quota_bytes is not None
+                    else 0
+                )
                 stats["user_quota"] = {
                     "used_bytes": used_bytes,
                     "total_quota_bytes": total_quota_bytes,
-                    "file_count": user_quota.file_count if user_quota.file_count is not None else 0,
+                    "file_count": user_quota.file_count
+                    if user_quota.file_count is not None
+                    else 0,
                     "max_file_count": user_quota.max_file_count,
-                    "usage_percent": (used_bytes / total_quota_bytes * 100) if total_quota_bytes > 0 else 0
+                    "usage_percent": (used_bytes / total_quota_bytes * 100)
+                    if total_quota_bytes > 0
+                    else 0,
                 }
 
             # Get org quota if organization_id provided
             if organization_id:
-                org_quota = await self.get_storage_quota("organization", organization_id)
+                org_quota = await self.get_storage_quota(
+                    "organization", organization_id
+                )
                 if org_quota:
-                    used_bytes = org_quota.used_bytes if org_quota.used_bytes is not None else 0
-                    total_quota_bytes = org_quota.total_quota_bytes if org_quota.total_quota_bytes is not None else 0
+                    used_bytes = (
+                        org_quota.used_bytes if org_quota.used_bytes is not None else 0
+                    )
+                    total_quota_bytes = (
+                        org_quota.total_quota_bytes
+                        if org_quota.total_quota_bytes is not None
+                        else 0
+                    )
                     stats["org_quota"] = {
                         "used_bytes": used_bytes,
                         "total_quota_bytes": total_quota_bytes,
-                        "file_count": org_quota.file_count if org_quota.file_count is not None else 0,
+                        "file_count": org_quota.file_count
+                        if org_quota.file_count is not None
+                        else 0,
                         "max_file_count": org_quota.max_file_count,
-                        "usage_percent": (used_bytes / total_quota_bytes * 100) if total_quota_bytes > 0 else 0
+                        "usage_percent": (used_bytes / total_quota_bytes * 100)
+                        if total_quota_bytes > 0
+                        else 0,
                     }
 
             # Get actual file stats from storage_files

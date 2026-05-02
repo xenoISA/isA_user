@@ -5,10 +5,9 @@ These interfaces define contracts for dependency injection.
 NO import-time I/O dependencies - safe to import anywhere.
 """
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
-from datetime import datetime
 
 # Import only models (no I/O dependencies)
-from .models import FavoriteLocation, WeatherAlert
+from .models import FavoriteLocation
 
 
 # =============================================================================
@@ -18,11 +17,13 @@ from .models import FavoriteLocation, WeatherAlert
 
 class WeatherServiceError(Exception):
     """Base exception for weather service"""
+
     pass
 
 
 class WeatherNotFoundError(WeatherServiceError):
     """Raised when weather data is not available for location"""
+
     def __init__(self, location: str):
         self.location = location
         super().__init__(f"Weather data not found for: {location}")
@@ -30,6 +31,7 @@ class WeatherNotFoundError(WeatherServiceError):
 
 class ProviderError(WeatherServiceError):
     """Raised when external weather provider fails"""
+
     def __init__(self, provider: str, message: str):
         self.provider = provider
         super().__init__(f"Provider {provider} error: {message}")
@@ -37,6 +39,7 @@ class ProviderError(WeatherServiceError):
 
 class ProviderConfigurationError(WeatherServiceError):
     """Raised when provider API key is missing"""
+
     def __init__(self, provider: str):
         self.provider = provider
         super().__init__(f"API key not configured for: {provider}")
@@ -44,6 +47,7 @@ class ProviderConfigurationError(WeatherServiceError):
 
 class LocationNotFoundError(WeatherServiceError):
     """Raised when saved location not found"""
+
     def __init__(self, location_id: int):
         self.location_id = location_id
         super().__init__(f"Location not found: {location_id}")
@@ -51,6 +55,7 @@ class LocationNotFoundError(WeatherServiceError):
 
 class InvalidCoordinatesError(WeatherServiceError):
     """Raised when coordinates are invalid"""
+
     def __init__(self, latitude: float, longitude: float):
         self.latitude = latitude
         self.longitude = longitude
@@ -59,6 +64,7 @@ class InvalidCoordinatesError(WeatherServiceError):
 
 class ForecastDaysExceededError(WeatherServiceError):
     """Raised when forecast days exceed provider limit"""
+
     def __init__(self, requested: int, maximum: int):
         self.requested = requested
         self.maximum = maximum
@@ -67,6 +73,7 @@ class ForecastDaysExceededError(WeatherServiceError):
 
 class LocationLimitExceededError(WeatherServiceError):
     """Raised when user exceeds saved location limit"""
+
     def __init__(self, user_id: str, limit: int):
         self.user_id = user_id
         self.limit = limit

@@ -12,7 +12,6 @@ from .models import (
     UserPermissionRecord,
     OrganizationPermission,
     ResourceType,
-    AccessLevel,
     UserPermissionSummary,
     PermissionAuditLog,
     ExternalServiceUser,
@@ -22,28 +21,34 @@ from .models import (
 
 # Custom exceptions - defined here to avoid importing repository
 
+
 class AuthorizationException(Exception):
     """Base authorization exception"""
+
     pass
 
 
 class PermissionNotFoundException(AuthorizationException):
     """Permission not found"""
+
     pass
 
 
 class UserNotFoundException(AuthorizationException):
     """User not found"""
+
     pass
 
 
 class OrganizationNotFoundException(AuthorizationException):
     """Organization not found"""
+
     pass
 
 
 class InvalidPermissionError(AuthorizationException):
     """Invalid permission configuration"""
+
     pass
 
 
@@ -57,9 +62,7 @@ class AuthorizationRepositoryProtocol(Protocol):
     """
 
     # Resource Permission Management
-    async def create_resource_permission(
-        self, permission: ResourcePermission
-    ) -> bool:
+    async def create_resource_permission(self, permission: ResourcePermission) -> bool:
         """Create a new resource permission"""
         ...
 
@@ -76,9 +79,7 @@ class AuthorizationRepositoryProtocol(Protocol):
         ...
 
     # User Permission Management
-    async def grant_user_permission(
-        self, permission: UserPermissionRecord
-    ) -> bool:
+    async def grant_user_permission(self, permission: UserPermissionRecord) -> bool:
         """Grant permission to a user"""
         ...
 

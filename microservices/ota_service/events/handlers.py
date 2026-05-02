@@ -10,9 +10,8 @@ import os
 from typing import Dict, Any
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ async def handle_device_deleted(event_data: Dict[str, Any], ota_repository):
         ota_repository: OTARepository instance for data access
     """
     try:
-        device_id = event_data.get('device_id')
+        device_id = event_data.get("device_id")
         if not device_id:
             logger.warning("device.deleted event missing device_id")
             return
@@ -48,7 +47,9 @@ async def handle_device_deleted(event_data: Dict[str, Any], ota_repository):
         # Cancel all pending/in-progress updates for this device
         cancelled_count = await ota_repository.cancel_device_updates(device_id)
 
-        logger.info(f"Cancelled {cancelled_count} OTA updates for deleted device {device_id}")
+        logger.info(
+            f"Cancelled {cancelled_count} OTA updates for deleted device {device_id}"
+        )
 
     except Exception as e:
         logger.error(f"Error handling device.deleted event: {e}", exc_info=True)
@@ -68,7 +69,7 @@ async def handle_user_deleted(event_data: Dict[str, Any], ota_repository):
         ota_repository: OTARepository instance for data access
     """
     try:
-        user_id = event_data.get('user_id')
+        user_id = event_data.get("user_id")
         if not user_id:
             logger.warning("user.deleted event missing user_id")
             return
@@ -81,7 +82,9 @@ async def handle_user_deleted(event_data: Dict[str, Any], ota_repository):
         # Clean up user's firmware preferences if any
         await ota_repository.delete_user_firmware_preferences(user_id)
 
-        logger.info(f"✅ Cancelled {cancelled_count} OTA updates for deleted user {user_id}")
+        logger.info(
+            f"✅ Cancelled {cancelled_count} OTA updates for deleted user {user_id}"
+        )
 
     except Exception as e:
         logger.error(f"Error handling user.deleted event: {e}", exc_info=True)
@@ -106,6 +109,10 @@ def get_event_handlers(ota_repository) -> Dict[str, callable]:
         Dict mapping event patterns to handler functions
     """
     return {
-        "device_service.device.deleted": lambda event: handle_device_deleted(event.data, ota_repository),
-        "account_service.user.deleted": lambda event: handle_user_deleted(event.data, ota_repository),
+        "device_service.device.deleted": lambda event: handle_device_deleted(
+            event.data, ota_repository
+        ),
+        "account_service.user.deleted": lambda event: handle_user_deleted(
+            event.data, ota_repository
+        ),
     }

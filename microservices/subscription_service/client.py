@@ -6,8 +6,7 @@ Client library for other microservices to interact with subscription service.
 
 import httpx
 import logging
-from typing import Optional, Dict, Any, List
-from decimal import Decimal
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +23,12 @@ class SubscriptionServiceClient:
             config: Optional ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
             self.config = None
         else:
             if config is None:
                 from core.config_manager import ConfigManager
+
                 config = ConfigManager("subscription_service_client")
 
             self.config = config
@@ -44,11 +44,11 @@ class SubscriptionServiceClient:
         if self.config:
             try:
                 host, port = self.config.discover_service(
-                    service_name='subscription_service',
-                    default_host='localhost',
+                    service_name="subscription_service",
+                    default_host="localhost",
                     default_port=8228,
-                    env_host_key='SUBSCRIPTION_SERVICE_HOST',
-                    env_port_key='SUBSCRIPTION_SERVICE_PORT'
+                    env_host_key="SUBSCRIPTION_SERVICE_HOST",
+                    env_port_key="SUBSCRIPTION_SERVICE_PORT",
                 )
                 return f"http://{host}:{port}"
             except Exception as e:
@@ -81,7 +81,7 @@ class SubscriptionServiceClient:
         seats: int = 1,
         use_trial: bool = False,
         promo_code: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new subscription for a user
@@ -114,7 +114,7 @@ class SubscriptionServiceClient:
                 "tier_code": tier_code,
                 "billing_cycle": billing_cycle,
                 "seats": seats,
-                "use_trial": use_trial
+                "use_trial": use_trial,
             }
             if organization_id:
                 payload["organization_id"] = organization_id
@@ -126,8 +126,7 @@ class SubscriptionServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self._get_base_url()}/api/v1/subscriptions",
-                json=payload
+                f"{self._get_base_url()}/api/v1/subscriptions", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -205,7 +204,7 @@ class SubscriptionServiceClient:
         seats: Optional[int] = None,
         auto_renew: Optional[bool] = None,
         payment_method_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Update a subscription
@@ -243,7 +242,7 @@ class SubscriptionServiceClient:
 
             response = await self.client.put(
                 f"{self._get_base_url()}/api/v1/subscriptions/{subscription_id}",
-                json=update_data
+                json=update_data,
             )
             response.raise_for_status()
             return response.json()
@@ -260,7 +259,7 @@ class SubscriptionServiceClient:
         subscription_id: str,
         immediate: bool = False,
         reason: Optional[str] = None,
-        feedback: Optional[str] = None
+        feedback: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Cancel a subscription
@@ -283,7 +282,7 @@ class SubscriptionServiceClient:
 
             response = await self.client.post(
                 f"{self._get_base_url()}/api/v1/subscriptions/{subscription_id}/cancel",
-                json=payload
+                json=payload,
             )
             response.raise_for_status()
             return response.json()
@@ -300,9 +299,7 @@ class SubscriptionServiceClient:
     # =============================================================================
 
     async def get_credit_balance(
-        self,
-        user_id: str,
-        organization_id: Optional[str] = None
+        self, user_id: str, organization_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get credit balance for a user
@@ -324,8 +321,7 @@ class SubscriptionServiceClient:
                 params["organization_id"] = organization_id
 
             response = await self.client.get(
-                f"{self._get_base_url()}/api/v1/credits/balance",
-                params=params
+                f"{self._get_base_url()}/api/v1/credits/balance", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -345,7 +341,7 @@ class SubscriptionServiceClient:
         organization_id: Optional[str] = None,
         usage_record_id: Optional[str] = None,
         description: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Consume credits from a user's subscription
@@ -374,7 +370,7 @@ class SubscriptionServiceClient:
             payload = {
                 "user_id": user_id,
                 "credits_to_consume": credits_to_consume,
-                "service_type": service_type
+                "service_type": service_type,
             }
             if organization_id:
                 payload["organization_id"] = organization_id
@@ -386,8 +382,7 @@ class SubscriptionServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self._get_base_url()}/api/v1/credits/consume",
-                json=payload
+                f"{self._get_base_url()}/api/v1/credits/consume", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -404,10 +399,7 @@ class SubscriptionServiceClient:
     # =============================================================================
 
     async def get_subscription_history(
-        self,
-        subscription_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, subscription_id: str, limit: int = 50, offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         Get subscription history
@@ -423,13 +415,15 @@ class SubscriptionServiceClient:
         try:
             response = await self.client.get(
                 f"{self._get_base_url()}/api/v1/subscriptions/{subscription_id}/history",
-                params={"limit": limit, "offset": offset}
+                params={"limit": limit, "offset": offset},
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get subscription history: {e.response.status_code}")
+            logger.error(
+                f"Failed to get subscription history: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting subscription history: {e}")
@@ -470,7 +464,7 @@ class SubscriptionServiceClient:
         try:
             response = await self.client.get(f"{self._get_base_url()}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

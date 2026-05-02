@@ -22,11 +22,10 @@ from core.nats_client import Event
 from core.nats_client import EventEnvelope
 
 from ..models import RecordUsageRequest, ServiceType
-from .models import BillingSubscribedEventType, UnitType, UsageEventData, parse_usage_event
+from .models import parse_usage_event
 from .publishers import (
     publish_billing_calculated,
     publish_billing_error,
-    publish_usage_recorded,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,7 +81,9 @@ async def _claim_usage_event_processing(
     """Claim the event in durable storage when available, otherwise use local memory."""
     repository = _get_event_repository(billing_service)
     if repository is not None:
-        processor_id = f"billing_service:{os.getenv('HOSTNAME') or 'local'}:{os.getpid()}"
+        processor_id = (
+            f"billing_service:{os.getenv('HOSTNAME') or 'local'}:{os.getpid()}"
+        )
         return await repository.claim_event_processing(
             claim_key=claim_key,
             source_event_id=source_event_id,
@@ -148,7 +149,9 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
         usage_data = parse_usage_event(event.data)
         dedup_key = usage_data.idempotency_key or event.id
         if dedup_key != event.id and is_event_processed(dedup_key):
-            logger.debug("Usage event %s already processed via key %s", event.id, dedup_key)
+            logger.debug(
+                "Usage event %s already processed via key %s", event.id, dedup_key
+            )
             mark_event_processed(event.id)
             return
 
@@ -229,7 +232,9 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
             cost_components=[
                 component.model_dump(mode="json", exclude_none=True)
                 for component in usage_data.cost_components
-            ] if usage_data.cost_components else None,
+            ]
+            if usage_data.cost_components
+            else None,
             session_id=usage_data.session_id,
             request_id=usage_data.request_id,
             usage_details=usage_details,
@@ -252,8 +257,14 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
             billing_result = await billing_service.record_usage_and_bill(request)
 
         if not billing_result or not billing_result.success:
-            error_msg = billing_result.message if billing_result else "No response from billing service"
-            logger.error(f"Failed to process usage for user {usage_data.user_id}: {error_msg}")
+            error_msg = (
+                billing_result.message
+                if billing_result
+                else "No response from billing service"
+            )
+            logger.error(
+                f"Failed to process usage for user {usage_data.user_id}: {error_msg}"
+            )
             await _mark_usage_event_failed(
                 billing_service=billing_service,
                 claim_key=dedup_key,
@@ -294,7 +305,9 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
                 unit_type=usage_data.unit_type,
                 token_equivalent=usage_data.usage_amount,  # Simplified: use usage_amount directly
                 cost_usd=billing_result.amount_charged or Decimal("0"),
-                unit_price=Decimal("0"),  # Simplified placeholder until product pricing is attached
+                unit_price=Decimal(
+                    "0"
+                ),  # Simplified placeholder until product pricing is attached
                 token_conversion_rate=Decimal("1"),
                 is_free_tier=False,
                 is_included_in_subscription=False,
@@ -563,7 +576,9 @@ async def handle_user_deleted(event: Event, billing_service, event_bus):
 
         # Cancel any active subscriptions
         try:
-            await billing_service.cancel_user_subscriptions(user_id, reason="user_deleted")
+            await billing_service.cancel_user_subscriptions(
+                user_id, reason="user_deleted"
+            )
             logger.info(f"Cancelled subscriptions for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to cancel subscriptions for user {user_id}: {e}")

@@ -4,12 +4,16 @@ Order Service Event Models
 Pydantic models for events published by order service
 """
 
-from pydantic import BaseModel, Field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class OrderEventType(str, Enum):
     """
@@ -18,6 +22,7 @@ class OrderEventType(str, Enum):
     Stream: order-stream
     Subjects: order.>
     """
+
     ORDER_CREATED = "order.created"
     ORDER_COMPLETED = "order.completed"
     ORDER_CANCELED = "order.canceled"
@@ -26,24 +31,23 @@ class OrderEventType(str, Enum):
 
 class OrderSubscribedEventType(str, Enum):
     """Events that order_service subscribes to from other services."""
+
     PAYMENT_COMPLETED = "payment.completed"
     PAYMENT_FAILED = "payment.failed"
 
 
 class OrderStreamConfig:
     """Stream configuration for order_service"""
+
     STREAM_NAME = "order-stream"
     SUBJECTS = ["order.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "order"
 
-from typing import Optional, Dict, Any, List
-from datetime import datetime
-from decimal import Decimal
-
 
 class OrderCreatedEvent(BaseModel):
     """Event published when order is created"""
+
     order_id: str
     user_id: str
     order_type: str
@@ -59,6 +63,7 @@ class OrderCreatedEvent(BaseModel):
 
 class OrderUpdatedEvent(BaseModel):
     """Event published when order is updated"""
+
     order_id: str
     user_id: str
     updated_fields: Dict[str, Any]
@@ -69,6 +74,7 @@ class OrderUpdatedEvent(BaseModel):
 
 class OrderCanceledEvent(BaseModel):
     """Event published when order is canceled"""
+
     order_id: str
     user_id: str
     order_type: str
@@ -81,6 +87,7 @@ class OrderCanceledEvent(BaseModel):
 
 class OrderCompletedEvent(BaseModel):
     """Event published when order is completed"""
+
     order_id: str
     user_id: str
     order_type: str
@@ -94,6 +101,7 @@ class OrderCompletedEvent(BaseModel):
 
 class OrderExpiredEvent(BaseModel):
     """Event published when order expires (unpaid)"""
+
     order_id: str
     user_id: str
     order_type: str
@@ -105,6 +113,7 @@ class OrderExpiredEvent(BaseModel):
 
 class OrderPaymentPendingEvent(BaseModel):
     """Event published when order is awaiting payment"""
+
     order_id: str
     user_id: str
     payment_intent_id: str
@@ -116,6 +125,7 @@ class OrderPaymentPendingEvent(BaseModel):
 
 class OrderRefundedEvent(BaseModel):
     """Event published when order is refunded"""
+
     order_id: str
     user_id: str
     refund_id: str
@@ -127,6 +137,7 @@ class OrderRefundedEvent(BaseModel):
 
 class OrderFulfilledEvent(BaseModel):
     """Event published when order items are delivered/fulfilled"""
+
     order_id: str
     user_id: str
     fulfillment_details: Optional[Dict[str, Any]] = None

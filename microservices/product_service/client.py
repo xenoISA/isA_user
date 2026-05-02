@@ -25,18 +25,18 @@ class ProductServiceClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use ConfigManager for service discovery (env → Consul → fallback)
             if config is None:
                 config = ConfigManager("product_service_client")
 
             host, port = config.discover_service(
-                service_name='product_service',
-                default_host='product.isa-cloud-staging.svc.cluster.local',
+                service_name="product_service",
+                default_host="product.isa-cloud-staging.svc.cluster.local",
                 default_port=8215,
-                env_host_key='PRODUCT_SERVICE_HOST',
-                env_port_key='PRODUCT_SERVICE_PORT'
+                env_host_key="PRODUCT_SERVICE_HOST",
+                env_port_key="PRODUCT_SERVICE_PORT",
             )
             self.base_url = f"http://{host}:{port}"
             logger.info(f"ProductServiceClient using: {self.base_url}")
@@ -68,9 +68,7 @@ class ProductServiceClient:
             >>> categories = await client.get_categories()
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/categories"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/categories")
             response.raise_for_status()
             return response.json()
 
@@ -82,9 +80,7 @@ class ProductServiceClient:
             return None
 
     async def list_products(
-        self,
-        category: Optional[str] = None,
-        active_only: bool = True
+        self, category: Optional[str] = None, active_only: bool = True
     ) -> Optional[List[Dict[str, Any]]]:
         """
         List products
@@ -105,8 +101,7 @@ class ProductServiceClient:
                 params["category"] = category
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/products",
-                params=params
+                f"{self.base_url}/api/v1/products", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -118,10 +113,7 @@ class ProductServiceClient:
             logger.error(f"Error listing products: {e}")
             return None
 
-    async def get_product(
-        self,
-        product_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_product(self, product_id: str) -> Optional[Dict[str, Any]]:
         """
         Get product details
 
@@ -149,9 +141,7 @@ class ProductServiceClient:
             return None
 
     async def get_product_pricing(
-        self,
-        product_id: str,
-        currency: str = "USD"
+        self, product_id: str, currency: str = "USD"
     ) -> Optional[Dict[str, Any]]:
         """
         Get product pricing
@@ -171,7 +161,7 @@ class ProductServiceClient:
 
             response = await self.client.get(
                 f"{self.base_url}/api/v1/product/products/{product_id}/pricing",
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -216,9 +206,7 @@ class ProductServiceClient:
             return None
 
     async def get_product_availability(
-        self,
-        product_id: str,
-        region: Optional[str] = None
+        self, product_id: str, region: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get product availability
@@ -240,13 +228,15 @@ class ProductServiceClient:
 
             response = await self.client.get(
                 f"{self.base_url}/api/v1/products/{product_id}/availability",
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get product availability: {e.response.status_code}")
+            logger.error(
+                f"Failed to get product availability: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting product availability: {e}")
@@ -257,8 +247,7 @@ class ProductServiceClient:
     # =============================================================================
 
     async def get_user_subscriptions(
-        self,
-        user_id: str
+        self, user_id: str
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get user product subscriptions
@@ -286,10 +275,7 @@ class ProductServiceClient:
             logger.error(f"Error getting user subscriptions: {e}")
             return None
 
-    async def get_subscription(
-        self,
-        subscription_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_subscription(self, subscription_id: str) -> Optional[Dict[str, Any]]:
         """
         Get subscription details
 
@@ -317,11 +303,7 @@ class ProductServiceClient:
             return None
 
     async def create_subscription(
-        self,
-        user_id: str,
-        product_id: str,
-        quantity: int = 1,
-        auto_renew: bool = True
+        self, user_id: str, product_id: str, quantity: int = 1, auto_renew: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
         Create product subscription
@@ -346,12 +328,11 @@ class ProductServiceClient:
                 "user_id": user_id,
                 "product_id": product_id,
                 "quantity": quantity,
-                "auto_renew": auto_renew
+                "auto_renew": auto_renew,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/subscriptions",
-                json=payload
+                f"{self.base_url}/api/v1/subscriptions", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -373,7 +354,7 @@ class ProductServiceClient:
         product_id: str,
         usage_amount: float,
         usage_unit: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Record product usage
@@ -401,15 +382,14 @@ class ProductServiceClient:
                 "user_id": user_id,
                 "product_id": product_id,
                 "usage_amount": usage_amount,
-                "usage_unit": usage_unit
+                "usage_unit": usage_unit,
             }
 
             if metadata:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/usage/record",
-                json=payload
+                f"{self.base_url}/api/v1/usage/record", json=payload
             )
             response.raise_for_status()
             return True
@@ -426,7 +406,7 @@ class ProductServiceClient:
         user_id: Optional[str] = None,
         product_id: Optional[str] = None,
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get usage records
@@ -455,8 +435,7 @@ class ProductServiceClient:
                 params["end_date"] = end_date
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/usage/records",
-                params=params
+                f"{self.base_url}/api/v1/usage/records", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -482,7 +461,7 @@ class ProductServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

@@ -15,8 +15,10 @@ from pydantic import BaseModel, Field, validator
 # Enums
 # ====================
 
+
 class ResourceType(str, Enum):
     """Resource types that can be authorized"""
+
     MCP_TOOL = "mcp_tool"
     PROMPT = "prompt"
     RESOURCE = "resource"
@@ -29,6 +31,7 @@ class ResourceType(str, Enum):
 
 class AccessLevel(str, Enum):
     """Access levels for resources"""
+
     NONE = "none"
     READ_ONLY = "read_only"
     READ_WRITE = "read_write"
@@ -38,6 +41,7 @@ class AccessLevel(str, Enum):
 
 class PermissionSource(str, Enum):
     """Source of permission grant"""
+
     SUBSCRIPTION = "subscription"
     ORGANIZATION = "organization"
     ADMIN_GRANT = "admin_grant"
@@ -46,6 +50,7 @@ class PermissionSource(str, Enum):
 
 class SubscriptionTier(str, Enum):
     """Subscription tiers"""
+
     FREE = "free"
     PRO = "pro"
     ENTERPRISE = "enterprise"
@@ -56,14 +61,17 @@ class SubscriptionTier(str, Enum):
 # Base Models
 # ====================
 
+
 class BaseResponse(BaseModel):
     """Base response model"""
+
     success: bool = True
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class HealthResponse(BaseModel):
     """Health check response"""
+
     status: str
     service: str
     port: int
@@ -72,6 +80,7 @@ class HealthResponse(BaseModel):
 
 class ServiceInfo(BaseModel):
     """Service information"""
+
     service: str
     version: str
     description: str
@@ -81,6 +90,7 @@ class ServiceInfo(BaseModel):
 
 class ServiceStats(BaseModel):
     """Service statistics"""
+
     service: str
     version: str
     status: str
@@ -93,8 +103,10 @@ class ServiceStats(BaseModel):
 # Core Authorization Models
 # ====================
 
+
 class ResourcePermission(BaseModel):
     """Base resource permission definition"""
+
     id: Optional[str] = None
     resource_type: ResourceType
     resource_name: str
@@ -109,6 +121,7 @@ class ResourcePermission(BaseModel):
 
 class UserPermissionRecord(BaseModel):
     """User-specific permission record"""
+
     id: Optional[str] = None
     user_id: str
     resource_type: ResourceType
@@ -121,16 +134,17 @@ class UserPermissionRecord(BaseModel):
     is_active: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
-    @validator('expires_at')
+
+    @validator("expires_at")
     def validate_expiry(cls, v):
         if v and v <= datetime.utcnow():
-            raise ValueError('Expiry date must be in the future')
+            raise ValueError("Expiry date must be in the future")
         return v
 
 
 class OrganizationPermission(BaseModel):
     """Organization-level permission configuration"""
+
     id: Optional[str] = None
     organization_id: str
     resource_type: ResourceType
@@ -147,8 +161,10 @@ class OrganizationPermission(BaseModel):
 # Request/Response Models
 # ====================
 
+
 class ResourceAccessRequest(BaseModel):
     """Request to check resource access"""
+
     user_id: str
     resource_type: ResourceType
     resource_name: str
@@ -159,6 +175,7 @@ class ResourceAccessRequest(BaseModel):
 
 class ResourceAccessResponse(BaseModel):
     """Response for resource access check"""
+
     has_access: bool
     user_access_level: AccessLevel
     permission_source: PermissionSource
@@ -171,6 +188,7 @@ class ResourceAccessResponse(BaseModel):
 
 class GrantPermissionRequest(BaseModel):
     """Request to grant permission"""
+
     user_id: str
     resource_type: ResourceType
     resource_name: str
@@ -184,6 +202,7 @@ class GrantPermissionRequest(BaseModel):
 
 class RevokePermissionRequest(BaseModel):
     """Request to revoke permission"""
+
     user_id: str
     resource_type: ResourceType
     resource_name: str
@@ -193,6 +212,7 @@ class RevokePermissionRequest(BaseModel):
 
 class BulkPermissionRequest(BaseModel):
     """Request for bulk permission operations"""
+
     operations: List[Union[GrantPermissionRequest, RevokePermissionRequest]]
     executed_by_user_id: Optional[str] = None
     batch_reason: Optional[str] = None
@@ -206,6 +226,7 @@ class AssignRoleRequest(BaseModel):
     role taxonomy. See docs/guidance/role-taxonomy.md and
     microservices/authorization_service/role_validator.py.
     """
+
     assigner_user_id: str
     assigner_role: str
     assignee_user_id: str
@@ -219,8 +240,10 @@ class AssignRoleRequest(BaseModel):
 # Summary and Analytics Models
 # ====================
 
+
 class UserPermissionSummary(BaseModel):
     """User permission summary"""
+
     user_id: str
     subscription_tier: str
     organization_id: Optional[str] = None
@@ -236,6 +259,7 @@ class UserPermissionSummary(BaseModel):
 
 class ResourceAccessSummary(BaseModel):
     """Resource access summary"""
+
     resource_type: ResourceType
     resource_name: str
     total_authorized_users: int
@@ -248,6 +272,7 @@ class ResourceAccessSummary(BaseModel):
 
 class OrganizationPermissionSummary(BaseModel):
     """Organization permission summary"""
+
     organization_id: str
     organization_plan: str
     total_members: int
@@ -262,8 +287,10 @@ class OrganizationPermissionSummary(BaseModel):
 # Service Communication Models
 # ====================
 
+
 class ExternalServiceUser(BaseModel):
     """User information from account service"""
+
     user_id: str
     email: str
     subscription_status: str
@@ -273,6 +300,7 @@ class ExternalServiceUser(BaseModel):
 
 class ExternalServiceOrganization(BaseModel):
     """Organization information from account service"""
+
     organization_id: str
     plan: str
     is_active: bool
@@ -281,6 +309,7 @@ class ExternalServiceOrganization(BaseModel):
 
 class ServiceHealthCheck(BaseModel):
     """Health check for external services"""
+
     service_name: str
     endpoint: str
     is_healthy: bool
@@ -292,8 +321,10 @@ class ServiceHealthCheck(BaseModel):
 # Database Operation Models
 # ====================
 
+
 class PermissionAuditLog(BaseModel):
     """Audit log for permission changes"""
+
     id: Optional[str] = None
     user_id: str
     resource_type: ResourceType
@@ -310,6 +341,7 @@ class PermissionAuditLog(BaseModel):
 
 class PermissionCacheEntry(BaseModel):
     """Cache entry for permission checks"""
+
     cache_key: str
     user_id: str
     resource_type: ResourceType
@@ -318,8 +350,10 @@ class PermissionCacheEntry(BaseModel):
     access_level: AccessLevel
     permission_source: PermissionSource
     cached_at: datetime = Field(default_factory=datetime.utcnow)
-    expires_at: datetime = Field(default_factory=lambda: datetime.utcnow() + timedelta(minutes=15))
-    
+    expires_at: datetime = Field(
+        default_factory=lambda: datetime.utcnow() + timedelta(minutes=15)
+    )
+
     @property
     def is_expired(self) -> bool:
         return datetime.utcnow() > self.expires_at
@@ -329,8 +363,10 @@ class PermissionCacheEntry(BaseModel):
 # Error Models
 # ====================
 
+
 class AuthorizationError(BaseModel):
     """Authorization error details"""
+
     error_code: str
     error_message: str
     user_id: Optional[str] = None
@@ -342,6 +378,7 @@ class AuthorizationError(BaseModel):
 
 class ValidationError(BaseModel):
     """Validation error details"""
+
     field: str
     error: str
     provided_value: Any
@@ -352,8 +389,10 @@ class ValidationError(BaseModel):
 # Batch Operation Models
 # ====================
 
+
 class BatchOperationResult(BaseModel):
     """Result of a batch operation"""
+
     operation_id: str
     operation_type: str  # grant, revoke
     target_user_id: str
@@ -366,6 +405,7 @@ class BatchOperationResult(BaseModel):
 
 class BatchOperationSummary(BaseModel):
     """Summary of batch operations"""
+
     batch_id: str
     total_operations: int
     successful_operations: int

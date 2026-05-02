@@ -5,8 +5,6 @@ Defines interfaces for dependency injection and testing.
 Following the protocol-based architecture pattern.
 """
 
-from datetime import datetime
-from decimal import Decimal
 from typing import Any, Dict, List, Optional, Protocol
 
 from .models import (
@@ -38,11 +36,7 @@ class MembershipRepositoryProtocol(Protocol):
 
     # Membership CRUD
     async def create_membership(
-        self,
-        user_id: str,
-        tier_code: str,
-        points_balance: int = 0,
-        **kwargs
+        self, user_id: str, tier_code: str, points_balance: int = 0, **kwargs
     ) -> Membership:
         """Create new membership"""
         ...
@@ -55,7 +49,7 @@ class MembershipRepositoryProtocol(Protocol):
         self,
         user_id: str,
         organization_id: Optional[str] = None,
-        active_only: bool = True
+        active_only: bool = True,
     ) -> Optional[Membership]:
         """Get active membership for user"""
         ...
@@ -67,7 +61,7 @@ class MembershipRepositoryProtocol(Protocol):
         status: Optional[MembershipStatus] = None,
         tier_code: Optional[MembershipTier] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Membership]:
         """List memberships with filters"""
         ...
@@ -77,7 +71,7 @@ class MembershipRepositoryProtocol(Protocol):
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         status: Optional[MembershipStatus] = None,
-        tier_code: Optional[MembershipTier] = None
+        tier_code: Optional[MembershipTier] = None,
     ) -> int:
         """Count memberships with filters"""
         ...
@@ -89,7 +83,7 @@ class MembershipRepositoryProtocol(Protocol):
         points: int,
         tier_points: int,
         source: str,
-        reference_id: Optional[str] = None
+        reference_id: Optional[str] = None,
     ) -> Membership:
         """Atomically add points"""
         ...
@@ -99,17 +93,13 @@ class MembershipRepositoryProtocol(Protocol):
         membership_id: str,
         points: int,
         reward_code: str,
-        description: Optional[str] = None
+        description: Optional[str] = None,
     ) -> Membership:
         """Atomically deduct points"""
         ...
 
     # Tier Operations
-    async def update_tier(
-        self,
-        membership_id: str,
-        new_tier: str
-    ) -> Membership:
+    async def update_tier(self, membership_id: str, new_tier: str) -> Membership:
         """Update membership tier"""
         ...
 
@@ -123,10 +113,7 @@ class MembershipRepositoryProtocol(Protocol):
 
     # Status Operations
     async def update_status(
-        self,
-        membership_id: str,
-        status: MembershipStatus,
-        reason: Optional[str] = None
+        self, membership_id: str, status: MembershipStatus, reason: Optional[str] = None
     ) -> Membership:
         """Update membership status"""
         ...
@@ -137,50 +124,33 @@ class MembershipRepositoryProtocol(Protocol):
         membership_id: str,
         limit: int = 50,
         offset: int = 0,
-        action: Optional[PointAction] = None
+        action: Optional[PointAction] = None,
     ) -> List[MembershipHistory]:
         """Get membership history"""
         ...
 
     async def count_history(
-        self,
-        membership_id: str,
-        action: Optional[PointAction] = None
+        self, membership_id: str, action: Optional[PointAction] = None
     ) -> int:
         """Count history entries"""
         ...
 
     async def add_history(
-        self,
-        membership_id: str,
-        action: PointAction,
-        points_change: int = 0,
-        **kwargs
+        self, membership_id: str, action: PointAction, points_change: int = 0, **kwargs
     ) -> MembershipHistory:
         """Record history entry"""
         ...
 
     # Benefits
-    async def get_tier_benefits(
-        self,
-        tier_code: str
-    ) -> List[TierBenefit]:
+    async def get_tier_benefits(self, tier_code: str) -> List[TierBenefit]:
         """Get benefits for tier"""
         ...
 
-    async def get_benefit_usage(
-        self,
-        membership_id: str,
-        benefit_code: str
-    ) -> int:
+    async def get_benefit_usage(self, membership_id: str, benefit_code: str) -> int:
         """Get benefit usage count"""
         ...
 
-    async def record_benefit_usage(
-        self,
-        membership_id: str,
-        benefit_code: str
-    ) -> None:
+    async def record_benefit_usage(self, membership_id: str, benefit_code: str) -> None:
         """Record benefit usage"""
         ...
 
@@ -236,28 +206,26 @@ class AccountClientProtocol(Protocol):
 
 class MembershipServiceError(Exception):
     """Base exception for membership service errors"""
+
     pass
 
 
 class MembershipNotFoundError(MembershipServiceError):
     """Raised when membership is not found"""
+
     pass
 
 
 class DuplicateMembershipError(MembershipServiceError):
     """Raised when user already has active membership"""
+
     pass
 
 
 class InsufficientPointsError(MembershipServiceError):
     """Raised when user has insufficient points"""
 
-    def __init__(
-        self,
-        message: str,
-        available: int = 0,
-        requested: int = 0
-    ):
+    def __init__(self, message: str, available: int = 0, requested: int = 0):
         super().__init__(message)
         self.available = available
         self.requested = requested
@@ -266,12 +234,7 @@ class InsufficientPointsError(MembershipServiceError):
 class InvalidStatusTransitionError(MembershipServiceError):
     """Raised when status transition is not allowed"""
 
-    def __init__(
-        self,
-        message: str,
-        current_status: str = "",
-        target_status: str = ""
-    ):
+    def __init__(self, message: str, current_status: str = "", target_status: str = ""):
         super().__init__(message)
         self.current_status = current_status
         self.target_status = target_status
@@ -279,21 +242,25 @@ class InvalidStatusTransitionError(MembershipServiceError):
 
 class MembershipSuspendedError(MembershipServiceError):
     """Raised when membership is suspended"""
+
     pass
 
 
 class MembershipExpiredError(MembershipServiceError):
     """Raised when membership is expired"""
+
     pass
 
 
 class BenefitNotAvailableError(MembershipServiceError):
     """Raised when benefit is not available"""
+
     pass
 
 
 class BenefitUsageLimitExceededError(MembershipServiceError):
     """Raised when benefit usage limit is exceeded"""
+
     pass
 
 

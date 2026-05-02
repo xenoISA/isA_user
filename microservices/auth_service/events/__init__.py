@@ -22,18 +22,16 @@ from .publishers import (
 
 __all__ = [
     # Handlers
-    'get_event_handlers',
-    
+    "get_event_handlers",
     # Models
-    'DevicePairingTokenGeneratedEventData',
-    'DevicePairingTokenVerifiedEventData',
-    'DevicePairingCompletedEventData',
-    'create_pairing_token_generated_event_data',
-    'create_pairing_token_verified_event_data',
-    'create_pairing_completed_event_data',
-    
+    "DevicePairingTokenGeneratedEventData",
+    "DevicePairingTokenVerifiedEventData",
+    "DevicePairingCompletedEventData",
+    "create_pairing_token_generated_event_data",
+    "create_pairing_token_verified_event_data",
+    "create_pairing_completed_event_data",
     # Publishers
-    'publish_device_pairing_token_generated',
-    'publish_device_pairing_token_verified',
-    'publish_device_pairing_completed',
+    "publish_device_pairing_token_generated",
+    "publish_device_pairing_token_verified",
+    "publish_device_pairing_completed",
 ]

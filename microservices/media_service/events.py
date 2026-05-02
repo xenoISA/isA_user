@@ -5,7 +5,6 @@ Handles event-driven cleanup and synchronization for media resources
 """
 
 import logging
-import json
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 class MediaEventHandler:
     """Event handler for Media Service"""
 
-    def __init__(self, media_service: 'MediaService'):
+    def __init__(self, media_service: "MediaService"):
         """
         Initialize event handler
 
@@ -36,7 +35,7 @@ class MediaEventHandler:
         try:
             # Event is already parsed by NATSEventBus
             # Extract data from Event object
-            if hasattr(event, 'to_dict'):
+            if hasattr(event, "to_dict"):
                 event_dict = event.to_dict()
                 data = event_dict.get("data", {})
                 event_type = event_dict.get("type")
@@ -51,7 +50,10 @@ class MediaEventHandler:
                 await self.handle_file_deleted(data)
             elif event_type == "device.deleted" or event_type == "DEVICE_DELETED":
                 await self.handle_device_deleted(data)
-            elif event_type == "file.uploaded.with_ai" or event_type == "FILE_UPLOADED_WITH_AI":
+            elif (
+                event_type == "file.uploaded.with_ai"
+                or event_type == "FILE_UPLOADED_WITH_AI"
+            ):
                 # 🆕 优先处理带 AI 元数据的事件
                 await self.handle_file_uploaded_with_ai(data)
             elif event_type == "file.uploaded" or event_type == "FILE_UPLOADED":
@@ -82,7 +84,9 @@ class MediaEventHandler:
                 logger.warning("file.deleted event missing file_id")
                 return
 
-            logger.info(f"Handling file.deleted event for file_id={file_id}, user_id={user_id}")
+            logger.info(
+                f"Handling file.deleted event for file_id={file_id}, user_id={user_id}"
+            )
 
             # 1. Delete photo versions associated with this file
             # Note: In production, you'd want to implement a method to find versions by file_id
@@ -95,9 +99,13 @@ class MediaEventHandler:
 
             # 2. Delete photo metadata
             try:
-                metadata = await self.media_service.repository.get_photo_metadata(file_id)
+                metadata = await self.media_service.repository.get_photo_metadata(
+                    file_id
+                )
                 if metadata and metadata.user_id == user_id:
-                    await self.media_service.repository.delete_photo_metadata(file_id, user_id)
+                    await self.media_service.repository.delete_photo_metadata(
+                        file_id, user_id
+                    )
                     logger.info(f"Deleted photo metadata for file {file_id}")
             except Exception as e:
                 logger.error(f"Error deleting photo metadata for file {file_id}: {e}")
@@ -107,7 +115,9 @@ class MediaEventHandler:
             # removed_count = await self.media_service.repository.remove_photo_from_all_playlists(file_id, user_id)
             # logger.info(f"Removed file {file_id} from {removed_count} playlists")
 
-            logger.info(f"Successfully handled file.deleted event for file_id={file_id}")
+            logger.info(
+                f"Successfully handled file.deleted event for file_id={file_id}"
+            )
 
         except Exception as e:
             logger.error(f"Error handling file.deleted event: {e}", exc_info=True)
@@ -132,19 +142,26 @@ class MediaEventHandler:
                 logger.warning("device.deleted event missing device_id")
                 return
 
-            logger.info(f"Handling device.deleted event for device_id={device_id}, user_id={user_id}")
+            logger.info(
+                f"Handling device.deleted event for device_id={device_id}, user_id={user_id}"
+            )
 
             # 1. Delete rotation schedules for this device
             try:
-                schedules = await self.media_service.repository.list_frame_schedules(device_id, user_id)
+                schedules = await self.media_service.repository.list_frame_schedules(
+                    device_id, user_id
+                )
                 for schedule in schedules:
                     await self.media_service.repository.delete_rotation_schedule(
-                        schedule.schedule_id,
-                        user_id
+                        schedule.schedule_id, user_id
                     )
-                logger.info(f"Deleted {len(schedules)} rotation schedules for device {device_id}")
+                logger.info(
+                    f"Deleted {len(schedules)} rotation schedules for device {device_id}"
+                )
             except Exception as e:
-                logger.error(f"Error deleting rotation schedules for device {device_id}: {e}")
+                logger.error(
+                    f"Error deleting rotation schedules for device {device_id}: {e}"
+                )
 
             # 2. Delete photo cache entries for this device
             try:
@@ -153,13 +170,17 @@ class MediaEventHandler:
                 # logger.info(f"Deleted {deleted_cache} cache entries for device {device_id}")
                 logger.info(f"Cleaning up cache entries for device {device_id}")
             except Exception as e:
-                logger.error(f"Error deleting cache entries for device {device_id}: {e}")
+                logger.error(
+                    f"Error deleting cache entries for device {device_id}: {e}"
+                )
 
             # 3. Optionally delete device-specific playlists
             # Note: You might want to keep playlists even if device is deleted
             # so users can re-assign them to new devices
 
-            logger.info(f"Successfully handled device.deleted event for device_id={device_id}")
+            logger.info(
+                f"Successfully handled device.deleted event for device_id={device_id}"
+            )
 
         except Exception as e:
             logger.error(f"Error handling device.deleted event: {e}", exc_info=True)
@@ -188,10 +209,14 @@ class MediaEventHandler:
                 logger.debug(f"Skipping non-image file: {file_type}")
                 return
 
-            logger.info(f"Handling file.uploaded event for file_id={file_id}, user_id={user_id}")
+            logger.info(
+                f"Handling file.uploaded event for file_id={file_id}, user_id={user_id}"
+            )
 
             # Check if metadata already exists
-            existing_metadata = await self.media_service.repository.get_photo_metadata(file_id)
+            existing_metadata = await self.media_service.repository.get_photo_metadata(
+                file_id
+            )
             if existing_metadata:
                 logger.info(f"Metadata already exists for file {file_id}, skipping")
                 return
@@ -208,7 +233,7 @@ class MediaEventHandler:
                 ai_scenes=[],
                 ai_colors=[],
                 face_detection={},
-                quality_score=None
+                quality_score=None,
             )
 
             await self.media_service.repository.create_or_update_metadata(metadata)
@@ -250,16 +275,26 @@ class MediaEventHandler:
                 return
 
             if not ai_metadata:
-                logger.warning(f"file.uploaded.with_ai event for {file_id} has no ai_metadata")
+                logger.warning(
+                    f"file.uploaded.with_ai event for {file_id} has no ai_metadata"
+                )
                 return
 
-            logger.info(f"📥 Handling file.uploaded.with_ai event for file_id={file_id}, chunk_id={chunk_id}")
-            logger.info(f"AI metadata received: categories={ai_metadata.get('ai_categories')}, tags={ai_metadata.get('ai_tags', [])[:3]}")
+            logger.info(
+                f"📥 Handling file.uploaded.with_ai event for file_id={file_id}, chunk_id={chunk_id}"
+            )
+            logger.info(
+                f"AI metadata received: categories={ai_metadata.get('ai_categories')}, tags={ai_metadata.get('ai_tags', [])[:3]}"
+            )
 
             # 检查是否已存在元数据
-            existing_metadata = await self.media_service.repository.get_photo_metadata(file_id)
+            existing_metadata = await self.media_service.repository.get_photo_metadata(
+                file_id
+            )
             if existing_metadata:
-                logger.info(f"Metadata already exists for file {file_id}, updating with AI data")
+                logger.info(
+                    f"Metadata already exists for file {file_id}, updating with AI data"
+                )
 
             # 创建/更新完整的 PhotoMetadata（带 AI 数据）
             from .models import PhotoMetadata
@@ -268,28 +303,25 @@ class MediaEventHandler:
                 file_id=file_id,
                 user_id=user_id,
                 organization_id=event_data.get("organization_id"),
-
                 # AI 提取的数据（来自 Storage Service）
                 ai_labels=ai_metadata.get("ai_tags", []),  # 使用 tags 作为 labels
                 ai_objects=[],  # TODO: 如果 VLM 支持对象检测，可以填充
-                ai_scenes=ai_metadata.get("ai_categories", []),  # 使用 categories 作为 scenes
+                ai_scenes=ai_metadata.get(
+                    "ai_categories", []
+                ),  # 使用 categories 作为 scenes
                 ai_colors=ai_metadata.get("ai_dominant_colors", []),
                 ai_description=f"Mood: {ai_metadata.get('ai_mood', 'unknown')}, Style: {ai_metadata.get('ai_style', 'unknown')}",
                 quality_score=ai_metadata.get("ai_quality_score"),
-
                 # 面部检测（如果需要，可以后续添加）
-                face_detection={
-                    "has_people": ai_metadata.get("ai_has_people", False)
-                },
-
+                face_detection={"has_people": ai_metadata.get("ai_has_people", False)},
                 # 🔗 关联数据 - 使用 full_metadata 字段
                 full_metadata={
                     "chunk_id": chunk_id,  # Qdrant 向量 ID
                     "download_url": event_data.get("download_url"),
                     "bucket_name": event_data.get("bucket_name"),
                     "object_name": event_data.get("object_name"),
-                    "ai_extraction_source": "storage_service_mcp"
-                }
+                    "ai_extraction_source": "storage_service_mcp",
+                },
             )
 
             await self.media_service.repository.create_or_update_metadata(metadata)
@@ -300,4 +332,6 @@ class MediaEventHandler:
             logger.info(f"   - Chunk ID: {chunk_id}")
 
         except Exception as e:
-            logger.error(f"Error handling file.uploaded.with_ai event: {e}", exc_info=True)
+            logger.error(
+                f"Error handling file.uploaded.with_ai event: {e}", exc_info=True
+            )

@@ -6,7 +6,7 @@ Publishes events to NATS event bus
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from core.nats_client import Event
 

@@ -23,7 +23,7 @@ class EventServiceClient:
             base_url: Event service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -33,6 +33,7 @@ class EventServiceClient:
                 logger.warning(f"Service discovery failed, using default: {e}")
                 # Use environment variable or default to localhost:8230
                 import os
+
                 self.base_url = os.getenv("EVENT_SERVICE_URL", "http://localhost:8230")
 
         self.client = httpx.AsyncClient(timeout=30.0)
@@ -60,7 +61,7 @@ class EventServiceClient:
         organization_id: Optional[str] = None,
         data: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        correlation_id: Optional[str] = None
+        correlation_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create and publish an event
@@ -92,7 +93,7 @@ class EventServiceClient:
             payload = {
                 "event_type": event_type,
                 "entity_type": entity_type,
-                "entity_id": entity_id
+                "entity_id": entity_id,
             }
 
             if user_id:
@@ -107,8 +108,7 @@ class EventServiceClient:
                 payload["correlation_id"] = correlation_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/events/create",
-                json=payload
+                f"{self.base_url}/api/events/create", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -121,8 +121,7 @@ class EventServiceClient:
             return None
 
     async def create_batch_events(
-        self,
-        events: List[Dict[str, Any]]
+        self, events: List[Dict[str, Any]]
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Create multiple events in batch
@@ -152,8 +151,7 @@ class EventServiceClient:
         """
         try:
             response = await self.client.post(
-                f"{self.base_url}/api/events/batch",
-                json={"events": events}
+                f"{self.base_url}/api/events/batch", json={"events": events}
             )
             response.raise_for_status()
             return response.json()
@@ -169,10 +167,7 @@ class EventServiceClient:
     # Event Querying
     # =============================================================================
 
-    async def get_event(
-        self,
-        event_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_event(self, event_id: str) -> Optional[Dict[str, Any]]:
         """
         Get specific event by ID
 
@@ -186,9 +181,7 @@ class EventServiceClient:
             >>> event = await client.get_event("evt_123")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/events/{event_id}"
-            )
+            response = await self.client.get(f"{self.base_url}/api/events/{event_id}")
             response.raise_for_status()
             return response.json()
 
@@ -209,7 +202,7 @@ class EventServiceClient:
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """
         Query events with filters
@@ -238,10 +231,7 @@ class EventServiceClient:
             ...     print(f"{event['event_type']}: {event['entity_id']}")
         """
         try:
-            payload = {
-                "limit": limit,
-                "offset": offset
-            }
+            payload = {"limit": limit, "offset": offset}
 
             if event_types:
                 payload["event_types"] = event_types
@@ -259,8 +249,7 @@ class EventServiceClient:
                 payload["end_time"] = end_time
 
             response = await self.client.post(
-                f"{self.base_url}/api/events/query",
-                json=payload
+                f"{self.base_url}/api/events/query", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -273,9 +262,7 @@ class EventServiceClient:
             return None
 
     async def get_entity_projection(
-        self,
-        entity_type: str,
-        entity_id: str
+        self, entity_type: str, entity_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get entity state projection from events
@@ -315,7 +302,7 @@ class EventServiceClient:
         endpoint_url: str,
         subscriber_id: str,
         active: bool = True,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create event subscription
@@ -342,15 +329,14 @@ class EventServiceClient:
                 "event_types": event_types,
                 "endpoint_url": endpoint_url,
                 "subscriber_id": subscriber_id,
-                "active": active
+                "active": active,
             }
 
             if filters:
                 payload["filters"] = filters
 
             response = await self.client.post(
-                f"{self.base_url}/api/events/subscriptions",
-                json=payload
+                f"{self.base_url}/api/events/subscriptions", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -388,10 +374,7 @@ class EventServiceClient:
             logger.error(f"Error listing subscriptions: {e}")
             return None
 
-    async def delete_subscription(
-        self,
-        subscription_id: str
-    ) -> bool:
+    async def delete_subscription(self, subscription_id: str) -> bool:
         """
         Delete event subscription
 
@@ -427,7 +410,7 @@ class EventServiceClient:
         start_time: str,
         end_time: str,
         event_types: Optional[List[str]] = None,
-        target_endpoint: Optional[str] = None
+        target_endpoint: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Replay historical events
@@ -449,10 +432,7 @@ class EventServiceClient:
             ... )
         """
         try:
-            payload = {
-                "start_time": start_time,
-                "end_time": end_time
-            }
+            payload = {"start_time": start_time, "end_time": end_time}
 
             if event_types:
                 payload["event_types"] = event_types
@@ -460,8 +440,7 @@ class EventServiceClient:
                 payload["target_endpoint"] = target_endpoint
 
             response = await self.client.post(
-                f"{self.base_url}/api/events/replay",
-                json=payload
+                f"{self.base_url}/api/events/replay", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -482,7 +461,7 @@ class EventServiceClient:
         processor_id: str,
         event_types: List[str],
         handler_function: str,
-        active: bool = True
+        active: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
         Create event processor
@@ -508,12 +487,11 @@ class EventServiceClient:
                 "processor_id": processor_id,
                 "event_types": event_types,
                 "handler_function": handler_function,
-                "active": active
+                "active": active,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/events/processors",
-                json=payload
+                f"{self.base_url}/api/events/processors", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -536,9 +514,7 @@ class EventServiceClient:
             >>> processors = await client.list_processors()
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/events/processors"
-            )
+            response = await self.client.get(f"{self.base_url}/api/events/processors")
             response.raise_for_status()
             return response.json()
 
@@ -549,10 +525,7 @@ class EventServiceClient:
             logger.error(f"Error listing processors: {e}")
             return None
 
-    async def toggle_processor(
-        self,
-        processor_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def toggle_processor(self, processor_id: str) -> Optional[Dict[str, Any]]:
         """
         Toggle processor active status
 
@@ -595,9 +568,7 @@ class EventServiceClient:
             >>> print(f"Total events: {stats['total_events']}")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/events/statistics"
-            )
+            response = await self.client.get(f"{self.base_url}/api/events/statistics")
             response.raise_for_status()
             return response.json()
 
@@ -622,7 +593,7 @@ class EventServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

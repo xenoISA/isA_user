@@ -7,11 +7,12 @@ Supports all memory types: factual, procedural, episodic, semantic, working, ses
 
 import httpx
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 from .models import (
-    MemoryType, MemoryOperationResult,
-    MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams
+    MemoryType,
+    MemoryOperationResult,
+    MemoryCreateRequest,
+    MemoryUpdateRequest,
 )
 
 
@@ -22,7 +23,7 @@ class MemoryServiceClient:
         self,
         base_url: str = "http://localhost:8223",
         timeout: float = 30.0,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
     ):
         """
         Initialize Memory Service client
@@ -32,7 +33,7 @@ class MemoryServiceClient:
             timeout: Request timeout in seconds
             api_key: Optional API key for authentication
         """
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.headers = {"Content-Type": "application/json"}
         if api_key:
@@ -48,10 +49,7 @@ class MemoryServiceClient:
     # ==================== AI-Powered Memory Extraction ====================
 
     async def extract_factual_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """
         Extract and store factual memories from dialog using AI
@@ -70,18 +68,15 @@ class MemoryServiceClient:
                 json={
                     "user_id": user_id,
                     "dialog_content": dialog_content,
-                    "importance_score": importance_score
+                    "importance_score": importance_score,
                 },
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
 
     async def extract_episodic_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """Extract and store episodic memories from dialog using AI"""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -90,18 +85,15 @@ class MemoryServiceClient:
                 json={
                     "user_id": user_id,
                     "dialog_content": dialog_content,
-                    "importance_score": importance_score
+                    "importance_score": importance_score,
                 },
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
 
     async def extract_procedural_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """Extract and store procedural memories from dialog using AI"""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -110,18 +102,15 @@ class MemoryServiceClient:
                 json={
                     "user_id": user_id,
                     "dialog_content": dialog_content,
-                    "importance_score": importance_score
+                    "importance_score": importance_score,
                 },
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
 
     async def extract_semantic_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """Extract and store semantic memories from dialog using AI"""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -130,9 +119,9 @@ class MemoryServiceClient:
                 json={
                     "user_id": user_id,
                     "dialog_content": dialog_content,
-                    "importance_score": importance_score
+                    "importance_score": importance_score,
                 },
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
@@ -140,8 +129,7 @@ class MemoryServiceClient:
     # ==================== CRUD Operations ====================
 
     async def create_memory(
-        self,
-        request: MemoryCreateRequest
+        self, request: MemoryCreateRequest
     ) -> MemoryOperationResult:
         """
         Create a new memory
@@ -156,16 +144,13 @@ class MemoryServiceClient:
             response = await client.post(
                 f"{self.base_url}/memories",
                 json=request.model_dump(),
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
 
     async def get_memory(
-        self,
-        memory_type: MemoryType,
-        memory_id: str,
-        user_id: Optional[str] = None
+        self, memory_type: MemoryType, memory_id: str, user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get memory by ID and type
@@ -186,7 +171,7 @@ class MemoryServiceClient:
             response = await client.get(
                 f"{self.base_url}/memories/{memory_type}/{memory_id}",
                 params=params,
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
@@ -197,7 +182,7 @@ class MemoryServiceClient:
         memory_type: Optional[MemoryType] = None,
         limit: int = 50,
         offset: int = 0,
-        importance_min: Optional[float] = None
+        importance_min: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         List memories for a user
@@ -212,11 +197,7 @@ class MemoryServiceClient:
         Returns:
             Dictionary with memories and count
         """
-        params = {
-            "user_id": user_id,
-            "limit": limit,
-            "offset": offset
-        }
+        params = {"user_id": user_id, "limit": limit, "offset": offset}
         if memory_type:
             params["memory_type"] = memory_type
         if importance_min is not None:
@@ -224,9 +205,7 @@ class MemoryServiceClient:
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(
-                f"{self.base_url}/memories",
-                params=params,
-                headers=self.headers
+                f"{self.base_url}/memories", params=params, headers=self.headers
             )
             response.raise_for_status()
             return response.json()
@@ -236,7 +215,7 @@ class MemoryServiceClient:
         memory_type: MemoryType,
         memory_id: str,
         request: MemoryUpdateRequest,
-        user_id: str
+        user_id: str,
     ) -> MemoryOperationResult:
         """
         Update a memory
@@ -255,16 +234,13 @@ class MemoryServiceClient:
                 f"{self.base_url}/memories/{memory_type}/{memory_id}",
                 json=request.model_dump(exclude_unset=True),
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
 
     async def delete_memory(
-        self,
-        memory_type: MemoryType,
-        memory_id: str,
-        user_id: str
+        self, memory_type: MemoryType, memory_id: str, user_id: str
     ) -> MemoryOperationResult:
         """
         Delete a memory
@@ -281,7 +257,7 @@ class MemoryServiceClient:
             response = await client.delete(
                 f"{self.base_url}/memories/{memory_type}/{memory_id}",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
@@ -289,10 +265,7 @@ class MemoryServiceClient:
     # ==================== Search Operations ====================
 
     async def search_facts_by_subject(
-        self,
-        user_id: str,
-        subject: str,
-        limit: int = 10
+        self, user_id: str, subject: str, limit: int = 10
     ) -> Dict[str, Any]:
         """
         Search factual memories by subject
@@ -309,16 +282,13 @@ class MemoryServiceClient:
             response = await client.get(
                 f"{self.base_url}/memories/factual/search/subject",
                 params={"user_id": user_id, "subject": subject, "limit": limit},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     async def search_episodes_by_event_type(
-        self,
-        user_id: str,
-        event_type: str,
-        limit: int = 10
+        self, user_id: str, event_type: str, limit: int = 10
     ) -> Dict[str, Any]:
         """
         Search episodic memories by event type
@@ -335,15 +305,12 @@ class MemoryServiceClient:
             response = await client.get(
                 f"{self.base_url}/memories/episodic/search/event_type",
                 params={"user_id": user_id, "event_type": event_type, "limit": limit},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
-    async def get_active_working_memories(
-        self,
-        user_id: str
-    ) -> Dict[str, Any]:
+    async def get_active_working_memories(self, user_id: str) -> Dict[str, Any]:
         """
         Get active working memories
 
@@ -357,14 +324,13 @@ class MemoryServiceClient:
             response = await client.get(
                 f"{self.base_url}/memories/working/active",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     async def cleanup_expired_memories(
-        self,
-        user_id: Optional[str] = None
+        self, user_id: Optional[str] = None
     ) -> MemoryOperationResult:
         """
         Clean up expired working memories
@@ -383,7 +349,7 @@ class MemoryServiceClient:
             response = await client.post(
                 f"{self.base_url}/memories/working/cleanup",
                 params=params,
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
@@ -391,9 +357,7 @@ class MemoryServiceClient:
     # ==================== Session Operations ====================
 
     async def get_session_memories(
-        self,
-        session_id: str,
-        user_id: str
+        self, session_id: str, user_id: str
     ) -> Dict[str, Any]:
         """
         Get memories for a specific session
@@ -409,15 +373,13 @@ class MemoryServiceClient:
             response = await client.get(
                 f"{self.base_url}/memories/session/{session_id}",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     async def deactivate_session(
-        self,
-        session_id: str,
-        user_id: str
+        self, session_id: str, user_id: str
     ) -> MemoryOperationResult:
         """
         Deactivate a session
@@ -433,7 +395,7 @@ class MemoryServiceClient:
             response = await client.post(
                 f"{self.base_url}/memories/session/{session_id}/deactivate",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return MemoryOperationResult(**response.json())
@@ -518,10 +480,7 @@ class MemoryServiceClient:
 
     # ==================== Statistics ====================
 
-    async def get_memory_statistics(
-        self,
-        user_id: str
-    ) -> Dict[str, Any]:
+    async def get_memory_statistics(self, user_id: str) -> Dict[str, Any]:
         """
         Get memory statistics for a user
 
@@ -535,7 +494,7 @@ class MemoryServiceClient:
             response = await client.get(
                 f"{self.base_url}/memories/statistics",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
@@ -549,9 +508,9 @@ class MemoryServiceSyncClient:
         self,
         base_url: str = "http://localhost:8223",
         timeout: float = 30.0,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
     ):
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.headers = {"Content-Type": "application/json"}
         if api_key:
@@ -565,10 +524,7 @@ class MemoryServiceSyncClient:
             return response.json()
 
     def extract_factual_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> Dict[str, Any]:
         """Extract and store factual memories from dialog using AI"""
         with httpx.Client(timeout=self.timeout) as client:
@@ -577,18 +533,15 @@ class MemoryServiceSyncClient:
                 json={
                     "user_id": user_id,
                     "dialog_content": dialog_content,
-                    "importance_score": importance_score
+                    "importance_score": importance_score,
                 },
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     def get_memory(
-        self,
-        memory_type: str,
-        memory_id: str,
-        user_id: Optional[str] = None
+        self, memory_type: str, memory_id: str, user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Get memory by ID and type"""
         params = {}
@@ -599,7 +552,7 @@ class MemoryServiceSyncClient:
             response = client.get(
                 f"{self.base_url}/memories/{memory_type}/{memory_id}",
                 params=params,
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
@@ -609,7 +562,7 @@ class MemoryServiceSyncClient:
         user_id: str,
         memory_type: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> Dict[str, Any]:
         """List memories for a user"""
         params = {"user_id": user_id, "limit": limit, "offset": offset}
@@ -618,18 +571,13 @@ class MemoryServiceSyncClient:
 
         with httpx.Client(timeout=self.timeout) as client:
             response = client.get(
-                f"{self.base_url}/memories",
-                params=params,
-                headers=self.headers
+                f"{self.base_url}/memories", params=params, headers=self.headers
             )
             response.raise_for_status()
             return response.json()
 
     def extract_episodic_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> Dict[str, Any]:
         """Extract and store episodic memories from dialog using AI"""
         with httpx.Client(timeout=self.timeout) as client:
@@ -638,18 +586,15 @@ class MemoryServiceSyncClient:
                 json={
                     "user_id": user_id,
                     "dialog_content": dialog_content,
-                    "importance_score": importance_score
+                    "importance_score": importance_score,
                 },
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     def extract_procedural_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> Dict[str, Any]:
         """Extract and store procedural memories from dialog using AI"""
         with httpx.Client(timeout=self.timeout) as client:
@@ -658,18 +603,15 @@ class MemoryServiceSyncClient:
                 json={
                     "user_id": user_id,
                     "dialog_content": dialog_content,
-                    "importance_score": importance_score
+                    "importance_score": importance_score,
                 },
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     def extract_semantic_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> Dict[str, Any]:
         """Extract and store semantic memories from dialog using AI"""
         with httpx.Client(timeout=self.timeout) as client:
@@ -678,23 +620,18 @@ class MemoryServiceSyncClient:
                 json={
                     "user_id": user_id,
                     "dialog_content": dialog_content,
-                    "importance_score": importance_score
+                    "importance_score": importance_score,
                 },
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
-    def create_memory(
-        self,
-        memory_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def create_memory(self, memory_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new memory"""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(
-                f"{self.base_url}/memories",
-                json=memory_data,
-                headers=self.headers
+                f"{self.base_url}/memories", json=memory_data, headers=self.headers
             )
             response.raise_for_status()
             return response.json()
@@ -704,7 +641,7 @@ class MemoryServiceSyncClient:
         memory_type: str,
         memory_id: str,
         user_id: str,
-        update_data: Dict[str, Any]
+        update_data: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Update a memory"""
         with httpx.Client(timeout=self.timeout) as client:
@@ -712,77 +649,62 @@ class MemoryServiceSyncClient:
                 f"{self.base_url}/memories/{memory_type}/{memory_id}",
                 json=update_data,
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     def delete_memory(
-        self,
-        memory_type: str,
-        memory_id: str,
-        user_id: str
+        self, memory_type: str, memory_id: str, user_id: str
     ) -> Dict[str, Any]:
         """Delete a memory"""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.delete(
                 f"{self.base_url}/memories/{memory_type}/{memory_id}",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     def search_facts_by_subject(
-        self,
-        user_id: str,
-        subject: str,
-        limit: int = 10
+        self, user_id: str, subject: str, limit: int = 10
     ) -> Dict[str, Any]:
         """Search factual memories by subject"""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.get(
                 f"{self.base_url}/memories/factual/search/subject",
                 params={"user_id": user_id, "subject": subject, "limit": limit},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
     def search_episodes_by_event_type(
-        self,
-        user_id: str,
-        event_type: str,
-        limit: int = 10
+        self, user_id: str, event_type: str, limit: int = 10
     ) -> Dict[str, Any]:
         """Search episodic memories by event type"""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.get(
                 f"{self.base_url}/memories/episodic/search/event_type",
                 params={"user_id": user_id, "event_type": event_type, "limit": limit},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
-    def get_active_working_memories(
-        self,
-        user_id: str
-    ) -> Dict[str, Any]:
+    def get_active_working_memories(self, user_id: str) -> Dict[str, Any]:
         """Get active working memories"""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.get(
                 f"{self.base_url}/memories/working/active",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
-    def cleanup_expired_memories(
-        self,
-        user_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def cleanup_expired_memories(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Clean up expired working memories"""
         params = {}
         if user_id:
@@ -792,37 +714,29 @@ class MemoryServiceSyncClient:
             response = client.post(
                 f"{self.base_url}/memories/working/cleanup",
                 params=params,
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
-    def get_session_memories(
-        self,
-        session_id: str,
-        user_id: str
-    ) -> Dict[str, Any]:
+    def get_session_memories(self, session_id: str, user_id: str) -> Dict[str, Any]:
         """Get memories for a specific session"""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.get(
                 f"{self.base_url}/memories/session/{session_id}",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
 
-    def deactivate_session(
-        self,
-        session_id: str,
-        user_id: str
-    ) -> Dict[str, Any]:
+    def deactivate_session(self, session_id: str, user_id: str) -> Dict[str, Any]:
         """Deactivate a session"""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(
                 f"{self.base_url}/memories/session/{session_id}/deactivate",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()
@@ -880,16 +794,13 @@ class MemoryServiceSyncClient:
             response.raise_for_status()
             return response.json()
 
-    def get_memory_statistics(
-        self,
-        user_id: str
-    ) -> Dict[str, Any]:
+    def get_memory_statistics(self, user_id: str) -> Dict[str, Any]:
         """Get memory statistics for a user"""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.get(
                 f"{self.base_url}/memories/statistics",
                 params={"user_id": user_id},
-                headers=self.headers
+                headers=self.headers,
             )
             response.raise_for_status()
             return response.json()

@@ -2,7 +2,8 @@
 Wallet Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # Define all routes
 SERVICE_ROUTES = [
     # Health Check
@@ -10,115 +11,117 @@ SERVICE_ROUTES = [
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Basic health check"
+        "description": "Basic health check",
     },
-        {
-            "path": "/api/v1/wallets/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/wallets/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     # Wallet Management
     {
         "path": "/api/v1/wallets",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create new wallet"
+        "description": "Create new wallet",
     },
     {
         "path": "/api/v1/wallets/{wallet_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get wallet details"
+        "description": "Get wallet details",
     },
     {
         "path": "/api/v1/wallets",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List user wallets (with user_id query parameter)"
+        "description": "List user wallets (with user_id query parameter)",
     },
     {
         "path": "/api/v1/wallets/{wallet_id}/balance",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get wallet balance"
+        "description": "Get wallet balance",
     },
     # Wallet Operations
     {
         "path": "/api/v1/wallets/{wallet_id}/deposit",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Deposit funds to wallet"
+        "description": "Deposit funds to wallet",
     },
     {
         "path": "/api/v1/wallets/{wallet_id}/withdraw",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Withdraw funds from wallet"
+        "description": "Withdraw funds from wallet",
     },
     {
         "path": "/api/v1/wallets/{wallet_id}/consume",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Consume wallet balance"
+        "description": "Consume wallet balance",
     },
     {
         "path": "/api/v1/wallets/credits/consume",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Consume user credits (with user_id query parameter)"
+        "description": "Consume user credits (with user_id query parameter)",
     },
     {
         "path": "/api/v1/wallets/{wallet_id}/transfer",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Transfer funds between wallets"
+        "description": "Transfer funds between wallets",
     },
     {
         "path": "/api/v1/transactions/{transaction_id}/refund",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Refund transaction"
+        "description": "Refund transaction",
     },
     # Transaction History
     {
         "path": "/api/v1/wallets/{wallet_id}/transactions",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get wallet transaction history"
+        "description": "Get wallet transaction history",
     },
     {
         "path": "/api/v1/wallets/transactions",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user transaction history (with user_id query parameter)"
+        "description": "Get user transaction history (with user_id query parameter)",
     },
     # Statistics & Credits
     {
         "path": "/api/v1/wallets/{wallet_id}/statistics",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get wallet statistics"
+        "description": "Get wallet statistics",
     },
     {
         "path": "/api/v1/wallets/statistics",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user wallet statistics (with user_id query parameter)"
+        "description": "Get user wallet statistics (with user_id query parameter)",
     },
     {
         "path": "/api/v1/wallets/credits/balance",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user credit balance (with user_id query parameter)"
+        "description": "Get user credit balance (with user_id query parameter)",
     },
     {
         "path": "/api/v1/wallet/stats",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Get service statistics"
-    }
+        "description": "Get service statistics",
+    },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -140,7 +143,13 @@ def get_routes_for_consul() -> Dict[str, Any]:
             transaction_routes.append(compact_path)
         elif "statistics" in path or "stats" in path or "credits/balance" in path:
             stats_routes.append(compact_path)
-        elif "/deposit" in path or "/withdraw" in path or "/consume" in path or "/transfer" in path or "/refund" in path:
+        elif (
+            "/deposit" in path
+            or "/withdraw" in path
+            or "/consume" in path
+            or "/transfer" in path
+            or "/refund" in path
+        ):
             operation_routes.append(compact_path)
         elif path.startswith("/api/v1/wallets") or "/wallets" in path:
             wallet_routes.append(compact_path)
@@ -156,6 +165,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "wallet_service",
@@ -169,6 +180,6 @@ SERVICE_METADATA = {
         "transaction_history",
         "wallet_transfer",
         "transaction_refund",
-        "event_driven"
-    ]
+        "event_driven",
+    ],
 }

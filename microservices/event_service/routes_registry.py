@@ -2,125 +2,128 @@
 Event Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/events/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/events/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     # Event Management
     {
         "path": "/api/v1/events/create",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create single event"
+        "description": "Create single event",
     },
     {
         "path": "/api/v1/events/batch",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create batch events"
+        "description": "Create batch events",
     },
     {
         "path": "/api/v1/events/{event_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get single event by ID"
+        "description": "Get single event by ID",
     },
     {
         "path": "/api/v1/events/query",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Query events with filters"
+        "description": "Query events with filters",
     },
     {
         "path": "/api/v1/events/statistics",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get event statistics"
+        "description": "Get event statistics",
     },
     # Event Stream
     {
         "path": "/api/v1/events/stream/{stream_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get event stream"
+        "description": "Get event stream",
     },
     {
         "path": "/api/v1/events/replay",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Replay events"
+        "description": "Replay events",
     },
     # Event Projections
     {
         "path": "/api/v1/events/projections/{entity_type}/{entity_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get entity projection"
+        "description": "Get entity projection",
     },
     # Event Subscriptions
     {
         "path": "/api/v1/events/subscriptions",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create event subscriptions"
+        "description": "List/create event subscriptions",
     },
     {
         "path": "/api/v1/events/subscriptions/{subscription_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Delete event subscription"
+        "description": "Delete event subscription",
     },
     # Event Processors
     {
         "path": "/api/v1/events/processors",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/register event processors"
+        "description": "List/register event processors",
     },
     {
         "path": "/api/v1/events/processors/{processor_id}/toggle",
         "methods": ["PUT"],
         "auth_required": True,
-        "description": "Toggle event processor"
+        "description": "Toggle event processor",
     },
     # Frontend Event Collection
     {
         "path": "/api/v1/events/frontend",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Collect single frontend event"
+        "description": "Collect single frontend event",
     },
     {
         "path": "/api/v1/events/frontend/batch",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Collect batch frontend events"
+        "description": "Collect batch frontend events",
     },
     # Webhooks
     {
         "path": "/webhooks/rudderstack",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "RudderStack webhook endpoint"
+        "description": "RudderStack webhook endpoint",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -156,6 +159,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "event_service",
@@ -169,6 +174,6 @@ SERVICE_METADATA = {
         "event_subscriptions",
         "event_processors",
         "frontend_collection",
-        "rudderstack_integration"
-    ]
+        "rudderstack_integration",
+    ],
 }

@@ -23,12 +23,13 @@ class AccountClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
             self.config = None
         else:
             # Use ConfigManager for service discovery
             if config is None:
                 from core.config_manager import ConfigManager
+
                 config = ConfigManager("payment_service")
 
             self.config = config
@@ -45,14 +46,16 @@ class AccountClient:
         if self.config:
             try:
                 host, port = self.config.discover_service(
-                    service_name='account_service',
-                    default_host='localhost',
+                    service_name="account_service",
+                    default_host="localhost",
                     default_port=8202,
-                    env_host_key='ACCOUNT_SERVICE_HOST',
-                    env_port_key='ACCOUNT_SERVICE_PORT'
+                    env_host_key="ACCOUNT_SERVICE_HOST",
+                    env_port_key="ACCOUNT_SERVICE_PORT",
                 )
                 self.base_url = f"http://{host}:{port}"
-                logger.info(f"AccountClient discovered account_service at: {self.base_url}")
+                logger.info(
+                    f"AccountClient discovered account_service at: {self.base_url}"
+                )
                 return self.base_url
             except Exception as e:
                 logger.warning(f"Service discovery failed, using default: {e}")
@@ -94,7 +97,9 @@ class AccountClient:
             if e.response.status_code == 404:
                 logger.warning(f"User {user_id} not found in account service")
                 return None
-            logger.error(f"Failed to get user profile: {e.response.status_code} - {e.response.text}")
+            logger.error(
+                f"Failed to get user profile: {e.response.status_code} - {e.response.text}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting user profile: {e}")
@@ -159,5 +164,5 @@ class AccountClient:
             base_url = self._get_base_url()
             response = await self.client.get(f"{base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

@@ -28,7 +28,7 @@ See also: ``docs/prd/organization_service.md`` and
 
 from __future__ import annotations
 
-from typing import FrozenSet, Set
+from typing import FrozenSet
 
 # ----------------------------------------------------------------------------
 # Canonical role constants

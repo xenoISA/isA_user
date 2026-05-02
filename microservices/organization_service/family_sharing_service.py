@@ -10,20 +10,26 @@ Uses dependency injection for testability:
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 import uuid
 
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import FamilySharingRepositoryProtocol
 from .family_sharing_models import (
-    CreateSharingRequest, UpdateSharingRequest,
-    UpdateMemberSharingPermissionRequest, GetMemberSharedResourcesRequest,
-    SharingResourceResponse, MemberSharingPermissionResponse,
-    SharedResourceDetailResponse, MemberSharedResourcesResponse,
+    CreateSharingRequest,
+    UpdateSharingRequest,
+    UpdateMemberSharingPermissionRequest,
+    GetMemberSharedResourcesRequest,
+    SharingResourceResponse,
+    MemberSharingPermissionResponse,
+    SharedResourceDetailResponse,
+    MemberSharedResourcesResponse,
     SharingUsageStatsResponse,
-    SharingResourceType, SharingPermissionLevel, SharingStatus
+    SharingPermissionLevel,
+    SharingStatus,
 )
+
 # Import event bus components
 from core.nats_client import Event
 
@@ -32,21 +38,25 @@ logger = logging.getLogger(__name__)
 
 class FamilySharingServiceError(Exception):
     """家庭共享服务异常基类"""
+
     pass
 
 
 class SharingNotFoundError(FamilySharingServiceError):
     """共享不存在异常"""
+
     pass
 
 
 class SharingAccessDeniedError(FamilySharingServiceError):
     """共享访问被拒绝异常"""
+
     pass
 
 
 class SharingQuotaExceededError(FamilySharingServiceError):
     """共享配额超出异常"""
+
     pass
 
 
@@ -76,10 +86,7 @@ class FamilySharingService:
     # ============ 共享资源管理 ============
 
     async def create_sharing(
-        self,
-        organization_id: str,
-        request: CreateSharingRequest,
-        created_by: str
+        self, organization_id: str, request: CreateSharingRequest, created_by: str
     ) -> SharingResourceResponse:
         """
         创建共享资源
@@ -110,16 +117,22 @@ class FamilySharingService:
             sharing_data = {
                 "sharing_id": sharing_id,
                 "organization_id": organization_id,
-                "resource_type": request.resource_type.value if hasattr(request.resource_type, 'value') else request.resource_type,
+                "resource_type": request.resource_type.value
+                if hasattr(request.resource_type, "value")
+                else request.resource_type,
                 "resource_id": request.resource_id,
                 "resource_name": request.resource_name,
                 "created_by": created_by,
                 "share_with_all_members": request.share_with_all_members,
-                "default_permission": request.default_permission.value if hasattr(request.default_permission, 'value') else request.default_permission,
+                "default_permission": request.default_permission.value
+                if hasattr(request.default_permission, "value")
+                else request.default_permission,
                 "status": SharingStatus.ACTIVE.value,
                 "quota_settings": request.quota_settings or {},  # ✅ 确保不是 None
                 "restrictions": request.restrictions or {},  # ✅ 确保不是 None
-                "expires_at": request.expires_at.isoformat() if request.expires_at else None,
+                "expires_at": request.expires_at.isoformat()
+                if request.expires_at
+                else None,
                 "metadata": request.metadata or {}  # ✅ 确保不是 None
                 # ✅ 不传 created_at 和 updated_at，让数据库使用默认值
             }
@@ -129,7 +142,7 @@ class FamilySharingService:
 
             if not sharing:
                 raise FamilySharingServiceError(
-                    f"Failed to create sharing resource in database"
+                    "Failed to create sharing resource in database"
                 )
 
             # 如果指定了共享成员，创建成员权限
@@ -145,8 +158,10 @@ class FamilySharingService:
             # 如果共享给所有成员，为当前所有成员创建权限
             if request.share_with_all_members:
                 await self._grant_all_members_permission(
-                    organization_id, sharing_id, request.default_permission,
-                    request.quota_settings
+                    organization_id,
+                    sharing_id,
+                    request.default_permission,
+                    request.quota_settings,
                 )
 
             logger.info(
@@ -163,18 +178,26 @@ class FamilySharingService:
                         data={
                             "sharing_id": sharing_id,
                             "organization_id": organization_id,
-                            "resource_type": request.resource_type.value if hasattr(request.resource_type, 'value') else request.resource_type,
+                            "resource_type": request.resource_type.value
+                            if hasattr(request.resource_type, "value")
+                            else request.resource_type,
                             "resource_id": request.resource_id,
                             "resource_name": request.resource_name,
                             "created_by": created_by,
                             "share_with_all_members": request.share_with_all_members,
-                            "default_permission": request.default_permission.value if hasattr(request.default_permission, 'value') else request.default_permission,
-                            "shared_with_count": len(request.shared_with_members) if request.shared_with_members else 0,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                            "default_permission": request.default_permission.value
+                            if hasattr(request.default_permission, "value")
+                            else request.default_permission,
+                            "shared_with_count": len(request.shared_with_members)
+                            if request.shared_with_members
+                            else 0,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
-                    logger.info(f"Published family.resource_shared event for sharing {sharing_id}")
+                    logger.info(
+                        f"Published family.resource_shared event for sharing {sharing_id}"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to publish family.resource_shared event: {e}")
 
@@ -187,9 +210,7 @@ class FamilySharingService:
             raise FamilySharingServiceError(f"Failed to create sharing: {str(e)}")
 
     async def get_sharing(
-        self,
-        sharing_id: str,
-        user_id: Optional[str] = None
+        self, sharing_id: str, user_id: Optional[str] = None
     ) -> SharedResourceDetailResponse:
         """
         获取共享资源详情
@@ -229,7 +250,7 @@ class FamilySharingService:
                     MemberSharingPermissionResponse(**perm)
                     for perm in member_permissions
                 ],
-                usage_stats=usage_stats
+                usage_stats=usage_stats,
             )
 
         except Exception as e:
@@ -239,10 +260,7 @@ class FamilySharingService:
             raise FamilySharingServiceError(f"Failed to get sharing: {str(e)}")
 
     async def update_sharing(
-        self,
-        sharing_id: str,
-        request: UpdateSharingRequest,
-        updated_by: str
+        self, sharing_id: str, request: UpdateSharingRequest, updated_by: str
     ) -> SharingResourceResponse:
         """
         更新共享资源
@@ -274,14 +292,16 @@ class FamilySharingService:
             update_data["updated_at"] = datetime.utcnow()
 
             # 更新数据库
-            updated_sharing = await self.repository.update_sharing(sharing_id, update_data)
+            updated_sharing = await self.repository.update_sharing(
+                sharing_id, update_data
+            )
 
             # 如果更新了共享成员列表，同步更新成员权限
             if request.shared_with_members is not None:
                 await self._sync_member_permissions(
                     sharing_id,
                     request.shared_with_members,
-                    request.custom_permissions or {}
+                    request.custom_permissions or {},
                 )
 
             logger.info(f"Sharing updated | sharing_id={sharing_id}")
@@ -294,11 +314,7 @@ class FamilySharingService:
                 raise
             raise FamilySharingServiceError(f"Failed to update sharing: {str(e)}")
 
-    async def delete_sharing(
-        self,
-        sharing_id: str,
-        deleted_by: str
-    ) -> bool:
+    async def delete_sharing(self, sharing_id: str, deleted_by: str) -> bool:
         """
         删除共享资源
 
@@ -345,7 +361,7 @@ class FamilySharingService:
         self,
         sharing_id: str,
         request: UpdateMemberSharingPermissionRequest,
-        updated_by: str
+        updated_by: str,
     ) -> MemberSharingPermissionResponse:
         """
         更新成员共享权限
@@ -379,8 +395,8 @@ class FamilySharingService:
                 {
                     "permission_level": request.permission_level,
                     "quota_allocated": request.quota_override,
-                    "restrictions": request.restrictions_override
-                }
+                    "restrictions": request.restrictions_override,
+                },
             )
 
             logger.info(
@@ -394,13 +410,12 @@ class FamilySharingService:
             logger.error(f"Error updating member permission: {e}")
             if isinstance(e, FamilySharingServiceError):
                 raise
-            raise FamilySharingServiceError(f"Failed to update member permission: {str(e)}")
+            raise FamilySharingServiceError(
+                f"Failed to update member permission: {str(e)}"
+            )
 
     async def revoke_member_access(
-        self,
-        sharing_id: str,
-        user_id: str,
-        revoked_by: str
+        self, sharing_id: str, user_id: str, revoked_by: str
     ) -> bool:
         """
         撤销成员访问权限
@@ -428,7 +443,9 @@ class FamilySharingService:
                 )
 
             # 撤销权限
-            success = await self.repository.delete_member_permission(sharing_id, user_id)
+            success = await self.repository.delete_member_permission(
+                sharing_id, user_id
+            )
 
             logger.info(
                 f"Member access revoked | sharing_id={sharing_id} | user_id={user_id}"
@@ -443,9 +460,7 @@ class FamilySharingService:
             raise FamilySharingServiceError(f"Failed to revoke member access: {str(e)}")
 
     async def get_member_shared_resources(
-        self,
-        organization_id: str,
-        request: GetMemberSharedResourcesRequest
+        self, organization_id: str, request: GetMemberSharedResourcesRequest
     ) -> MemberSharedResourcesResponse:
         """
         获取成员的共享资源列表
@@ -465,26 +480,25 @@ class FamilySharingService:
                 resource_type=request.resource_type,
                 status=request.status,
                 limit=request.limit,
-                offset=request.offset
+                offset=request.offset,
             )
 
             total = await self.repository.count_member_permissions(
                 organization_id,
                 request.user_id,
                 resource_type=request.resource_type,
-                status=request.status
+                status=request.status,
             )
 
             return MemberSharedResourcesResponse(
                 user_id=request.user_id,
                 organization_id=organization_id,
                 shared_resources=[
-                    MemberSharingPermissionResponse(**perm)
-                    for perm in permissions
+                    MemberSharingPermissionResponse(**perm) for perm in permissions
                 ],
                 total=total,
                 limit=request.limit,
-                offset=request.offset
+                offset=request.offset,
             )
 
         except Exception as e:
@@ -502,7 +516,7 @@ class FamilySharingService:
         resource_type: Optional[str] = None,
         status: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[SharingResourceResponse]:
         """
         列出组织的所有共享资源
@@ -534,7 +548,7 @@ class FamilySharingService:
                 resource_type=resource_type,
                 status=status,
                 limit=limit,
-                offset=offset
+                offset=offset,
             )
 
             return [SharingResourceResponse(**sharing) for sharing in sharings]
@@ -548,9 +562,7 @@ class FamilySharingService:
             )
 
     async def get_sharing_usage_stats(
-        self,
-        sharing_id: str,
-        period_days: int = 30
+        self, sharing_id: str, period_days: int = 30
     ) -> SharingUsageStatsResponse:
         """
         获取共享资源使用统计
@@ -583,19 +595,13 @@ class FamilySharingService:
     # ============ 内部辅助方法 ============
 
     async def _check_organization_admin_permission(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> bool:
         """检查用户是否是组织管理员"""
         # Use repository to check admin permissions
         return await self.repository.check_organization_admin(organization_id, user_id)
 
-    async def _check_sharing_access(
-        self,
-        sharing_id: str,
-        user_id: str
-    ) -> bool:
+    async def _check_sharing_access(self, sharing_id: str, user_id: str) -> bool:
         """检查用户是否有访问共享资源的权限"""
         # 获取共享资源
         sharing = await self.repository.get_sharing(sharing_id)
@@ -622,20 +628,22 @@ class FamilySharingService:
         sharing_id: str,
         user_id: str,
         permission_level: SharingPermissionLevel,
-        quota_settings: Optional[Dict[str, Any]] = None
+        quota_settings: Optional[Dict[str, Any]] = None,
     ) -> None:
         """为成员授予共享权限"""
         permission_data = {
             "permission_id": str(uuid.uuid4()),
             "sharing_id": sharing_id,
             "user_id": user_id,
-            "permission_level": permission_level.value if hasattr(permission_level, 'value') else permission_level,
+            "permission_level": permission_level.value
+            if hasattr(permission_level, "value")
+            else permission_level,
             "quota_allocated": quota_settings or {},
             "quota_used": {},
             "is_active": True,
             "granted_at": datetime.utcnow().isoformat(),
             "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat(),
         }
         await self.repository.create_member_permission(permission_data)
 
@@ -644,7 +652,7 @@ class FamilySharingService:
         organization_id: str,
         sharing_id: str,
         permission_level: SharingPermissionLevel,
-        quota_settings: Optional[Dict[str, Any]] = None
+        quota_settings: Optional[Dict[str, Any]] = None,
     ) -> None:
         """为所有组织成员授予共享权限"""
         # 获取组织所有成员
@@ -652,21 +660,17 @@ class FamilySharingService:
 
         for member in members:
             await self._grant_member_permission(
-                sharing_id,
-                member["user_id"],
-                permission_level,
-                quota_settings
+                sharing_id, member["user_id"], permission_level, quota_settings
             )
 
     async def _sync_member_permissions(
-        self,
-        sharing_id: str,
-        member_ids: List[str],
-        custom_permissions: Dict[str, str]
+        self, sharing_id: str, member_ids: List[str], custom_permissions: Dict[str, str]
     ) -> None:
         """同步成员权限列表"""
         # 获取当前所有权限
-        current_permissions = await self.repository.get_sharing_member_permissions(sharing_id)
+        current_permissions = await self.repository.get_sharing_member_permissions(
+            sharing_id
+        )
         current_member_ids = {perm["user_id"] for perm in current_permissions}
 
         # 删除不在新列表中的成员权限
@@ -681,16 +685,10 @@ class FamilySharingService:
             await self._grant_member_permission(sharing_id, user_id, permission_level)
 
     async def _get_sharing_usage_stats(
-        self,
-        sharing_id: str,
-        period_days: int = 30
+        self, sharing_id: str, period_days: int = 30
     ) -> Dict[str, Any]:
         """获取共享使用统计（内部方法）"""
         # TODO: 根据资源类型，调用相应服务获取使用统计
         # 例如：storage_service, wallet_service, device_service 等
         # 暂时返回空字典
-        return {
-            "total_usage": {},
-            "member_usage": [],
-            "quota_utilization": 0.0
-        }
+        return {"total_usage": {}, "member_usage": [], "quota_utilization": 0.0}

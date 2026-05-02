@@ -6,7 +6,7 @@ Handles incoming events from other services.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from .models import (
     CampaignSubscribedEventType,
@@ -83,7 +83,9 @@ class CampaignEventHandler:
                 # Start campaign execution
                 campaign = await self.campaign_service.get_campaign(campaign_id)
                 # Trigger execution logic (would be implemented in execution module)
-                logger.info(f"Campaign {campaign_id} execution triggered by task {event_data.task_id}")
+                logger.info(
+                    f"Campaign {campaign_id} execution triggered by task {event_data.task_id}"
+                )
 
         except Exception as e:
             logger.error(f"Error handling task.executed: {e}", exc_info=True)
@@ -153,7 +155,11 @@ class CampaignEventHandler:
 
             if event_data.bounce_type:
                 # Handle bounce
-                bounce_type = BounceType(event_data.bounce_type) if event_data.bounce_type else BounceType.SOFT
+                bounce_type = (
+                    BounceType(event_data.bounce_type)
+                    if event_data.bounce_type
+                    else BounceType.SOFT
+                )
                 await self.repository.update_message_status(
                     event_data.message_id,
                     MessageStatus.BOUNCED,

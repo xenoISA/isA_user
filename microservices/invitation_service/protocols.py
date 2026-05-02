@@ -3,8 +3,7 @@ Invitation Service Protocols - DI Interfaces
 
 All dependencies defined as Protocol classes for testability.
 """
-from typing import Protocol, runtime_checkable, Optional, Dict, Any, List, Tuple
-from datetime import datetime
+from typing import Protocol, runtime_checkable, Optional, Dict, Any, List
 
 
 @runtime_checkable
@@ -12,24 +11,16 @@ class InvitationRepositoryProtocol(Protocol):
     """Repository interface for invitation data access"""
 
     async def create_invitation(
-        self,
-        organization_id: str,
-        email: str,
-        role: Any,
-        invited_by: str
+        self, organization_id: str, email: str, role: Any, invited_by: str
     ) -> Optional[Any]:
         """Create new invitation and return InvitationResponse"""
         ...
 
-    async def get_invitation_by_id(
-        self, invitation_id: str
-    ) -> Optional[Any]:
+    async def get_invitation_by_id(self, invitation_id: str) -> Optional[Any]:
         """Get invitation by ID"""
         ...
 
-    async def get_invitation_by_token(
-        self, invitation_token: str
-    ) -> Optional[Any]:
+    async def get_invitation_by_token(self, invitation_token: str) -> Optional[Any]:
         """Get invitation by token"""
         ...
 
@@ -79,9 +70,7 @@ class InvitationRepositoryProtocol(Protocol):
         """Get invitation statistics"""
         ...
 
-    async def cancel_organization_invitations(
-        self, organization_id: str
-    ) -> int:
+    async def cancel_organization_invitations(self, organization_id: str) -> int:
         """Cancel all pending invitations for an organization"""
         ...
 
@@ -98,9 +87,7 @@ class EventBusProtocol(Protocol):
         """Publish event to NATS"""
         ...
 
-    async def subscribe(
-        self, subject: str, callback: Any
-    ) -> None:
+    async def subscribe(self, subject: str, callback: Any) -> None:
         """Subscribe to NATS subject"""
         ...
 
@@ -119,37 +106,25 @@ class OrganizationClientProtocol(Protocol):
         """Get organization info"""
         ...
 
-    async def get_organization_name(
-        self, organization_id: str
-    ) -> Optional[str]:
+    async def get_organization_name(self, organization_id: str) -> Optional[str]:
         """Get organization name"""
         ...
 
-    async def can_user_invite(
-        self, user_id: str, organization_id: str
-    ) -> bool:
+    async def can_user_invite(self, user_id: str, organization_id: str) -> bool:
         """Check if user can invite to organization"""
         ...
 
-    async def is_user_member(
-        self, user_id: str, organization_id: str
-    ) -> bool:
+    async def is_user_member(self, user_id: str, organization_id: str) -> bool:
         """Check if user is already a member"""
         ...
 
     async def add_member_to_organization(
-        self,
-        organization_id: str,
-        user_id: str,
-        role: str,
-        invited_by: Optional[str]
+        self, organization_id: str, user_id: str, role: str, invited_by: Optional[str]
     ) -> bool:
         """Add user as organization member"""
         ...
 
-    async def get_organization_member_count(
-        self, organization_id: str
-    ) -> int:
+    async def get_organization_member_count(self, organization_id: str) -> int:
         """Get current member count"""
         ...
 
@@ -162,21 +137,15 @@ class OrganizationClientProtocol(Protocol):
 class AccountClientProtocol(Protocol):
     """Client interface for account service calls"""
 
-    async def get_user_by_email(
-        self, email: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """Get user by email"""
         ...
 
-    async def get_user_by_id(
-        self, user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get user by ID"""
         ...
 
-    async def verify_user_email(
-        self, user_id: str, email: str
-    ) -> bool:
+    async def verify_user_email(self, user_id: str, email: str) -> bool:
         """Verify user's email matches"""
         ...
 

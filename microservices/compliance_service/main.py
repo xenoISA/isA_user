@@ -1009,9 +1009,9 @@ async def check_card_data_exposure(
 ):
     """
     **PCI-DSS Requirement 3: Protect Stored Cardholder Data**
-    
+
     Check if content contains credit card information that should be protected.
-    
+
     **Example:**
     ```bash
     curl -X POST http://localhost:8250/api/compliance/pci/card-data-check \

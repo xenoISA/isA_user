@@ -2,7 +2,8 @@
 Payment Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # Define all routes
 SERVICE_ROUTES = [
     # Health and Service Info
@@ -10,172 +11,254 @@ SERVICE_ROUTES = [
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Health check endpoint"
+        "description": "Health check endpoint",
     },
-        {
-            "path": "/api/v1/payment/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/payment/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/api/v1/payment/info",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service information"
+        "description": "Service information",
     },
     {
         "path": "/api/v1/payment/stats",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Service statistics"
+        "description": "Service statistics",
     },
     # Subscription Plans
     {
         "path": "/api/v1/payment/plans",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create subscription plan"
+        "description": "Create subscription plan",
     },
     {
         "path": "/api/v1/payment/plans/{plan_id}",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Get subscription plan"
+        "description": "Get subscription plan",
     },
     {
         "path": "/api/v1/payment/plans",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "List subscription plans"
+        "description": "List subscription plans",
     },
     # Subscriptions
     {
         "path": "/api/v1/payment/subscriptions",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create subscription"
+        "description": "Create subscription",
     },
     {
         "path": "/api/v1/payment/subscriptions/user/{user_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user subscription"
+        "description": "Get user subscription",
     },
     {
         "path": "/api/v1/payment/subscriptions/{subscription_id}",
         "methods": ["PUT"],
         "auth_required": True,
-        "description": "Update subscription"
+        "description": "Update subscription",
     },
     {
         "path": "/api/v1/payment/subscriptions/{subscription_id}/cancel",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Cancel subscription"
+        "description": "Cancel subscription",
     },
     # Payments
     {
         "path": "/api/v1/payment/payments/intent",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create payment intent"
+        "description": "Create payment intent",
     },
     {
         "path": "/api/v1/payment/payments/{payment_id}/confirm",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Confirm payment"
+        "description": "Confirm payment",
     },
     {
         "path": "/api/v1/payment/payments/{payment_id}/fail",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Mark payment as failed"
+        "description": "Mark payment as failed",
     },
     {
         "path": "/api/v1/payment/payments/user/{user_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user payment history"
+        "description": "Get user payment history",
     },
     # Invoices
     {
         "path": "/api/v1/payment/invoices",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create invoice"
+        "description": "Create invoice",
     },
     {
         "path": "/api/v1/payment/invoices/{invoice_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get invoice"
+        "description": "Get invoice",
     },
     {
         "path": "/api/v1/payment/invoices/{invoice_id}/pay",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Pay invoice"
+        "description": "Pay invoice",
     },
     # Refunds
     {
         "path": "/api/v1/payment/refunds",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create refund"
+        "description": "Create refund",
     },
     {
         "path": "/api/v1/payment/refunds/{refund_id}/process",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Process refund"
+        "description": "Process refund",
     },
     # Webhooks & Usage
     {
         "path": "/api/v1/payment/webhooks/stripe",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Stripe webhook handler"
+        "description": "Stripe webhook handler",
     },
     {
         "path": "/api/v1/payment/usage",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Record usage"
+        "description": "Record usage",
     },
     # Statistics
     {
         "path": "/api/v1/payment/stats/revenue",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get revenue statistics"
+        "description": "Get revenue statistics",
     },
     {
         "path": "/api/v1/payment/stats/subscriptions",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get subscription statistics"
+        "description": "Get subscription statistics",
     },
     # Crypto Payments
-    {"path": "/crypto/info", "methods": ["GET"], "auth_required": False, "description": "Crypto service info"},
-    {"path": "/crypto/providers", "methods": ["GET"], "auth_required": False, "description": "List crypto providers"},
-    {"path": "/crypto/chains", "methods": ["GET"], "auth_required": False, "description": "List supported chains"},
-    {"path": "/crypto/tokens", "methods": ["GET"], "auth_required": False, "description": "List supported tokens"},
-    {"path": "/crypto/payments", "methods": ["POST"], "auth_required": True, "description": "Create crypto payment"},
-    {"path": "/crypto/payments/{payment_id}", "methods": ["GET"], "auth_required": True, "description": "Get crypto payment"},
-    {"path": "/crypto/payments/{payment_id}/status", "methods": ["GET"], "auth_required": True, "description": "Check crypto payment status"},
-    {"path": "/crypto/payments/{payment_id}/cancel", "methods": ["POST"], "auth_required": True, "description": "Cancel crypto payment"},
-    {"path": "/crypto/users/{user_id}/payments", "methods": ["GET"], "auth_required": True, "description": "Get user crypto payments"},
-    {"path": "/crypto/refunds", "methods": ["POST"], "auth_required": True, "description": "Create crypto refund"},
-    {"path": "/crypto/webhooks/coinbase", "methods": ["POST"], "auth_required": False, "description": "Coinbase webhook"},
-    {"path": "/crypto/health", "methods": ["GET"], "auth_required": False, "description": "Crypto health check"},
+    {
+        "path": "/crypto/info",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Crypto service info",
+    },
+    {
+        "path": "/crypto/providers",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "List crypto providers",
+    },
+    {
+        "path": "/crypto/chains",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "List supported chains",
+    },
+    {
+        "path": "/crypto/tokens",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "List supported tokens",
+    },
+    {
+        "path": "/crypto/payments",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Create crypto payment",
+    },
+    {
+        "path": "/crypto/payments/{payment_id}",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get crypto payment",
+    },
+    {
+        "path": "/crypto/payments/{payment_id}/status",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Check crypto payment status",
+    },
+    {
+        "path": "/crypto/payments/{payment_id}/cancel",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Cancel crypto payment",
+    },
+    {
+        "path": "/crypto/users/{user_id}/payments",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get user crypto payments",
+    },
+    {
+        "path": "/crypto/refunds",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Create crypto refund",
+    },
+    {
+        "path": "/crypto/webhooks/coinbase",
+        "methods": ["POST"],
+        "auth_required": False,
+        "description": "Coinbase webhook",
+    },
+    {
+        "path": "/crypto/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Crypto health check",
+    },
     # Blockchain Integration
-    {"path": "/blockchain/payment", "methods": ["POST"], "auth_required": True, "description": "Blockchain payment"},
-    {"path": "/blockchain/payment/{tx_hash}/verify", "methods": ["GET"], "auth_required": True, "description": "Verify blockchain tx"},
-    {"path": "/blockchain/refund", "methods": ["POST"], "auth_required": True, "description": "Blockchain refund"},
-    {"path": "/blockchain/subscription/{user_address}/{service_id}", "methods": ["GET"], "auth_required": True, "description": "Blockchain subscription status"},
+    {
+        "path": "/blockchain/payment",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Blockchain payment",
+    },
+    {
+        "path": "/blockchain/payment/{tx_hash}/verify",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Verify blockchain tx",
+    },
+    {
+        "path": "/blockchain/refund",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Blockchain refund",
+    },
+    {
+        "path": "/blockchain/subscription/{user_address}/{service_id}",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Blockchain subscription status",
+    },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -233,6 +316,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "payment_service",
@@ -248,6 +333,6 @@ SERVICE_METADATA = {
         "usage_tracking",
         "revenue_analytics",
         "crypto_payments",
-        "blockchain_integration"
-    ]
+        "blockchain_integration",
+    ],
 }

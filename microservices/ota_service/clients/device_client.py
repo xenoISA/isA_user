@@ -23,11 +23,12 @@ class DeviceClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("device_service")
             except Exception as e:
@@ -88,7 +89,7 @@ class DeviceClient:
             device = await self.get_device(device_id)
             if device:
                 # Assuming device has a firmware_version or current_version field
-                return device.get('firmware_version') or device.get('current_version')
+                return device.get("firmware_version") or device.get("current_version")
             return None
 
         except Exception as e:
@@ -99,7 +100,7 @@ class DeviceClient:
         self,
         device_id: str,
         device_model: str,
-        min_hardware_version: Optional[str] = None
+        min_hardware_version: Optional[str] = None,
     ) -> bool:
         """
         Check if firmware is compatible with device
@@ -119,7 +120,7 @@ class DeviceClient:
                 return False
 
             # Check device model match
-            if device.get('model') != device_model:
+            if device.get("model") != device_model:
                 logger.warning(
                     f"Device model mismatch: device has {device.get('model')}, "
                     f"firmware requires {device_model}"
@@ -128,7 +129,7 @@ class DeviceClient:
 
             # Check hardware version if specified
             if min_hardware_version:
-                device_hw_version = device.get('hardware_version')
+                device_hw_version = device.get("hardware_version")
                 if not device_hw_version:
                     logger.warning(f"Device {device_id} has no hardware_version")
                     return True  # Allow if hw version not specified
@@ -148,9 +149,7 @@ class DeviceClient:
             return False
 
     async def update_device_firmware_version(
-        self,
-        device_id: str,
-        firmware_version: str
+        self, device_id: str, firmware_version: str
     ) -> bool:
         """
         Update device's firmware version record
@@ -163,20 +162,21 @@ class DeviceClient:
             True if successful
         """
         try:
-            payload = {
-                "firmware_version": firmware_version
-            }
+            payload = {"firmware_version": firmware_version}
 
             response = await self.client.patch(
-                f"{self.base_url}/api/v1/devices/{device_id}",
-                json=payload
+                f"{self.base_url}/api/v1/devices/{device_id}", json=payload
             )
             response.raise_for_status()
-            logger.info(f"Updated device {device_id} firmware version to {firmware_version}")
+            logger.info(
+                f"Updated device {device_id} firmware version to {firmware_version}"
+            )
             return True
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to update device firmware version: {e.response.status_code}")
+            logger.error(
+                f"Failed to update device firmware version: {e.response.status_code}"
+            )
             return False
         except Exception as e:
             logger.error(f"Error updating device firmware version: {e}")
@@ -187,5 +187,5 @@ class DeviceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

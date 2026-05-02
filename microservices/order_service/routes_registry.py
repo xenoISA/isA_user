@@ -2,70 +2,71 @@
 Order Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/orders/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/orders/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Detailed health check"
+        "description": "Detailed health check",
     },
     # Order Management
     {
         "path": "/api/v1/orders",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create orders"
+        "description": "List/create orders",
     },
     {
         "path": "/api/v1/orders/{order_id}",
         "methods": ["GET", "PUT"],
         "auth_required": True,
-        "description": "Get/update order"
+        "description": "Get/update order",
     },
     {
         "path": "/api/v1/orders/{order_id}/cancel",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Cancel order"
+        "description": "Cancel order",
     },
     {
         "path": "/api/v1/orders/{order_id}/complete",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Complete order"
+        "description": "Complete order",
     },
     # Order Search & Statistics
     {
         "path": "/api/v1/orders/search",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Search orders"
+        "description": "Search orders",
     },
     {
         "path": "/api/v1/orders/statistics",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get order statistics"
+        "description": "Get order statistics",
     },
     # User & Payment Related
     # Note: User orders can be retrieved using GET /api/v1/orders?user_id={user_id}
@@ -74,22 +75,24 @@ SERVICE_ROUTES = [
         "path": "/api/v1/payments/{payment_intent_id}/orders",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get orders by payment"
+        "description": "Get orders by payment",
     },
     {
         "path": "/api/v1/subscriptions/{subscription_id}/orders",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get orders by subscription"
+        "description": "Get orders by subscription",
     },
     # Order Info
     {
         "path": "/api/v1/order/info",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get order information"
+        "description": "Get order information",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -122,6 +125,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "order_service",
@@ -134,6 +139,6 @@ SERVICE_METADATA = {
         "order_statistics",
         "order_cancellation",
         "payment_integration",
-        "subscription_orders"
-    ]
+        "subscription_orders",
+    ],
 }

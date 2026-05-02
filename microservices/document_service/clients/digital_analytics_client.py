@@ -6,7 +6,7 @@ Document Service - Digital Analytics Service Client
 """
 
 import logging
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 from core.config_manager import ConfigManager

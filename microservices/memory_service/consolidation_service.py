@@ -20,9 +20,9 @@ Fixes #118
 import json
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from isa_model.inference_client import AsyncISAModel
 
@@ -197,22 +197,22 @@ class ConsolidationService:
 
             try:
                 filter_conditions = {
-                    "must": [
-                        {"field": "user_id", "match": {"keyword": mem["user_id"]}}
-                    ]
+                    "must": [{"field": "user_id", "match": {"keyword": mem["user_id"]}}]
                 }
 
                 async with self.episodic_service.qdrant:
-                    search_results = await self.episodic_service.qdrant.search_with_filter(
-                        collection_name="episodic_memories",
-                        vector=embedding,
-                        filter_conditions=filter_conditions,
-                        limit=cfg.max_cluster_size,
-                        score_threshold=cfg.similarity_threshold,
-                        with_payload=True,
+                    search_results = (
+                        await self.episodic_service.qdrant.search_with_filter(
+                            collection_name="episodic_memories",
+                            vector=embedding,
+                            filter_conditions=filter_conditions,
+                            limit=cfg.max_cluster_size,
+                            score_threshold=cfg.similarity_threshold,
+                            with_payload=True,
+                        )
                     )
 
-                for result in (search_results or []):
+                for result in search_results or []:
                     rid = str(result["id"])
                     if rid in candidate_ids and rid != mem["id"]:
                         union(mem["id"], rid)
@@ -235,7 +235,9 @@ class ConsolidationService:
             if cluster_members:
                 clusters.append(cluster_members)
 
-        logger.info(f"Created {len(clusters)} clusters from {len(candidates)} candidates")
+        logger.info(
+            f"Created {len(clusters)} clusters from {len(candidates)} candidates"
+        )
         return clusters
 
     async def consolidate_cluster(
@@ -317,10 +319,16 @@ class ConsolidationService:
                                     "vector": embedding,
                                     "payload": {
                                         "user_id": user_id,
-                                        "concept_type": llm_result.get("concept_type", "consolidated"),
-                                        "category": llm_result.get("category", "general"),
+                                        "concept_type": llm_result.get(
+                                            "concept_type", "consolidated"
+                                        ),
+                                        "category": llm_result.get(
+                                            "category", "general"
+                                        ),
                                         "abstraction_level": "high",
-                                        "created_at": datetime.now(timezone.utc).isoformat(),
+                                        "created_at": datetime.now(
+                                            timezone.utc
+                                        ).isoformat(),
                                     },
                                 }
                             ],
@@ -340,40 +348,46 @@ class ConsolidationService:
                         user_id,
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to tag episodic {ep_mem['id']} as consolidated: {e}")
+                    logger.warning(
+                        f"Failed to tag episodic {ep_mem['id']} as consolidated: {e}"
+                    )
 
             # Step d: Create bidirectional associations
             for ep_id in source_ids:
                 try:
                     # Forward: semantic -> episodic (consolidated_from)
                     forward_id = str(uuid.uuid4())
-                    await self.association_service.repository.create({
-                        "id": forward_id,
-                        "user_id": user_id,
-                        "source_memory_type": "semantic",
-                        "source_memory_id": semantic_id,
-                        "target_memory_type": "episodic",
-                        "target_memory_id": ep_id,
-                        "association_type": "consolidated_from",
-                        "strength": 1.0,
-                        "auto_discovered": True,
-                        "confirmation_count": 0,
-                    })
+                    await self.association_service.repository.create(
+                        {
+                            "id": forward_id,
+                            "user_id": user_id,
+                            "source_memory_type": "semantic",
+                            "source_memory_id": semantic_id,
+                            "target_memory_type": "episodic",
+                            "target_memory_id": ep_id,
+                            "association_type": "consolidated_from",
+                            "strength": 1.0,
+                            "auto_discovered": True,
+                            "confirmation_count": 0,
+                        }
+                    )
 
                     # Reverse: episodic -> semantic (consolidated_into)
                     reverse_id = str(uuid.uuid4())
-                    await self.association_service.repository.create({
-                        "id": reverse_id,
-                        "user_id": user_id,
-                        "source_memory_type": "episodic",
-                        "source_memory_id": ep_id,
-                        "target_memory_type": "semantic",
-                        "target_memory_id": semantic_id,
-                        "association_type": "consolidated_into",
-                        "strength": 1.0,
-                        "auto_discovered": True,
-                        "confirmation_count": 0,
-                    })
+                    await self.association_service.repository.create(
+                        {
+                            "id": reverse_id,
+                            "user_id": user_id,
+                            "source_memory_type": "episodic",
+                            "source_memory_id": ep_id,
+                            "target_memory_type": "semantic",
+                            "target_memory_id": semantic_id,
+                            "association_type": "consolidated_into",
+                            "strength": 1.0,
+                            "auto_discovered": True,
+                            "confirmation_count": 0,
+                        }
+                    )
                 except Exception as e:
                     logger.warning(
                         f"Failed to create association for episodic {ep_id}: {e}"
@@ -447,7 +461,9 @@ class ConsolidationService:
             if cluster_result["success"]:
                 result["consolidated_count"] += 1
                 result["new_semantic_ids"].append(cluster_result["semantic_memory_id"])
-                result["source_episodic_ids"].extend(cluster_result["source_episodic_ids"])
+                result["source_episodic_ids"].extend(
+                    cluster_result["source_episodic_ids"]
+                )
 
         logger.info(
             f"Consolidation complete for user {user_id}: "

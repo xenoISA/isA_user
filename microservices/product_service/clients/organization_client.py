@@ -22,11 +22,12 @@ class OrganizationClient:
             base_url: Organization service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("organization_service")
             except Exception as e:
@@ -67,7 +68,9 @@ class OrganizationClient:
             if e.response.status_code == 404:
                 logger.warning(f"Organization {organization_id} not found")
                 return None
-            logger.error(f"Failed to get organization {organization_id}: {e.response.status_code}")
+            logger.error(
+                f"Failed to get organization {organization_id}: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting organization {organization_id}: {e}")
@@ -86,7 +89,9 @@ class OrganizationClient:
         org = await self.get_organization(organization_id)
         return org is not None
 
-    async def get_organization_members(self, organization_id: str) -> Optional[List[Dict[str, Any]]]:
+    async def get_organization_members(
+        self, organization_id: str
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         Get organization members
 
@@ -107,16 +112,16 @@ class OrganizationClient:
             if e.response.status_code == 404:
                 logger.warning(f"Organization {organization_id} not found")
                 return None
-            logger.error(f"Failed to get organization members: {e.response.status_code}")
+            logger.error(
+                f"Failed to get organization members: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting organization members: {e}")
             return None
 
     async def check_user_in_organization(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> bool:
         """
         Check if user is member of organization
@@ -149,5 +154,5 @@ class OrganizationClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

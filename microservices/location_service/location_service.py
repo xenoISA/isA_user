@@ -5,30 +5,23 @@ Coordinates location tracking, geofencing, and spatial operations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from core.nats_client import Event
 
 from .location_repository import LocationRepository
 from .models import (
     GeofenceCreateRequest,
-    GeofenceResponse,
     GeofenceShapeType,
     GeofenceUpdateRequest,
     LocationBatchRequest,
-    LocationEventType,
-    LocationMethod,
     LocationOperationResult,
     LocationReportRequest,
-    LocationResponse,
     NearbySearchRequest,
     PlaceCreateRequest,
-    PlaceResponse,
     PlaceUpdateRequest,
-    PolygonSearchRequest,
     RadiusSearchRequest,
-    RouteResponse,
 )
 
 logger = logging.getLogger(__name__)

@@ -6,13 +6,14 @@ Event data models for weather-related events.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class WeatherEventType(str, Enum):
     """
@@ -21,18 +22,21 @@ class WeatherEventType(str, Enum):
     Stream: weather-stream
     Subjects: weather.>
     """
+
     WEATHER_DATA_FETCHED = "weather.data.fetched"
     WEATHER_ALERT_CREATED = "weather.alert.created"
 
 
 class WeatherSubscribedEventType(str, Enum):
     """Events that weather_service subscribes to from other services."""
+
     DEVICE_REGISTERED = "device.registered"
     LOCATION_UPDATED = "location.updated"
 
 
 class WeatherStreamConfig:
     """Stream configuration for weather_service"""
+
     STREAM_NAME = "weather-stream"
     SUBJECTS = ["weather.>"]
     MAX_MESSAGES = 100000

@@ -25,11 +25,12 @@ class BillingClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("billing_service")
             except Exception as e:
@@ -56,7 +57,7 @@ class BillingClient:
         currency: str = "USD",
         payment_id: Optional[str] = None,
         subscription_id: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create billing record
@@ -80,12 +81,11 @@ class BillingClient:
                 "payment_id": payment_id,
                 "subscription_id": subscription_id,
                 "description": description,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/billing/records",
-                json=payload
+                f"{self.base_url}/api/v1/billing/records", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -98,9 +98,7 @@ class BillingClient:
             return None
 
     async def get_billing_history(
-        self,
-        user_id: str,
-        limit: int = 100
+        self, user_id: str, limit: int = 100
     ) -> Optional[list]:
         """
         Get billing history for user
@@ -115,8 +113,7 @@ class BillingClient:
         try:
             params = {"limit": limit}
             response = await self.client.get(
-                f"{self.base_url}/api/v1/billing/users/{user_id}/history",
-                params=params
+                f"{self.base_url}/api/v1/billing/users/{user_id}/history", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -135,5 +132,5 @@ class BillingClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

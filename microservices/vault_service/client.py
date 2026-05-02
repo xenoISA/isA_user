@@ -24,7 +24,7 @@ class VaultServiceClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via ConfigManager
             if config is None:
@@ -32,11 +32,11 @@ class VaultServiceClient:
 
             try:
                 host, port = config.discover_service(
-                    service_name='vault_service',
-                    default_host='localhost',
+                    service_name="vault_service",
+                    default_host="localhost",
                     default_port=8214,
-                    env_host_key='VAULT_SERVICE_HOST',
-                    env_port_key='VAULT_SERVICE_PORT'
+                    env_host_key="VAULT_SERVICE_HOST",
+                    env_port_key="VAULT_SERVICE_PORT",
                 )
                 self.base_url = f"http://{host}:{port}"
                 logger.info(f"Vault service discovered at {self.base_url}")
@@ -68,7 +68,7 @@ class VaultServiceClient:
         user_id: str,
         description: Optional[str] = None,
         tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create new secret
@@ -99,7 +99,7 @@ class VaultServiceClient:
             payload = {
                 "secret_type": secret_type,
                 "secret_name": secret_name,
-                "secret_value": secret_value
+                "secret_value": secret_value,
             }
 
             if description:
@@ -112,7 +112,7 @@ class VaultServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/vault/secrets",
                 json=payload,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -125,10 +125,7 @@ class VaultServiceClient:
             return None
 
     async def get_secret(
-        self,
-        vault_id: str,
-        user_id: str,
-        include_value: bool = True
+        self, vault_id: str, user_id: str, include_value: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
         Get secret by ID
@@ -150,7 +147,7 @@ class VaultServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/vault/secrets/{vault_id}",
                 params=params,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -168,7 +165,7 @@ class VaultServiceClient:
         secret_type: Optional[str] = None,
         tags: Optional[List[str]] = None,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
     ) -> Optional[Dict[str, Any]]:
         """
         List user secrets
@@ -187,10 +184,7 @@ class VaultServiceClient:
             >>> secrets = await client.list_secrets("user123", secret_type="api_key")
         """
         try:
-            params = {
-                "page": page,
-                "page_size": page_size
-            }
+            params = {"page": page, "page_size": page_size}
 
             if secret_type:
                 params["secret_type"] = secret_type
@@ -200,7 +194,7 @@ class VaultServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/vault/secrets",
                 params=params,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -220,7 +214,7 @@ class VaultServiceClient:
         secret_name: Optional[str] = None,
         description: Optional[str] = None,
         tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Update secret
@@ -262,7 +256,7 @@ class VaultServiceClient:
             response = await self.client.put(
                 f"{self.base_url}/api/v1/vault/secrets/{vault_id}",
                 json=payload,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -274,11 +268,7 @@ class VaultServiceClient:
             logger.error(f"Error updating secret: {e}")
             return None
 
-    async def delete_secret(
-        self,
-        vault_id: str,
-        user_id: str
-    ) -> bool:
+    async def delete_secret(self, vault_id: str, user_id: str) -> bool:
         """
         Delete secret
 
@@ -295,7 +285,7 @@ class VaultServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/v1/vault/secrets/{vault_id}",
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return True
@@ -308,9 +298,7 @@ class VaultServiceClient:
             return False
 
     async def rotate_secret(
-        self,
-        vault_id: str,
-        user_id: str
+        self, vault_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Rotate secret (generate new version)
@@ -328,7 +316,7 @@ class VaultServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/vault/secrets/{vault_id}/rotate",
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -350,7 +338,7 @@ class VaultServiceClient:
         share_with_user_id: str,
         user_id: str,
         permission: str = "read",
-        expires_in_days: Optional[int] = None
+        expires_in_days: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Share secret with another user
@@ -377,7 +365,7 @@ class VaultServiceClient:
         try:
             payload = {
                 "share_with_user_id": share_with_user_id,
-                "permission": permission
+                "permission": permission,
             }
 
             if expires_in_days:
@@ -386,7 +374,7 @@ class VaultServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/vault/secrets/{vault_id}/share",
                 json=payload,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -398,10 +386,7 @@ class VaultServiceClient:
             logger.error(f"Error sharing secret: {e}")
             return None
 
-    async def get_shared_secrets(
-        self,
-        user_id: str
-    ) -> Optional[List[Dict[str, Any]]]:
+    async def get_shared_secrets(self, user_id: str) -> Optional[List[Dict[str, Any]]]:
         """
         Get secrets shared with user
 
@@ -416,8 +401,7 @@ class VaultServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/vault/shared",
-                headers={"X-User-Id": user_id}
+                f"{self.base_url}/api/v1/vault/shared", headers={"X-User-Id": user_id}
             )
             response.raise_for_status()
             return response.json()
@@ -438,7 +422,7 @@ class VaultServiceClient:
         user_id: str,
         vault_id: Optional[str] = None,
         action: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get audit logs
@@ -466,7 +450,7 @@ class VaultServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/vault/audit-logs",
                 params=params,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -478,10 +462,7 @@ class VaultServiceClient:
             logger.error(f"Error getting audit logs: {e}")
             return None
 
-    async def get_vault_stats(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_vault_stats(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get vault statistics
 
@@ -496,8 +477,7 @@ class VaultServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/vault/stats",
-                headers={"X-User-Id": user_id}
+                f"{self.base_url}/api/v1/vault/stats", headers={"X-User-Id": user_id}
             )
             response.raise_for_status()
             return response.json()
@@ -514,10 +494,7 @@ class VaultServiceClient:
     # =============================================================================
 
     async def test_secret(
-        self,
-        vault_id: str,
-        user_id: str,
-        test_endpoint: Optional[str] = None
+        self, vault_id: str, user_id: str, test_endpoint: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Test secret (verify it works)
@@ -541,7 +518,7 @@ class VaultServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/vault/secrets/{vault_id}/test",
                 json=payload,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -567,7 +544,7 @@ class VaultServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

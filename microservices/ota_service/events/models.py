@@ -6,10 +6,12 @@ Pydantic models for all events published by OTA Service
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class OtaEventType(str, Enum):
     """
@@ -18,6 +20,7 @@ class OtaEventType(str, Enum):
     Stream: ota-stream
     Subjects: ota.>
     """
+
     FIRMWARE_UPLOADED = "firmware.uploaded"
     FIRMWARE_DELETED = "firmware.deleted"
     CAMPAIGN_CREATED = "campaign.created"
@@ -30,19 +33,18 @@ class OtaEventType(str, Enum):
 
 class OtaSubscribedEventType(str, Enum):
     """Events that ota_service subscribes to from other services."""
+
     DEVICE_REGISTERED = "device.registered"
     DEVICE_ONLINE = "device.online"
 
 
 class OtaStreamConfig:
     """Stream configuration for ota_service"""
+
     STREAM_NAME = "ota-stream"
     SUBJECTS = ["ota.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "ota"
-
-from typing import Optional, Dict, Any, List
-from datetime import datetime
 
 
 class FirmwareUploadedEvent(BaseModel):
@@ -53,7 +55,9 @@ class FirmwareUploadedEvent(BaseModel):
     version: str = Field(..., description="Firmware version")
     device_model: str = Field(..., description="Target device model")
     file_size: int = Field(..., description="File size in bytes")
-    is_security_update: bool = Field(default=False, description="Is this a security update")
+    is_security_update: bool = Field(
+        default=False, description="Is this a security update"
+    )
     uploaded_by: str = Field(..., description="User ID who uploaded")
     timestamp: str = Field(..., description="Upload timestamp")
 
@@ -66,8 +70,12 @@ class CampaignCreatedEvent(BaseModel):
     firmware_id: str = Field(..., description="Firmware ID to deploy")
     firmware_version: str = Field(..., description="Firmware version")
     target_device_count: int = Field(..., description="Number of target devices")
-    deployment_strategy: str = Field(..., description="Deployment strategy (staged/immediate/scheduled)")
-    priority: str = Field(..., description="Campaign priority (low/normal/high/critical)")
+    deployment_strategy: str = Field(
+        ..., description="Deployment strategy (staged/immediate/scheduled)"
+    )
+    priority: str = Field(
+        ..., description="Campaign priority (low/normal/high/critical)"
+    )
     created_by: str = Field(..., description="User ID who created")
     timestamp: str = Field(..., description="Creation timestamp")
 
@@ -90,7 +98,9 @@ class UpdateCancelledEvent(BaseModel):
     device_id: str = Field(..., description="Device ID")
     firmware_id: str = Field(..., description="Firmware ID")
     firmware_version: str = Field(..., description="Firmware version")
-    campaign_id: Optional[str] = Field(None, description="Campaign ID if part of campaign")
+    campaign_id: Optional[str] = Field(
+        None, description="Campaign ID if part of campaign"
+    )
     timestamp: str = Field(..., description="Cancellation timestamp")
 
 

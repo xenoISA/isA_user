@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from core.mqtt_client import MQTTEventBus, MQTTTopics, get_mqtt_bus
+from core.mqtt_client import MQTTEventBus
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,9 @@ class AlbumMQTTPublisher:
         self.mqtt_bus: Optional[MQTTEventBus] = None
         self._initialized = False
 
-        logger.info(f"AlbumMQTTPublisher initialized (host: {mqtt_host}, port: {mqtt_port})")
+        logger.info(
+            f"AlbumMQTTPublisher initialized (host: {mqtt_host}, port: {mqtt_port})"
+        )
 
     async def _ensure_connected(self):
         """Ensure MQTT bus is connected (lazy initialization)"""
@@ -99,7 +101,9 @@ class AlbumMQTTPublisher:
                     "file_name": photo_metadata.get("file_name"),
                     "content_type": photo_metadata.get("content_type"),
                     "file_size": photo_metadata.get("file_size"),
-                    "ai_labels": photo_metadata.get("ai_metadata", {}).get("labels", []),
+                    "ai_labels": photo_metadata.get("ai_metadata", {}).get(
+                        "labels", []
+                    ),
                     "created_at": photo_metadata.get("created_at"),
                 },
                 "media_service_url": media_service_url
@@ -109,7 +113,9 @@ class AlbumMQTTPublisher:
             }
 
             topic = f"albums/{album_id}/photo_added"
-            success = await self.mqtt_bus.publish_json(topic, message, qos=1, retained=False)
+            success = await self.mqtt_bus.publish_json(
+                topic, message, qos=1, retained=False
+            )
 
             if success:
                 logger.info(f"Published MQTT photo_added event to {topic}")
@@ -151,7 +157,9 @@ class AlbumMQTTPublisher:
             }
 
             topic = f"albums/{album_id}/photo_removed"
-            success = await self.mqtt_bus.publish_json(topic, message, qos=1, retained=False)
+            success = await self.mqtt_bus.publish_json(
+                topic, message, qos=1, retained=False
+            )
 
             if success:
                 logger.info(f"Published MQTT photo_removed event to {topic}")
@@ -196,10 +204,14 @@ class AlbumMQTTPublisher:
             }
 
             topic = f"frames/{frame_id}/sync"
-            success = await self.mqtt_bus.publish_json(topic, message, qos=2, retained=True)
+            success = await self.mqtt_bus.publish_json(
+                topic, message, qos=2, retained=True
+            )
 
             if success:
-                logger.info(f"Published MQTT album_sync event to {topic} ({len(photos)} photos)")
+                logger.info(
+                    f"Published MQTT album_sync event to {topic} ({len(photos)} photos)"
+                )
 
             return success
 
@@ -239,7 +251,9 @@ class AlbumMQTTPublisher:
             }
 
             topic = f"frames/{frame_id}/command"
-            success = await self.mqtt_bus.publish_json(topic, message, qos=2, retained=False)
+            success = await self.mqtt_bus.publish_json(
+                topic, message, qos=2, retained=False
+            )
 
             if success:
                 logger.info(f"Published MQTT frame_command '{command}' to {topic}")
@@ -280,7 +294,9 @@ class AlbumMQTTPublisher:
             }
 
             topic = f"albums/{album_id}/config"
-            success = await self.mqtt_bus.publish_json(topic, message, qos=1, retained=True)
+            success = await self.mqtt_bus.publish_json(
+                topic, message, qos=1, retained=True
+            )
 
             if success:
                 logger.info(f"Published MQTT album_config to {topic}")
@@ -317,7 +333,9 @@ async def get_album_mqtt_publisher(
     global _album_mqtt_publisher
 
     if _album_mqtt_publisher is None:
-        _album_mqtt_publisher = AlbumMQTTPublisher(mqtt_host=mqtt_host, mqtt_port=mqtt_port)
+        _album_mqtt_publisher = AlbumMQTTPublisher(
+            mqtt_host=mqtt_host, mqtt_port=mqtt_port
+        )
         await _album_mqtt_publisher.connect()
         logger.info("Created global AlbumMQTTPublisher instance")
 

@@ -2,7 +2,8 @@
 Billing Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # Define all routes
 SERVICE_ROUTES = [
     # Health and Service Info
@@ -10,97 +11,99 @@ SERVICE_ROUTES = [
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Health check endpoint"
+        "description": "Health check endpoint",
     },
-        {
-            "path": "/api/v1/billing/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/billing/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/api/v1/billing/info",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service information and capabilities"
+        "description": "Service information and capabilities",
     },
     # Core Billing APIs
     {
         "path": "/api/v1/billing/usage/record",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Record usage and bill immediately"
+        "description": "Record usage and bill immediately",
     },
     {
         "path": "/api/v1/billing/calculate",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Calculate billing cost"
+        "description": "Calculate billing cost",
     },
     {
         "path": "/api/v1/billing/process",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Process billing (actual charge)"
+        "description": "Process billing (actual charge)",
     },
     # Quota Management
     {
         "path": "/api/v1/billing/quota/check",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Check quota limits"
+        "description": "Check quota limits",
     },
     {
         "path": "/api/v1/billing/quota/{user_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user quota status"
+        "description": "Get user quota status",
     },
     # Query and Statistics
     {
         "path": "/api/v1/billing/records",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List billing records with pagination"
+        "description": "List billing records with pagination",
     },
     {
         "path": "/api/v1/billing/records/user/{user_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user billing records"
+        "description": "Get user billing records",
     },
     {
         "path": "/api/v1/billing/record/{billing_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get single billing record"
+        "description": "Get single billing record",
     },
     {
         "path": "/api/v1/billing/usage/aggregations",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get usage aggregations"
+        "description": "Get usage aggregations",
     },
     {
         "path": "/api/v1/billing/usage/overview",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Cross-service usage overview (Story #458)"
+        "description": "Cross-service usage overview (Story #458)",
     },
     {
         "path": "/api/v1/billing/stats",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get billing statistics"
+        "description": "Get billing statistics",
     },
     # Management
     {
         "path": "/api/v1/billing/record/{billing_id}/status",
         "methods": ["PUT"],
         "auth_required": True,
-        "description": "Update billing record status (admin)"
-    }
+        "description": "Update billing record status (admin)",
+    },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -138,6 +141,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "billing_service",
@@ -151,6 +156,6 @@ SERVICE_METADATA = {
         "billing_analytics",
         "wallet_deduction",
         "payment_charge",
-        "event_driven_billing"
-    ]
+        "event_driven_billing",
+    ],
 }

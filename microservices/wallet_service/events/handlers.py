@@ -7,15 +7,11 @@ Wallet Event Handlers
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
 
 from core.nats_client import Event
 
 from ..models import ConsumeRequest
 from .models import (
-    BillingCalculatedEventData,
-    TokensDeductedEventData,
-    TokensInsufficientEventData,
     parse_billing_calculated_event,
 )
 from .publishers import publish_tokens_deducted, publish_tokens_insufficient
@@ -84,7 +80,11 @@ async def handle_billing_calculated(event: Event, wallet_service, event_bus):
             if hasattr(deduction_result, "dict")
             else deduction_result
         )
-        data = deduction_payload.get("data", {}) if isinstance(deduction_payload, dict) else {}
+        data = (
+            deduction_payload.get("data", {})
+            if isinstance(deduction_payload, dict)
+            else {}
+        )
         transaction = data.get("transaction", {}) if isinstance(data, dict) else {}
 
         if deduction_payload.get("success"):
@@ -406,7 +406,9 @@ async def handle_subscription_created(event: Event, wallet_service):
         # Get user's primary wallet
         wallet = await wallet_service.repository.get_primary_wallet(user_id)
         if not wallet:
-            logger.warning(f"No wallet found for user {user_id}, skipping credit allocation")
+            logger.warning(
+                f"No wallet found for user {user_id}, skipping credit allocation"
+            )
             _mark_event_processed(event.id)
             return
 
@@ -496,7 +498,7 @@ async def handle_user_deleted(event: Event, wallet_service):
                         "user_deleted": True,
                         "user_deleted_at": datetime.now(timezone.utc).isoformat(),
                         "original_user_id": user_id,  # Keep for audit
-                    }
+                    },
                 )
 
                 frozen_count += 1
@@ -507,7 +509,9 @@ async def handle_user_deleted(event: Event, wallet_service):
 
         # Anonymize transaction history (keep amounts for accounting)
         try:
-            anonymized = await wallet_service.repository.anonymize_user_transactions(user_id)
+            anonymized = await wallet_service.repository.anonymize_user_transactions(
+                user_id
+            )
             logger.info(f"Anonymized {anonymized} transactions for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to anonymize transactions: {e}")

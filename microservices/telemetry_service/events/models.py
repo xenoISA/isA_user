@@ -6,10 +6,12 @@ Pydantic models for all events published by Telemetry Service
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class TelemetryEventType(str, Enum):
     """
@@ -18,6 +20,7 @@ class TelemetryEventType(str, Enum):
     Stream: telemetry-stream
     Subjects: telemetry.>
     """
+
     DATA_RECEIVED = "telemetry.data.received"
     ALERT_TRIGGERED = "alert.triggered"
     ALERT_RESOLVED = "alert.resolved"
@@ -27,18 +30,17 @@ class TelemetryEventType(str, Enum):
 
 class TelemetrySubscribedEventType(str, Enum):
     """Events that telemetry_service subscribes to from other services."""
+
     DEVICE_REGISTERED = "device.registered"
 
 
 class TelemetryStreamConfig:
     """Stream configuration for telemetry_service"""
+
     STREAM_NAME = "telemetry-stream"
     SUBJECTS = ["telemetry.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "telemetry"
-
-from typing import Optional, Dict, Any
-from datetime import datetime
 
 
 class TelemetryDataReceivedEvent(BaseModel):

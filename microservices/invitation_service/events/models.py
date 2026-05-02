@@ -6,10 +6,12 @@ Invitation Service Event Models
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional, Dict, Any
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class InvitationEventType(str, Enum):
     """
@@ -18,6 +20,7 @@ class InvitationEventType(str, Enum):
     Stream: invitation-stream
     Subjects: invitation.>
     """
+
     INVITATION_SENT = "invitation.sent"
     INVITATION_ACCEPTED = "invitation.accepted"
     INVITATION_DECLINED = "invitation.declined"
@@ -27,18 +30,17 @@ class InvitationEventType(str, Enum):
 
 class InvitationSubscribedEventType(str, Enum):
     """Events that invitation_service subscribes to from other services."""
+
     USER_DELETED = "user.deleted"
 
 
 class InvitationStreamConfig:
     """Stream configuration for invitation_service"""
+
     STREAM_NAME = "invitation-stream"
     SUBJECTS = ["invitation.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "invitation"
-
-from typing import Optional, Dict, Any
-from datetime import datetime
 
 
 class InvitationSentEvent(BaseModel):
@@ -51,7 +53,9 @@ class InvitationSentEvent(BaseModel):
     invited_by: str = Field(..., description="邀请人用户ID")
     email_sent: bool = Field(default=False, description="邮件是否发送成功")
     timestamp: str = Field(..., description="事件时间戳")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外元数据")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="额外元数据"
+    )
 
 
 class InvitationExpiredEvent(BaseModel):
@@ -62,7 +66,9 @@ class InvitationExpiredEvent(BaseModel):
     email: str = Field(..., description="受邀邮箱")
     expired_at: str = Field(..., description="过期时间")
     timestamp: str = Field(..., description="事件时间戳")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外元数据")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="额外元数据"
+    )
 
 
 class InvitationAcceptedEvent(BaseModel):
@@ -75,7 +81,9 @@ class InvitationAcceptedEvent(BaseModel):
     role: str = Field(..., description="分配的角色")
     accepted_at: str = Field(..., description="接受时间")
     timestamp: str = Field(..., description="事件时间戳")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外元数据")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="额外元数据"
+    )
 
 
 class InvitationCancelledEvent(BaseModel):
@@ -86,4 +94,6 @@ class InvitationCancelledEvent(BaseModel):
     email: str = Field(..., description="受邀邮箱")
     cancelled_by: str = Field(..., description="取消人用户ID")
     timestamp: str = Field(..., description="事件时间戳")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外元数据")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="额外元数据"
+    )

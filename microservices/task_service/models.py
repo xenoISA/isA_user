@@ -13,6 +13,7 @@ from enum import Enum
 # 枚举定义
 class TaskStatus(str, Enum):
     """任务状态"""
+
     PENDING = "pending"
     SCHEDULED = "scheduled"
     RUNNING = "running"
@@ -24,6 +25,7 @@ class TaskStatus(str, Enum):
 
 class TaskType(str, Enum):
     """任务类型"""
+
     DAILY_WEATHER = "daily_weather"
     DAILY_NEWS = "daily_news"
     NEWS_MONITOR = "news_monitor"
@@ -38,6 +40,7 @@ class TaskType(str, Enum):
 
 class TaskPriority(str, Enum):
     """任务优先级"""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -47,6 +50,7 @@ class TaskPriority(str, Enum):
 # 请求模型
 class TaskCreateRequest(BaseModel):
     """创建任务请求"""
+
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     task_type: TaskType
@@ -62,6 +66,7 @@ class TaskCreateRequest(BaseModel):
 
 class TaskUpdateRequest(BaseModel):
     """更新任务请求"""
+
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     priority: Optional[TaskPriority] = None
@@ -78,6 +83,7 @@ class TaskUpdateRequest(BaseModel):
 
 class TaskExecutionRequest(BaseModel):
     """执行任务请求"""
+
     trigger_type: str = Field(default="manual")
     trigger_data: Dict[str, Any] = Field(default_factory=dict)
 
@@ -85,6 +91,7 @@ class TaskExecutionRequest(BaseModel):
 # 响应模型
 class TaskResponse(BaseModel):
     """任务响应"""
+
     id: int
     task_id: str
     user_id: str
@@ -111,7 +118,7 @@ class TaskResponse(BaseModel):
     success_count: int
     failure_count: int
     total_credits_consumed: float
-    
+
     # 时间相关
     due_date: Optional[datetime]
     reminder_time: Optional[datetime]
@@ -122,6 +129,7 @@ class TaskResponse(BaseModel):
 
 class TaskExecutionResponse(BaseModel):
     """任务执行响应"""
+
     id: int
     execution_id: str
     task_id: str
@@ -129,7 +137,7 @@ class TaskExecutionResponse(BaseModel):
     status: TaskStatus
     trigger_type: str
     trigger_data: Optional[Dict[str, Any]]
-    
+
     # 执行结果
     result: Optional[Dict[str, Any]]
     error_message: Optional[str]
@@ -140,7 +148,7 @@ class TaskExecutionResponse(BaseModel):
     tokens_used: Optional[int]
     api_calls_made: int
     duration_ms: Optional[int]
-    
+
     # 时间
     started_at: datetime
     completed_at: Optional[datetime]
@@ -149,6 +157,7 @@ class TaskExecutionResponse(BaseModel):
 
 class TaskTemplateResponse(BaseModel):
     """任务模板响应"""
+
     id: int
     template_id: str
     name: str
@@ -170,16 +179,17 @@ class TaskTemplateResponse(BaseModel):
 
 class TaskAnalyticsResponse(BaseModel):
     """任务分析响应"""
+
     user_id: str
     time_period: str
-    
+
     # 任务统计
     total_tasks: int
     active_tasks: int
     completed_tasks: int
     failed_tasks: int
     paused_tasks: int
-    
+
     # 执行统计
     total_executions: int
     successful_executions: int
@@ -191,19 +201,20 @@ class TaskAnalyticsResponse(BaseModel):
     total_credits_consumed: float
     total_tokens_used: int
     total_api_calls: int
-    
+
     # 任务类型分布
     task_types_distribution: Dict[str, int]
-    
+
     # 时间分析
     busiest_hours: List[int]
     busiest_days: List[str]
-    
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class TaskListResponse(BaseModel):
     """任务列表响应"""
+
     tasks: List[TaskResponse]
     count: int
     limit: int

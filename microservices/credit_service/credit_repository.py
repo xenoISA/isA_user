@@ -13,7 +13,9 @@ from datetime import datetime, timezone
 import json
 import uuid
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -32,11 +34,11 @@ class CreditRepository:
         # Discover PostgreSQL service
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -44,8 +46,8 @@ class CreditRepository:
             host=host,
             port=port,
             user_id="credit_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = "credit"
         self.accounts_table = "credit_accounts"
@@ -65,13 +67,17 @@ class CreditRepository:
     # Credit Account Management
     # ====================
 
-    async def create_account(self, account_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def create_account(
+        self, account_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Create a new credit account"""
         try:
-            account_id = account_data.get("account_id") or f"cred_acc_{uuid.uuid4().hex[:12]}"
+            account_id = (
+                account_data.get("account_id") or f"cred_acc_{uuid.uuid4().hex[:12]}"
+            )
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.accounts_table} (
                     account_id, user_id, organization_id, credit_type, balance,
                     total_allocated, total_consumed, total_expired, currency,
@@ -79,7 +85,7 @@ class CreditRepository:
                     created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 RETURNING *
-            '''
+            """
 
             params = [
                 account_id,
@@ -96,7 +102,7 @@ class CreditRepository:
                 account_data.get("is_active", True),
                 json.dumps(account_data.get("metadata", {})),
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -114,10 +120,10 @@ class CreditRepository:
     async def get_account_by_id(self, account_id: str) -> Optional[Dict[str, Any]]:
         """Get account by ID"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.accounts_table}
                 WHERE account_id = $1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[account_id])
@@ -130,13 +136,15 @@ class CreditRepository:
             logger.error(f"Error getting credit account {account_id}: {e}")
             raise
 
-    async def get_account_by_user_type(self, user_id: str, credit_type: str) -> Optional[Dict[str, Any]]:
+    async def get_account_by_user_type(
+        self, user_id: str, credit_type: str
+    ) -> Optional[Dict[str, Any]]:
         """Get account by user and type"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.accounts_table}
                 WHERE user_id = $1 AND credit_type = $2
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[user_id, credit_type])
@@ -146,10 +154,14 @@ class CreditRepository:
             return None
 
         except Exception as e:
-            logger.error(f"Error getting account for user {user_id}, type {credit_type}: {e}")
+            logger.error(
+                f"Error getting account for user {user_id}, type {credit_type}: {e}"
+            )
             raise
 
-    async def get_user_accounts(self, user_id: str, filters: Dict) -> List[Dict[str, Any]]:
+    async def get_user_accounts(
+        self, user_id: str, filters: Dict
+    ) -> List[Dict[str, Any]]:
         """Get all accounts for user"""
         try:
             conditions = ["user_id = $1"]
@@ -173,11 +185,11 @@ class CreditRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.accounts_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -194,7 +206,7 @@ class CreditRepository:
             now = datetime.now(timezone.utc)
 
             # Atomic update with balance delta
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.accounts_table}
                 SET balance = balance + $1,
                     total_allocated = CASE WHEN $1 > 0 THEN total_allocated + $1 ELSE total_allocated END,
@@ -202,7 +214,7 @@ class CreditRepository:
                     updated_at = $2
                 WHERE account_id = $3 AND balance + $1 >= 0
                 RETURNING balance
-            '''
+            """
 
             params = [balance_delta, now, account_id]
 
@@ -213,7 +225,9 @@ class CreditRepository:
                 logger.info(f"Updated account {account_id} balance by {balance_delta}")
                 return True
             else:
-                logger.warning(f"Failed to update account {account_id} - insufficient balance or not found")
+                logger.warning(
+                    f"Failed to update account {account_id} - insufficient balance or not found"
+                )
                 return False
 
         except Exception as e:
@@ -224,20 +238,24 @@ class CreditRepository:
     # Transaction Management
     # ====================
 
-    async def create_transaction(self, txn_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def create_transaction(
+        self, txn_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Create transaction record"""
         try:
-            transaction_id = txn_data.get("transaction_id") or f"cred_txn_{uuid.uuid4().hex[:12]}"
+            transaction_id = (
+                txn_data.get("transaction_id") or f"cred_txn_{uuid.uuid4().hex[:12]}"
+            )
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.transactions_table} (
                     transaction_id, account_id, user_id, transaction_type, amount,
                     balance_before, balance_after, reference_id, reference_type,
                     description, metadata, expires_at, created_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *
-            '''
+            """
 
             params = [
                 transaction_id,
@@ -252,7 +270,7 @@ class CreditRepository:
                 txn_data.get("description"),
                 json.dumps(txn_data.get("metadata", {})),
                 txn_data.get("expires_at"),
-                now
+                now,
             ]
 
             async with self.db:
@@ -268,7 +286,9 @@ class CreditRepository:
             logger.error(f"Error creating transaction: {e}", exc_info=True)
             raise
 
-    async def get_user_transactions(self, user_id: str, filters: Dict) -> List[Dict[str, Any]]:
+    async def get_user_transactions(
+        self, user_id: str, filters: Dict
+    ) -> List[Dict[str, Any]]:
         """Get transactions for user"""
         try:
             conditions = ["user_id = $1"]
@@ -305,12 +325,12 @@ class CreditRepository:
             limit = filters.get("limit", 100)
             offset = filters.get("offset", 0)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.transactions_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
 
             params.extend([limit, offset])
 
@@ -327,20 +347,24 @@ class CreditRepository:
     # Allocation Management
     # ====================
 
-    async def create_allocation(self, alloc_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def create_allocation(
+        self, alloc_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Create allocation record"""
         try:
-            allocation_id = alloc_data.get("allocation_id") or f"cred_alloc_{uuid.uuid4().hex[:12]}"
+            allocation_id = (
+                alloc_data.get("allocation_id") or f"cred_alloc_{uuid.uuid4().hex[:12]}"
+            )
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.allocations_table} (
                     allocation_id, campaign_id, user_id, account_id, transaction_id,
                     amount, status, expires_at, expired_amount, consumed_amount,
                     metadata, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *
-            '''
+            """
 
             params = [
                 allocation_id,
@@ -355,7 +379,7 @@ class CreditRepository:
                 alloc_data.get("consumed_amount", 0),
                 json.dumps(alloc_data.get("metadata", {})),
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -374,13 +398,13 @@ class CreditRepository:
     async def get_expiring_allocations(self, before: datetime) -> List[Dict[str, Any]]:
         """Get allocations expiring before date"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.allocations_table}
                 WHERE expires_at <= $1
                   AND status = 'completed'
                   AND (amount - consumed_amount - expired_amount) > 0
                 ORDER BY expires_at ASC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[before])
@@ -391,18 +415,20 @@ class CreditRepository:
             logger.error(f"Error getting expiring allocations: {e}")
             raise
 
-    async def update_allocation_consumed(self, allocation_id: str, consumed_amount: int) -> bool:
+    async def update_allocation_consumed(
+        self, allocation_id: str, consumed_amount: int
+    ) -> bool:
         """Update allocation consumed amount"""
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.allocations_table}
                 SET consumed_amount = consumed_amount + $1,
                     updated_at = $2
                 WHERE allocation_id = $3
                 RETURNING allocation_id
-            '''
+            """
 
             params = [consumed_amount, now, allocation_id]
 
@@ -410,7 +436,9 @@ class CreditRepository:
                 results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
-                logger.info(f"Updated allocation {allocation_id} consumed amount by {consumed_amount}")
+                logger.info(
+                    f"Updated allocation {allocation_id} consumed amount by {consumed_amount}"
+                )
                 return True
             return False
 
@@ -418,18 +446,20 @@ class CreditRepository:
             logger.error(f"Error updating allocation consumed amount: {e}")
             raise
 
-    async def update_allocation_expired(self, allocation_id: str, expired_amount: int) -> bool:
+    async def update_allocation_expired(
+        self, allocation_id: str, expired_amount: int
+    ) -> bool:
         """Update allocation expired amount"""
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.allocations_table}
                 SET expired_amount = expired_amount + $1,
                     updated_at = $2
                 WHERE allocation_id = $3
                 RETURNING allocation_id
-            '''
+            """
 
             params = [expired_amount, now, allocation_id]
 
@@ -437,7 +467,9 @@ class CreditRepository:
                 results = await self.db.query(query, params=params)
 
             if results and len(results) > 0:
-                logger.info(f"Updated allocation {allocation_id} expired amount by {expired_amount}")
+                logger.info(
+                    f"Updated allocation {allocation_id} expired amount by {expired_amount}"
+                )
                 return True
             return False
 
@@ -445,7 +477,9 @@ class CreditRepository:
             logger.error(f"Error updating allocation expired amount: {e}")
             raise
 
-    async def get_user_allocations(self, user_id: str, filters: Dict) -> List[Dict[str, Any]]:
+    async def get_user_allocations(
+        self, user_id: str, filters: Dict
+    ) -> List[Dict[str, Any]]:
         """Get allocations for user"""
         try:
             conditions = ["user_id = $1"]
@@ -463,15 +497,15 @@ class CreditRepository:
                 params.append(filters["status"])
 
             if filters.get("active_only"):
-                conditions.append(f"(amount - consumed_amount - expired_amount) > 0")
+                conditions.append("(amount - consumed_amount - expired_amount) > 0")
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.allocations_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -486,13 +520,17 @@ class CreditRepository:
     # Campaign Management
     # ====================
 
-    async def create_campaign(self, campaign_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def create_campaign(
+        self, campaign_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Create campaign"""
         try:
-            campaign_id = campaign_data.get("campaign_id") or f"camp_{uuid.uuid4().hex[:12]}"
+            campaign_id = (
+                campaign_data.get("campaign_id") or f"camp_{uuid.uuid4().hex[:12]}"
+            )
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.campaigns_table} (
                     campaign_id, name, description, credit_type, credit_amount,
                     total_budget, allocated_amount, eligibility_rules, allocation_rules,
@@ -500,7 +538,7 @@ class CreditRepository:
                     is_active, created_by, metadata, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
                 RETURNING *
-            '''
+            """
 
             params = [
                 campaign_id,
@@ -520,7 +558,7 @@ class CreditRepository:
                 campaign_data.get("created_by"),
                 json.dumps(campaign_data.get("metadata", {})),
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -539,10 +577,10 @@ class CreditRepository:
     async def get_campaign_by_id(self, campaign_id: str) -> Optional[Dict[str, Any]]:
         """Get campaign by ID"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.campaigns_table}
                 WHERE campaign_id = $1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[campaign_id])
@@ -560,13 +598,13 @@ class CreditRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.campaigns_table}
                 SET allocated_amount = allocated_amount + $1,
                     updated_at = $2
                 WHERE campaign_id = $3 AND (allocated_amount + $1) <= total_budget
                 RETURNING campaign_id
-            '''
+            """
 
             params = [amount, now, campaign_id]
 
@@ -577,14 +615,18 @@ class CreditRepository:
                 logger.info(f"Updated campaign {campaign_id} budget by {amount}")
                 return True
             else:
-                logger.warning(f"Failed to update campaign {campaign_id} - budget exceeded or not found")
+                logger.warning(
+                    f"Failed to update campaign {campaign_id} - budget exceeded or not found"
+                )
                 return False
 
         except Exception as e:
             logger.error(f"Error updating campaign budget: {e}")
             raise
 
-    async def update_campaign(self, campaign_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def update_campaign(
+        self, campaign_id: str, updates: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Update campaign fields"""
         try:
             now = datetime.now(timezone.utc)
@@ -613,12 +655,12 @@ class CreditRepository:
 
             set_clause = ", ".join(set_clauses)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.campaigns_table}
                 SET {set_clause}
                 WHERE campaign_id = ${param_count}
                 RETURNING *
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -632,11 +674,17 @@ class CreditRepository:
             logger.error(f"Error updating campaign: {e}")
             raise
 
-    async def get_active_campaigns(self, credit_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_active_campaigns(
+        self, credit_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Get active campaigns"""
         try:
             now = datetime.now(timezone.utc)
-            conditions = ["is_active = TRUE", f"start_date <= ${1}", f"end_date >= ${2}"]
+            conditions = [
+                "is_active = TRUE",
+                f"start_date <= ${1}",
+                f"end_date >= ${2}",
+            ]
             params = [now, now]
             param_count = 2
 
@@ -647,11 +695,11 @@ class CreditRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.campaigns_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -662,13 +710,15 @@ class CreditRepository:
             logger.error(f"Error getting active campaigns: {e}")
             raise
 
-    async def get_user_campaign_allocations_count(self, user_id: str, campaign_id: str) -> int:
+    async def get_user_campaign_allocations_count(
+        self, user_id: str, campaign_id: str
+    ) -> int:
         """Get count of allocations for user in campaign"""
         try:
-            query = f'''
+            query = f"""
                 SELECT COUNT(*) as count FROM {self.schema}.{self.allocations_table}
                 WHERE user_id = $1 AND campaign_id = $2
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[user_id, campaign_id])
@@ -688,12 +738,12 @@ class CreditRepository:
     async def get_aggregated_balance(self, user_id: str) -> Dict[str, int]:
         """Get aggregated balance by credit type"""
         try:
-            query = f'''
+            query = f"""
                 SELECT credit_type, SUM(balance) as total_balance
                 FROM {self.schema}.{self.accounts_table}
                 WHERE user_id = $1 AND is_active = TRUE
                 GROUP BY credit_type
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[user_id])
@@ -714,7 +764,7 @@ class CreditRepository:
     async def get_available_credits_fifo(self, account_id: str) -> List[Dict[str, Any]]:
         """Get available credits in FIFO order (by expires_at) for consumption"""
         try:
-            query = f'''
+            query = f"""
                 SELECT a.allocation_id, a.amount, a.consumed_amount, a.expired_amount,
                        a.expires_at, a.created_at,
                        (a.amount - a.consumed_amount - a.expired_amount) as available
@@ -724,15 +774,19 @@ class CreditRepository:
                   AND (a.amount - a.consumed_amount - a.expired_amount) > 0
                   AND (a.expires_at IS NULL OR a.expires_at > $2)
                 ORDER BY a.expires_at ASC NULLS LAST, a.created_at ASC
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, params=[account_id, datetime.now(timezone.utc)])
+                results = await self.db.query(
+                    query, params=[account_id, datetime.now(timezone.utc)]
+                )
 
             return [self._row_to_dict(row) for row in results] if results else []
 
         except Exception as e:
-            logger.error(f"Error getting available credits FIFO for account {account_id}: {e}")
+            logger.error(
+                f"Error getting available credits FIFO for account {account_id}: {e}"
+            )
             raise
 
     # ====================
@@ -745,7 +799,9 @@ class CreditRepository:
             deleted_count = 0
 
             # Delete allocations
-            query1 = f"DELETE FROM {self.schema}.{self.allocations_table} WHERE user_id = $1"
+            query1 = (
+                f"DELETE FROM {self.schema}.{self.allocations_table} WHERE user_id = $1"
+            )
             async with self.db:
                 results = await self.db.query(query1, params=[user_id])
                 if results:
@@ -759,7 +815,9 @@ class CreditRepository:
                     deleted_count += len(results)
 
             # Delete accounts
-            query3 = f"DELETE FROM {self.schema}.{self.accounts_table} WHERE user_id = $1"
+            query3 = (
+                f"DELETE FROM {self.schema}.{self.accounts_table} WHERE user_id = $1"
+            )
             async with self.db:
                 results = await self.db.query(query3, params=[user_id])
                 if results:
@@ -787,7 +845,12 @@ class CreditRepository:
             if isinstance(value, datetime):
                 result[key] = value.isoformat()
             # Parse JSON strings back to dicts
-            elif key in ("metadata", "eligibility_rules", "allocation_rules", "billing_metadata"):
+            elif key in (
+                "metadata",
+                "eligibility_rules",
+                "allocation_rules",
+                "billing_metadata",
+            ):
                 if isinstance(value, str):
                     try:
                         result[key] = json.loads(value)

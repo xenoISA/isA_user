@@ -3,7 +3,7 @@ Authorization Microservice
 
 A comprehensive authorization service that provides:
 - User and organization resource access control
-- Permission validation and management  
+- Permission validation and management
 - Multi-level authorization (subscription, organization, admin)
 - Resource-based access control (RBAC)
 

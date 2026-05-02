@@ -12,20 +12,20 @@ from decimal import Decimal
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import (
-    Order, OrderStatus, OrderType, PaymentStatus,
-    OrderFilter, OrderStatistics
-)
+from .models import Order, OrderStatus, OrderType, PaymentStatus
 
 logger = logging.getLogger(__name__)
 
 
 class OrderNotFoundException(Exception):
     """Order not found exception"""
+
     pass
 
 
@@ -45,15 +45,21 @@ class OrderRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="order_service", min_pool_size=1, max_pool_size=2)
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="order_service",
+            min_pool_size=1,
+            max_pool_size=2,
+        )
 
         self.schema = "orders"  # Using "orders" instead of "order" (reserved keyword)
         self.orders_table = "orders"
@@ -80,17 +86,29 @@ class OrderRepository:
         tracking_number: Optional[str] = None,
         shipping_address: Optional[Dict[str, Any]] = None,
         billing_address: Optional[Dict[str, Any]] = None,
-        expires_at: Optional[datetime] = None
+        expires_at: Optional[datetime] = None,
     ) -> Order:
         """Create a new order"""
         try:
             order_id = f"order_{uuid.uuid4().hex[:12]}"
             now = datetime.now(timezone.utc)
-            subtotal_value = float(subtotal_amount) if subtotal_amount is not None else float(total_amount)
+            subtotal_value = (
+                float(subtotal_amount)
+                if subtotal_amount is not None
+                else float(total_amount)
+            )
             tax_value = float(tax_amount) if tax_amount is not None else 0.0
-            shipping_value = float(shipping_amount) if shipping_amount is not None else 0.0
-            discount_value = float(discount_amount) if discount_amount is not None else 0.0
-            final_value = float(final_amount) if final_amount is not None else subtotal_value + tax_value + shipping_value - discount_value
+            shipping_value = (
+                float(shipping_amount) if shipping_amount is not None else 0.0
+            )
+            discount_value = (
+                float(discount_amount) if discount_amount is not None else 0.0
+            )
+            final_value = (
+                float(final_amount)
+                if final_amount is not None
+                else subtotal_value + tax_value + shipping_value - discount_value
+            )
 
             order_data = {
                 "order_id": order_id,
@@ -120,11 +138,13 @@ class OrderRepository:
                 "cancelled_at": None,
                 "expires_at": expires_at if expires_at else None,
                 "cancellation_reason": None,
-                "cancelled_by": None
+                "cancelled_by": None,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.orders_table, [order_data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.orders_table, [order_data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 return await self.get_order(order_id)
@@ -143,7 +163,9 @@ class OrderRepository:
     async def get_order(self, order_id: str) -> Optional[Order]:
         """Get order by ID"""
         try:
-            query = f'SELECT * FROM "{self.schema}".{self.orders_table} WHERE order_id = $1'
+            query = (
+                f'SELECT * FROM "{self.schema}".{self.orders_table} WHERE order_id = $1'
+            )
 
             async with self.db:
                 result = await self.db.query_row(query, [order_id], schema=self.schema)
@@ -167,13 +189,11 @@ class OrderRepository:
         fulfillment_status: Optional[str] = None,
         tracking_number: Optional[str] = None,
         shipping_address: Optional[Dict[str, Any]] = None,
-        billing_address: Optional[Dict[str, Any]] = None
+        billing_address: Optional[Dict[str, Any]] = None,
     ) -> Optional[Order]:
         """Update order"""
         try:
-            update_data = {
-                "updated_at": datetime.now(timezone.utc)
-            }
+            update_data = {"updated_at": datetime.now(timezone.utc)}
 
             if status:
                 update_data["status"] = status.value
@@ -208,11 +228,11 @@ class OrderRepository:
             params.append(order_id)
 
             set_clause = ", ".join(set_clauses)
-            query = f'''
+            query = f"""
                 UPDATE "{self.schema}".{self.orders_table}
                 SET {set_clause}
                 WHERE order_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -229,21 +249,18 @@ class OrderRepository:
         self,
         order_id: str,
         status: OrderStatus,
-        payment_status: Optional[PaymentStatus] = None
+        payment_status: Optional[PaymentStatus] = None,
     ) -> Optional[Order]:
         """Update order and payment status"""
         return await self.update_order(
-            order_id=order_id,
-            status=status,
-            payment_status=payment_status
+            order_id=order_id, status=status, payment_status=payment_status
         )
 
-    async def update_order_metadata(self, order_id: str, metadata: Dict[str, Any]) -> Optional[Order]:
+    async def update_order_metadata(
+        self, order_id: str, metadata: Dict[str, Any]
+    ) -> Optional[Order]:
         """Update order metadata"""
-        return await self.update_order(
-            order_id=order_id,
-            metadata=metadata
-        )
+        return await self.update_order(order_id=order_id, metadata=metadata)
 
     async def list_orders(
         self,
@@ -252,7 +269,7 @@ class OrderRepository:
         user_id: Optional[str] = None,
         order_type: Optional[OrderType] = None,
         status: Optional[OrderStatus] = None,
-        payment_status: Optional[PaymentStatus] = None
+        payment_status: Optional[PaymentStatus] = None,
     ) -> List[Order]:
         """List orders with filtering"""
         try:
@@ -281,12 +298,12 @@ class OrderRepository:
                 params.append(payment_status.value)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
-            query = f'''
+            query = f"""
                 SELECT * FROM "{self.schema}".{self.orders_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -300,25 +317,19 @@ class OrderRepository:
             raise
 
     async def get_user_orders(
-        self,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, user_id: str, limit: int = 50, offset: int = 0
     ) -> List[Order]:
         """Get orders for a specific user"""
         return await self.list_orders(
             limit=limit,
             offset=offset,
             user_id=user_id,
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
 
     async def search_orders(
-        self,
-        query: str,
-        limit: int = 50,
-        user_id: Optional[str] = None
+        self, query: str, limit: int = 50, user_id: Optional[str] = None
     ) -> List[Order]:
         """Search orders by query"""
         try:
@@ -338,12 +349,12 @@ class OrderRepository:
                 params.append(user_id)
 
             where_clause = " AND ".join(conditions)
-            sql_query = f'''
+            sql_query = f"""
                 SELECT * FROM "{self.schema}".{self.orders_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(sql_query, params, schema=self.schema)
@@ -362,23 +373,31 @@ class OrderRepository:
             query = f'SELECT * FROM "{self.schema}".{self.orders_table} WHERE payment_intent_id = $1'
 
             async with self.db:
-                results = await self.db.query(query, [payment_intent_id], schema=self.schema)
+                results = await self.db.query(
+                    query, [payment_intent_id], schema=self.schema
+                )
 
             if results:
                 return [self._dict_to_order(order_data) for order_data in results]
             return []
 
         except Exception as e:
-            logger.error(f"Failed to get orders by payment intent {payment_intent_id}: {e}")
+            logger.error(
+                f"Failed to get orders by payment intent {payment_intent_id}: {e}"
+            )
             raise
 
-    async def get_order_by_payment_intent(self, payment_intent_id: str) -> Optional[Order]:
+    async def get_order_by_payment_intent(
+        self, payment_intent_id: str
+    ) -> Optional[Order]:
         """Get a single order by payment intent ID (returns first match)"""
         try:
             orders = await self.get_orders_by_payment_intent(payment_intent_id)
             return orders[0] if orders else None
         except Exception as e:
-            logger.error(f"Failed to get order by payment intent {payment_intent_id}: {e}")
+            logger.error(
+                f"Failed to get order by payment intent {payment_intent_id}: {e}"
+            )
             raise
 
     async def get_orders_by_subscription(self, subscription_id: str) -> List[Order]:
@@ -387,7 +406,9 @@ class OrderRepository:
             query = f'SELECT * FROM "{self.schema}".{self.orders_table} WHERE subscription_id = $1'
 
             async with self.db:
-                results = await self.db.query(query, [subscription_id], schema=self.schema)
+                results = await self.db.query(
+                    query, [subscription_id], schema=self.schema
+                )
 
             if results:
                 return [self._dict_to_order(order_data) for order_data in results]
@@ -403,9 +424,7 @@ class OrderRepository:
             metadata = {"cancellation_reason": reason} if reason else {}
 
             result = await self.update_order(
-                order_id=order_id,
-                status=OrderStatus.CANCELLED,
-                metadata=metadata
+                order_id=order_id, status=OrderStatus.CANCELLED, metadata=metadata
             )
 
             return result is not None
@@ -415,9 +434,7 @@ class OrderRepository:
             raise
 
     async def complete_order(
-        self,
-        order_id: str,
-        payment_intent_id: Optional[str] = None
+        self, order_id: str, payment_intent_id: Optional[str] = None
     ) -> bool:
         """Complete an order"""
         try:
@@ -426,7 +443,7 @@ class OrderRepository:
                 status=OrderStatus.COMPLETED,
                 payment_status=PaymentStatus.COMPLETED,
                 payment_intent_id=payment_intent_id,
-                completed_at=datetime.now(timezone.utc)
+                completed_at=datetime.now(timezone.utc),
             )
 
             return result is not None
@@ -439,9 +456,13 @@ class OrderRepository:
         """Get order statistics"""
         try:
             # Get total orders
-            total_query = f'SELECT COUNT(*) as count FROM "{self.schema}".{self.orders_table}'
+            total_query = (
+                f'SELECT COUNT(*) as count FROM "{self.schema}".{self.orders_table}'
+            )
             async with self.db:
-                total_result = await self.db.query_row(total_query, [], schema=self.schema)
+                total_result = await self.db.query_row(
+                    total_query, [], schema=self.schema
+                )
             total_orders = int(total_result.get("count", 0)) if total_result else 0
 
             # Get orders by status
@@ -449,21 +470,31 @@ class OrderRepository:
             for status in OrderStatus:
                 status_query = f'SELECT COUNT(*) as count FROM "{self.schema}".{self.orders_table} WHERE status = $1'
                 async with self.db:
-                    status_result = await self.db.query_row(status_query, [status.value], schema=self.schema)
-                status_stats[status.value] = int(status_result.get("count", 0)) if status_result else 0
+                    status_result = await self.db.query_row(
+                        status_query, [status.value], schema=self.schema
+                    )
+                status_stats[status.value] = (
+                    int(status_result.get("count", 0)) if status_result else 0
+                )
 
             # Get orders by type
             type_stats = {}
             for order_type in OrderType:
                 type_query = f'SELECT COUNT(*) as count FROM "{self.schema}".{self.orders_table} WHERE order_type = $1'
                 async with self.db:
-                    type_result = await self.db.query_row(type_query, [order_type.value], schema=self.schema)
-                type_stats[order_type.value] = int(type_result.get("count", 0)) if type_result else 0
+                    type_result = await self.db.query_row(
+                        type_query, [order_type.value], schema=self.schema
+                    )
+                type_stats[order_type.value] = (
+                    int(type_result.get("count", 0)) if type_result else 0
+                )
 
             # Get revenue (completed orders only)
             revenue_query = f'SELECT total_amount, currency FROM "{self.schema}".{self.orders_table} WHERE status = $1'
             async with self.db:
-                revenue_results = await self.db.query(revenue_query, [OrderStatus.COMPLETED.value], schema=self.schema)
+                revenue_results = await self.db.query(
+                    revenue_query, [OrderStatus.COMPLETED.value], schema=self.schema
+                )
 
             total_revenue = Decimal(0)
             revenue_by_currency = {}
@@ -474,25 +505,29 @@ class OrderRepository:
                     currency = order["currency"]
 
                     total_revenue += amount
-                    revenue_by_currency[currency] = revenue_by_currency.get(currency, Decimal(0)) + amount
+                    revenue_by_currency[currency] = (
+                        revenue_by_currency.get(currency, Decimal(0)) + amount
+                    )
 
             avg_order_value = total_revenue / max(total_orders, 1)
 
             # Get recent orders (simplified - would need date filtering in real implementation)
             recent_24h = min(total_orders, 10)  # Placeholder
-            recent_7d = min(total_orders, 50)   # Placeholder
-            recent_30d = min(total_orders, 200) # Placeholder
+            recent_7d = min(total_orders, 50)  # Placeholder
+            recent_30d = min(total_orders, 200)  # Placeholder
 
             return {
                 "total_orders": total_orders,
                 "orders_by_status": status_stats,
                 "orders_by_type": type_stats,
                 "total_revenue": float(total_revenue),
-                "revenue_by_currency": {k: float(v) for k, v in revenue_by_currency.items()},
+                "revenue_by_currency": {
+                    k: float(v) for k, v in revenue_by_currency.items()
+                },
                 "avg_order_value": float(avg_order_value),
                 "recent_orders_24h": recent_24h,
                 "recent_orders_7d": recent_7d,
-                "recent_orders_30d": recent_30d
+                "recent_orders_30d": recent_30d,
             }
 
         except Exception as e:
@@ -520,7 +555,7 @@ class OrderRepository:
         """Parse a datetime value that may be a native datetime or an ISO string."""
         if isinstance(value, datetime):
             return value
-        return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
     def _dict_to_order(self, data: Dict[str, Any]) -> Order:
         """Convert dictionary to Order model"""
@@ -528,6 +563,7 @@ class OrderRepository:
         items = data.get("items")
         if isinstance(items, str):
             import json
+
             items = json.loads(items)
         elif not isinstance(items, list):
             items = []
@@ -537,6 +573,7 @@ class OrderRepository:
         metadata = data.get("metadata")
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
         elif not isinstance(metadata, dict):
             metadata = {}
@@ -545,11 +582,13 @@ class OrderRepository:
         shipping_address = data.get("shipping_address")
         if isinstance(shipping_address, str):
             import json
+
             shipping_address = json.loads(shipping_address)
 
         billing_address = data.get("billing_address")
         if isinstance(billing_address, str):
             import json
+
             billing_address = json.loads(billing_address)
 
         return Order(
@@ -576,6 +615,10 @@ class OrderRepository:
             metadata=metadata,
             created_at=self._parse_datetime(data["created_at"]),
             updated_at=self._parse_datetime(data["updated_at"]),
-            completed_at=self._parse_datetime(data["completed_at"]) if data.get("completed_at") else None,
-            expires_at=self._parse_datetime(data["expires_at"]) if data.get("expires_at") else None
+            completed_at=self._parse_datetime(data["completed_at"])
+            if data.get("completed_at")
+            else None,
+            expires_at=self._parse_datetime(data["expires_at"])
+            if data.get("expires_at")
+            else None,
         )

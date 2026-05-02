@@ -24,11 +24,12 @@ class PaymentClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("payment_service")
             except Exception as e:
@@ -54,7 +55,7 @@ class PaymentClient:
         amount: Decimal,
         currency: str = "USD",
         order_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create payment intent
@@ -74,15 +75,14 @@ class PaymentClient:
                 "user_id": user_id,
                 "amount": float(amount),
                 "currency": currency,
-                "metadata": metadata or {}
+                "metadata": metadata or {},
             }
 
             if order_id:
                 payload["metadata"]["order_id"] = order_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/payment/intents",
-                json=payload
+                f"{self.base_url}/api/v1/payment/intents", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -104,7 +104,7 @@ class PaymentClient:
         tax_amount: Optional[Decimal] = None,
         shipping_amount: Optional[Decimal] = None,
         discount_amount: Optional[Decimal] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create payment intent (v2 path + amount breakdown)
@@ -114,28 +114,37 @@ class PaymentClient:
             "amount": float(amount),
             "currency": currency,
             "order_id": order_id,
-            "subtotal_amount": float(subtotal_amount) if subtotal_amount is not None else None,
+            "subtotal_amount": float(subtotal_amount)
+            if subtotal_amount is not None
+            else None,
             "tax_amount": float(tax_amount) if tax_amount is not None else None,
-            "shipping_amount": float(shipping_amount) if shipping_amount is not None else None,
-            "discount_amount": float(discount_amount) if discount_amount is not None else None,
+            "shipping_amount": float(shipping_amount)
+            if shipping_amount is not None
+            else None,
+            "discount_amount": float(discount_amount)
+            if discount_amount is not None
+            else None,
             "metadata": metadata or {},
         }
 
         try:
             response = await self.client.post(
-                f"{self.base_url}/api/v1/payments/payments/intent",
-                json=payload
+                f"{self.base_url}/api/v1/payments/payments/intent", json=payload
             )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to create payment intent v2: {e.response.status_code}")
+            logger.error(
+                f"Failed to create payment intent v2: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error creating payment intent v2: {e}")
             return None
 
-    async def get_payment_status(self, payment_intent_id: str) -> Optional[Dict[str, Any]]:
+    async def get_payment_status(
+        self, payment_intent_id: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Get payment status
 
@@ -187,10 +196,7 @@ class PaymentClient:
             return False
 
     async def create_refund(
-        self,
-        payment_id: str,
-        amount: Decimal,
-        reason: Optional[str] = None
+        self, payment_id: str, amount: Decimal, reason: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Create refund
@@ -207,12 +213,11 @@ class PaymentClient:
             payload = {
                 "payment_id": payment_id,
                 "amount": float(amount),
-                "reason": reason
+                "reason": reason,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/payment/refunds",
-                json=payload
+                f"{self.base_url}/api/v1/payment/refunds", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -229,5 +234,5 @@ class PaymentClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

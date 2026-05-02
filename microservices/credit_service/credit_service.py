@@ -13,7 +13,7 @@ Implements all 50 business rules from logic_contract.md:
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from .protocols import (
     CreditRepositoryProtocol,
@@ -51,11 +51,11 @@ class CreditService:
     # Credit type priority for consumption (BR-CON-004)
     # Higher priority = consumed first within same expiration date
     CREDIT_TYPE_PRIORITY = {
-        "compensation": 1,    # Highest - use free money first
+        "compensation": 1,  # Highest - use free money first
         "promotional": 2,
         "bonus": 3,
         "referral": 4,
-        "subscription": 5,    # Lowest - preserve subscription value
+        "subscription": 5,  # Lowest - preserve subscription value
     }
 
     # Non-transferable credit types (BR-TRF-004)
@@ -63,12 +63,20 @@ class CreditService:
 
     # Valid credit types (BR-ACC-003)
     VALID_CREDIT_TYPES = {
-        "promotional", "bonus", "referral", "subscription", "compensation"
+        "promotional",
+        "bonus",
+        "referral",
+        "subscription",
+        "compensation",
     }
 
     # Valid expiration policies (BR-ACC-008)
     VALID_EXPIRATION_POLICIES = {
-        "fixed_days", "end_of_month", "end_of_year", "subscription_period", "never"
+        "fixed_days",
+        "end_of_month",
+        "end_of_year",
+        "subscription_period",
+        "never",
     }
 
     def __init__(
@@ -468,9 +476,9 @@ class CreditService:
 
         # Convert string dates to datetime if needed
         if isinstance(start_date, str):
-            start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            start_date = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
         if isinstance(end_date, str):
-            end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            end_date = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
 
         if start_date and start_date > now:
             raise CampaignInactiveError("Campaign has not started yet")
@@ -492,8 +500,10 @@ class CreditService:
 
         # BR-ALC-005: Max Allocations Per User
         max_allocations = campaign.get("max_allocations_per_user", 1)
-        user_allocation_count = await self.repository.get_user_campaign_allocations_count(
-            user_id, campaign_id
+        user_allocation_count = (
+            await self.repository.get_user_campaign_allocations_count(
+                user_id, campaign_id
+            )
         )
         if user_allocation_count >= max_allocations:
             raise ValueError("Maximum allocations reached for this campaign")
@@ -681,12 +691,14 @@ class CreditService:
                         allocation_id, consume_amount
                     )
 
-                transactions.append({
-                    "transaction_id": transaction_id,
-                    "account_id": account_id,
-                    "amount": consume_amount,
-                    "credit_type": account["credit_type"],
-                })
+                transactions.append(
+                    {
+                        "transaction_id": transaction_id,
+                        "account_id": account_id,
+                        "amount": consume_amount,
+                        "credit_type": account["credit_type"],
+                    }
+                )
 
                 total_consumed += consume_amount
 
@@ -751,15 +763,17 @@ class CreditService:
             for alloc in available_allocations:
                 available = alloc.get("available", 0)
                 if available > 0:
-                    all_credits.append({
-                        "account_id": account_id,
-                        "credit_type": credit_type,
-                        "allocation_id": alloc["allocation_id"],
-                        "available": available,
-                        "expires_at": alloc.get("expires_at"),
-                        "created_at": alloc.get("created_at"),
-                        "priority": self.CREDIT_TYPE_PRIORITY.get(credit_type, 99),
-                    })
+                    all_credits.append(
+                        {
+                            "account_id": account_id,
+                            "credit_type": credit_type,
+                            "allocation_id": alloc["allocation_id"],
+                            "available": available,
+                            "expires_at": alloc.get("expires_at"),
+                            "created_at": alloc.get("created_at"),
+                            "priority": self.CREDIT_TYPE_PRIORITY.get(credit_type, 99),
+                        }
+                    )
 
         # Sort by expires_at (FIFO), then by priority, then by created_at
         # BR-CON-003: FIFO Expiration Order
@@ -778,21 +792,21 @@ class CreditService:
                 break
 
             consume_amount = min(remaining, credit["available"])
-            plan.append({
-                "account_id": credit["account_id"],
-                "allocation_id": credit["allocation_id"],
-                "amount": consume_amount,
-                "credit_type": credit["credit_type"],
-                "expires_at": credit["expires_at"],
-            })
+            plan.append(
+                {
+                    "account_id": credit["account_id"],
+                    "allocation_id": credit["allocation_id"],
+                    "amount": consume_amount,
+                    "credit_type": credit["credit_type"],
+                    "expires_at": credit["expires_at"],
+                }
+            )
 
             remaining -= consume_amount
 
         return plan
 
-    async def check_availability(
-        self, user_id: str, amount: int
-    ) -> Dict[str, Any]:
+    async def check_availability(self, user_id: str, amount: int) -> Dict[str, Any]:
         """
         Check credit availability and return consumption plan.
 
@@ -816,7 +830,9 @@ class CreditService:
         # Build consumption plan
         consumption_plan = []
         if accounts:
-            plan = await self._build_consumption_plan(accounts, min(amount, total_balance))
+            plan = await self._build_consumption_plan(
+                accounts, min(amount, total_balance)
+            )
             consumption_plan = [
                 {
                     "account_id": item["account_id"],
@@ -910,7 +926,9 @@ class CreditService:
                 await self.repository.update_account_balance(account_id, -remaining)
 
                 # Update allocation expired_amount
-                await self.repository.update_allocation_expired(allocation_id, remaining)
+                await self.repository.update_allocation_expired(
+                    allocation_id, remaining
+                )
 
                 total_expired_amount += remaining
                 expired_count += 1
@@ -964,7 +982,7 @@ class CreditService:
         for alloc in expiring_soon:
             expires_at = alloc.get("expires_at")
             if isinstance(expires_at, str):
-                expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
 
             if expires_at and expires_at > now:
                 result.append(alloc)
@@ -1033,7 +1051,9 @@ class CreditService:
         if self.account_client:
             is_valid = await self.account_client.validate_user(to_user_id)
             if not is_valid:
-                raise UserValidationFailedError(f"Recipient user not found: {to_user_id}")
+                raise UserValidationFailedError(
+                    f"Recipient user not found: {to_user_id}"
+                )
 
         # BR-TRF-001: Check sender has sufficient balance
         from_account = await self.repository.get_account_by_user_type(
@@ -1393,7 +1413,7 @@ class CreditService:
                 if required_tiers and user_tier not in required_tiers:
                     raise CreditAllocationFailedError(
                         "User does not meet eligibility requirements",
-                        reason="eligibility_failed"
+                        reason="eligibility_failed",
                     )
 
         # Calculate expiration
@@ -1461,9 +1481,9 @@ class CreditService:
                 continue
 
             remaining = (
-                alloc.get("amount", 0) -
-                alloc.get("consumed_amount", 0) -
-                alloc.get("expired_amount", 0)
+                alloc.get("amount", 0)
+                - alloc.get("consumed_amount", 0)
+                - alloc.get("expired_amount", 0)
             )
 
             if remaining <= 0:
@@ -1476,7 +1496,9 @@ class CreditService:
                     {
                         "user_id": user_id,
                         "amount": remaining,
-                        "expires_at": alloc.get("expires_at").isoformat() if alloc.get("expires_at") else None,
+                        "expires_at": alloc.get("expires_at").isoformat()
+                        if alloc.get("expires_at")
+                        else None,
                         "allocation_id": alloc.get("allocation_id"),
                         "timestamp": now.isoformat(),
                     },
@@ -1519,9 +1541,9 @@ class CreditService:
         # Get credits expiring in 7 days
         expiring_soon_allocations = await self.check_expiring_soon(days=7)
         expiring_soon = sum(
-            alloc.get("amount", 0) -
-            alloc.get("consumed_amount", 0) -
-            alloc.get("expired_amount", 0)
+            alloc.get("amount", 0)
+            - alloc.get("consumed_amount", 0)
+            - alloc.get("expired_amount", 0)
             for alloc in expiring_soon_allocations
             if alloc.get("user_id") == user_id
         )
@@ -1536,9 +1558,9 @@ class CreditService:
             if user_allocations:
                 next_alloc = user_allocations[0]
                 next_expiration = {
-                    "amount": next_alloc.get("amount", 0) -
-                             next_alloc.get("consumed_amount", 0) -
-                             next_alloc.get("expired_amount", 0),
+                    "amount": next_alloc.get("amount", 0)
+                    - next_alloc.get("consumed_amount", 0)
+                    - next_alloc.get("expired_amount", 0),
                     "expires_at": next_alloc.get("expires_at"),
                 }
 
@@ -1626,8 +1648,12 @@ class CreditService:
                 total_expired += account.get("total_expired", 0)
 
         # Calculate rates
-        utilization_rate = total_consumed / total_allocated if total_allocated > 0 else 0.0
-        expiration_rate = total_expired / total_allocated if total_allocated > 0 else 0.0
+        utilization_rate = (
+            total_consumed / total_allocated if total_allocated > 0 else 0.0
+        )
+        expiration_rate = (
+            total_expired / total_allocated if total_allocated > 0 else 0.0
+        )
 
         # Get active campaigns
         campaigns = await self.get_active_campaigns()

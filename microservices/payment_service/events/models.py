@@ -4,12 +4,16 @@ Payment Service Event Models
 Pydantic models for events published by payment service
 """
 
-from pydantic import BaseModel, Field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, Optional
+
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class PaymentEventType(str, Enum):
     """
@@ -18,6 +22,7 @@ class PaymentEventType(str, Enum):
     Stream: payment-stream
     Subjects: payment.>
     """
+
     PAYMENT_INITIATED = "payment.initiated"
     PAYMENT_COMPLETED = "payment.completed"
     PAYMENT_FAILED = "payment.failed"
@@ -26,23 +31,22 @@ class PaymentEventType(str, Enum):
 
 class PaymentSubscribedEventType(str, Enum):
     """Events that payment_service subscribes to from other services."""
+
     ORDER_CREATED = "order.created"
 
 
 class PaymentStreamConfig:
     """Stream configuration for payment_service"""
+
     STREAM_NAME = "payment-stream"
     SUBJECTS = ["payment.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "payment"
 
-from typing import Optional, Dict, Any
-from datetime import datetime
-from decimal import Decimal
-
 
 class PaymentCompletedEvent(BaseModel):
     """Event published when payment is successfully completed"""
+
     payment_intent_id: str
     payment_id: Optional[str] = None
     user_id: str
@@ -55,6 +59,7 @@ class PaymentCompletedEvent(BaseModel):
 
 class PaymentFailedEvent(BaseModel):
     """Event published when payment fails"""
+
     payment_intent_id: str
     user_id: str
     amount: float
@@ -67,6 +72,7 @@ class PaymentFailedEvent(BaseModel):
 
 class PaymentRefundedEvent(BaseModel):
     """Event published when payment is refunded"""
+
     payment_id: str
     refund_id: str
     user_id: str
@@ -79,6 +85,7 @@ class PaymentRefundedEvent(BaseModel):
 
 class PaymentIntentCreatedEvent(BaseModel):
     """Event published when payment intent is created"""
+
     payment_intent_id: str
     user_id: str
     amount: float
@@ -90,6 +97,7 @@ class PaymentIntentCreatedEvent(BaseModel):
 
 class SubscriptionCreatedEvent(BaseModel):
     """Event published when subscription is created"""
+
     subscription_id: str
     user_id: str
     plan_id: str
@@ -103,6 +111,7 @@ class SubscriptionCreatedEvent(BaseModel):
 
 class SubscriptionCanceledEvent(BaseModel):
     """Event published when subscription is canceled"""
+
     subscription_id: str
     user_id: str
     plan_id: Optional[str] = None
@@ -114,6 +123,7 @@ class SubscriptionCanceledEvent(BaseModel):
 
 class SubscriptionUpdatedEvent(BaseModel):
     """Event published when subscription is updated"""
+
     subscription_id: str
     user_id: str
     old_plan_id: Optional[str] = None
@@ -126,6 +136,7 @@ class SubscriptionUpdatedEvent(BaseModel):
 
 class SubscriptionExpiredEvent(BaseModel):
     """Event published when subscription expires"""
+
     subscription_id: str
     user_id: str
     plan_id: str
@@ -135,6 +146,7 @@ class SubscriptionExpiredEvent(BaseModel):
 
 class InvoiceCreatedEvent(BaseModel):
     """Event published when invoice is created"""
+
     invoice_id: str
     user_id: str
     subscription_id: Optional[str] = None
@@ -147,6 +159,7 @@ class InvoiceCreatedEvent(BaseModel):
 
 class InvoicePaidEvent(BaseModel):
     """Event published when invoice is paid"""
+
     invoice_id: str
     payment_id: str
     user_id: str

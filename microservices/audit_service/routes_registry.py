@@ -3,42 +3,116 @@ Audit Service Routes Registry
 Defines all API routes for Consul service registration
 """
 
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 # Define all routes
 SERVICE_ROUTES = [
     # Health checks
-    {"path": "/health", "methods": ["GET"], "auth_required": False, "description": "Basic health check"},
-    {"path": "/api/v1/audit/health", "methods": ["GET"], "auth_required": False, "description": "Service health check (API v1)"},
-    {"path": "/health/detailed", "methods": ["GET"], "auth_required": False, "description": "Detailed health check"},
-
+    {
+        "path": "/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Basic health check",
+    },
+    {
+        "path": "/api/v1/audit/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
+    {
+        "path": "/health/detailed",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Detailed health check",
+    },
     # Service info
-    {"path": "/api/v1/audit/info", "methods": ["GET"], "auth_required": False, "description": "Service information"},
-    {"path": "/api/v1/audit/stats", "methods": ["GET"], "auth_required": True, "description": "Service statistics"},
-
+    {
+        "path": "/api/v1/audit/info",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service information",
+    },
+    {
+        "path": "/api/v1/audit/stats",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Service statistics",
+    },
     # Audit event management
-    {"path": "/api/v1/audit/events", "methods": ["GET", "POST"], "auth_required": True, "description": "List/create audit events"},
-    {"path": "/api/v1/audit/events/query", "methods": ["POST"], "auth_required": True, "description": "Query audit events"},
-    {"path": "/api/v1/audit/events/batch", "methods": ["POST"], "auth_required": True, "description": "Batch log events"},
-
+    {
+        "path": "/api/v1/audit/events",
+        "methods": ["GET", "POST"],
+        "auth_required": True,
+        "description": "List/create audit events",
+    },
+    {
+        "path": "/api/v1/audit/events/query",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Query audit events",
+    },
+    {
+        "path": "/api/v1/audit/events/batch",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Batch log events",
+    },
     # User activity tracking
-    {"path": "/api/v1/audit/users/{user_id}/activities", "methods": ["GET"], "auth_required": True, "description": "Get user activities"},
-    {"path": "/api/v1/audit/users/{user_id}/summary", "methods": ["GET"], "auth_required": True, "description": "User activity summary"},
-
+    {
+        "path": "/api/v1/audit/users/{user_id}/activities",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get user activities",
+    },
+    {
+        "path": "/api/v1/audit/users/{user_id}/summary",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "User activity summary",
+    },
     # Security event management
-    {"path": "/api/v1/audit/security/alerts", "methods": ["POST"], "auth_required": True, "description": "Create security alert"},
-    {"path": "/api/v1/audit/security/events", "methods": ["GET"], "auth_required": True, "description": "Get security events"},
-
+    {
+        "path": "/api/v1/audit/security/alerts",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Create security alert",
+    },
+    {
+        "path": "/api/v1/audit/security/events",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get security events",
+    },
     # Compliance reporting
-    {"path": "/api/v1/audit/compliance/reports", "methods": ["POST"], "auth_required": True, "description": "Generate compliance report"},
-    {"path": "/api/v1/audit/compliance/standards", "methods": ["GET"], "auth_required": False, "description": "Get compliance standards"},
-
+    {
+        "path": "/api/v1/audit/compliance/reports",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Generate compliance report",
+    },
+    {
+        "path": "/api/v1/audit/compliance/standards",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Get compliance standards",
+    },
     # Admin audit trail
-    {"path": "/api/v1/audit/admin/actions", "methods": ["GET", "POST"], "auth_required": True, "description": "Query/record admin actions"},
-
+    {
+        "path": "/api/v1/audit/admin/actions",
+        "methods": ["GET", "POST"],
+        "auth_required": True,
+        "description": "Query/record admin actions",
+    },
     # System maintenance
-    {"path": "/api/v1/audit/maintenance/cleanup", "methods": ["POST"], "auth_required": True, "description": "Cleanup old data"},
+    {
+        "path": "/api/v1/audit/maintenance/cleanup",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Cleanup old data",
+    },
 ]
+
 
 def get_routes_for_consul() -> Dict[str, Any]:
     """
@@ -79,6 +153,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
 
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "audit_service",
@@ -91,6 +166,6 @@ SERVICE_METADATA = {
         "security_alerting",
         "compliance_reporting",
         "real_time_analysis",
-        "data_retention"
-    ]
+        "data_retention",
+    ],
 }

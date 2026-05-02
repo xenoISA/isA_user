@@ -8,7 +8,6 @@ Usage:
     from .factory import create_memory_service
     service = create_memory_service(event_bus=event_bus)
 """
-from typing import Optional
 
 from .memory_service import MemoryService
 

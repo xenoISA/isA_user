@@ -3,7 +3,8 @@ Credit Service Routes Registry
 Defines all API routes for Consul service registration.
 Pattern: CDD System Contract - Service Registration Pattern
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # Define all routes based on system_contract.md
 SERVICE_ROUTES = [
     # Health and Service Info
@@ -11,93 +12,95 @@ SERVICE_ROUTES = [
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Basic health check endpoint"
+        "description": "Basic health check endpoint",
     },
-        {
-            "path": "/api/v1/credits/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/credits/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Detailed health check with dependencies"
+        "description": "Detailed health check with dependencies",
     },
     # Credit Account Management
     {
         "path": "/api/v1/credits/accounts",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List user accounts (GET) or create new account (POST)"
+        "description": "List user accounts (GET) or create new account (POST)",
     },
     {
         "path": "/api/v1/credits/accounts/{account_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get account by ID"
+        "description": "Get account by ID",
     },
     # Balance Operations
     {
         "path": "/api/v1/credits/balance",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get aggregated credit balance summary"
+        "description": "Get aggregated credit balance summary",
     },
     {
         "path": "/api/v1/credits/check-availability",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Check credit availability for consumption"
+        "description": "Check credit availability for consumption",
     },
     # Credit Operations
     {
         "path": "/api/v1/credits/allocate",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Allocate credits to user"
+        "description": "Allocate credits to user",
     },
     {
         "path": "/api/v1/credits/consume",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Consume credits with FIFO expiration"
+        "description": "Consume credits with FIFO expiration",
     },
     {
         "path": "/api/v1/credits/transfer",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Transfer credits between users"
+        "description": "Transfer credits between users",
     },
     # Transaction History
     {
         "path": "/api/v1/credits/transactions",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get credit transaction history"
+        "description": "Get credit transaction history",
     },
     # Campaign Management
     {
         "path": "/api/v1/credits/campaigns",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List campaigns (GET) or create campaign (POST)"
+        "description": "List campaigns (GET) or create campaign (POST)",
     },
     {
         "path": "/api/v1/credits/campaigns/{campaign_id}",
         "methods": ["GET", "PUT"],
         "auth_required": True,
-        "description": "Get campaign (GET) or update campaign (PUT)"
+        "description": "Get campaign (GET) or update campaign (PUT)",
     },
     # Statistics and Analytics
     {
         "path": "/api/v1/credits/statistics",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get credit statistics and analytics"
+        "description": "Get credit statistics and analytics",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul registration.
@@ -142,6 +145,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "credit_service",
@@ -155,6 +160,6 @@ SERVICE_METADATA = {
         "credit_transfer",
         "campaign_management",
         "fifo_expiration",
-        "event_driven"
-    ]
+        "event_driven",
+    ],
 }

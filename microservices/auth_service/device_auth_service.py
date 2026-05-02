@@ -10,7 +10,7 @@ import os
 import secrets
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 import jwt
 
@@ -406,7 +406,6 @@ class DeviceAuthService:
 
             if self.event_bus:
                 from events.publishers import publish_device_pairing_token_verified
-
 
                 await publish_device_pairing_token_verified(
                     event_bus=self.event_bus,

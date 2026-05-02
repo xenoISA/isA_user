@@ -3,43 +3,133 @@ Compliance Service Routes Registry
 Defines all API routes for Consul service registration
 """
 
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 # Define all routes
 SERVICE_ROUTES = [
     # Health checks
-    {"path": "/health", "methods": ["GET"], "auth_required": False, "description": "Health check"},
-    {"path": "/api/v1/compliance/health", "methods": ["GET"], "auth_required": False, "description": "Service health check (API v1)"},
-    {"path": "/status", "methods": ["GET"], "auth_required": False, "description": "Service status"},
-
+    {
+        "path": "/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Health check",
+    },
+    {
+        "path": "/api/v1/compliance/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
+    {
+        "path": "/status",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service status",
+    },
     # Compliance checks
-    {"path": "/api/v1/compliance/check", "methods": ["POST"], "auth_required": True, "description": "Perform compliance check"},
-    {"path": "/api/v1/compliance/check/batch", "methods": ["POST"], "auth_required": True, "description": "Batch compliance check"},
-
+    {
+        "path": "/api/v1/compliance/check",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Perform compliance check",
+    },
+    {
+        "path": "/api/v1/compliance/check/batch",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Batch compliance check",
+    },
     # Query and reporting
-    {"path": "/api/v1/compliance/checks/{check_id}", "methods": ["GET"], "auth_required": True, "description": "Get check by ID"},
-    {"path": "/api/v1/compliance/checks/user/{user_id}", "methods": ["GET"], "auth_required": True, "description": "Get user checks"},
-    {"path": "/api/v1/compliance/reviews/pending", "methods": ["GET"], "auth_required": True, "description": "Get pending reviews"},
-    {"path": "/api/v1/compliance/reviews/{check_id}", "methods": ["PUT"], "auth_required": True, "description": "Update review"},
-    {"path": "/api/v1/compliance/reports", "methods": ["POST"], "auth_required": True, "description": "Generate report"},
-
+    {
+        "path": "/api/v1/compliance/checks/{check_id}",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get check by ID",
+    },
+    {
+        "path": "/api/v1/compliance/checks/user/{user_id}",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get user checks",
+    },
+    {
+        "path": "/api/v1/compliance/reviews/pending",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get pending reviews",
+    },
+    {
+        "path": "/api/v1/compliance/reviews/{check_id}",
+        "methods": ["PUT"],
+        "auth_required": True,
+        "description": "Update review",
+    },
+    {
+        "path": "/api/v1/compliance/reports",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Generate report",
+    },
     # Policy management
-    {"path": "/api/v1/compliance/policies", "methods": ["GET", "POST"], "auth_required": True, "description": "List/create policies"},
-    {"path": "/api/v1/compliance/policies/{policy_id}", "methods": ["GET"], "auth_required": True, "description": "Get policy"},
-
+    {
+        "path": "/api/v1/compliance/policies",
+        "methods": ["GET", "POST"],
+        "auth_required": True,
+        "description": "List/create policies",
+    },
+    {
+        "path": "/api/v1/compliance/policies/{policy_id}",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get policy",
+    },
     # Statistics
-    {"path": "/api/v1/compliance/stats", "methods": ["GET"], "auth_required": True, "description": "Get statistics"},
-
+    {
+        "path": "/api/v1/compliance/stats",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get statistics",
+    },
     # GDPR compliance
-    {"path": "/api/v1/compliance/user/{user_id}/data-export", "methods": ["GET"], "auth_required": True, "description": "Export user data (GDPR)"},
-    {"path": "/api/v1/compliance/user/{user_id}/data", "methods": ["DELETE"], "auth_required": True, "description": "Delete user data (GDPR)"},
-    {"path": "/api/v1/compliance/user/{user_id}/data-summary", "methods": ["GET"], "auth_required": True, "description": "User data summary (GDPR)"},
-    {"path": "/api/v1/compliance/user/{user_id}/consent", "methods": ["POST"], "auth_required": True, "description": "Update consent (GDPR)"},
-    {"path": "/api/v1/compliance/user/{user_id}/audit-log", "methods": ["GET"], "auth_required": True, "description": "Get audit log (GDPR)"},
-
+    {
+        "path": "/api/v1/compliance/user/{user_id}/data-export",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Export user data (GDPR)",
+    },
+    {
+        "path": "/api/v1/compliance/user/{user_id}/data",
+        "methods": ["DELETE"],
+        "auth_required": True,
+        "description": "Delete user data (GDPR)",
+    },
+    {
+        "path": "/api/v1/compliance/user/{user_id}/data-summary",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "User data summary (GDPR)",
+    },
+    {
+        "path": "/api/v1/compliance/user/{user_id}/consent",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Update consent (GDPR)",
+    },
+    {
+        "path": "/api/v1/compliance/user/{user_id}/audit-log",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get audit log (GDPR)",
+    },
     # PCI-DSS compliance
-    {"path": "/api/v1/compliance/pci/card-data-check", "methods": ["POST"], "auth_required": True, "description": "Check card data (PCI-DSS)"},
+    {
+        "path": "/api/v1/compliance/pci/card-data-check",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Check card data (PCI-DSS)",
+    },
 ]
+
 
 def get_routes_for_consul() -> Dict[str, Any]:
     """
@@ -61,7 +151,9 @@ def get_routes_for_consul() -> Dict[str, Any]:
         elif "/check" in path:
             check_routes.append(path.split("/")[-1])
         elif "/policies" in path:
-            policy_routes.append(path.split("/")[-1] if "{" not in path.split("/")[-1] else "*")
+            policy_routes.append(
+                path.split("/")[-1] if "{" not in path.split("/")[-1] else "*"
+            )
         elif "/user/" in path and "/pci/" not in path:
             gdpr_routes.append(path.split("/")[-1])
         elif "/pci/" in path:
@@ -80,6 +172,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
 
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "compliance_service",
@@ -93,6 +186,6 @@ SERVICE_METADATA = {
         "pci_dss_compliance",
         "policy_enforcement",
         "compliance_reporting",
-        "user_data_control"
-    ]
+        "user_data_control",
+    ],
 }

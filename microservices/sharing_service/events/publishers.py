@@ -5,7 +5,7 @@ Publish events for share lifecycle.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from core.nats_client import Event
 

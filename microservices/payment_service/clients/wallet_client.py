@@ -24,11 +24,12 @@ class WalletClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("wallet_service")
             except Exception as e:
@@ -86,8 +87,8 @@ class WalletClient:
             Balance as Decimal
         """
         wallet = await self.get_wallet(user_id)
-        if wallet and 'balance' in wallet:
-            return Decimal(str(wallet['balance']))
+        if wallet and "balance" in wallet:
+            return Decimal(str(wallet["balance"]))
         return None
 
     async def add_credits(
@@ -95,7 +96,7 @@ class WalletClient:
         user_id: str,
         amount: Decimal,
         reason: str = "payment_completed",
-        transaction_id: Optional[str] = None
+        transaction_id: Optional[str] = None,
     ) -> bool:
         """
         Add credits to wallet
@@ -114,12 +115,11 @@ class WalletClient:
                 "user_id": user_id,
                 "amount": float(amount),
                 "reason": reason,
-                "transaction_id": transaction_id
+                "transaction_id": transaction_id,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/wallet/credits/add",
-                json=payload
+                f"{self.base_url}/api/v1/wallet/credits/add", json=payload
             )
             response.raise_for_status()
             return True
@@ -136,7 +136,7 @@ class WalletClient:
         user_id: str,
         amount: Decimal,
         reason: str = "payment_charge",
-        transaction_id: Optional[str] = None
+        transaction_id: Optional[str] = None,
     ) -> bool:
         """
         Deduct credits from wallet
@@ -155,12 +155,11 @@ class WalletClient:
                 "user_id": user_id,
                 "amount": float(amount),
                 "reason": reason,
-                "transaction_id": transaction_id
+                "transaction_id": transaction_id,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/wallet/credits/deduct",
-                json=payload
+                f"{self.base_url}/api/v1/wallet/credits/deduct", json=payload
             )
             response.raise_for_status()
             return True
@@ -177,5 +176,5 @@ class WalletClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

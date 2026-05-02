@@ -6,13 +6,14 @@ Event data models for credit lifecycle and campaign management events.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
 # =============================================================================
+
 
 class CreditEventType(str, Enum):
     """
@@ -21,6 +22,7 @@ class CreditEventType(str, Enum):
     Stream: credit-stream
     Subjects: credit.>
     """
+
     CREDIT_ALLOCATED = "credit.allocated"
     CREDIT_CONSUMED = "credit.consumed"
     CREDIT_EXPIRED = "credit.expired"
@@ -29,12 +31,14 @@ class CreditEventType(str, Enum):
 
 class CreditSubscribedEventType(str, Enum):
     """Events that credit_service subscribes to from other services."""
+
     SUBSCRIPTION_CREATED = "subscription.created"
     SUBSCRIPTION_RENEWED = "subscription.renewed"
 
 
 class CreditStreamConfig:
     """Stream configuration for credit_service"""
+
     STREAM_NAME = "credit-stream"
     SUBJECTS = ["credit.>"]
     MAX_MESSAGES = 100000
@@ -54,7 +58,9 @@ class CreditAllocatedEventData(BaseModel):
 
     allocation_id: str = Field(..., description="Allocation record ID")
     user_id: str = Field(..., description="User receiving credits")
-    credit_type: str = Field(..., description="Type of credit (bonus, subscription, referral, etc.)")
+    credit_type: str = Field(
+        ..., description="Type of credit (bonus, subscription, referral, etc.)"
+    )
     amount: int = Field(..., description="Amount of credits allocated")
     campaign_id: Optional[str] = Field(None, description="Campaign ID if from campaign")
     expires_at: datetime = Field(..., description="Credit expiration timestamp")
@@ -82,10 +88,14 @@ class CreditConsumedEventData(BaseModel):
     Triggered when credits are consumed by a user
     """
 
-    transaction_ids: List[str] = Field(..., description="List of transaction IDs (FIFO may use multiple)")
+    transaction_ids: List[str] = Field(
+        ..., description="List of transaction IDs (FIFO may use multiple)"
+    )
     user_id: str = Field(..., description="User consuming credits")
     amount: int = Field(..., description="Amount of credits consumed")
-    billing_record_id: Optional[str] = Field(None, description="Associated billing record")
+    billing_record_id: Optional[str] = Field(
+        None, description="Associated billing record"
+    )
     balance_before: int = Field(..., description="Account balance before consumption")
     balance_after: int = Field(..., description="Account balance after consumption")
     timestamp: datetime = Field(default_factory=datetime.utcnow)

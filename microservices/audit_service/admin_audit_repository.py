@@ -6,8 +6,7 @@ Data access layer for the admin_audit_log table.
 
 import json
 import logging
-import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from isa_common import AsyncPostgresClient
@@ -26,11 +25,11 @@ class AdminAuditRepository:
             config = ConfigManager("audit_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         self.db = AsyncPostgresClient(
@@ -43,7 +42,9 @@ class AdminAuditRepository:
         self.schema = "audit"
         self.table = "admin_audit_log"
 
-    async def create_admin_audit_entry(self, entry: AdminAuditLogEntry) -> Optional[AdminAuditLogEntry]:
+    async def create_admin_audit_entry(
+        self, entry: AdminAuditLogEntry
+    ) -> Optional[AdminAuditLogEntry]:
         """Insert a new admin audit log entry"""
         try:
             query = f"""

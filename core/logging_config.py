@@ -27,12 +27,12 @@ class LogLevel(Enum):
 
 class StructuredFormatter(logging.Formatter):
     """结构化JSON日志格式化器"""
-    
+
     def __init__(self, service_name: str, include_trace: bool = True):
         self.service_name = service_name
         self.include_trace = include_trace
         super().__init__()
-    
+
     def format(self, record: logging.LogRecord) -> str:
         """格式化日志记录为JSON"""
         log_data = {
@@ -45,19 +45,19 @@ class StructuredFormatter(logging.Formatter):
             "function": record.funcName,
             "line": record.lineno,
         }
-        
+
         # 添加请求ID（如果存在）
         if hasattr(record, 'request_id'):
             log_data["request_id"] = record.request_id
-        
+
         # 添加用户ID（如果存在）
         if hasattr(record, 'user_id'):
             log_data["user_id"] = record.user_id
-        
+
         # 添加额外字段
         if hasattr(record, 'extra'):
             log_data["extra"] = record.extra
-        
+
         # 添加异常信息
         if record.exc_info and self.include_trace:
             log_data["exception"] = {
@@ -65,7 +65,7 @@ class StructuredFormatter(logging.Formatter):
                 "message": str(record.exc_info[1]) if record.exc_info[1] else None,
                 "traceback": self.formatException(record.exc_info) if record.exc_info else None
             }
-        
+
         return json.dumps(log_data, ensure_ascii=False)
 
 
@@ -84,7 +84,7 @@ class ResilientLokiHandler(logging.Handler):
 
         try:
             self.loki_handler.emit(record)
-        except Exception as e:
+        except Exception:
             self.failed = True
             # Silently fail - don't crash the application
             pass
@@ -96,7 +96,7 @@ class HumanReadableFormatter(logging.Formatter):
     def __init__(self, service_name: str, use_colors: bool = True):
         self.service_name = service_name
         self.use_colors = use_colors
-        
+
         # 颜色代码
         self.colors = {
             'DEBUG': '\033[36m',    # 青色
@@ -106,23 +106,23 @@ class HumanReadableFormatter(logging.Formatter):
             'CRITICAL': '\033[35m', # 紫色
             'ENDC': '\033[0m'       # 结束颜色
         }
-        
+
         fmt = "%(asctime)s | %(service)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
         super().__init__(fmt, datefmt="%Y-%m-%d %H:%M:%S")
-    
+
     def format(self, record: logging.LogRecord) -> str:
         # 添加服务名
         record.service = self.service_name
-        
+
         # 格式化消息
         formatted = super().format(record)
-        
+
         # 添加颜色（如果在终端环境）
         if self.use_colors and sys.stderr.isatty():
             level_color = self.colors.get(record.levelname, '')
             if level_color:
                 formatted = f"{level_color}{formatted}{self.colors['ENDC']}"
-        
+
         return formatted
 
 
@@ -228,30 +228,30 @@ class UnifiedLoggingConfig:
 
         # 决定是否启用 Loki (优先级: 参数 > 环境变量)
         use_loki = enable_loki if enable_loki is not None else self.loki_enabled
-        
+
         # 获取根日志器
         logger = logging.getLogger(self.service_name)
         logger.setLevel(getattr(logging, level.value))
-        
+
         # 清除现有处理器
         logger.handlers.clear()
-        
+
         # 控制台处理器
         if enable_console:
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setLevel(getattr(logging, level.value))
             console_formatter = HumanReadableFormatter(
-                self.service_name, 
+                self.service_name,
                 use_colors=True
             )
             console_handler.setFormatter(console_formatter)
             logger.addHandler(console_handler)
-        
+
         # 文件处理器 - 人类可读格式
         if enable_file:
             file_path = self.service_log_dir / f"{self.service_name}.log"
             file_formatter = HumanReadableFormatter(
-                self.service_name, 
+                self.service_name,
                 use_colors=False
             )
             file_handler = self._build_file_handler(
@@ -363,7 +363,7 @@ class UnifiedLoggingConfig:
                     console_logger.info("📝 Logging to console/file only")
 
         return logger
-    
+
     def get_log_file_paths(self) -> Dict[str, str]:
         """获取日志文件路径"""
         return {
@@ -375,23 +375,23 @@ class UnifiedLoggingConfig:
 
 class LoggingContextManager:
     """日志上下文管理器"""
-    
+
     def __init__(self, logger: logging.Logger):
         self.logger = logger
         self.context: Dict[str, Any] = {}
-    
+
     def set_context(self, **kwargs):
         """设置日志上下文"""
         self.context.update(kwargs)
-    
+
     def clear_context(self):
         """清除日志上下文"""
         self.context.clear()
-    
+
     def log(self, level: str, message: str, **extra):
         """带上下文的日志记录"""
         combined_extra = {**self.context, **extra}
-        
+
         # 创建LogRecord并添加额外信息
         record = self.logger.makeRecord(
             self.logger.name,
@@ -402,46 +402,46 @@ class LoggingContextManager:
             (),
             None
         )
-        
+
         # 添加上下文信息
         for key, value in combined_extra.items():
             setattr(record, key, value)
-        
+
         self.logger.handle(record)
-    
+
     def info(self, message: str, **extra):
         self.log("info", message, **extra)
-    
+
     def error(self, message: str, **extra):
         self.log("error", message, **extra)
-    
+
     def warning(self, message: str, **extra):
         self.log("warning", message, **extra)
-    
+
     def debug(self, message: str, **extra):
         self.log("debug", message, **extra)
 
 
-def setup_service_logging(service_name: str, 
+def setup_service_logging(service_name: str,
                          level: str = "INFO",
                          log_dir: str = "logs") -> tuple[logging.Logger, LoggingContextManager]:
     """
     便捷函数：为服务设置统一日志
-    
+
     Returns:
         tuple: (logger, context_manager)
     """
     config = UnifiedLoggingConfig(service_name, log_dir)
     logger = config.setup_logging(LogLevel(level.upper()))
     context_manager = LoggingContextManager(logger)
-    
+
     return logger, context_manager
 
 
 # 导出主要类和函数
 __all__ = [
     "UnifiedLoggingConfig",
-    "LoggingContextManager", 
+    "LoggingContextManager",
     "StructuredFormatter",
     "HumanReadableFormatter",
     "LogLevel",

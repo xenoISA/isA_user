@@ -10,18 +10,26 @@ import sys
 import uuid
 import json
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from enum import Enum
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    UserSubscription, SubscriptionHistory, SubscriptionStatus,
-    BillingCycle, SubscriptionAction, InitiatedBy,
-    BillingAccountType, CreditReservation, ReservationStatus,
+    UserSubscription,
+    SubscriptionHistory,
+    SubscriptionStatus,
+    BillingCycle,
+    SubscriptionAction,
+    InitiatedBy,
+    BillingAccountType,
+    CreditReservation,
+    ReservationStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,11 +88,11 @@ class SubscriptionRepository:
 
         # Discover PostgreSQL service
         postgres_host, postgres_port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
@@ -92,8 +100,8 @@ class SubscriptionRepository:
             host=postgres_host,
             port=postgres_port,
             user_id="subscription_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = "subscription"
         self.subscriptions_table = "user_subscriptions"
@@ -142,11 +150,14 @@ class SubscriptionRepository:
     # Subscription CRUD
     # ====================
 
-    async def create_subscription(self, subscription: UserSubscription) -> Optional[UserSubscription]:
+    async def create_subscription(
+        self, subscription: UserSubscription
+    ) -> Optional[UserSubscription]:
         """Create a new subscription"""
         try:
             import json
-            query = f'''
+
+            query = f"""
                 INSERT INTO {self.schema}.{self.subscriptions_table} (
                     subscription_id, user_id, organization_id,
                     tier_id, tier_code, status,
@@ -165,7 +176,7 @@ class SubscriptionRepository:
                     $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31
                 )
                 RETURNING *
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -199,7 +210,7 @@ class SubscriptionRepository:
                 subscription.last_billing_date,
                 json.dumps(subscription.metadata) if subscription.metadata else "{}",
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -213,13 +224,15 @@ class SubscriptionRepository:
             logger.error(f"Error creating subscription: {e}", exc_info=True)
             return None
 
-    async def get_subscription(self, subscription_id: str) -> Optional[UserSubscription]:
+    async def get_subscription(
+        self, subscription_id: str
+    ) -> Optional[UserSubscription]:
         """Get subscription by ID"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.subscriptions_table}
                 WHERE subscription_id = $1
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[subscription_id])
@@ -239,7 +252,7 @@ class SubscriptionRepository:
         billing_account_type: Optional[str] = None,
         billing_account_id: Optional[str] = None,
         actor_user_id: Optional[str] = None,
-        active_only: bool = True
+        active_only: bool = True,
     ) -> Optional[UserSubscription]:
         """Get the active subscription for the resolved billing account."""
         try:
@@ -252,27 +265,27 @@ class SubscriptionRepository:
             )
 
             if scope["billing_account_type"] == BillingAccountType.ORGANIZATION:
-                query = f'''
+                query = f"""
                     SELECT * FROM {self.schema}.{self.subscriptions_table}
                     WHERE organization_id = $1
                     {'AND status = $2' if active_only else ''}
                     ORDER BY created_at DESC
                     LIMIT 1
-                '''
+                """
                 params = [scope["billing_account_id"]]
                 if active_only:
-                    params.append('active')
+                    params.append("active")
             else:
-                query = f'''
+                query = f"""
                     SELECT * FROM {self.schema}.{self.subscriptions_table}
                     WHERE user_id = $1 AND organization_id IS NULL
                     {'AND status = $2' if active_only else ''}
                     ORDER BY created_at DESC
                     LIMIT 1
-                '''
+                """
                 params = [scope["billing_account_id"]]
                 if active_only:
-                    params.append('active')
+                    params.append("active")
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -292,7 +305,7 @@ class SubscriptionRepository:
         status: Optional[SubscriptionStatus] = None,
         tier_code: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[UserSubscription]:
         """Get subscriptions with filters"""
         try:
@@ -322,31 +335,32 @@ class SubscriptionRepository:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.subscriptions_table}
                 {where_clause}
                 ORDER BY created_at DESC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
             params.extend([limit, offset])
 
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            return [self._row_to_subscription(row) for row in results] if results else []
+            return (
+                [self._row_to_subscription(row) for row in results] if results else []
+            )
 
         except Exception as e:
             logger.error(f"Error getting subscriptions: {e}")
             return []
 
     async def update_subscription(
-        self,
-        subscription_id: str,
-        updates: Dict[str, Any]
+        self, subscription_id: str, updates: Dict[str, Any]
     ) -> Optional[UserSubscription]:
         """Update a subscription"""
         try:
             import json
+
             set_clauses = []
             params = []
             param_count = 0
@@ -367,12 +381,12 @@ class SubscriptionRepository:
             param_count += 1
             params.append(subscription_id)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.subscriptions_table}
                 SET {", ".join(set_clauses)}
                 WHERE subscription_id = ${param_count}
                 RETURNING *
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -386,13 +400,11 @@ class SubscriptionRepository:
             return None
 
     async def consume_credits(
-        self,
-        subscription_id: str,
-        credits_to_consume: int
+        self, subscription_id: str, credits_to_consume: int
     ) -> Optional[UserSubscription]:
         """Consume credits from a subscription (atomic operation)"""
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.subscriptions_table}
                 SET
                     credits_used = credits_used + $1,
@@ -401,7 +413,7 @@ class SubscriptionRepository:
                 WHERE subscription_id = $3
                 AND credits_remaining >= $1
                 RETURNING *
-            '''
+            """
 
             params = [credits_to_consume, datetime.now(timezone.utc), subscription_id]
 
@@ -417,14 +429,11 @@ class SubscriptionRepository:
             return None
 
     async def allocate_credits(
-        self,
-        subscription_id: str,
-        credits_to_allocate: int,
-        rollover_credits: int = 0
+        self, subscription_id: str, credits_to_allocate: int, rollover_credits: int = 0
     ) -> Optional[UserSubscription]:
         """Allocate credits to a subscription (for new period)"""
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.subscriptions_table}
                 SET
                     credits_allocated = $1,
@@ -434,13 +443,13 @@ class SubscriptionRepository:
                     updated_at = $3
                 WHERE subscription_id = $4
                 RETURNING *
-            '''
+            """
 
             params = [
                 credits_to_allocate,
                 rollover_credits,
                 datetime.now(timezone.utc),
-                subscription_id
+                subscription_id,
             ]
 
             async with self.db:
@@ -649,12 +658,18 @@ class SubscriptionRepository:
                     if reservation.status != ReservationStatus.PENDING:
                         return {
                             "reservation": reservation,
-                            "credits_remaining": int(subscription_row["credits_remaining"]),
+                            "credits_remaining": int(
+                                subscription_row["credits_remaining"]
+                            ),
                             "message": f"Reservation already {reservation.status.value}",
                         }
 
-                    credits_refunded = max(reservation.estimated_credits - actual_credits, 0)
-                    extra_credits = max(actual_credits - reservation.estimated_credits, 0)
+                    credits_refunded = max(
+                        reservation.estimated_credits - actual_credits, 0
+                    )
+                    extra_credits = max(
+                        actual_credits - reservation.estimated_credits, 0
+                    )
 
                     if credits_refunded > 0:
                         updated_subscription = await conn.fetchrow(
@@ -693,7 +708,9 @@ class SubscriptionRepository:
                         if not updated_subscription:
                             return {
                                 "reservation": reservation,
-                                "credits_remaining": int(subscription_row["credits_remaining"]),
+                                "credits_remaining": int(
+                                    subscription_row["credits_remaining"]
+                                ),
                                 "message": "Insufficient credits to reconcile reservation overage",
                             }
                         subscription_row = updated_subscription
@@ -725,7 +742,9 @@ class SubscriptionRepository:
                         return None
 
                     return {
-                        "reservation": self._row_to_credit_reservation(dict(updated_reservation)),
+                        "reservation": self._row_to_credit_reservation(
+                            dict(updated_reservation)
+                        ),
                         "credits_remaining": int(subscription_row["credits_remaining"]),
                         "message": "Reservation reconciled successfully",
                     }
@@ -771,14 +790,18 @@ class SubscriptionRepository:
                     if reservation.status == ReservationStatus.RELEASED:
                         return {
                             "reservation": reservation,
-                            "credits_remaining": int(subscription_row["credits_remaining"]),
+                            "credits_remaining": int(
+                                subscription_row["credits_remaining"]
+                            ),
                             "message": "Reservation already released",
                         }
 
                     if reservation.status == ReservationStatus.RECONCILED:
                         return {
                             "reservation": reservation,
-                            "credits_remaining": int(subscription_row["credits_remaining"]),
+                            "credits_remaining": int(
+                                subscription_row["credits_remaining"]
+                            ),
                             "message": "Reservation already reconciled",
                         }
 
@@ -821,8 +844,12 @@ class SubscriptionRepository:
                         return None
 
                     return {
-                        "reservation": self._row_to_credit_reservation(dict(updated_reservation)),
-                        "credits_remaining": int(updated_subscription["credits_remaining"]),
+                        "reservation": self._row_to_credit_reservation(
+                            dict(updated_reservation)
+                        ),
+                        "credits_remaining": int(
+                            updated_subscription["credits_remaining"]
+                        ),
                         "message": "Reservation released successfully",
                     }
 
@@ -834,11 +861,14 @@ class SubscriptionRepository:
     # History Operations
     # ====================
 
-    async def add_history(self, history: SubscriptionHistory) -> Optional[SubscriptionHistory]:
+    async def add_history(
+        self, history: SubscriptionHistory
+    ) -> Optional[SubscriptionHistory]:
         """Add a subscription history entry"""
         try:
             import json
-            query = f'''
+
+            query = f"""
                 INSERT INTO {self.schema}.{self.history_table} (
                     history_id, subscription_id, user_id, organization_id,
                     action, previous_tier_code, new_tier_code,
@@ -851,7 +881,7 @@ class SubscriptionRepository:
                     $11, $12, $13, $14, $15, $16, $17, $18
                 )
                 RETURNING *
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             params = [
@@ -872,7 +902,7 @@ class SubscriptionRepository:
                 history.reason,
                 history.initiated_by.value,
                 json.dumps(history.metadata) if history.metadata else "{}",
-                now
+                now,
             ]
 
             async with self.db:
@@ -887,22 +917,21 @@ class SubscriptionRepository:
             return None
 
     async def get_subscription_history(
-        self,
-        subscription_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, subscription_id: str, limit: int = 50, offset: int = 0
     ) -> List[SubscriptionHistory]:
         """Get history for a subscription"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.history_table}
                 WHERE subscription_id = $1
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, params=[subscription_id, limit, offset])
+                results = await self.db.query(
+                    query, params=[subscription_id, limit, offset]
+                )
 
             return [self._row_to_history(row) for row in results] if results else []
 
@@ -964,7 +993,7 @@ class SubscriptionRepository:
             last_billing_date=row.get("last_billing_date"),
             metadata=self._coerce_json_dict(row.get("metadata")),
             created_at=row.get("created_at"),
-            updated_at=row.get("updated_at")
+            updated_at=row.get("updated_at"),
         )
 
     def _row_to_history(self, row: Dict[str, Any]) -> SubscriptionHistory:
@@ -981,14 +1010,16 @@ class SubscriptionRepository:
             previous_status=row.get("previous_status"),
             new_status=row.get("new_status"),
             credits_change=int(row.get("credits_change", 0)),
-            credits_balance_after=int(row.get("credits_balance_after")) if row.get("credits_balance_after") else None,
+            credits_balance_after=int(row.get("credits_balance_after"))
+            if row.get("credits_balance_after")
+            else None,
             price_change=Decimal(str(row.get("price_change", 0))),
             period_start=row.get("period_start"),
             period_end=row.get("period_end"),
             reason=row.get("reason"),
             initiated_by=InitiatedBy(row.get("initiated_by", "system")),
             metadata=self._coerce_json_dict(row.get("metadata")),
-            created_at=row.get("created_at")
+            created_at=row.get("created_at"),
         )
 
     def _row_to_credit_reservation(self, row: Dict[str, Any]) -> CreditReservation:
@@ -1009,7 +1040,9 @@ class SubscriptionRepository:
             request_id=row.get("request_id"),
             model=row.get("model"),
             estimated_credits=int(row.get("estimated_credits", 0)),
-            actual_credits=int(row.get("actual_credits")) if row.get("actual_credits") is not None else None,
+            actual_credits=int(row.get("actual_credits"))
+            if row.get("actual_credits") is not None
+            else None,
             credits_refunded=int(row.get("credits_refunded", 0)),
             extra_credits_consumed=int(row.get("extra_credits_consumed", 0)),
             credits_remaining_after_reserve=(
@@ -1022,7 +1055,9 @@ class SubscriptionRepository:
                 if row.get("credits_remaining_after_finalize") is not None
                 else None
             ),
-            status=ReservationStatus(row.get("status", ReservationStatus.PENDING.value)),
+            status=ReservationStatus(
+                row.get("status", ReservationStatus.PENDING.value)
+            ),
             metadata=self._coerce_json_dict(row.get("metadata")),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at"),

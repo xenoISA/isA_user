@@ -23,11 +23,12 @@ class NotificationClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("notification_service")
             except Exception as e:
@@ -48,9 +49,7 @@ class NotificationClient:
         await self.close()
 
     async def send_campaign_notification(
-        self,
-        user_ids: List[str],
-        campaign_data: Dict[str, Any]
+        self, user_ids: List[str], campaign_data: Dict[str, Any]
     ) -> bool:
         """
         Send campaign notification to users
@@ -70,28 +69,27 @@ class NotificationClient:
                 "message": f"A new firmware update campaign has been created for {campaign_data.get('device_count', 0)} devices",
                 "data": campaign_data,
                 "channels": ["push", "email"],
-                "priority": campaign_data.get('priority', 'normal')
+                "priority": campaign_data.get("priority", "normal"),
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/notifications/send",
-                json=payload
+                f"{self.base_url}/api/v1/notifications/send", json=payload
             )
             response.raise_for_status()
             logger.info(f"Campaign notification sent to {len(user_ids)} users")
             return True
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to send campaign notification: {e.response.status_code}")
+            logger.error(
+                f"Failed to send campaign notification: {e.response.status_code}"
+            )
             return False
         except Exception as e:
             logger.error(f"Error sending campaign notification: {e}")
             return False
 
     async def send_update_notification(
-        self,
-        device_id: str,
-        update_data: Dict[str, Any]
+        self, device_id: str, update_data: Dict[str, Any]
     ) -> bool:
         """
         Send update notification for device
@@ -111,29 +109,26 @@ class NotificationClient:
                 "message": f"Firmware version {update_data.get('version', 'unknown')} is ready to install",
                 "data": update_data,
                 "channels": ["push"],
-                "priority": update_data.get('priority', 'normal')
+                "priority": update_data.get("priority", "normal"),
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/notifications/device/{device_id}",
-                json=payload
+                f"{self.base_url}/api/v1/notifications/device/{device_id}", json=payload
             )
             response.raise_for_status()
             logger.info(f"Update notification sent to device {device_id}")
             return True
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to send update notification: {e.response.status_code}")
+            logger.error(
+                f"Failed to send update notification: {e.response.status_code}"
+            )
             return False
         except Exception as e:
             logger.error(f"Error sending update notification: {e}")
             return False
 
-    async def send_alert(
-        self,
-        user_ids: List[str],
-        alert_data: Dict[str, Any]
-    ) -> bool:
+    async def send_alert(self, user_ids: List[str], alert_data: Dict[str, Any]) -> bool:
         """
         Send alert notification
 
@@ -148,16 +143,15 @@ class NotificationClient:
             payload = {
                 "user_ids": user_ids,
                 "notification_type": "ota_alert",
-                "title": alert_data.get('title', 'OTA Alert'),
-                "message": alert_data.get('message', 'An OTA alert has occurred'),
+                "title": alert_data.get("title", "OTA Alert"),
+                "message": alert_data.get("message", "An OTA alert has occurred"),
                 "data": alert_data,
                 "channels": ["push", "email", "sms"],
-                "priority": "high"
+                "priority": "high",
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/notifications/alert",
-                json=payload
+                f"{self.base_url}/api/v1/notifications/alert", json=payload
             )
             response.raise_for_status()
             logger.info(f"Alert sent to {len(user_ids)} users")
@@ -171,9 +165,7 @@ class NotificationClient:
             return False
 
     async def send_rollback_notification(
-        self,
-        device_id: str,
-        rollback_data: Dict[str, Any]
+        self, device_id: str, rollback_data: Dict[str, Any]
     ) -> bool:
         """
         Send rollback notification
@@ -193,19 +185,20 @@ class NotificationClient:
                 "message": f"Firmware is being rolled back from {rollback_data.get('from_version')} to {rollback_data.get('to_version')}",
                 "data": rollback_data,
                 "channels": ["push"],
-                "priority": "high"
+                "priority": "high",
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/notifications/device/{device_id}",
-                json=payload
+                f"{self.base_url}/api/v1/notifications/device/{device_id}", json=payload
             )
             response.raise_for_status()
             logger.info(f"Rollback notification sent to device {device_id}")
             return True
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to send rollback notification: {e.response.status_code}")
+            logger.error(
+                f"Failed to send rollback notification: {e.response.status_code}"
+            )
             return False
         except Exception as e:
             logger.error(f"Error sending rollback notification: {e}")
@@ -216,5 +209,5 @@ class NotificationClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

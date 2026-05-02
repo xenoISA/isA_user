@@ -7,9 +7,7 @@ Task Service Business Logic Layer
 import asyncio
 import json
 import logging
-import uuid
 from datetime import datetime, timedelta
-from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 # Service communication imports
@@ -17,13 +15,11 @@ import httpx
 from core.config_manager import ConfigManager
 from core.nats_client import Event
 
-from .clients import NotificationClient
 from .models import (
     TaskCreateRequest,
     TaskResponse,
     TaskType,
     TaskStatus,
-    TaskPriority,
     TaskUpdateRequest,
     TaskExecutionRequest,
     TaskExecutionResponse,
@@ -32,6 +28,7 @@ from .models import (
     TaskAnalyticsResponse,
 )
 from .task_repository import TaskRepository
+
 
 # Temporary ServiceError class until shared module is available
 class ServiceError(Exception):
@@ -189,15 +186,15 @@ class TaskService:
                     f"Permission denied for creating {request.task_type.value} task",
                     error_code="PERMISSION_DENIED",
                 )
-            logger.debug(f"Permission check passed")
+            logger.debug("Permission check passed")
 
             # 3. 检查任务数量限制
             await self._check_task_limits(user_id, subscription_level)
-            logger.debug(f"Task limits check passed")
+            logger.debug("Task limits check passed")
 
             # 4. 验证任务配置
             await self._validate_task_config(request)
-            logger.debug(f"Task config validation passed")
+            logger.debug("Task config validation passed")
 
             # 5. 处理调度信息
             task_data = request.dict()
@@ -209,7 +206,7 @@ class TaskService:
                     else next_run_time
                 )
                 task_data["status"] = TaskStatus.SCHEDULED.value
-            logger.debug(f"Task data prepared, calling repository")
+            logger.debug("Task data prepared, calling repository")
 
             # 6. 创建任务
             task = await self.repository.create_task(user_id, task_data)

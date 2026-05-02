@@ -2,61 +2,64 @@
 Album Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/albums/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/albums/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     # Album Management
     {
         "path": "/api/v1/albums",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create albums"
+        "description": "List/create albums",
     },
     {
         "path": "/api/v1/albums/{album_id}",
         "methods": ["GET", "PUT", "DELETE"],
         "auth_required": True,
-        "description": "Get/update/delete album"
+        "description": "Get/update/delete album",
     },
     # Album Photos
     {
         "path": "/api/v1/albums/{album_id}/photos",
         "methods": ["GET", "POST", "DELETE"],
         "auth_required": True,
-        "description": "Manage album photos"
+        "description": "Manage album photos",
     },
     # Album Sync
     {
         "path": "/api/v1/albums/{album_id}/sync",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Sync album to frame"
+        "description": "Sync album to frame",
     },
     {
         "path": "/api/v1/albums/{album_id}/sync/{frame_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get album sync status"
+        "description": "Get album sync status",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -89,6 +92,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "album_service",
@@ -99,6 +104,6 @@ SERVICE_METADATA = {
         "photo_organization",
         "album_sync",
         "frame_integration",
-        "photo_sharing"
-    ]
+        "photo_sharing",
+    ],
 }

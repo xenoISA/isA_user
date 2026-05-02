@@ -19,7 +19,7 @@ import uuid
 import logging
 import os
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 from .base import CryptoPaymentProvider
@@ -78,9 +78,7 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
     }
 
     def __init__(
-        self,
-        api_key: Optional[str] = None,
-        webhook_secret: Optional[str] = None
+        self, api_key: Optional[str] = None, webhook_secret: Optional[str] = None
     ):
         """
         Initialize Coinbase Commerce provider.
@@ -90,7 +88,9 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
             webhook_secret: Webhook shared secret (or use COINBASE_COMMERCE_WEBHOOK_SECRET env)
         """
         self.api_key = api_key or os.getenv("COINBASE_COMMERCE_API_KEY")
-        self.webhook_secret = webhook_secret or os.getenv("COINBASE_COMMERCE_WEBHOOK_SECRET")
+        self.webhook_secret = webhook_secret or os.getenv(
+            "COINBASE_COMMERCE_WEBHOOK_SECRET"
+        )
 
         if not self.api_key:
             logger.warning("Coinbase Commerce API key not configured")
@@ -148,8 +148,7 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
         ]
 
     async def create_payment(
-        self,
-        request: CryptoPaymentRequest
+        self, request: CryptoPaymentRequest
     ) -> CryptoPaymentResponse:
         """
         Create a Coinbase Commerce charge (payment).
@@ -161,7 +160,8 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
         # Build charge request
         charge_data = {
             "name": request.description or "Payment",
-            "description": request.description or f"Payment for order {request.order_id or payment_id}",
+            "description": request.description
+            or f"Payment for order {request.order_id or payment_id}",
             "pricing_type": "fixed_price",
             "local_price": {
                 "amount": str(request.amount),
@@ -209,13 +209,17 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
                         if pricing_key != "local":
                             token = self.COINBASE_ASSET_MAP.get(pricing_key.upper())
                             if token:
-                                crypto_amounts[token.value] = Decimal(pricing_info["amount"])
-                                supported_tokens.append({
-                                    "token": token.value,
-                                    "chain": chain.value,
-                                    "address": address,
-                                    "amount": pricing_info["amount"],
-                                })
+                                crypto_amounts[token.value] = Decimal(
+                                    pricing_info["amount"]
+                                )
+                                supported_tokens.append(
+                                    {
+                                        "token": token.value,
+                                        "chain": chain.value,
+                                        "address": address,
+                                        "amount": pricing_info["amount"],
+                                    }
+                                )
 
             # Create payment record
             payment = CryptoPayment(
@@ -263,8 +267,7 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
         return self._payments.get(payment_id)
 
     async def get_payment_by_provider_id(
-        self,
-        provider_payment_id: str
+        self, provider_payment_id: str
     ) -> Optional[CryptoPayment]:
         """Get payment by Coinbase charge ID"""
         payment_id = self._provider_id_map.get(provider_payment_id)
@@ -301,7 +304,11 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
                 if event.get("status") == "COMPLETED" and "payment" in event:
                     payment_info = event["payment"]
                     payment.tx_hash = payment_info.get("transaction_id")
-                    payment.crypto_amount = Decimal(payment_info.get("value", {}).get("crypto", {}).get("amount", "0"))
+                    payment.crypto_amount = Decimal(
+                        payment_info.get("value", {})
+                        .get("crypto", {})
+                        .get("amount", "0")
+                    )
 
                     # Map network/token
                     network = payment_info.get("network")
@@ -356,10 +363,7 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
         return False
 
     async def process_webhook(
-        self,
-        payload: bytes,
-        signature: str,
-        headers: Dict[str, str]
+        self, payload: bytes, signature: str, headers: Dict[str, str]
     ) -> Optional[CryptoWebhookEvent]:
         """
         Process Coinbase Commerce webhook.
@@ -369,9 +373,7 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
         # Verify signature
         if self.webhook_secret:
             expected_sig = hmac.new(
-                self.webhook_secret.encode(),
-                payload,
-                hashlib.sha256
+                self.webhook_secret.encode(), payload, hashlib.sha256
             ).hexdigest()
 
             # Coinbase sends signature in X-CC-Webhook-Signature header
@@ -397,7 +399,11 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
 
             # Get our payment
             payment = await self.get_payment_by_provider_id(provider_payment_id)
-            payment_id = payment.payment_id if payment else charge.get("metadata", {}).get("payment_id", "")
+            payment_id = (
+                payment.payment_id
+                if payment
+                else charge.get("metadata", {}).get("payment_id", "")
+            )
 
             # Determine status
             status = self._map_coinbase_status(charge)
@@ -452,8 +458,7 @@ class CoinbaseCommerceProvider(CryptoPaymentProvider):
             return None
 
     async def create_refund(
-        self,
-        request: CryptoRefundRequest
+        self, request: CryptoRefundRequest
     ) -> Optional[CryptoRefund]:
         """
         Create a refund.

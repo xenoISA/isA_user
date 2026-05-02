@@ -24,7 +24,7 @@ class BillingServiceClient:
             base_url: Billing service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -58,7 +58,7 @@ class BillingServiceClient:
         usage_type: str,
         quantity: float,
         unit: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Record service usage
@@ -93,15 +93,14 @@ class BillingServiceClient:
                 "service_name": service_name,
                 "usage_type": usage_type,
                 "quantity": quantity,
-                "unit": unit
+                "unit": unit,
             }
 
             if metadata:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/usage/record",
-                json=payload
+                f"{self.base_url}/api/v1/usage/record", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -123,7 +122,7 @@ class BillingServiceClient:
         organization_id: str,
         start_date: datetime,
         end_date: datetime,
-        usage_types: Optional[List[str]] = None
+        usage_types: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Calculate billing for period
@@ -152,15 +151,14 @@ class BillingServiceClient:
                 "user_id": user_id,
                 "organization_id": organization_id,
                 "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat()
+                "end_date": end_date.isoformat(),
             }
 
             if usage_types:
                 payload["usage_types"] = usage_types
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/billing/calculate",
-                json=payload
+                f"{self.base_url}/api/v1/billing/calculate", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -179,7 +177,7 @@ class BillingServiceClient:
         billing_period: str,
         start_date: datetime,
         end_date: datetime,
-        auto_charge: bool = False
+        auto_charge: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Process billing and create invoice
@@ -212,12 +210,11 @@ class BillingServiceClient:
                 "billing_period": billing_period,
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat(),
-                "auto_charge": auto_charge
+                "auto_charge": auto_charge,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/billing/process",
-                json=payload
+                f"{self.base_url}/api/v1/billing/process", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -238,7 +235,7 @@ class BillingServiceClient:
         user_id: str,
         organization_id: str,
         resource_type: str,
-        requested_quantity: float
+        requested_quantity: float,
     ) -> Optional[Dict[str, Any]]:
         """
         Check if user has quota available
@@ -267,12 +264,11 @@ class BillingServiceClient:
                 "user_id": user_id,
                 "organization_id": organization_id,
                 "resource_type": resource_type,
-                "requested_quantity": requested_quantity
+                "requested_quantity": requested_quantity,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/quota/check",
-                json=payload
+                f"{self.base_url}/api/v1/quota/check", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -296,7 +292,7 @@ class BillingServiceClient:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """
         Get user's billing records
@@ -322,10 +318,7 @@ class BillingServiceClient:
             ...     print(f"{record['billing_period']}: ${record['total_amount']}")
         """
         try:
-            params = {
-                "limit": limit,
-                "offset": offset
-            }
+            params = {"limit": limit, "offset": offset}
 
             if organization_id:
                 params["organization_id"] = organization_id
@@ -337,8 +330,7 @@ class BillingServiceClient:
                 params["end_date"] = end_date.isoformat()
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/billing/records/user/{user_id}",
-                params=params
+                f"{self.base_url}/api/v1/billing/records/user/{user_id}", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -350,10 +342,7 @@ class BillingServiceClient:
             logger.error(f"Error getting billing records: {e}")
             return None
 
-    async def get_billing_record(
-        self,
-        billing_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_billing_record(self, billing_id: str) -> Optional[Dict[str, Any]]:
         """
         Get specific billing record
 
@@ -386,7 +375,7 @@ class BillingServiceClient:
         billing_id: str,
         status: str,
         payment_method: Optional[str] = None,
-        transaction_id: Optional[str] = None
+        transaction_id: Optional[str] = None,
     ) -> bool:
         """
         Update billing record status
@@ -417,7 +406,7 @@ class BillingServiceClient:
 
             response = await self.client.put(
                 f"{self.base_url}/api/v1/billing/record/{billing_id}/status",
-                json=payload
+                json=payload,
             )
             response.raise_for_status()
             return True
@@ -441,7 +430,7 @@ class BillingServiceClient:
         usage_type: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
-        group_by: str = "day"
+        group_by: str = "day",
     ) -> Optional[Dict[str, Any]]:
         """
         Get usage aggregations
@@ -482,8 +471,7 @@ class BillingServiceClient:
                 params["end_date"] = end_date.isoformat()
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/usage/aggregations",
-                params=params
+                f"{self.base_url}/api/v1/usage/aggregations", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -536,7 +524,7 @@ class BillingServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

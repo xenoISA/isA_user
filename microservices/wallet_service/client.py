@@ -24,7 +24,7 @@ class WalletServiceClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via ConfigManager
             if config is None:
@@ -32,11 +32,11 @@ class WalletServiceClient:
 
             try:
                 host, port = config.discover_service(
-                    service_name='wallet_service',
-                    default_host='localhost',
+                    service_name="wallet_service",
+                    default_host="localhost",
                     default_port=8208,
-                    env_host_key='WALLET_SERVICE_HOST',
-                    env_port_key='WALLET_SERVICE_PORT'
+                    env_host_key="WALLET_SERVICE_HOST",
+                    env_port_key="WALLET_SERVICE_PORT",
                 )
                 self.base_url = f"http://{host}:{port}"
                 logger.info(f"Wallet service discovered at {self.base_url}")
@@ -65,7 +65,7 @@ class WalletServiceClient:
         user_id: str,
         currency: str = "USD",
         wallet_type: str = "user",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create new wallet
@@ -91,15 +91,14 @@ class WalletServiceClient:
             payload = {
                 "user_id": user_id,
                 "currency": currency,
-                "wallet_type": wallet_type
+                "wallet_type": wallet_type,
             }
 
             if metadata:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/wallets",
-                json=payload
+                f"{self.base_url}/api/v1/wallets", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -111,10 +110,7 @@ class WalletServiceClient:
             logger.error(f"Error creating wallet: {e}")
             return None
 
-    async def get_wallet(
-        self,
-        wallet_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_wallet(self, wallet_id: str) -> Optional[Dict[str, Any]]:
         """
         Get wallet by ID
 
@@ -141,10 +137,7 @@ class WalletServiceClient:
             logger.error(f"Error getting wallet: {e}")
             return None
 
-    async def get_user_wallets(
-        self,
-        user_id: str
-    ) -> Optional[List[Dict[str, Any]]]:
+    async def get_user_wallets(self, user_id: str) -> Optional[List[Dict[str, Any]]]:
         """
         Get all wallets for user
 
@@ -171,10 +164,7 @@ class WalletServiceClient:
             logger.error(f"Error getting user wallets: {e}")
             return None
 
-    async def get_wallet_balance(
-        self,
-        wallet_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_wallet_balance(self, wallet_id: str) -> Optional[Dict[str, Any]]:
         """
         Get wallet balance
 
@@ -211,7 +201,7 @@ class WalletServiceClient:
         amount: float,
         description: str,
         reference_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Deposit funds to wallet
@@ -235,10 +225,7 @@ class WalletServiceClient:
             ... )
         """
         try:
-            payload = {
-                "amount": amount,
-                "description": description
-            }
+            payload = {"amount": amount, "description": description}
 
             if reference_id:
                 payload["reference_id"] = reference_id
@@ -246,8 +233,7 @@ class WalletServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/wallets/{wallet_id}/deposit",
-                json=payload
+                f"{self.base_url}/api/v1/wallets/{wallet_id}/deposit", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -265,7 +251,7 @@ class WalletServiceClient:
         amount: float,
         description: str,
         reference_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Withdraw funds from wallet
@@ -288,10 +274,7 @@ class WalletServiceClient:
             ... )
         """
         try:
-            payload = {
-                "amount": amount,
-                "description": description
-            }
+            payload = {"amount": amount, "description": description}
 
             if reference_id:
                 payload["reference_id"] = reference_id
@@ -299,8 +282,7 @@ class WalletServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/wallets/{wallet_id}/withdraw",
-                json=payload
+                f"{self.base_url}/api/v1/wallets/{wallet_id}/withdraw", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -318,7 +300,7 @@ class WalletServiceClient:
         amount: float,
         description: str,
         reference_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Consume credits from wallet
@@ -341,10 +323,7 @@ class WalletServiceClient:
             ... )
         """
         try:
-            payload = {
-                "amount": amount,
-                "description": description
-            }
+            payload = {"amount": amount, "description": description}
 
             if reference_id:
                 payload["reference_id"] = reference_id
@@ -352,8 +331,7 @@ class WalletServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/wallets/{wallet_id}/consume",
-                json=payload
+                f"{self.base_url}/api/v1/wallets/{wallet_id}/consume", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -370,7 +348,7 @@ class WalletServiceClient:
         user_id: str,
         amount: float,
         description: str,
-        reference_id: Optional[str] = None
+        reference_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Consume credits from user's default credit wallet
@@ -392,17 +370,13 @@ class WalletServiceClient:
             ... )
         """
         try:
-            payload = {
-                "amount": amount,
-                "description": description
-            }
+            payload = {"amount": amount, "description": description}
 
             if reference_id:
                 payload["reference_id"] = reference_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/users/{user_id}/credits/consume",
-                json=payload
+                f"{self.base_url}/api/v1/users/{user_id}/credits/consume", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -420,7 +394,7 @@ class WalletServiceClient:
         to_wallet_id: str,
         amount: float,
         description: str,
-        reference_id: Optional[str] = None
+        reference_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Transfer funds between wallets
@@ -447,15 +421,14 @@ class WalletServiceClient:
             payload = {
                 "to_wallet_id": to_wallet_id,
                 "amount": amount,
-                "description": description
+                "description": description,
             }
 
             if reference_id:
                 payload["reference_id"] = reference_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/wallets/{wallet_id}/transfer",
-                json=payload
+                f"{self.base_url}/api/v1/wallets/{wallet_id}/transfer", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -468,9 +441,7 @@ class WalletServiceClient:
             return None
 
     async def refund_transaction(
-        self,
-        transaction_id: str,
-        reason: Optional[str] = None
+        self, transaction_id: str, reason: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Refund a transaction
@@ -495,7 +466,7 @@ class WalletServiceClient:
 
             response = await self.client.post(
                 f"{self.base_url}/api/v1/transactions/{transaction_id}/refund",
-                json=payload
+                json=payload,
             )
             response.raise_for_status()
             return response.json()
@@ -518,7 +489,7 @@ class WalletServiceClient:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
     ) -> Optional[Dict[str, Any]]:
         """
         Get wallet transactions
@@ -538,10 +509,7 @@ class WalletServiceClient:
             >>> transactions = await client.get_wallet_transactions("wallet123")
         """
         try:
-            params = {
-                "page": page,
-                "page_size": page_size
-            }
+            params = {"page": page, "page_size": page_size}
 
             if transaction_type:
                 params["transaction_type"] = transaction_type
@@ -552,7 +520,7 @@ class WalletServiceClient:
 
             response = await self.client.get(
                 f"{self.base_url}/api/v1/wallets/{wallet_id}/transactions",
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -571,7 +539,7 @@ class WalletServiceClient:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
     ) -> Optional[Dict[str, Any]]:
         """
         Get all user transactions across all wallets
@@ -591,10 +559,7 @@ class WalletServiceClient:
             >>> transactions = await client.get_user_transactions("user123")
         """
         try:
-            params = {
-                "page": page,
-                "page_size": page_size
-            }
+            params = {"page": page, "page_size": page_size}
 
             if transaction_type:
                 params["transaction_type"] = transaction_type
@@ -604,8 +569,7 @@ class WalletServiceClient:
                 params["end_date"] = end_date
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/users/{user_id}/transactions",
-                params=params
+                f"{self.base_url}/api/v1/users/{user_id}/transactions", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -621,10 +585,7 @@ class WalletServiceClient:
     # Statistics
     # =============================================================================
 
-    async def get_wallet_statistics(
-        self,
-        wallet_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_wallet_statistics(self, wallet_id: str) -> Optional[Dict[str, Any]]:
         """
         Get wallet statistics
 
@@ -651,10 +612,7 @@ class WalletServiceClient:
             logger.error(f"Error getting wallet statistics: {e}")
             return None
 
-    async def get_user_statistics(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_user_statistics(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get user statistics across all wallets
 
@@ -681,10 +639,7 @@ class WalletServiceClient:
             logger.error(f"Error getting user statistics: {e}")
             return None
 
-    async def get_user_credit_balance(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_user_credit_balance(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get user's credit balance
 
@@ -711,9 +666,7 @@ class WalletServiceClient:
             logger.error(f"Error getting credit balance: {e}")
             return None
 
-    async def get_wallet_stats(
-        self
-    ) -> Optional[Dict[str, Any]]:
+    async def get_wallet_stats(self) -> Optional[Dict[str, Any]]:
         """
         Get wallet service statistics
 
@@ -724,9 +677,7 @@ class WalletServiceClient:
             >>> stats = await client.get_wallet_stats()
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/wallet/stats"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/wallet/stats")
             response.raise_for_status()
             return response.json()
 
@@ -751,7 +702,7 @@ class WalletServiceClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

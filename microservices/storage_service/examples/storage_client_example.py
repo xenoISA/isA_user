@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 class StorageServiceClient:
     """Client for Storage Service operations"""
 
-    def __init__(self, base_url: str = "http://localhost:8230", auth_token: Optional[str] = None):
+    def __init__(
+        self, base_url: str = "http://localhost:8230", auth_token: Optional[str] = None
+    ):
         """
         Initialize Storage Service client
 
@@ -28,7 +30,7 @@ class StorageServiceClient:
             base_url: Base URL of storage service (default: localhost:8230)
             auth_token: Optional JWT token for authenticated requests
         """
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
         self.auth_token = auth_token
         self.client: Optional[httpx.AsyncClient] = None
 
@@ -40,7 +42,7 @@ class StorageServiceClient:
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=httpx.Timeout(300.0),  # 5 minutes for file uploads
-            headers=headers
+            headers=headers,
         )
         return self
 
@@ -53,7 +55,7 @@ class StorageServiceClient:
         file_path: str,
         user_id: str,
         organization_id: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> Optional[Dict[str, Any]]:
         """
         Upload file to storage
@@ -73,7 +75,7 @@ class StorageServiceClient:
                 logger.error(f"File not found: {file_path}")
                 return None
 
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 files = {"file": (path.name, f, "application/octet-stream")}
 
                 data = {
@@ -91,9 +93,7 @@ class StorageServiceClient:
                     data["metadata"] = str(kwargs["metadata"])
 
                 response = await self.client.post(
-                    "/api/v1/storage/upload",
-                    files=files,
-                    data=data
+                    "/api/v1/storage/upload", files=files, data=data
                 )
                 response.raise_for_status()
                 return response.json()
@@ -151,8 +151,7 @@ class StorageServiceClient:
         """
         try:
             response = await self.client.delete(
-                f"/api/v1/storage/files/{file_id}",
-                params={"user_id": user_id}
+                f"/api/v1/storage/files/{file_id}", params={"user_id": user_id}
             )
             response.raise_for_status()
             return True
@@ -161,9 +160,7 @@ class StorageServiceClient:
             return False
 
     async def get_presigned_url(
-        self,
-        file_id: str,
-        expires_in: int = 3600
+        self, file_id: str, expires_in: int = 3600
     ) -> Optional[str]:
         """
         Generate pre-signed download URL
@@ -178,10 +175,7 @@ class StorageServiceClient:
         try:
             response = await self.client.post(
                 "/api/v1/storage/presigned-url",
-                json={
-                    "file_id": file_id,
-                    "expires_in": expires_in
-                }
+                json={"file_id": file_id, "expires_in": expires_in},
             )
             response.raise_for_status()
             result = response.json()
@@ -192,6 +186,7 @@ class StorageServiceClient:
 
 
 # ==================== Example Usage ====================
+
 
 async def example_1_basic_file_operations():
     """Example 1: Basic file upload and download"""
@@ -204,7 +199,7 @@ async def example_1_basic_file_operations():
 
         # Create a test file
         test_file = "/tmp/test_firmware.bin"
-        with open(test_file, 'wb') as f:
+        with open(test_file, "wb") as f:
             f.write(b"Test firmware content" * 1000)
 
         upload_result = await client.upload_file(
@@ -212,7 +207,7 @@ async def example_1_basic_file_operations():
             user_id="user_123",
             organization_id="org_123",
             tags=["firmware", "test"],
-            metadata={"version": "1.0.0", "device": "smart_frame"}
+            metadata={"version": "1.0.0", "device": "smart_frame"},
         )
 
         if upload_result:
@@ -229,7 +224,7 @@ async def example_1_basic_file_operations():
             print("\n3. Generating presigned URL...")
             presigned_url = await client.get_presigned_url(file_id, expires_in=1800)
             if presigned_url:
-                print(f"   ✓ Presigned URL generated (expires in 30 minutes)")
+                print("   ✓ Presigned URL generated (expires in 30 minutes)")
                 print(f"     URL: {presigned_url[:60]}...")
 
             print("\n4. Downloading file...")
@@ -240,7 +235,7 @@ async def example_1_basic_file_operations():
             print("\n5. Deleting file...")
             deleted = await client.delete_file(file_id, "user_123")
             if deleted:
-                print(f"   ✓ File deleted successfully")
+                print("   ✓ File deleted successfully")
 
 
 async def example_2_firmware_storage():
@@ -254,7 +249,7 @@ async def example_2_firmware_storage():
 
         # Simulate firmware file
         firmware_file = "/tmp/smartframe_v2.1.0.bin"
-        with open(firmware_file, 'wb') as f:
+        with open(firmware_file, "wb") as f:
             # Write 5MB of test data
             f.write(b"FIRMWARE_DATA" * 400000)
 
@@ -262,7 +257,7 @@ async def example_2_firmware_storage():
             "device_model": "SF-2024-Pro",
             "version": "2.1.0",
             "checksum_md5": "d41d8cd98f00b204e9800998ecf8427e",
-            "checksum_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            "checksum_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         }
 
         upload_result = await client.upload_file(
@@ -270,7 +265,7 @@ async def example_2_firmware_storage():
             user_id="ota_service",
             organization_id="org_smarttech",
             tags=["firmware", "ota", "production"],
-            metadata=firmware_metadata
+            metadata=firmware_metadata,
         )
 
         if upload_result:
@@ -280,14 +275,13 @@ async def example_2_firmware_storage():
 
             print("\n2. Generating download URL for devices...")
             download_url = await client.get_presigned_url(
-                firmware_id,
-                expires_in=3600  # 1 hour for device downloads
+                firmware_id, expires_in=3600  # 1 hour for device downloads
             )
 
             if download_url:
-                print(f"   ✓ Download URL generated for OTA update")
+                print("   ✓ Download URL generated for OTA update")
                 print(f"     URL: {download_url[:80]}...")
-                print(f"     Expires in: 1 hour")
+                print("     Expires in: 1 hour")
 
             print("\n3. Verifying file integrity...")
             file_info = await client.get_file_info(firmware_id)
@@ -301,7 +295,7 @@ async def main():
     """Run all examples"""
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
     try:
@@ -315,6 +309,7 @@ async def main():
     except Exception as e:
         print(f"\n✗ Error running examples: {e}")
         import traceback
+
         traceback.print_exc()
 
 

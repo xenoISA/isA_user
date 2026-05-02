@@ -10,7 +10,9 @@ import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -22,7 +24,12 @@ logger = logging.getLogger(__name__)
 class BaseMemoryRepository:
     """Base repository class for memory operations"""
 
-    def __init__(self, schema: str = "memory", table_name: str = "memories", config: Optional[ConfigManager] = None):
+    def __init__(
+        self,
+        schema: str = "memory",
+        table_name: str = "memories",
+        config: Optional[ConfigManager] = None,
+    ):
         """
         Initialize base memory repository with PostgresClient
 
@@ -38,11 +45,11 @@ class BaseMemoryRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -52,7 +59,7 @@ class BaseMemoryRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='memory_service',
+            user_id="memory_service",
             min_pool_size=1,
             max_pool_size=2,
         )
@@ -64,24 +71,31 @@ class BaseMemoryRepository:
         Recursively clean protobuf objects from values
         Converts any remaining protobuf objects to Python native types
         """
-        import json
 
         # Check if it's a protobuf message/descriptor object
-        if hasattr(value, 'DESCRIPTOR') or type(value).__module__.startswith('google.protobuf') or type(value).__module__.startswith('google._upb'):
+        if (
+            hasattr(value, "DESCRIPTOR")
+            or type(value).__module__.startswith("google.protobuf")
+            or type(value).__module__.startswith("google._upb")
+        ):
             # Try to convert to dict, or return empty dict/list as appropriate
             try:
-                if hasattr(value, 'values'):
+                if hasattr(value, "values"):
                     # It's a list-like proto object
-                    values_data = value.values() if callable(value.values) else value.values
+                    values_data = (
+                        value.values() if callable(value.values) else value.values
+                    )
                     return [self._clean_protobuf_objects(v) for v in values_data]
                 else:
                     # Try MessageToDict or return empty dict
                     try:
                         return MessageToDict(value)
-                    except:
+                    except Exception:
                         return {}
-            except:
-                logger.warning(f"Could not convert protobuf object of type {type(value)}, returning empty dict")
+            except Exception:
+                logger.warning(
+                    f"Could not convert protobuf object of type {type(value)}, returning empty dict"
+                )
                 return {}
 
         # Handle lists recursively
@@ -109,7 +123,13 @@ class BaseMemoryRepository:
         deserialized = {}
 
         # Fields that are stored as JSON strings and need parsing
-        json_fields = {'context', 'conversation_state', 'task_context', 'properties', 'tags'}
+        json_fields = {
+            "context",
+            "conversation_state",
+            "task_context",
+            "properties",
+            "tags",
+        }
 
         for key, value in row.items():
             if value is None:
@@ -122,12 +142,16 @@ class BaseMemoryRepository:
                     # If parsing fails, keep as string
                     deserialized[key] = value
             # Convert proto ListValue to Python list
-            elif hasattr(value, 'values'):
+            elif hasattr(value, "values"):
                 try:
                     # Check if values is a method or attribute
-                    values_data = value.values() if callable(value.values) else value.values
+                    values_data = (
+                        value.values() if callable(value.values) else value.values
+                    )
                     deserialized[key] = [
-                        MessageToDict(val.struct_value) if hasattr(val, 'struct_value') else val
+                        MessageToDict(val.struct_value)
+                        if hasattr(val, "struct_value")
+                        else val
                         for val in values_data
                     ]
                 except (TypeError, AttributeError):
@@ -136,7 +160,9 @@ class BaseMemoryRepository:
                         deserialized[key] = list(value) if value else []
                     except TypeError:
                         # If list conversion fails, return empty list for safety
-                        logger.warning(f"Could not deserialize field '{key}', setting to empty list")
+                        logger.warning(
+                            f"Could not deserialize field '{key}', setting to empty list"
+                        )
                         deserialized[key] = []
             # Keep other types as-is (includes lists, strings, numbers, dates)
             else:
@@ -153,16 +179,26 @@ class BaseMemoryRepository:
         Converts Python types to PostgreSQL-compatible types
         """
         import json
+
         serialized = {}
 
         # Fields that should remain as Python lists for PostgreSQL array types
         array_fields = {
-            'participants', 'related_concepts', 'steps', 'prerequisites',
-            'related_facts'
+            "participants",
+            "related_concepts",
+            "steps",
+            "prerequisites",
+            "related_facts",
         }
 
         # Fields that should be JSON strings
-        json_fields = {'context', 'conversation_state', 'task_context', 'properties', 'tags'}
+        json_fields = {
+            "context",
+            "conversation_state",
+            "task_context",
+            "properties",
+            "tags",
+        }
 
         for key, value in data.items():
             if value is None:
@@ -198,20 +234,22 @@ class BaseMemoryRepository:
         """
         try:
             # Ensure timestamps
-            if 'created_at' not in data:
-                data['created_at'] = datetime.now(timezone.utc)
-            if 'updated_at' not in data:
-                data['updated_at'] = datetime.now(timezone.utc)
+            if "created_at" not in data:
+                data["created_at"] = datetime.now(timezone.utc)
+            if "updated_at" not in data:
+                data["updated_at"] = datetime.now(timezone.utc)
 
             # Serialize data for gRPC
             serialized_data = self._serialize_data(data)
 
             async with self.db:
-                count = await self.db.insert_into(self.table_name, [serialized_data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.table_name, [serialized_data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 # Retrieve the created record
-                return await self.get_by_id(data['id'], data.get('user_id'))
+                return await self.get_by_id(data["id"], data.get("user_id"))
             return None
 
         except Exception as e:
@@ -219,9 +257,7 @@ class BaseMemoryRepository:
             raise
 
     async def get_by_id(
-        self,
-        memory_id: str,
-        user_id: Optional[str] = None
+        self, memory_id: str, user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get memory by ID
@@ -261,7 +297,7 @@ class BaseMemoryRepository:
         user_id: str,
         limit: int = 100,
         offset: int = 0,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         List memories for a user with optional filters
@@ -307,10 +343,7 @@ class BaseMemoryRepository:
             return []
 
     async def update(
-        self,
-        memory_id: str,
-        updates: Dict[str, Any],
-        user_id: Optional[str] = None
+        self, memory_id: str, updates: Dict[str, Any], user_id: Optional[str] = None
     ) -> bool:
         """
         Update a memory record
@@ -368,11 +401,7 @@ class BaseMemoryRepository:
             logger.error(f"Error updating memory in {self.table_name}: {e}")
             raise
 
-    async def delete(
-        self,
-        memory_id: str,
-        user_id: Optional[str] = None
-    ) -> bool:
+    async def delete(self, memory_id: str, user_id: Optional[str] = None) -> bool:
         """
         Delete a memory record
 
@@ -426,7 +455,7 @@ class BaseMemoryRepository:
             async with self.db:
                 result = await self.db.query_row(query, params, schema=self.schema)
 
-            return result.get('count', 0) if result else 0
+            return result.get("count", 0) if result else 0
 
         except Exception as e:
             logger.error(f"Error getting count from {self.table_name}: {e}")
@@ -448,9 +477,7 @@ class BaseMemoryRepository:
             return False
 
     async def increment_access_count(
-        self,
-        memory_id: str,
-        user_id: Optional[str] = None
+        self, memory_id: str, user_id: Optional[str] = None
     ) -> bool:
         """
         Increment access count for a memory

@@ -9,22 +9,25 @@ import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
-import json
 
-# Database client setup  
+# Database client setup
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import Session, SessionMessage, SearchHit
+from .models import Session, SessionMessage
 
 logger = logging.getLogger(__name__)
 
 
 class SessionNotFoundException(Exception):
     """Session not found exception"""
+
     pass
 
 
@@ -40,11 +43,11 @@ class SessionRepository:
         # Discover PostgreSQL service (native connection)
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -54,13 +57,13 @@ class SessionRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='session_service',
+            user_id="session_service",
             min_pool_size=1,
             max_pool_size=2,
         )
         self.schema = "session"
         self.sessions_table = "sessions"
-    
+
     async def create_session(self, session_data: Dict[str, Any]) -> Optional[Session]:
         """创建会话"""
         try:
@@ -79,14 +82,12 @@ class SessionRepository:
                 "session_summary": "",
                 "created_at": now,
                 "updated_at": now,
-                "last_activity": now
+                "last_activity": now,
             }
 
             async with self.db:
                 count = await self.db.insert_into(
-                    self.sessions_table,
-                    [data],
-                    schema=self.schema
+                    self.sessions_table, [data], schema=self.schema
                 )
 
             # Check if insert succeeded
@@ -116,13 +117,9 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error getting session: {e}")
             return None
-    
+
     async def get_user_sessions(
-        self,
-        user_id: str,
-        active_only: bool = False,
-        limit: int = 50,
-        offset: int = 0
+        self, user_id: str, active_only: bool = False, limit: int = 50, offset: int = 0
     ) -> List[Session]:
         """获取用户的会话列表"""
         try:
@@ -156,14 +153,11 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error getting user sessions: {e}")
             return []
-    
+
     async def update_session_status(self, session_id: str, status: str) -> bool:
         """更新会话状态"""
         try:
-            update_data = {
-                "status": status,
-                "updated_at": datetime.now(timezone.utc)
-            }
+            update_data = {"status": status, "updated_at": datetime.now(timezone.utc)}
 
             if status == "ended":
                 update_data["is_active"] = False
@@ -196,7 +190,7 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error updating session status: {e}")
             return False
-    
+
     async def update_session_activity(self, session_id: str) -> bool:
         """更新会话活动时间"""
         try:
@@ -216,8 +210,10 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error updating session activity: {e}")
             return False
-    
-    async def increment_message_count(self, session_id: str, tokens_used: int = 0, cost_usd: float = 0.0) -> bool:
+
+    async def increment_message_count(
+        self, session_id: str, tokens_used: int = 0, cost_usd: float = 0.0
+    ) -> bool:
         """增加消息计数和统计信息"""
         try:
             # 首先获取当前会话
@@ -241,7 +237,7 @@ class SessionRepository:
                 session.total_cost + cost_usd,
                 now,
                 now,
-                session_id
+                session_id,
             ]
 
             async with self.db:
@@ -252,7 +248,7 @@ class SessionRepository:
         except Exception as e:
             logger.error(f"Error incrementing message count: {e}")
             return False
-    
+
     async def expire_old_sessions(self, hours_old: int = 24) -> int:
         """过期旧会话"""
         try:
@@ -341,28 +337,32 @@ class SessionMessageRepository:
         # Discover PostgreSQL service (native connection)
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
-        logger.info(f"SessionMessageRepository connecting to PostgreSQL at {host}:{port}")
+        logger.info(
+            f"SessionMessageRepository connecting to PostgreSQL at {host}:{port}"
+        )
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='session_service',
+            user_id="session_service",
             min_pool_size=1,
             max_pool_size=2,
         )
         self.schema = "session"
         self.messages_table = "session_messages"
-    
-    async def create_message(self, message_data: Dict[str, Any]) -> Optional[SessionMessage]:
+
+    async def create_message(
+        self, message_data: Dict[str, Any]
+    ) -> Optional[SessionMessage]:
         """创建消息"""
         try:
             # Generate UUID for message
@@ -381,21 +381,23 @@ class SessionMessageRepository:
                 "message_metadata": message_data.get("metadata") or {},
                 "tokens_used": message_data.get("tokens_used", 0),
                 "cost_usd": message_data.get("cost_usd", 0.0),
-                "created_at": datetime.now(timezone.utc)
+                "created_at": datetime.now(timezone.utc),
             }
 
             async with self.db:
                 count = await self.db.insert_into(
-                    self.messages_table,
-                    [data],
-                    schema=self.schema
+                    self.messages_table, [data], schema=self.schema
                 )
 
             if count is not None and count > 0:
                 # Query the inserted message
-                query = f"SELECT * FROM {self.schema}.{self.messages_table} WHERE id = $1"
+                query = (
+                    f"SELECT * FROM {self.schema}.{self.messages_table} WHERE id = $1"
+                )
                 async with self.db:
-                    result = await self.db.query_row(query, [message_id], schema=self.schema)
+                    result = await self.db.query_row(
+                        query, [message_id], schema=self.schema
+                    )
 
                 if result:
                     # Map database columns to SessionMessage model
@@ -409,7 +411,7 @@ class SessionMessageRepository:
                         "metadata": result.get("message_metadata") or {},
                         "tokens_used": result.get("tokens_used", 0),
                         "cost_usd": result.get("cost_usd", 0.0),
-                        "created_at": result.get("created_at")
+                        "created_at": result.get("created_at"),
                     }
                     return SessionMessage.model_validate(message_dict)
 
@@ -418,12 +420,9 @@ class SessionMessageRepository:
         except Exception as e:
             logger.error(f"Error creating message: {e}")
             return None
-    
+
     async def get_session_messages(
-        self,
-        session_id: str,
-        limit: int = 100,
-        offset: int = 0
+        self, session_id: str, limit: int = 100, offset: int = 0
     ) -> List[SessionMessage]:
         """获取会话消息"""
         try:
@@ -452,7 +451,7 @@ class SessionMessageRepository:
                         "metadata": msg.get("message_metadata") or {},
                         "tokens_used": msg.get("tokens_used", 0),
                         "cost_usd": msg.get("cost_usd", 0.0),
-                        "created_at": msg.get("created_at")
+                        "created_at": msg.get("created_at"),
                     }
                     messages.append(SessionMessage.model_validate(message_dict))
 
@@ -498,9 +497,7 @@ class SessionMessageRepository:
                 query_param = f"${param_idx}"
                 params.append(query)
 
-                search_condition = (
-                    f"to_tsvector('english', m.content) @@ plainto_tsquery('english', {query_param})"
-                )
+                search_condition = f"to_tsvector('english', m.content) @@ plainto_tsquery('english', {query_param})"
                 rank_expr = f"ts_rank(to_tsvector('english', m.content), plainto_tsquery('english', {query_param}))"
                 snippet_expr = (
                     f"ts_headline('english', m.content, plainto_tsquery('english', {query_param}), "
@@ -558,10 +555,14 @@ class SessionMessageRepository:
             """
 
             async with self.db:
-                count_result = await self.db.query_row(count_query, params[:2], schema=self.schema)
+                count_result = await self.db.query_row(
+                    count_query, params[:2], schema=self.schema
+                )
                 total = count_result["cnt"] if count_result else 0
 
-                rows = await self.db.query(search_query, params, schema=self.schema) or []
+                rows = (
+                    await self.db.query(search_query, params, schema=self.schema) or []
+                )
 
             return rows, total
 

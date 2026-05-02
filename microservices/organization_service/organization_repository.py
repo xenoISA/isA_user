@@ -11,13 +11,20 @@ import uuid
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    OrganizationPlan, OrganizationStatus, OrganizationRole, MemberStatus,
-    OrganizationResponse, OrganizationMemberResponse
+    OrganizationPlan,
+    OrganizationStatus,
+    OrganizationRole,
+    MemberStatus,
+    OrganizationResponse,
+    OrganizationMemberResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,11 +41,11 @@ class OrganizationRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -48,20 +55,18 @@ class OrganizationRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='organization_service',
+            user_id="organization_service",
             min_pool_size=1,
             max_pool_size=2,
         )
         self.schema = "organization"
         self.organizations_table = "organizations"
         self.org_members_table = "organization_members"
-    
+
     # ============ Organization CRUD Operations ============
-    
+
     async def create_organization(
-        self,
-        organization_data: Dict[str, Any],
-        owner_user_id: str
+        self, organization_data: Dict[str, Any], owner_user_id: str
     ) -> Optional[OrganizationResponse]:
         """创建组织并添加所有者"""
         try:
@@ -70,24 +75,24 @@ class OrganizationRepository:
 
             # 准备组织数据 (只包含数据库中存在的字段)
             org_dict = {
-                'organization_id': org_id,
-                'name': organization_data['name'],
-                'domain': organization_data.get('domain'),
-                'billing_email': organization_data['billing_email'],
-                'plan': organization_data.get('plan', OrganizationPlan.FREE.value),
-                'status': OrganizationStatus.ACTIVE.value,
-                'credits_pool': 0.0,  # ✅ Float for DOUBLE PRECISION
-                'settings': organization_data.get('settings', {}),  # ✅ Direct dict, no json.dumps
-                'metadata': {},
-                'api_keys': []
+                "organization_id": org_id,
+                "name": organization_data["name"],
+                "domain": organization_data.get("domain"),
+                "billing_email": organization_data["billing_email"],
+                "plan": organization_data.get("plan", OrganizationPlan.FREE.value),
+                "status": OrganizationStatus.ACTIVE.value,
+                "credits_pool": 0.0,  # ✅ Float for DOUBLE PRECISION
+                "settings": organization_data.get(
+                    "settings", {}
+                ),  # ✅ Direct dict, no json.dumps
+                "metadata": {},
+                "api_keys": [],
             }
 
             # 创建组织
             async with self.db:
                 count = await self.db.insert_into(
-                    self.organizations_table,
-                    [org_dict],
-                    schema=self.schema
+                    self.organizations_table, [org_dict], schema=self.schema
                 )
 
             # ✅ Check count for None
@@ -97,9 +102,7 @@ class OrganizationRepository:
 
             # 添加所有者为成员
             member_result = await self.add_organization_member(
-                org_id,
-                owner_user_id,
-                OrganizationRole.OWNER
+                org_id, owner_user_id, OrganizationRole.OWNER
             )
 
             if not member_result:
@@ -117,14 +120,18 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error creating organization: {e}")
             return None
-    
-    async def get_organization(self, organization_id: str) -> Optional[OrganizationResponse]:
+
+    async def get_organization(
+        self, organization_id: str
+    ) -> Optional[OrganizationResponse]:
         """获取组织信息"""
         try:
             query = f"SELECT * FROM {self.schema}.{self.organizations_table} WHERE organization_id = $1"
 
             async with self.db:
-                result = await self.db.query(query, [organization_id], schema=self.schema)
+                result = await self.db.query(
+                    query, [organization_id], schema=self.schema
+                )
 
             if not result or len(result) == 0:
                 return None
@@ -133,18 +140,16 @@ class OrganizationRepository:
 
             # 获取成员数
             member_count = await self.get_organization_member_count(organization_id)
-            org_data['member_count'] = member_count
+            org_data["member_count"] = member_count
 
             return OrganizationResponse(**org_data)
 
         except Exception as e:
             logger.error(f"Error getting organization {organization_id}: {e}")
             return None
-    
+
     async def update_organization(
-        self,
-        organization_id: str,
-        update_data: Dict[str, Any]
+        self, organization_id: str, update_data: Dict[str, Any]
     ) -> Optional[OrganizationResponse]:
         """更新组织信息"""
         try:
@@ -156,7 +161,7 @@ class OrganizationRepository:
                 return await self.get_organization(organization_id)
 
             # ✅ 手动添加 updated_at
-            update_dict['updated_at'] = datetime.now(timezone.utc)
+            update_dict["updated_at"] = datetime.now(timezone.utc)
 
             # 构建 SET 子句
             set_clauses = []
@@ -193,7 +198,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error updating organization {organization_id}: {e}")
             return None
-    
+
     # ------------------------------------------------------------------
     # Rate Limits (Story xenoISA/isA_Console#461)
     # ------------------------------------------------------------------
@@ -253,9 +258,7 @@ class OrganizationRepository:
                 return None
             return rate_limits
         except Exception as e:
-            logger.error(
-                f"Error updating org rate_limits {organization_id}: {e}"
-            )
+            logger.error(f"Error updating org rate_limits {organization_id}: {e}")
             return None
 
     async def delete_organization(self, organization_id: str) -> bool:
@@ -269,7 +272,7 @@ class OrganizationRepository:
             params = [
                 OrganizationStatus.DELETED.value,
                 datetime.now(timezone.utc),
-                organization_id
+                organization_id,
             ]
 
             async with self.db:
@@ -280,7 +283,7 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error deleting organization {organization_id}: {e}")
             return False
-    
+
     async def get_user_organizations(self, user_id: str) -> List[Dict[str, Any]]:
         """获取用户所属的所有组织"""
         try:
@@ -295,26 +298,28 @@ class OrganizationRepository:
                 member_result = await self.db.query(
                     member_query,
                     [user_id, MemberStatus.ACTIVE.value],
-                    schema=self.schema
+                    schema=self.schema,
                 )
 
             if not member_result:
                 return []
 
-            org_ids = [m['organization_id'] for m in member_result]
-            role_map = {m['organization_id']: m['role'] for m in member_result}
+            org_ids = [m["organization_id"] for m in member_result]
+            role_map = {m["organization_id"]: m["role"] for m in member_result}
 
             # 获取组织详情
             if not org_ids:
                 return []
 
             # 构建 IN 子句
-            placeholders = ', '.join([f'${i+1}' for i in range(len(org_ids))])
+            placeholders = ", ".join([f"${i+1}" for i in range(len(org_ids))])
             org_query = f"""
                 SELECT * FROM {self.schema}.{self.organizations_table}
                 WHERE organization_id IN ({placeholders})
                 AND status != $%d
-            """ % (len(org_ids) + 1)
+            """ % (
+                len(org_ids) + 1
+            )
 
             params = org_ids + [OrganizationStatus.DELETED.value]
 
@@ -325,7 +330,7 @@ class OrganizationRepository:
                 return []
 
             # Batch-fetch member counts in a single query instead of N+1
-            count_placeholders = ', '.join([f'${i+1}' for i in range(len(org_ids))])
+            count_placeholders = ", ".join([f"${i+1}" for i in range(len(org_ids))])
             count_query = f"""
                 SELECT organization_id, COUNT(*) as count
                 FROM {self.schema}.{self.org_members_table}
@@ -337,16 +342,16 @@ class OrganizationRepository:
                 count_result = await self.db.query(
                     count_query,
                     org_ids + [MemberStatus.ACTIVE.value],
-                    schema=self.schema
+                    schema=self.schema,
                 )
 
-            count_map = {r['organization_id']: r['count'] for r in (count_result or [])}
+            count_map = {r["organization_id"]: r["count"] for r in (count_result or [])}
 
             # 组合数据
             organizations = []
             for org in org_result:
-                org['user_role'] = role_map.get(org['organization_id'])
-                org['member_count'] = count_map.get(org['organization_id'], 0)
+                org["user_role"] = role_map.get(org["organization_id"])
+                org["member_count"] = count_map.get(org["organization_id"], 0)
                 organizations.append(org)
 
             return organizations
@@ -354,15 +359,15 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Error getting user organizations for {user_id}: {e}")
             return []
-    
+
     # ============ Member Management ============
-    
+
     async def add_organization_member(
         self,
         organization_id: str,
         user_id: str,
         role: OrganizationRole,
-        permissions: Optional[List[str]] = None
+        permissions: Optional[List[str]] = None,
     ) -> Optional[OrganizationMemberResponse]:
         """添加组织成员"""
         try:
@@ -374,14 +379,12 @@ class OrganizationRepository:
 
             async with self.db:
                 existing = await self.db.query(
-                    check_query,
-                    [organization_id, user_id],
-                    schema=self.schema
+                    check_query, [organization_id, user_id], schema=self.schema
                 )
 
             if existing and len(existing) > 0:
                 # 如果是被删除的成员，重新激活
-                if existing[0]['status'] in [MemberStatus.INACTIVE.value, 'removed']:
+                if existing[0]["status"] in [MemberStatus.INACTIVE.value, "removed"]:
                     update_query = f"""
                         UPDATE {self.schema}.{self.org_members_table}
                         SET role = $1, status = $2, permissions = $3, updated_at = $4
@@ -393,32 +396,36 @@ class OrganizationRepository:
                         permissions or [],
                         datetime.now(timezone.utc),
                         organization_id,
-                        user_id
+                        user_id,
                     ]
 
                     async with self.db:
-                        count = await self.db.execute(update_query, params, schema=self.schema)
+                        count = await self.db.execute(
+                            update_query, params, schema=self.schema
+                        )
 
                     if count is not None and count > 0:
-                        return await self.get_organization_member(organization_id, user_id)
+                        return await self.get_organization_member(
+                            organization_id, user_id
+                        )
                 else:
-                    logger.warning(f"User {user_id} is already a member of organization {organization_id}")
+                    logger.warning(
+                        f"User {user_id} is already a member of organization {organization_id}"
+                    )
                     return None
 
             # 添加新成员
             member_dict = {
-                'organization_id': organization_id,
-                'user_id': user_id,
-                'role': role.value,
-                'status': MemberStatus.ACTIVE.value,
-                'permissions': permissions or []
+                "organization_id": organization_id,
+                "user_id": user_id,
+                "role": role.value,
+                "status": MemberStatus.ACTIVE.value,
+                "permissions": permissions or [],
             }
 
             async with self.db:
                 count = await self.db.insert_into(
-                    self.org_members_table,
-                    [member_dict],
-                    schema=self.schema
+                    self.org_members_table, [member_dict], schema=self.schema
                 )
 
             if count is None or count == 0:
@@ -428,24 +435,27 @@ class OrganizationRepository:
             return await self.get_organization_member(organization_id, user_id)
 
         except Exception as e:
-            logger.error(f"Error adding member {user_id} to organization {organization_id}: {e}")
+            logger.error(
+                f"Error adding member {user_id} to organization {organization_id}: {e}"
+            )
             return None
-    
+
     async def update_organization_member(
-        self,
-        organization_id: str,
-        user_id: str,
-        update_data: Dict[str, Any]
+        self, organization_id: str, user_id: str, update_data: Dict[str, Any]
     ) -> Optional[OrganizationMemberResponse]:
         """更新组织成员信息"""
         try:
-            update_dict = {k: v.value if hasattr(v, 'value') else v for k, v in update_data.items() if v is not None}
+            update_dict = {
+                k: v.value if hasattr(v, "value") else v
+                for k, v in update_data.items()
+                if v is not None
+            }
 
             if not update_dict:
                 return await self.get_organization_member(organization_id, user_id)
 
             # ✅ 手动添加 updated_at
-            update_dict['updated_at'] = datetime.now(timezone.utc)
+            update_dict["updated_at"] = datetime.now(timezone.utc)
 
             # 构建 SET 子句
             set_clauses = []
@@ -483,13 +493,13 @@ class OrganizationRepository:
             return await self.get_organization_member(organization_id, user_id)
 
         except Exception as e:
-            logger.error(f"Error updating member {user_id} in organization {organization_id}: {e}")
+            logger.error(
+                f"Error updating member {user_id} in organization {organization_id}: {e}"
+            )
             return None
-    
+
     async def remove_organization_member(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> bool:
         """移除组织成员（软删除）"""
         try:
@@ -502,7 +512,7 @@ class OrganizationRepository:
                 MemberStatus.INACTIVE.value,
                 datetime.now(timezone.utc),
                 organization_id,
-                user_id
+                user_id,
             ]
 
             async with self.db:
@@ -511,13 +521,13 @@ class OrganizationRepository:
             return count is not None and count > 0
 
         except Exception as e:
-            logger.error(f"Error removing member {user_id} from organization {organization_id}: {e}")
+            logger.error(
+                f"Error removing member {user_id} from organization {organization_id}: {e}"
+            )
             return False
-    
+
     async def get_organization_member(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> Optional[OrganizationMemberResponse]:
         """获取组织成员信息"""
         try:
@@ -527,7 +537,9 @@ class OrganizationRepository:
             """
 
             async with self.db:
-                result = await self.db.query(query, [organization_id, user_id], schema=self.schema)
+                result = await self.db.query(
+                    query, [organization_id, user_id], schema=self.schema
+                )
 
             if not result or len(result) == 0:
                 return None
@@ -540,16 +552,18 @@ class OrganizationRepository:
             return OrganizationMemberResponse(**member_data)
 
         except Exception as e:
-            logger.error(f"Error getting member {user_id} from organization {organization_id}: {e}")
+            logger.error(
+                f"Error getting member {user_id} from organization {organization_id}: {e}"
+            )
             return None
-    
+
     async def get_organization_members(
         self,
         organization_id: str,
         limit: int = 100,
         offset: int = 0,
         role_filter: Optional[OrganizationRole] = None,
-        status_filter: Optional[MemberStatus] = None
+        status_filter: Optional[MemberStatus] = None,
     ) -> List[OrganizationMemberResponse]:
         """获取组织成员列表"""
         try:
@@ -596,13 +610,13 @@ class OrganizationRepository:
             return members
 
         except Exception as e:
-            logger.error(f"Error getting members for organization {organization_id}: {e}")
+            logger.error(
+                f"Error getting members for organization {organization_id}: {e}"
+            )
             return []
-    
+
     async def get_user_organization_role(
-        self,
-        organization_id: str,
-        user_id: str
+        self, organization_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """获取用户在组织中的角色"""
         try:
@@ -613,7 +627,9 @@ class OrganizationRepository:
             """
 
             async with self.db:
-                result = await self.db.query(query, [organization_id, user_id], schema=self.schema)
+                result = await self.db.query(
+                    query, [organization_id, user_id], schema=self.schema
+                )
 
             if not result or len(result) == 0:
                 return None
@@ -621,15 +637,17 @@ class OrganizationRepository:
             member = result[0]
 
             return {
-                'role': member['role'],
-                'permissions': member.get('permissions', []),
-                'status': member['status']
+                "role": member["role"],
+                "permissions": member.get("permissions", []),
+                "status": member["status"],
             }
 
         except Exception as e:
-            logger.error(f"Error getting user role for {user_id} in organization {organization_id}: {e}")
+            logger.error(
+                f"Error getting user role for {user_id} in organization {organization_id}: {e}"
+            )
             return None
-    
+
     async def get_organization_member_count(self, organization_id: str) -> int:
         """获取组织成员数量"""
         try:
@@ -643,19 +661,21 @@ class OrganizationRepository:
                 result = await self.db.query(
                     query,
                     [organization_id, MemberStatus.ACTIVE.value],
-                    schema=self.schema
+                    schema=self.schema,
                 )
 
             if result and len(result) > 0:
-                return int(result[0]['count'])
+                return int(result[0]["count"])
             return 0
 
         except Exception as e:
-            logger.error(f"Error getting member count for organization {organization_id}: {e}")
+            logger.error(
+                f"Error getting member count for organization {organization_id}: {e}"
+            )
             return 0
-    
+
     # ============ Statistics and Analytics ============
-    
+
     async def get_organization_stats(self, organization_id: str) -> Dict[str, Any]:
         """获取组织统计信息"""
         try:
@@ -663,39 +683,39 @@ class OrganizationRepository:
             org = await self.get_organization(organization_id)
             if not org:
                 return {}
-            
+
             # 获取成员统计
             total_members = await self.get_organization_member_count(organization_id)
-            
+
             # 获取活跃成员数（最近30天有活动）
             # TODO: 需要从活动日志中获取
             active_members = total_members
-            
+
             return {
-                'organization_id': organization_id,
-                'name': org.name,
-                'plan': org.plan,
-                'status': org.status,
-                'member_count': total_members,
-                'active_members': active_members,
-                'credits_pool': float(org.credits_pool),
-                'credits_used_this_month': 0,  # TODO: 从使用记录获取
-                'storage_used_gb': 0.0,  # TODO: 从存储服务获取
-                'api_calls_this_month': 0,  # TODO: 从API日志获取
-                'created_at': org.created_at
+                "organization_id": organization_id,
+                "name": org.name,
+                "plan": org.plan,
+                "status": org.status,
+                "member_count": total_members,
+                "active_members": active_members,
+                "credits_pool": float(org.credits_pool),
+                "credits_used_this_month": 0,  # TODO: 从使用记录获取
+                "storage_used_gb": 0.0,  # TODO: 从存储服务获取
+                "api_calls_this_month": 0,  # TODO: 从API日志获取
+                "created_at": org.created_at,
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting stats for organization {organization_id}: {e}")
             return {}
-    
+
     async def list_all_organizations(
         self,
         limit: int = 100,
         offset: int = 0,
         search: Optional[str] = None,
         plan_filter: Optional[str] = None,
-        status_filter: Optional[str] = None
+        status_filter: Optional[str] = None,
     ) -> List[OrganizationResponse]:
         """获取所有组织列表（平台管理员）"""
         try:
@@ -706,7 +726,9 @@ class OrganizationRepository:
 
             if search:
                 param_count += 1
-                conditions.append(f"(name ILIKE ${param_count} OR display_name ILIKE ${param_count})")
+                conditions.append(
+                    f"(name ILIKE ${param_count} OR display_name ILIKE ${param_count})"
+                )
                 params.append(f"%{search}%")
 
             if plan_filter:
@@ -739,7 +761,9 @@ class OrganizationRepository:
 
             organizations = []
             for org_data in result:
-                org_data['member_count'] = await self.get_organization_member_count(org_data['organization_id'])
+                org_data["member_count"] = await self.get_organization_member_count(
+                    org_data["organization_id"]
+                )
                 organizations.append(OrganizationResponse(**org_data))
 
             return organizations

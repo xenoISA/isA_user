@@ -25,12 +25,6 @@ from .protocols import (
     JWTManagerProtocol,
     EventBusProtocol,
     AuthRepositoryProtocol,
-    AuthenticationError,
-    InvalidTokenError,
-    RegistrationError,
-    VerificationError,
-    InvalidCredentialsError,
-    AccountDisabledError,
 )
 from .models import AuthProvider
 
@@ -98,10 +92,14 @@ class AuthenticationService:
 
         # Auth0 configuration (for OAuth integration)
         self.auth0_domain = (
-            config.auth0_domain if config and hasattr(config, 'auth0_domain') else "your-auth0-domain.auth0.com"
+            config.auth0_domain
+            if config and hasattr(config, "auth0_domain")
+            else "your-auth0-domain.auth0.com"
         )
         self.auth0_audience = (
-            config.auth0_audience if config and hasattr(config, 'auth0_audience') else ""
+            config.auth0_audience
+            if config and hasattr(config, "auth0_audience")
+            else ""
         )
         self.auth0_algorithms = ["RS256"]
 
@@ -118,6 +116,7 @@ class AuthenticationService:
         """Lazy load HTTP client for Auth0 verification"""
         if self._http_client is None:
             import httpx
+
             self._http_client = httpx.AsyncClient(timeout=10.0)
         return self._http_client
 
@@ -197,6 +196,7 @@ class AuthenticationService:
 
         except Exception as e:
             import jwt
+
             if isinstance(e, jwt.ExpiredSignatureError):
                 return {"valid": False, "error": "Token expired"}
             elif isinstance(e, jwt.InvalidTokenError):
@@ -240,6 +240,7 @@ class AuthenticationService:
         """Auto-detect token provider from issuer"""
         try:
             import jwt
+
             payload = jwt.decode(token, options={"verify_signature": False})
             issuer = payload.get("iss", "")
 
@@ -252,7 +253,7 @@ class AuthenticationService:
                 # Default to custom JWT
                 return AuthProvider.ISA_USER.value
 
-        except:
+        except Exception:
             return AuthProvider.ISA_USER.value
 
     # ============================================
@@ -379,6 +380,7 @@ class AuthenticationService:
         password_hash = None
         if password:
             from .password_utils import hash_password
+
             password_hash = hash_password(password)
 
         # Store user in auth repository with password hash
@@ -401,7 +403,7 @@ class AuthenticationService:
         if self.account_client:
             try:
                 # Try to call ensure_account if it exists (protocol method)
-                if hasattr(self.account_client, 'ensure_account'):
+                if hasattr(self.account_client, "ensure_account"):
                     account = await self.account_client.ensure_account(
                         user_id=user_id,
                         email=email,
@@ -409,7 +411,9 @@ class AuthenticationService:
                     )
                 else:
                     # Fall back to HTTP call for real AccountServiceClient
-                    from microservices.account_service.client import AccountServiceClient
+                    from microservices.account_service.client import (
+                        AccountServiceClient,
+                    )
 
                     if isinstance(self.account_client, AccountServiceClient):
                         base_url = self.account_client._get_base_url()
@@ -501,7 +505,9 @@ class AuthenticationService:
             # Validate user exists in Account Service (optional in dev mode)
             if self.account_client:
                 try:
-                    user_account = await self.account_client.get_account_profile(user_id)
+                    user_account = await self.account_client.get_account_profile(
+                        user_id
+                    )
                     if user_account:
                         logger.info(
                             f"User {user_id} validated via Account Service for dev token"
@@ -573,9 +579,12 @@ class AuthenticationService:
             # Result was only used for logging, but the awaited call added a full
             # service roundtrip (~hundreds of ms) to the login hot path.
             if self.account_client:
+
                 async def _validate_user_bg() -> None:
                     try:
-                        user_account = await self.account_client.get_account_profile(user_id)
+                        user_account = await self.account_client.get_account_profile(
+                            user_id
+                        )
                         if user_account:
                             logger.info(f"User {user_id} validated via Account Service")
                         else:
@@ -583,7 +592,10 @@ class AuthenticationService:
                                 f"User {user_id} not found in Account Service (dev/test mode)"
                             )
                     except Exception as e:
-                        logger.warning(f"Failed to validate user via Account Service: {e}")
+                        logger.warning(
+                            f"Failed to validate user via Account Service: {e}"
+                        )
+
                 asyncio.create_task(_validate_user_bg())
 
             # Import TokenClaims from core.jwt_manager
@@ -619,7 +631,9 @@ class AuthenticationService:
                                 "provider": "isa_user",
                             },
                             metadata={
-                                "permissions": ",".join(permissions) if permissions else "",
+                                "permissions": ",".join(permissions)
+                                if permissions
+                                else "",
                                 "has_organization": str(organization_id is not None),
                             },
                         )
@@ -636,7 +650,9 @@ class AuthenticationService:
                                 "provider": "isa_user",
                             },
                             "metadata": {
-                                "permissions": ",".join(permissions) if permissions else "",
+                                "permissions": ",".join(permissions)
+                                if permissions
+                                else "",
                                 "has_organization": str(organization_id is not None),
                             },
                         }
@@ -647,9 +663,12 @@ class AuthenticationService:
                     async def _publish_login_event() -> None:
                         try:
                             await self.event_bus.publish_event(event)
-                            logger.info(f"Published user.logged_in event for user {user_id}")
+                            logger.info(
+                                f"Published user.logged_in event for user {user_id}"
+                            )
                         except Exception as e:
                             logger.error(f"Failed to publish user.logged_in event: {e}")
+
                     asyncio.create_task(_publish_login_event())
                 except Exception as e:
                     logger.error(f"Failed to schedule user.logged_in publish: {e}")
@@ -743,15 +762,21 @@ class AuthenticationService:
             # Normalize both sides for backward-compatible a2a.* → mcp:* comparison
             normalized_allowed = _normalize_scopes(allowed_scopes)
             normalized_requested = _normalize_scopes(requested_scopes)
-            if normalized_requested and not normalized_requested.issubset(normalized_allowed):
+            if normalized_requested and not normalized_requested.issubset(
+                normalized_allowed
+            ):
                 return {
                     "success": False,
                     "error": "Requested scope is not allowed",
                     "error_code": "invalid_scope",
                 }
 
-            granted_scopes = normalized_requested if normalized_requested else normalized_allowed
-            ttl_seconds = max(300, min(int(client.get("token_ttl_seconds", 3600)), 86400))
+            granted_scopes = (
+                normalized_requested if normalized_requested else normalized_allowed
+            )
+            ttl_seconds = max(
+                300, min(int(client.get("token_ttl_seconds", 3600)), 86400)
+            )
 
             from core.jwt_manager import TokenClaims, TokenScope, TokenType
 
@@ -946,7 +971,9 @@ class AuthenticationService:
                 "permissions": verification_result.get("permissions", []),
             }
         else:
-            verification = await self.verify_token(token, provider=AuthProvider.ISA_USER.value)
+            verification = await self.verify_token(
+                token, provider=AuthProvider.ISA_USER.value
+            )
         if not verification.get("valid"):
             return verification
 
@@ -994,24 +1021,36 @@ class AuthenticationService:
             user = await self.auth_repository.get_user_for_login(normalized_email)
 
             if not user:
-                logger.warning(f"Login failed: user not found for email {normalized_email}")
+                logger.warning(
+                    f"Login failed: user not found for email {normalized_email}"
+                )
                 return {"success": False, "error": "Invalid email or password"}
 
             # Check if account is active
             if not user.get("is_active", True):
-                logger.warning(f"Login failed: account disabled for user {user['user_id']}")
+                logger.warning(
+                    f"Login failed: account disabled for user {user['user_id']}"
+                )
                 return {"success": False, "error": "Account is disabled"}
 
             # Check if password is set
             password_hash = user.get("password_hash")
             if not password_hash:
-                logger.warning(f"Login failed: no password set for user {user['user_id']}")
-                return {"success": False, "error": "Password not set. Please use password reset."}
+                logger.warning(
+                    f"Login failed: no password set for user {user['user_id']}"
+                )
+                return {
+                    "success": False,
+                    "error": "Password not set. Please use password reset.",
+                }
 
             # Verify password
             from .password_utils import verify_password
+
             if not verify_password(password, password_hash):
-                logger.warning(f"Login failed: invalid password for user {user['user_id']}")
+                logger.warning(
+                    f"Login failed: invalid password for user {user['user_id']}"
+                )
                 return {"success": False, "error": "Invalid email or password"}
 
             # Update last login timestamp
@@ -1083,29 +1122,44 @@ class AuthenticationService:
             user = await self.auth_repository.get_user_for_login(normalized_email)
 
             if not user:
-                logger.warning(f"Admin login failed: user not found for email {normalized_email}")
+                logger.warning(
+                    f"Admin login failed: user not found for email {normalized_email}"
+                )
                 return {"success": False, "error": "Invalid email or password"}
 
             # Check if account is active
             if not user.get("is_active", True):
-                logger.warning(f"Admin login failed: account disabled for user {user['user_id']}")
+                logger.warning(
+                    f"Admin login failed: account disabled for user {user['user_id']}"
+                )
                 return {"success": False, "error": "Account is disabled"}
 
             # Verify password
             password_hash = user.get("password_hash")
             if not password_hash:
-                logger.warning(f"Admin login failed: no password set for user {user['user_id']}")
+                logger.warning(
+                    f"Admin login failed: no password set for user {user['user_id']}"
+                )
                 return {"success": False, "error": "Invalid email or password"}
 
             from .password_utils import verify_password
+
             if not verify_password(password, password_hash):
-                logger.warning(f"Admin login failed: invalid password for user {user['user_id']}")
+                logger.warning(
+                    f"Admin login failed: invalid password for user {user['user_id']}"
+                )
                 return {"success": False, "error": "Invalid email or password"}
 
             # Check admin_roles — must have at least one admin role
             admin_roles = user.get("admin_roles")
-            if not admin_roles or not isinstance(admin_roles, list) or len(admin_roles) == 0:
-                logger.warning(f"Admin login failed: user {user['user_id']} has no admin roles")
+            if (
+                not admin_roles
+                or not isinstance(admin_roles, list)
+                or len(admin_roles) == 0
+            ):
+                logger.warning(
+                    f"Admin login failed: user {user['user_id']} has no admin roles"
+                )
                 return {"success": False, "error": "Insufficient admin privileges"}
 
             # Update last login
@@ -1142,7 +1196,9 @@ class AuthenticationService:
                 expires_delta=timedelta(hours=24),
             )
 
-            logger.info(f"Admin login successful for user {user['user_id']} with roles {admin_roles}")
+            logger.info(
+                f"Admin login successful for user {user['user_id']} with roles {admin_roles}"
+            )
 
             return {
                 "success": True,
@@ -1174,10 +1230,15 @@ class AuthenticationService:
             Dictionary with admin user info or error
         """
         try:
-            verification = await self.verify_token(token, provider=AuthProvider.ISA_USER.value)
+            verification = await self.verify_token(
+                token, provider=AuthProvider.ISA_USER.value
+            )
 
             if not verification.get("valid"):
-                return {"valid": False, "error": verification.get("error", "Invalid token")}
+                return {
+                    "valid": False,
+                    "error": verification.get("error", "Invalid token"),
+                }
 
             payload = verification.get("payload", {}) or {}
 

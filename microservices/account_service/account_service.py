@@ -39,23 +39,26 @@ from .models import (
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
+    pass
 
 logger = logging.getLogger(__name__)
 
 
 class AccountServiceError(Exception):
     """Base exception for account service errors"""
+
     pass
 
 
 class AccountValidationError(AccountServiceError):
     """Account validation error"""
+
     pass
 
 
 class AccountNotFoundError(AccountServiceError):
     """Account not found error"""
+
     pass
 
 
@@ -103,6 +106,7 @@ class AccountService:
                     publish_user_profile_updated,
                     publish_user_status_changed,
                 )
+
                 self._publish_user_created = publish_user_created
                 self._publish_user_deleted = publish_user_deleted
                 self._publish_user_profile_updated = publish_user_profile_updated
@@ -155,15 +159,18 @@ class AccountService:
                         try:
                             # Try to get or create subscription for the new user
                             sub_result = await self.subscription_client.get_or_create_subscription(
-                                user_id=request.user_id,
-                                tier_code="free"
+                                user_id=request.user_id, tier_code="free"
                             )
                             if sub_result and sub_result.get("subscription"):
-                                subscription_plan = sub_result["subscription"].get("tier_code", "free")
+                                subscription_plan = sub_result["subscription"].get(
+                                    "tier_code", "free"
+                                )
                         except Exception as sub_e:
-                            logger.warning(f"Failed to get subscription for user {request.user_id}: {sub_e}")
+                            logger.warning(
+                                f"Failed to get subscription for user {request.user_id}: {sub_e}"
+                            )
 
-                    if hasattr(self, '_publish_user_created'):
+                    if hasattr(self, "_publish_user_created"):
                         await self._publish_user_created(
                             event_bus=self.event_bus,
                             user_id=request.user_id,
@@ -177,7 +184,7 @@ class AccountService:
             logger.info(f"Account ensured: {request.user_id}, created: {was_created}")
             return account_response, was_created
 
-        except DuplicateEntryError as e:
+        except DuplicateEntryError:
             raise AccountValidationError(
                 f"Account with email already exists: {request.email}"
             )
@@ -254,7 +261,7 @@ class AccountService:
             if self.event_bus:
                 try:
                     self._lazy_load_event_publishers()
-                    if hasattr(self, '_publish_user_profile_updated'):
+                    if hasattr(self, "_publish_user_profile_updated"):
                         await self._publish_user_profile_updated(
                             event_bus=self.event_bus,
                             user_id=user_id,
@@ -352,7 +359,7 @@ class AccountService:
                 if self.event_bus:
                     try:
                         self._lazy_load_event_publishers()
-                        if hasattr(self, '_publish_user_status_changed'):
+                        if hasattr(self, "_publish_user_status_changed"):
                             await self._publish_user_status_changed(
                                 event_bus=self.event_bus,
                                 user_id=user_id,
@@ -397,7 +404,7 @@ class AccountService:
                 if self.event_bus:
                     try:
                         self._lazy_load_event_publishers()
-                        if hasattr(self, '_publish_user_deleted'):
+                        if hasattr(self, "_publish_user_deleted"):
                             await self._publish_user_deleted(
                                 event_bus=self.event_bus,
                                 user_id=user_id,

@@ -5,7 +5,6 @@ Storage Service - Event Handlers
 """
 
 import logging
-from datetime import datetime
 
 from core.nats_client import Event
 
@@ -135,9 +134,9 @@ async def handle_file_indexing_request(
                             ai_metadata_extracted = MessageToDict(
                                 ai_metadata_extracted, preserving_proto_field_name=True
                             )
-                        except:
+                        except Exception:
                             logger.warning(
-                                f"Failed to convert ai_metadata from protobuf, setting to empty dict"
+                                "Failed to convert ai_metadata from protobuf, setting to empty dict"
                             )
                             ai_metadata_extracted = {}
                     if not ai_metadata_extracted:
@@ -239,12 +238,19 @@ async def handle_user_deleted(event: Event, storage_service, event_bus):
 
         # 3. Clean up user's vector embeddings (if intelligence service available)
         try:
-            if hasattr(storage_service, 'intelligence_service') and storage_service.intelligence_service:
+            if (
+                hasattr(storage_service, "intelligence_service")
+                and storage_service.intelligence_service
+            ):
                 collection_name = f"user_{user_id}_media"
-                await storage_service.intelligence_service.delete_collection(collection_name)
+                await storage_service.intelligence_service.delete_collection(
+                    collection_name
+                )
                 logger.info(f"Deleted vector collection {collection_name}")
         except Exception as e:
-            logger.warning(f"Failed to delete vector collection for user {user_id}: {e}")
+            logger.warning(
+                f"Failed to delete vector collection for user {user_id}: {e}"
+            )
 
         logger.info(f"Successfully handled user.deleted event for user {user_id}")
 

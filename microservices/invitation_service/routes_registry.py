@@ -2,78 +2,81 @@
 Invitation Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/invitations/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/invitations/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/info",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service information"
+        "description": "Service information",
     },
     {
         "path": "/api/v1/invitations/info",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Invitation service info"
+        "description": "Invitation service info",
     },
     # Invitation Management
     {
         "path": "/api/v1/invitations/organizations/{organization_id}",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create organization invitations"
+        "description": "List/create organization invitations",
     },
     {
         "path": "/api/v1/invitations/{invitation_token}",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Get invitation details by token"
+        "description": "Get invitation details by token",
     },
     {
         "path": "/api/v1/invitations/{invitation_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Delete invitation"
+        "description": "Delete invitation",
     },
     {
         "path": "/api/v1/invitations/accept",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Accept invitation"
+        "description": "Accept invitation",
     },
     {
         "path": "/api/v1/invitations/{invitation_id}/resend",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Resend invitation"
+        "description": "Resend invitation",
     },
     # Admin Operations
     {
         "path": "/api/v1/admin/expire-invitations",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Expire old invitations (admin)"
+        "description": "Expire old invitations (admin)",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -102,6 +105,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "invitation_service",
@@ -113,6 +118,6 @@ SERVICE_METADATA = {
         "invitation_management",
         "organization_invites",
         "email_notifications",
-        "invitation_expiration"
-    ]
+        "invitation_expiration",
+    ],
 }

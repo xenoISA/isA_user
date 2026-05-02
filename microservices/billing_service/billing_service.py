@@ -27,7 +27,6 @@ from .models import (
     BillingCalculationResponse,
     BillingEvent,
     BillingMethod,
-    BillingQuota,
     BillingRecord,
     BillingStats,
     BillingStatus,
@@ -39,9 +38,6 @@ from .models import (
     QuotaCheckResponse,
     RecordUsageRequest,
     ServiceType,
-    UsageAggregation,
-    UsageStatsRequest,
-    UsageStatsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -484,9 +480,7 @@ class BillingService:
 
         upstream_total = Decimal(str(cost_usd))
         usage_amount = calculation.usage_amount or Decimal("0")
-        unit_price = (
-            upstream_total / usage_amount if usage_amount > 0 else Decimal("0")
-        )
+        unit_price = upstream_total / usage_amount if usage_amount > 0 else Decimal("0")
         return calculation.model_copy(
             update={
                 "unit_price": unit_price,
@@ -609,7 +603,9 @@ class BillingService:
                 )
 
             unit_price = Decimal(str(raw_price or 0))
-            raw_total_cost = pricing_info.get("total_price") or pricing_info.get("total_cost")
+            raw_total_cost = pricing_info.get("total_price") or pricing_info.get(
+                "total_cost"
+            )
             total_cost = (
                 Decimal(str(raw_total_cost))
                 if raw_total_cost is not None
@@ -689,7 +685,9 @@ class BillingService:
                 available_methods.append(BillingMethod.SUBSCRIPTION_CREDIT)
             if purchased_credits >= total_cost_credits:
                 available_methods.append(BillingMethod.CREDIT_CONSUMPTION)
-            if wallet_balance and wallet_balance >= Decimal(str(total_cost_credits * 0.00001)):
+            if wallet_balance and wallet_balance >= Decimal(
+                str(total_cost_credits * 0.00001)
+            ):
                 available_methods.append(BillingMethod.WALLET_DEDUCTION)
             available_methods.append(BillingMethod.PAYMENT_CHARGE)
 
@@ -975,7 +973,11 @@ class BillingService:
                 credits_to_consume = self._convert_to_credits(
                     calculation.total_cost, calculation.currency
                 )
-                success, transaction_id, error = await self._process_purchased_credit_consumption(
+                (
+                    success,
+                    transaction_id,
+                    error,
+                ) = await self._process_purchased_credit_consumption(
                     user_id=billing_record.user_id,
                     credits_amount=credits_to_consume,
                     service_type=billing_record.service_type.value,
@@ -1144,7 +1146,9 @@ class BillingService:
                 else:
                     warning = "subscription_service_unavailable"
             except Exception as e:
-                logger.warning(f"Subscription service unavailable for billing status: {e}")
+                logger.warning(
+                    f"Subscription service unavailable for billing status: {e}"
+                )
                 warning = "subscription_service_unavailable"
         else:
             warning = "subscription_service_unavailable"
@@ -1222,19 +1226,23 @@ class BillingService:
             by_day: Dict[str, Dict[str, float]] = {}
             for agg in aggregations or []:
                 day_key = agg.period_start.strftime("%Y-%m-%d")
-                row = by_day.setdefault(day_key, {"requests": 0, "tokens": 0, "cost": 0.0})
+                row = by_day.setdefault(
+                    day_key, {"requests": 0, "tokens": 0, "cost": 0.0}
+                )
                 row["requests"] += int(agg.total_usage_count or 0)
                 row["tokens"] += int(agg.total_usage_amount or 0)
                 row["cost"] += float(agg.total_cost or 0)
 
             for day_key in sorted(by_day.keys()):
                 row = by_day[day_key]
-                daily.append({
-                    "date": day_key,
-                    "requests": int(row["requests"]),
-                    "tokens": int(row["tokens"]),
-                    "cost": round(float(row["cost"]), 4),
-                })
+                daily.append(
+                    {
+                        "date": day_key,
+                        "requests": int(row["requests"]),
+                        "tokens": int(row["tokens"]),
+                        "cost": round(float(row["cost"]), 4),
+                    }
+                )
                 totals["requests"] += int(row["requests"])
                 totals["tokens"] += int(row["tokens"])
                 totals["cost"] += float(row["cost"])
@@ -1341,7 +1349,9 @@ class BillingService:
                 billing_account_id=request.billing_account_id,
             )
             usage_details.setdefault("actor_user_id", scope["actor_user_id"])
-            usage_details.setdefault("billing_account_type", scope["billing_account_type"].value)
+            usage_details.setdefault(
+                "billing_account_type", scope["billing_account_type"].value
+            )
             usage_details.setdefault("billing_account_id", scope["billing_account_id"])
             if request.unit_type:
                 usage_details.setdefault("unit_type", request.unit_type)
@@ -1506,9 +1516,13 @@ class BillingService:
                         actor_user_id=actor_user_id,
                     )
                     if credit_balance and credit_balance.get("success"):
-                        subscription_credits = credit_balance.get("subscription_credits_remaining", 0)
+                        subscription_credits = credit_balance.get(
+                            "subscription_credits_remaining", 0
+                        )
                         subscription_id = credit_balance.get("subscription_id")
-                        logger.debug(f"User {user_id} subscription credits: {subscription_credits}")
+                        logger.debug(
+                            f"User {user_id} subscription credits: {subscription_credits}"
+                        )
                 except Exception as e:
                     logger.warning(f"Failed to get subscription credits: {e}")
 
@@ -1538,12 +1552,19 @@ class BillingService:
                         credit_data = credit_response.json()
                         if credit_data.get("success"):
                             purchased_credits = credit_data.get("total_credits", 0)
-                            logger.debug(f"User {user_id} purchased credits: {purchased_credits}")
+                            logger.debug(
+                                f"User {user_id} purchased credits: {purchased_credits}"
+                            )
 
             except Exception as e:
                 logger.warning(f"Failed to get wallet/credit balance: {e}")
 
-            return subscription_credits, purchased_credits, wallet_balance, subscription_id
+            return (
+                subscription_credits,
+                purchased_credits,
+                wallet_balance,
+                subscription_id,
+            )
 
         except Exception as e:
             logger.error(f"Error getting user balances: {e}")
@@ -1592,7 +1613,9 @@ class BillingService:
             return BillingMethod.CREDIT_CONSUMPTION
 
         # Priority 3: Use wallet balance
-        if wallet_balance and wallet_balance >= Decimal(str(total_cost_credits * 0.00001)):
+        if wallet_balance and wallet_balance >= Decimal(
+            str(total_cost_credits * 0.00001)
+        ):
             return BillingMethod.WALLET_DEDUCTION
 
         # Priority 4: External payment required
@@ -1678,7 +1701,7 @@ class BillingService:
         organization_id: Optional[str],
         credits_amount: int,
         service_type: str,
-        reference_id: str
+        reference_id: str,
     ) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
         """
         Process subscription credit consumption
@@ -1718,7 +1741,11 @@ class BillingService:
                     result.get("subscription_id"),
                 )
             else:
-                error_msg = result.get("message", "Subscription credit consumption failed") if result else "No response"
+                error_msg = (
+                    result.get("message", "Subscription credit consumption failed")
+                    if result
+                    else "No response"
+                )
                 return (
                     False,
                     None,
@@ -1731,11 +1758,7 @@ class BillingService:
             return False, None, str(e), None
 
     async def _process_purchased_credit_consumption(
-        self,
-        user_id: str,
-        credits_amount: int,
-        service_type: str,
-        reference_id: str
+        self, user_id: str, credits_amount: int, service_type: str, reference_id: str
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Process purchased credit consumption from wallet credit_accounts
@@ -1758,7 +1781,7 @@ class BillingService:
                         "credits_amount": credits_amount,
                         "service_type": service_type,
                         "description": f"Billing charge for {reference_id}",
-                        "usage_record_id": reference_id
+                        "usage_record_id": reference_id,
                     },
                     timeout=10.0,
                 )
@@ -1768,9 +1791,17 @@ class BillingService:
                     if result.get("success"):
                         return True, result.get("transaction_id"), None
                     else:
-                        return False, None, result.get("message", "Credit consumption failed")
+                        return (
+                            False,
+                            None,
+                            result.get("message", "Credit consumption failed"),
+                        )
                 else:
-                    return False, None, f"Wallet service returned {response.status_code}"
+                    return (
+                        False,
+                        None,
+                        f"Wallet service returned {response.status_code}",
+                    )
 
         except Exception as e:
             logger.error(f"Error consuming purchased credits: {e}")
@@ -1805,12 +1836,14 @@ class BillingService:
             user_id=getattr(calculation, "user_id", ""),
             actor_user_id=getattr(calculation, "actor_user_id", None) or actor_user_id,
             billing_account_type=(
-                getattr(calculation, "billing_account_type", None) or billing_account_type
+                getattr(calculation, "billing_account_type", None)
+                or billing_account_type
             ),
             billing_account_id=(
                 getattr(calculation, "billing_account_id", None) or billing_account_id
             ),
-            organization_id=getattr(calculation, "organization_id", None) or organization_id,
+            organization_id=getattr(calculation, "organization_id", None)
+            or organization_id,
             agent_id=getattr(calculation, "agent_id", None) or agent_id,
             subscription_id=(
                 getattr(calculation, "subscription_id", None) or subscription_id

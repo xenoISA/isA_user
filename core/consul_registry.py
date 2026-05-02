@@ -7,7 +7,6 @@ Service registration is handled by Consul agent sidecar (not programmatically).
 
 import consul
 import logging
-import asyncio
 import socket
 import json
 from typing import Optional, List, Dict, Any
@@ -92,7 +91,7 @@ class ConsulRegistry:
         """No-op: Registration handled by Consul agent sidecar"""
         logger.debug("Registration handled by Consul agent sidecar, skipping maintenance stop")
         pass
-    
+
     # Configuration Management Methods
     def get_config(self, key: str, default: Any = None) -> Any:
         """Get configuration value from Consul KV store"""
@@ -110,7 +109,7 @@ class ConsulRegistry:
         except Exception as e:
             logger.error(f"Failed to get config {key}: {e}")
             return default
-    
+
     def set_config(self, key: str, value: Any) -> bool:
         """Set configuration value in Consul KV store"""
         try:
@@ -122,7 +121,7 @@ class ConsulRegistry:
         except Exception as e:
             logger.error(f"Failed to set config {key}: {e}")
             return False
-    
+
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration for this service"""
         try:
@@ -130,7 +129,7 @@ class ConsulRegistry:
             index, data = self.consul.kv.get(prefix, recurse=True)
             if not data:
                 return {}
-            
+
             config = {}
             for item in data:
                 if item['Value']:
@@ -144,7 +143,7 @@ class ConsulRegistry:
         except Exception as e:
             logger.error(f"Failed to get all config: {e}")
             return {}
-    
+
     def watch_config(self, key: str, callback):
         """Watch for configuration changes (blocking call)"""
         full_key = f"{self.service_name}/{key}"
@@ -162,14 +161,14 @@ class ConsulRegistry:
             except Exception as e:
                 logger.error(f"Error watching config {key}: {e}")
                 break
-    
+
     # Service Discovery Methods
     def discover_service(self, service_name: str) -> List[Dict[str, Any]]:
         """Discover healthy instances of a service"""
         try:
             # Get health checks for the service
             index, services = self.consul.health.service(service_name, passing=True)
-            
+
             instances = []
             for service in services:
                 instance = {
@@ -180,12 +179,12 @@ class ConsulRegistry:
                     'meta': service['Service'].get('Meta', {})
                 }
                 instances.append(instance)
-            
+
             return instances
         except Exception as e:
             logger.error(f"Failed to discover service {service_name}: {e}")
             return []
-    
+
     def get_service_endpoint(self, service_name: str, strategy: str = 'health_weighted') -> Optional[str]:
         """Get a single service endpoint using advanced load balancing strategy"""
         instances = self.discover_service(service_name)
@@ -216,7 +215,7 @@ class ConsulRegistry:
             instance = random.choice(instances)
 
         return f"http://{instance['address']}:{instance['port']}"
-    
+
     def _select_best_instance(self, instances: List[Dict[str, Any]]) -> Dict[str, Any]:
         """选择最佳实例（基于健康状态和负载）"""
         # 简单实现：优先选择标签包含'preferred'的实例
@@ -224,30 +223,30 @@ class ConsulRegistry:
         if preferred_instances:
             import random
             return random.choice(preferred_instances)
-        
+
         # 没有首选实例时随机选择
         import random
         return random.choice(instances)
-    
+
     def _get_round_robin_instance(self, service_name: str, instances: List[Dict[str, Any]]) -> Dict[str, Any]:
         """实现真正的轮询负载均衡"""
         if not hasattr(self, '_round_robin_counters'):
             self._round_robin_counters = {}
-        
+
         if service_name not in self._round_robin_counters:
             self._round_robin_counters[service_name] = 0
-        
+
         # 获取当前计数器并递增
         counter = self._round_robin_counters[service_name]
         self._round_robin_counters[service_name] = (counter + 1) % len(instances)
-        
+
         return instances[counter]
 
     def _log_service_metrics(self, operation: str, success: bool, service_name: str = None):
         """记录服务操作指标"""
         service = service_name or self.service_name
         status = "SUCCESS" if success else "FAILED"
-        
+
         # 使用项目统一的logger记录指标
         logger.info(
             f"🔍 CONSUL_METRICS | operation={operation} | service={service} | "
@@ -272,21 +271,21 @@ class ConsulRegistry:
             # Returns: "http://10.0.1.5:8201" (from Consul) or "http://localhost:8201" (fallback)
         """
         last_error = None
-        
+
         for attempt in range(max_retries):
             try:
                 endpoint = self.get_service_endpoint(service_name)
                 if endpoint:
                     logger.debug(f"Discovered {service_name} at {endpoint} (attempt {attempt + 1})")
                     return endpoint
-                    
+
                 # 如果没找到服务但没有异常，记录并继续
                 last_error = f"Service {service_name} not found in Consul registry"
-                
+
             except Exception as e:
                 last_error = e
                 logger.warning(f"Consul discovery attempt {attempt + 1} failed for {service_name}: {e}")
-                
+
                 # 短暂等待后重试（除了最后一次）
                 if attempt < max_retries - 1:
                     import time
@@ -298,16 +297,16 @@ class ConsulRegistry:
             return fallback_url
 
         raise ValueError(f"Service {service_name} not found after {max_retries} attempts and no fallback provided. Last error: {last_error}")
-    
+
     def watch_service(self, service_name: str, callback, wait_time: str = '30s'):
         """Watch for changes in service instances"""
         index = None
         while True:
             try:
                 index, services = self.consul.health.service(
-                    service_name, 
-                    passing=True, 
-                    index=index, 
+                    service_name,
+                    passing=True,
+                    index=index,
                     wait=wait_time
                 )
                 # Convert to simplified format
@@ -336,7 +335,7 @@ async def consul_lifespan(
 ):
     """
     FastAPI lifespan context manager for Consul registration
-    
+
     Usage:
         app = FastAPI(lifespan=lambda app: consul_lifespan(app, "my-service", 8080))
     """
@@ -354,7 +353,7 @@ async def consul_lifespan(
         tags=tags,
         health_check_type=health_check_type
     )
-    
+
     # Register with Consul
     if registry.register():
         # Start maintenance task
@@ -363,9 +362,9 @@ async def consul_lifespan(
         app.state.consul_registry = registry
     else:
         logger.warning("Failed to register with Consul, continuing without service discovery")
-    
+
     yield
-    
+
     # Shutdown
     if hasattr(app.state, 'consul_registry'):
         registry.stop_maintenance()

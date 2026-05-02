@@ -23,11 +23,12 @@ class AccountClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("account_service")
             except Exception as e:
@@ -113,7 +114,7 @@ class AccountClient:
         """
         profile = await self.get_account_profile(user_id)
         if profile:
-            return profile.get('tier', 'basic')
+            return profile.get("tier", "basic")
         return None
 
     async def validate_user(self, user_id: str) -> bool:
@@ -134,5 +135,5 @@ class AccountClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

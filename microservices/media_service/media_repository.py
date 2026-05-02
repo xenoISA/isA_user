@@ -27,11 +27,8 @@ from .models import (
     PhotoCache,
     PhotoMetadata,
     PhotoVersion,
-    PhotoVersionType,
     Playlist,
-    PlaylistType,
     RotationSchedule,
-    ScheduleType,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,14 +47,20 @@ class MediaRepository:
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
             service_name="postgres_service",
-            default_host='localhost',
+            default_host="localhost",
             default_port=5432,
             env_host_key="POSTGRES_HOST",
             env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="media_service", min_pool_size=1, max_pool_size=2)
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="media_service",
+            min_pool_size=1,
+            max_pool_size=2,
+        )
 
         # Table names (media schema)
         self.schema = "media"
@@ -527,7 +530,9 @@ class MediaRepository:
                 schedule_data.days_of_week or [],
                 schedule_data.rotation_interval or 10,
                 schedule_data.shuffle or False,
-                schedule_data.is_active if schedule_data.is_active is not None else True,
+                schedule_data.is_active
+                if schedule_data.is_active is not None
+                else True,
                 now,
                 now,
             ]

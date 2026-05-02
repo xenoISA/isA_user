@@ -7,18 +7,25 @@ Data access layer for event management using PostgresClient.
 import os
 import sys
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any, Tuple
-import uuid
+from datetime import datetime, timezone
+from typing import List, Optional, Dict, Tuple
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    Event, EventStatus, EventSource, EventCategory,
-    EventStatistics, EventProcessingResult,
-    EventProjection, EventProcessor, EventSubscription
+    Event,
+    EventStatus,
+    EventSource,
+    EventCategory,
+    EventStatistics,
+    EventProcessingResult,
+    EventProjection,
+    EventProcessor,
+    EventSubscription,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,15 +43,21 @@ class EventRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="event_service", min_pool_size=1, max_pool_size=2)
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="event_service",
+            min_pool_size=1,
+            max_pool_size=2,
+        )
 
         self.schema = "event"
         self.events_table = "events"
@@ -64,33 +77,35 @@ class EventRepository:
         """Save event"""
         try:
             event_dict = {
-                'event_id': event.event_id,
-                'event_type': event.event_type,
-                'event_source': event.event_source.value,
-                'event_category': event.event_category.value,
-                'user_id': event.user_id,
-                'session_id': event.session_id,
-                'organization_id': event.organization_id,
-                'device_id': event.device_id,
-                'correlation_id': event.correlation_id,
-                'data': event.data or {},  # Direct dict, not json.dumps()
-                'metadata': event.metadata or {},
-                'context': event.context or {},
-                'properties': event.properties or {},
-                'status': event.status.value,
-                'processed_at': event.processed_at if event.processed_at else None,
-                'processors': event.processors or [],
-                'error_message': event.error_message,
-                'retry_count': event.retry_count,
-                'timestamp': event.timestamp,
-                'created_at': event.created_at,
-                'updated_at': event.updated_at,
-                'version': event.version,
-                'schema_version': event.schema_version
+                "event_id": event.event_id,
+                "event_type": event.event_type,
+                "event_source": event.event_source.value,
+                "event_category": event.event_category.value,
+                "user_id": event.user_id,
+                "session_id": event.session_id,
+                "organization_id": event.organization_id,
+                "device_id": event.device_id,
+                "correlation_id": event.correlation_id,
+                "data": event.data or {},  # Direct dict, not json.dumps()
+                "metadata": event.metadata or {},
+                "context": event.context or {},
+                "properties": event.properties or {},
+                "status": event.status.value,
+                "processed_at": event.processed_at if event.processed_at else None,
+                "processors": event.processors or [],
+                "error_message": event.error_message,
+                "retry_count": event.retry_count,
+                "timestamp": event.timestamp,
+                "created_at": event.created_at,
+                "updated_at": event.updated_at,
+                "version": event.version,
+                "schema_version": event.schema_version,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.events_table, [event_dict], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.events_table, [event_dict], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 logger.info(f"Event {event.event_id} saved successfully")
@@ -110,7 +125,9 @@ class EventRepository:
     async def get_event(self, event_id: str) -> Optional[Event]:
         """Get single event by ID"""
         try:
-            query = f'SELECT * FROM {self.schema}.{self.events_table} WHERE event_id = $1'
+            query = (
+                f"SELECT * FROM {self.schema}.{self.events_table} WHERE event_id = $1"
+            )
 
             async with self.db:
                 result = await self.db.query_row(query, [event_id], schema=self.schema)
@@ -123,17 +140,19 @@ class EventRepository:
             logger.error(f"Error getting event {event_id}: {e}")
             return None
 
-    async def query_events(self,
-                          user_id: Optional[str] = None,
-                          event_type: Optional[str] = None,
-                          event_source: Optional[EventSource] = None,
-                          event_category: Optional[EventCategory] = None,
-                          status: Optional[EventStatus] = None,
-                          correlation_id: Optional[str] = None,
-                          start_time: Optional[datetime] = None,
-                          end_time: Optional[datetime] = None,
-                          limit: int = 100,
-                          offset: int = 0) -> Tuple[List[Event], int]:
+    async def query_events(
+        self,
+        user_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        event_source: Optional[EventSource] = None,
+        event_category: Optional[EventCategory] = None,
+        status: Optional[EventStatus] = None,
+        correlation_id: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Tuple[List[Event], int]:
         """Query events with filters"""
         try:
             conditions = []
@@ -183,18 +202,20 @@ class EventRepository:
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
             # Get total count
-            count_query = f'SELECT COUNT(*) as count FROM {self.schema}.{self.events_table} WHERE {where_clause}'
+            count_query = f"SELECT COUNT(*) as count FROM {self.schema}.{self.events_table} WHERE {where_clause}"
             async with self.db:
-                count_result = await self.db.query_row(count_query, params, schema=self.schema)
+                count_result = await self.db.query_row(
+                    count_query, params, schema=self.schema
+                )
             total_count = int(count_result.get("count", 0)) if count_result else 0
 
             # Get events
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.events_table}
                 WHERE {where_clause}
                 ORDER BY timestamp DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -207,14 +228,18 @@ class EventRepository:
             logger.error(f"Error querying events: {e}")
             return [], 0
 
-    async def update_event_status(self, event_id: str, status: EventStatus,
-                                  error_message: Optional[str] = None,
-                                  processed_at: Optional[datetime] = None) -> bool:
+    async def update_event_status(
+        self,
+        event_id: str,
+        status: EventStatus,
+        error_message: Optional[str] = None,
+        processed_at: Optional[datetime] = None,
+    ) -> bool:
         """Update event status"""
         try:
             update_data = {
                 "status": status.value,
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             if error_message:
@@ -238,11 +263,11 @@ class EventRepository:
             params.append(event_id)
 
             set_clause = ", ".join(set_clauses)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.events_table}
                 SET {set_clause}
                 WHERE event_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -266,7 +291,7 @@ class EventRepository:
                 "processors": event.processors or [],
                 "error_message": event.error_message,
                 "retry_count": event.retry_count,
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             set_clauses = []
@@ -282,11 +307,11 @@ class EventRepository:
             params.append(event.event_id)
 
             set_clause = ", ".join(set_clauses)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.events_table}
                 SET {set_clause}
                 WHERE event_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -300,7 +325,7 @@ class EventRepository:
     async def get_unprocessed_events(self, limit: int = 100) -> List[Event]:
         """Get unprocessed events"""
         try:
-            query = f'''
+            query = f"""
                 WITH claimed AS (
                     SELECT event_id
                     FROM {self.schema}.{self.events_table}
@@ -315,7 +340,7 @@ class EventRepository:
                 FROM claimed
                 WHERE events.event_id = claimed.event_id
                 RETURNING events.*
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(
@@ -343,7 +368,7 @@ class EventRepository:
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
             # Get counts by status
-            query = f'''
+            query = f"""
                 SELECT
                     COUNT(*) as total_events,
                     COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_events,
@@ -354,7 +379,7 @@ class EventRepository:
                     COUNT(CASE WHEN timestamp >= CURRENT_DATE - INTERVAL '30 days' THEN 1 END) as events_month
                 FROM {self.schema}.{self.events_table}
                 WHERE {where_clause}
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params, schema=self.schema)
@@ -370,7 +395,7 @@ class EventRepository:
                     events_this_month=int(result.get("events_month", 0)),
                     events_by_type={},
                     events_by_source={},
-                    events_by_category={}
+                    events_by_category={},
                 )
 
             # Return default statistics
@@ -384,7 +409,7 @@ class EventRepository:
                 events_this_month=0,
                 events_by_type={},
                 events_by_source={},
-                events_by_category={}
+                events_by_category={},
             )
 
         except Exception as e:
@@ -399,23 +424,27 @@ class EventRepository:
                 events_this_month=0,
                 events_by_type={},
                 events_by_source={},
-                events_by_category={}
+                events_by_category={},
             )
 
     async def save_processing_result(self, result: EventProcessingResult):
         """Save processing result"""
         try:
             result_dict = {
-                'event_id': result.event_id,
-                'processor_name': result.processor_name,
-                'status': result.status.value,
-                'message': result.message,
-                'processed_at': result.processed_at if result.processed_at else datetime.now(timezone.utc),
-                'duration_ms': result.duration_ms
+                "event_id": result.event_id,
+                "processor_name": result.processor_name,
+                "status": result.status.value,
+                "message": result.message,
+                "processed_at": result.processed_at
+                if result.processed_at
+                else datetime.now(timezone.utc),
+                "duration_ms": result.duration_ms,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.processing_results_table, [result_dict], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.processing_results_table, [result_dict], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 logger.info(f"Processing result for event {result.event_id} saved")
@@ -424,16 +453,19 @@ class EventRepository:
             logger.error(f"Error saving processing result: {e}")
             raise
 
-    async def get_event_stream(self, stream_id: str,
-                              entity_type: Optional[str] = None,
-                              entity_id: Optional[str] = None) -> Optional[Dict]:
+    async def get_event_stream(
+        self,
+        stream_id: str,
+        entity_type: Optional[str] = None,
+        entity_id: Optional[str] = None,
+    ) -> Optional[Dict]:
         """Get event stream"""
         try:
             if stream_id:
-                query = f'SELECT * FROM {self.schema}.{self.event_streams_table} WHERE stream_id = $1'
+                query = f"SELECT * FROM {self.schema}.{self.event_streams_table} WHERE stream_id = $1"
                 params = [stream_id]
             elif entity_type and entity_id:
-                query = f'SELECT * FROM {self.schema}.{self.event_streams_table} WHERE entity_type = $1 AND entity_id = $2'
+                query = f"SELECT * FROM {self.schema}.{self.event_streams_table} WHERE entity_type = $1 AND entity_id = $2"
                 params = [entity_type, entity_id]
             else:
                 return None
@@ -451,19 +483,21 @@ class EventRepository:
         """Save event projection"""
         try:
             projection_dict = {
-                'projection_id': projection.projection_id,
-                'projection_name': projection.projection_name,
-                'entity_id': projection.entity_id,
-                'entity_type': projection.entity_type,
-                'state': projection.state or {},
-                'version': projection.version,
-                'last_event_id': projection.last_event_id,
-                'created_at': projection.created_at,
-                'updated_at': projection.updated_at
+                "projection_id": projection.projection_id,
+                "projection_name": projection.projection_name,
+                "entity_id": projection.entity_id,
+                "entity_type": projection.entity_type,
+                "state": projection.state or {},
+                "version": projection.version,
+                "last_event_id": projection.last_event_id,
+                "created_at": projection.created_at,
+                "updated_at": projection.updated_at,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.event_projections_table, [projection_dict], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.event_projections_table, [projection_dict], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 logger.info(f"Projection {projection.projection_id} saved")
@@ -472,29 +506,36 @@ class EventRepository:
             logger.error(f"Error saving projection: {e}")
             raise
 
-    async def get_projection(self, entity_type: str, entity_id: str,
-                            projection_name: str = "default") -> Optional[EventProjection]:
+    async def get_projection(
+        self, entity_type: str, entity_id: str, projection_name: str = "default"
+    ) -> Optional[EventProjection]:
         """Get event projection"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.event_projections_table}
                 WHERE entity_type = $1 AND entity_id = $2 AND projection_name = $3
-            '''
+            """
 
             async with self.db:
-                result = await self.db.query_row(query, [entity_type, entity_id, projection_name], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [entity_type, entity_id, projection_name], schema=self.schema
+                )
 
             if result:
                 return EventProjection(
-                    projection_id=result['projection_id'],
-                    projection_name=result['projection_name'],
-                    entity_id=result['entity_id'],
-                    entity_type=result['entity_type'],
-                    state=result.get('state', {}),
-                    version=result.get('version', 0),
-                    last_event_id=result.get('last_event_id'),
-                    created_at=datetime.fromisoformat(result['created_at'].replace('Z', '+00:00')),
-                    updated_at=datetime.fromisoformat(result['updated_at'].replace('Z', '+00:00'))
+                    projection_id=result["projection_id"],
+                    projection_name=result["projection_name"],
+                    entity_id=result["entity_id"],
+                    entity_type=result["entity_type"],
+                    state=result.get("state", {}),
+                    version=result.get("version", 0),
+                    last_event_id=result.get("last_event_id"),
+                    created_at=datetime.fromisoformat(
+                        result["created_at"].replace("Z", "+00:00")
+                    ),
+                    updated_at=datetime.fromisoformat(
+                        result["updated_at"].replace("Z", "+00:00")
+                    ),
                 )
 
             return None
@@ -507,22 +548,26 @@ class EventRepository:
         """Save event processor"""
         try:
             processor_dict = {
-                'processor_id': processor.processor_id,
-                'processor_name': processor.processor_name,
-                'processor_type': processor.processor_type,
-                'enabled': processor.enabled,
-                'priority': processor.priority,
-                'filters': processor.filters or {},
-                'config': processor.config or {},
-                'error_count': processor.error_count,
-                'last_error': processor.last_error,
-                'last_processed_at': processor.last_processed_at if processor.last_processed_at else None,
-                'created_at': processor.created_at,
-                'updated_at': processor.updated_at
+                "processor_id": processor.processor_id,
+                "processor_name": processor.processor_name,
+                "processor_type": processor.processor_type,
+                "enabled": processor.enabled,
+                "priority": processor.priority,
+                "filters": processor.filters or {},
+                "config": processor.config or {},
+                "error_count": processor.error_count,
+                "last_error": processor.last_error,
+                "last_processed_at": processor.last_processed_at
+                if processor.last_processed_at
+                else None,
+                "created_at": processor.created_at,
+                "updated_at": processor.updated_at,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.event_processors_table, [processor_dict], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.event_processors_table, [processor_dict], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 logger.info(f"Processor {processor.processor_id} saved")
@@ -534,11 +579,11 @@ class EventRepository:
     async def get_processors(self) -> List[EventProcessor]:
         """Get all event processors"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.event_processors_table}
                 WHERE enabled = TRUE
                 ORDER BY priority DESC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, [], schema=self.schema)
@@ -546,20 +591,30 @@ class EventRepository:
             processors = []
             if results:
                 for row in results:
-                    processors.append(EventProcessor(
-                        processor_id=row['processor_id'],
-                        processor_name=row['processor_name'],
-                        processor_type=row['processor_type'],
-                        enabled=row.get('enabled', True),
-                        priority=row.get('priority', 0),
-                        filters=row.get('filters', {}),
-                        config=row.get('config', {}),
-                        error_count=row.get('error_count', 0),
-                        last_error=row.get('last_error'),
-                        last_processed_at=datetime.fromisoformat(row['last_processed_at'].replace('Z', '+00:00')) if row.get('last_processed_at') else None,
-                        created_at=datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')),
-                        updated_at=datetime.fromisoformat(row['updated_at'].replace('Z', '+00:00'))
-                    ))
+                    processors.append(
+                        EventProcessor(
+                            processor_id=row["processor_id"],
+                            processor_name=row["processor_name"],
+                            processor_type=row["processor_type"],
+                            enabled=row.get("enabled", True),
+                            priority=row.get("priority", 0),
+                            filters=row.get("filters", {}),
+                            config=row.get("config", {}),
+                            error_count=row.get("error_count", 0),
+                            last_error=row.get("last_error"),
+                            last_processed_at=datetime.fromisoformat(
+                                row["last_processed_at"].replace("Z", "+00:00")
+                            )
+                            if row.get("last_processed_at")
+                            else None,
+                            created_at=datetime.fromisoformat(
+                                row["created_at"].replace("Z", "+00:00")
+                            ),
+                            updated_at=datetime.fromisoformat(
+                                row["updated_at"].replace("Z", "+00:00")
+                            ),
+                        )
+                    )
 
             return processors
 
@@ -571,22 +626,26 @@ class EventRepository:
         """Save event subscription"""
         try:
             subscription_dict = {
-                'subscription_id': subscription.subscription_id,
-                'subscriber_name': subscription.subscriber_name,
-                'subscriber_type': subscription.subscriber_type,
-                'event_types': subscription.event_types or [],
-                'event_sources': subscription.event_sources or [],
-                'event_categories': subscription.event_categories or [],
-                'callback_url': subscription.callback_url,
-                'webhook_secret': subscription.webhook_secret,
-                'enabled': subscription.enabled,
-                'retry_policy': subscription.retry_policy or {},
-                'created_at': subscription.created_at,
-                'updated_at': subscription.updated_at
+                "subscription_id": subscription.subscription_id,
+                "subscriber_name": subscription.subscriber_name,
+                "subscriber_type": subscription.subscriber_type,
+                "event_types": subscription.event_types or [],
+                "event_sources": subscription.event_sources or [],
+                "event_categories": subscription.event_categories or [],
+                "callback_url": subscription.callback_url,
+                "webhook_secret": subscription.webhook_secret,
+                "enabled": subscription.enabled,
+                "retry_policy": subscription.retry_policy or {},
+                "created_at": subscription.created_at,
+                "updated_at": subscription.updated_at,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.event_subscriptions_table, [subscription_dict], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.event_subscriptions_table,
+                    [subscription_dict],
+                    schema=self.schema,
+                )
 
             if count is not None and count > 0:
                 logger.info(f"Subscription {subscription.subscription_id} saved")
@@ -601,11 +660,11 @@ class EventRepository:
     async def get_subscriptions(self) -> List[EventSubscription]:
         """Get all event subscriptions"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.event_subscriptions_table}
                 WHERE enabled = TRUE
                 ORDER BY created_at DESC
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, [], schema=self.schema)
@@ -613,20 +672,26 @@ class EventRepository:
             subscriptions = []
             if results:
                 for row in results:
-                    subscriptions.append(EventSubscription(
-                        subscription_id=row['subscription_id'],
-                        subscriber_name=row['subscriber_name'],
-                        subscriber_type=row['subscriber_type'],
-                        event_types=row.get('event_types', []),
-                        event_sources=row.get('event_sources', []),
-                        event_categories=row.get('event_categories', []),
-                        callback_url=row.get('callback_url'),
-                        webhook_secret=row.get('webhook_secret'),
-                        enabled=row.get('enabled', True),
-                        retry_policy=row.get('retry_policy', {}),
-                        created_at=datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')),
-                        updated_at=datetime.fromisoformat(row['updated_at'].replace('Z', '+00:00'))
-                    ))
+                    subscriptions.append(
+                        EventSubscription(
+                            subscription_id=row["subscription_id"],
+                            subscriber_name=row["subscriber_name"],
+                            subscriber_type=row["subscriber_type"],
+                            event_types=row.get("event_types", []),
+                            event_sources=row.get("event_sources", []),
+                            event_categories=row.get("event_categories", []),
+                            callback_url=row.get("callback_url"),
+                            webhook_secret=row.get("webhook_secret"),
+                            enabled=row.get("enabled", True),
+                            retry_policy=row.get("retry_policy", {}),
+                            created_at=datetime.fromisoformat(
+                                row["created_at"].replace("Z", "+00:00")
+                            ),
+                            updated_at=datetime.fromisoformat(
+                                row["updated_at"].replace("Z", "+00:00")
+                            ),
+                        )
+                    )
 
             return subscriptions
 
@@ -637,58 +702,66 @@ class EventRepository:
     def _row_to_event(self, row: Dict) -> Event:
         """Convert database row to Event model"""
         # Handle JSONB fields
-        data = row.get('data')
+        data = row.get("data")
         if isinstance(data, str):
             import json
+
             data = json.loads(data)
         elif not isinstance(data, dict):
             data = {}
 
-        metadata = row.get('metadata')
+        metadata = row.get("metadata")
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
         elif not isinstance(metadata, dict):
             metadata = {}
 
-        context = row.get('context')
+        context = row.get("context")
         if isinstance(context, str):
             import json
+
             context = json.loads(context)
         elif not isinstance(context, dict):
             context = {}
 
-        properties = row.get('properties')
+        properties = row.get("properties")
         if isinstance(properties, str):
             import json
+
             properties = json.loads(properties)
         elif not isinstance(properties, dict):
             properties = {}
 
         return Event(
-            event_id=row['event_id'],
-            event_type=row['event_type'],
-            event_source=EventSource(row['event_source']),
-            event_category=EventCategory(row['event_category']),
-            user_id=row.get('user_id'),
-            session_id=row.get('session_id'),
-            organization_id=row.get('organization_id'),
-            device_id=row.get('device_id'),
-            correlation_id=row.get('correlation_id'),
+            event_id=row["event_id"],
+            event_type=row["event_type"],
+            event_source=EventSource(row["event_source"]),
+            event_category=EventCategory(row["event_category"]),
+            user_id=row.get("user_id"),
+            session_id=row.get("session_id"),
+            organization_id=row.get("organization_id"),
+            device_id=row.get("device_id"),
+            correlation_id=row.get("correlation_id"),
             data=data,
             metadata=metadata,
             context=context,
             properties=properties,
-            status=EventStatus(row['status']),
-            processed_at=datetime.fromisoformat(row['processed_at'].replace('Z', '+00:00')) if row.get('processed_at') else None,
-            processors=row.get('processors') or [],  # Handle None values from database
-            error_message=row.get('error_message'),
-            retry_count=row.get('retry_count', 0),
-            timestamp=datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00')),
-            created_at=datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')),
-            updated_at=datetime.fromisoformat(row['updated_at'].replace('Z', '+00:00')),
-            version=row.get('version', '1.0.0'),
-            schema_version=row.get('schema_version', '1.0.0')
+            status=EventStatus(row["status"]),
+            processed_at=datetime.fromisoformat(
+                row["processed_at"].replace("Z", "+00:00")
+            )
+            if row.get("processed_at")
+            else None,
+            processors=row.get("processors") or [],  # Handle None values from database
+            error_message=row.get("error_message"),
+            retry_count=row.get("retry_count", 0),
+            timestamp=datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")),
+            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")),
+            updated_at=datetime.fromisoformat(row["updated_at"].replace("Z", "+00:00")),
+            version=row.get("version", "1.0.0"),
+            schema_version=row.get("schema_version", "1.0.0"),
         )
 
     async def close(self):

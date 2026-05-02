@@ -14,12 +14,9 @@ import os
 import sys
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from .models import (
-    MemoryCreateRequest,
-    MemoryResponse,
-    MemoryUpdateRequest,
     MessageCreateRequest,
     MessageListResponse,
     MessageResponse,
@@ -28,7 +25,6 @@ from .models import (
     Session,
     SessionCreateRequest,
     SessionListResponse,
-    SessionMemory,
     SessionMessage,
     SessionResponse,
     SessionSearchResponse,
@@ -44,15 +40,13 @@ from .protocols import (
     EventBusProtocol,
     AccountClientProtocol,
     SessionNotFoundError,
-    MessageNotFoundError,
-    MemoryNotFoundError,
     SessionServiceError,
     SessionValidationError,
 )
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
+    pass
 
 sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -116,6 +110,7 @@ class SessionService:
 
         if self._account_client is None:
             from microservices.account_service.client import AccountServiceClient
+
             self._account_client = AccountServiceClient()
 
         self._repos_initialized = True
@@ -748,7 +743,9 @@ class SessionService:
         except SessionValidationError:
             raise
         except Exception as e:
-            logger.error(f"Error searching sessions for user {user_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error searching sessions for user {user_id}: {e}", exc_info=True
+            )
             raise SessionServiceError(f"Failed to search sessions: {str(e)}")
 
     # Utility Methods

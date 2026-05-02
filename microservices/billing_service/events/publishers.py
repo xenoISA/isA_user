@@ -15,13 +15,12 @@ Migration path:
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Union
+from typing import Optional
 
 # Event bus from core
-from core.nats_client import Event, NATSEventBus, get_event_bus
+from core.nats_client import Event, NATSEventBus
 
 from .models import (
-    BillingCalculatedEventData,
     BillingErrorEventData,
     BillingEventType,
     UnitType,
@@ -34,6 +33,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # New Pattern: BillingEventPublisher class
 # =============================================================================
+
 
 class BillingEventPublisher:
     """
@@ -83,13 +83,15 @@ class BillingEventPublisher:
         event = Event(
             event_type=BillingEventType.CALCULATED.value,
             source=self.source,
-            data=event_data.model_dump(mode='json'),
+            data=event_data.model_dump(mode="json"),
         )
 
         result = await self.event_bus.publish_event(event)
 
         if result:
-            logger.info(f"✅ Published {BillingEventType.CALCULATED.value} for {billing_record_id}")
+            logger.info(
+                f"✅ Published {BillingEventType.CALCULATED.value} for {billing_record_id}"
+            )
         else:
             logger.error(f"❌ Failed to publish {BillingEventType.CALCULATED.value}")
 
@@ -118,13 +120,15 @@ class BillingEventPublisher:
         event = Event(
             event_type=BillingEventType.ERROR.value,
             source=self.source,
-            data=error_data.model_dump(mode='json'),
+            data=error_data.model_dump(mode="json"),
         )
 
         result = await self.event_bus.publish_event(event)
 
         if result:
-            logger.warning(f"⚠️  Published {BillingEventType.ERROR.value}: {error_code}")
+            logger.warning(
+                f"⚠️  Published {BillingEventType.ERROR.value}: {error_code}"
+            )
 
         return result
 
@@ -221,7 +225,7 @@ async def publish_billing_calculated(
         event = Event(
             event_type="billing.calculated",
             source="billing_service",
-            data=event_data.model_dump(mode='json'),
+            data=event_data.model_dump(mode="json"),
         )
 
         # 发布事件
@@ -284,7 +288,7 @@ async def publish_billing_error(
         event = Event(
             event_type="billing.error",
             source="billing_service",
-            data=error_data.model_dump(mode='json'),
+            data=error_data.model_dump(mode="json"),
         )
 
         # 发布事件

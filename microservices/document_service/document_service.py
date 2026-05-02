@@ -26,7 +26,6 @@ from .protocols import (
 )
 from .models import (
     AccessLevel,
-    ChunkingStrategy,
     DocumentCreateRequest,
     DocumentPermissionHistory,
     DocumentPermissionResponse,
@@ -36,14 +35,12 @@ from .models import (
     DocumentStatus,
     DocumentType,
     DocumentUpdateRequest,
-    DocumentVersionResponse,
     KnowledgeDocument,
     RAGQueryRequest,
     RAGQueryResponse,
     SearchResultItem,
     SemanticSearchRequest,
     SemanticSearchResponse,
-    UpdateStrategy,
 )
 
 # Type checking imports (not executed at runtime)
@@ -333,7 +330,9 @@ class DocumentService:
             await self.repo.update_document_status(doc_id, DocumentStatus.UPDATING)
 
             # Download new file content
-            new_content = await self._download_file_content(request.new_file_id, user_id)
+            new_content = await self._download_file_content(
+                request.new_file_id, user_id
+            )
 
             # Re-index via Digital Analytics (handles chunking internally)
             result = await self._reindex_document(
@@ -536,9 +535,7 @@ class DocumentService:
                     )
                     await self.event_bus.publish_event(event)
                 except Exception as e:
-                    logger.error(
-                        f"Failed to publish permission.updated event: {e}"
-                    )
+                    logger.error(f"Failed to publish permission.updated event: {e}")
 
             return DocumentPermissionResponse(
                 doc_id=doc_id,
@@ -580,7 +577,10 @@ class DocumentService:
     # ==================== RAG Query Operations (with Permission Filtering) ====================
 
     async def rag_query_secure(
-        self, request: RAGQueryRequest, user_id: str, organization_id: Optional[str] = None
+        self,
+        request: RAGQueryRequest,
+        user_id: str,
+        organization_id: Optional[str] = None,
     ) -> RAGQueryResponse:
         """
         RAG query with permission filtering
@@ -635,7 +635,10 @@ class DocumentService:
             raise DocumentServiceError(f"RAG query failed: {str(e)}")
 
     async def semantic_search_secure(
-        self, request: SemanticSearchRequest, user_id: str, organization_id: Optional[str] = None
+        self,
+        request: SemanticSearchRequest,
+        user_id: str,
+        organization_id: Optional[str] = None,
     ) -> SemanticSearchResponse:
         """
         Semantic search with permission filtering
@@ -735,9 +738,7 @@ class DocumentService:
 
     # ==================== Helper Methods ====================
 
-    async def _index_document_async(
-        self, document: KnowledgeDocument, user_id: str
-    ):
+    async def _index_document_async(self, document: KnowledgeDocument, user_id: str):
         """Index document via Digital Analytics (async background task)"""
         try:
             # Update status
@@ -777,19 +778,25 @@ class DocumentService:
                     await self.repo.update_document_status(
                         document.doc_id, DocumentStatus.INDEXED, chunk_count=chunk_count
                     )
-                    logger.info(f"✅ Document indexed: {document.doc_id}, {chunk_count} chunks")
+                    logger.info(
+                        f"✅ Document indexed: {document.doc_id}, {chunk_count} chunks"
+                    )
                 else:
                     # Digital Analytics returned no result
                     await self.repo.update_document_status(
                         document.doc_id, DocumentStatus.INDEXED, chunk_count=0
                     )
-                    logger.warning(f"⚠️ Document indexed without chunks: {document.doc_id}")
+                    logger.warning(
+                        f"⚠️ Document indexed without chunks: {document.doc_id}"
+                    )
             else:
                 # Digital Analytics not available - mark as indexed anyway for testing
                 await self.repo.update_document_status(
                     document.doc_id, DocumentStatus.INDEXED, chunk_count=0
                 )
-                logger.warning(f"⚠️ Digital Analytics not available, skipping indexing: {document.doc_id}")
+                logger.warning(
+                    f"⚠️ Digital Analytics not available, skipping indexing: {document.doc_id}"
+                )
 
         except Exception as e:
             logger.error(f"Document indexing failed: {e}")
@@ -819,12 +826,15 @@ class DocumentService:
             download_info = await self.storage_client.get_download_url(file_id, user_id)
 
             if not download_info or not download_info.get("download_url"):
-                raise DocumentServiceError(f"File {file_id} not found in storage service")
+                raise DocumentServiceError(
+                    f"File {file_id} not found in storage service"
+                )
 
             download_url = download_info["download_url"]
 
             # Fetch actual content from URL
             import httpx
+
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.get(download_url)
                 response.raise_for_status()

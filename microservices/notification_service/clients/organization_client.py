@@ -26,7 +26,9 @@ class OrganizationServiceClient:
         self.config_manager = config_manager or ConfigManager("notification_service")
 
         # Get organization_service endpoint from Consul or use fallback
-        self.base_url = self._get_service_url("organization_service", "http://localhost:8212")
+        self.base_url = self._get_service_url(
+            "organization_service", "http://localhost:8212"
+        )
 
         # Create HTTP client
         self.client = httpx.AsyncClient(
@@ -34,11 +36,13 @@ class OrganizationServiceClient:
             timeout=30.0,
             headers={
                 "Content-Type": "application/json",
-                "X-Service-Name": "notification_service"  # Internal service identifier
-            }
+                "X-Service-Name": "notification_service",  # Internal service identifier
+            },
         )
 
-        logger.info(f"OrganizationServiceClient initialized with base_url: {self.base_url}")
+        logger.info(
+            f"OrganizationServiceClient initialized with base_url: {self.base_url}"
+        )
 
     def _get_service_url(self, service_name: str, fallback_url: str) -> str:
         """Get service URL from Consul or use fallback"""
@@ -72,7 +76,9 @@ class OrganizationServiceClient:
                 logger.warning(f"Organization not found: {organization_id}")
                 return None
             else:
-                logger.error(f"Failed to get organization {organization_id}: {response.status_code}")
+                logger.error(
+                    f"Failed to get organization {organization_id}: {response.status_code}"
+                )
                 return None
 
         except Exception as e:
@@ -80,10 +86,7 @@ class OrganizationServiceClient:
             return None
 
     async def get_organization_members(
-        self,
-        organization_id: str,
-        role: Optional[str] = None,
-        limit: int = 100
+        self, organization_id: str, role: Optional[str] = None, limit: int = 100
     ) -> List[Dict[str, Any]]:
         """
         Get organization members list
@@ -102,15 +105,16 @@ class OrganizationServiceClient:
                 params["role"] = role
 
             response = await self.client.get(
-                f"/api/v1/organizations/{organization_id}/members",
-                params=params
+                f"/api/v1/organizations/{organization_id}/members", params=params
             )
 
             if response.status_code == 200:
                 data = response.json()
                 return data.get("members", [])
             else:
-                logger.error(f"Failed to get organization members {organization_id}: {response.status_code}")
+                logger.error(
+                    f"Failed to get organization members {organization_id}: {response.status_code}"
+                )
                 return []
 
         except Exception as e:
@@ -129,22 +133,26 @@ class OrganizationServiceClient:
         """
         try:
             response = await self.client.get(
-                f"/api/v1/users/organizations",
-                headers={"X-User-ID": user_id}  # Pass user context
+                "/api/v1/users/organizations",
+                headers={"X-User-ID": user_id},  # Pass user context
             )
 
             if response.status_code == 200:
                 data = response.json()
                 return data.get("organizations", [])
             else:
-                logger.error(f"Failed to get user organizations for {user_id}: {response.status_code}")
+                logger.error(
+                    f"Failed to get user organizations for {user_id}: {response.status_code}"
+                )
                 return []
 
         except Exception as e:
             logger.error(f"Error fetching user organizations {user_id}: {e}")
             return []
 
-    async def get_organization_admins(self, organization_id: str) -> List[Dict[str, Any]]:
+    async def get_organization_admins(
+        self, organization_id: str
+    ) -> List[Dict[str, Any]]:
         """
         Get organization admins (owner + admin roles)
 
@@ -160,8 +168,7 @@ class OrganizationServiceClient:
 
             # Filter for owner and admin roles
             admins = [
-                member for member in members
-                if member.get("role") in ["owner", "admin"]
+                member for member in members if member.get("role") in ["owner", "admin"]
             ]
 
             return admins
@@ -184,11 +191,7 @@ class OrganizationServiceClient:
             members = await self.get_organization_members(organization_id)
 
             # Extract emails (assuming members have email field)
-            emails = [
-                member.get("email")
-                for member in members
-                if member.get("email")
-            ]
+            emails = [member.get("email") for member in members if member.get("email")]
 
             return emails
 
@@ -196,7 +199,9 @@ class OrganizationServiceClient:
             logger.error(f"Error fetching member emails {organization_id}: {e}")
             return []
 
-    async def get_organization_stats(self, organization_id: str) -> Optional[Dict[str, Any]]:
+    async def get_organization_stats(
+        self, organization_id: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Get organization statistics
 
@@ -207,12 +212,16 @@ class OrganizationServiceClient:
             Stats dict or None if failed
         """
         try:
-            response = await self.client.get(f"/api/v1/organizations/{organization_id}/stats")
+            response = await self.client.get(
+                f"/api/v1/organizations/{organization_id}/stats"
+            )
 
             if response.status_code == 200:
                 return response.json()
             else:
-                logger.error(f"Failed to get organization stats {organization_id}: {response.status_code}")
+                logger.error(
+                    f"Failed to get organization stats {organization_id}: {response.status_code}"
+                )
                 return None
 
         except Exception as e:

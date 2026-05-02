@@ -23,11 +23,12 @@ class StorageClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("storage_service")
             except Exception as e:
@@ -53,7 +54,7 @@ class StorageClient:
         file_content: bytes,
         filename: str,
         user_id: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Upload firmware binary to storage service (MinIO/S3)
@@ -70,21 +71,17 @@ class StorageClient:
         """
         try:
             # Prepare multipart form data
-            files = {
-                'file': (filename, file_content, 'application/octet-stream')
-            }
+            files = {"file": (filename, file_content, "application/octet-stream")}
 
             data = {
-                'firmware_id': firmware_id,
-                'user_id': user_id,
-                'folder': 'firmware',
-                'metadata': str(metadata or {})
+                "firmware_id": firmware_id,
+                "user_id": user_id,
+                "folder": "firmware",
+                "metadata": str(metadata or {}),
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/storage/upload",
-                files=files,
-                data=data
+                f"{self.base_url}/api/v1/storage/upload", files=files, data=data
             )
             response.raise_for_status()
 
@@ -100,9 +97,7 @@ class StorageClient:
             return None
 
     async def get_firmware_download_url(
-        self,
-        firmware_id: str,
-        expiry_seconds: int = 3600
+        self, firmware_id: str, expiry_seconds: int = 3600
     ) -> Optional[str]:
         """
         Get presigned download URL for firmware
@@ -115,19 +110,16 @@ class StorageClient:
             Presigned download URL
         """
         try:
-            params = {
-                'firmware_id': firmware_id,
-                'expiry': expiry_seconds
-            }
+            params = {"firmware_id": firmware_id, "expiry": expiry_seconds}
 
             response = await self.client.get(
                 f"{self.base_url}/api/v1/storage/firmware/{firmware_id}/download-url",
-                params=params
+                params=params,
             )
             response.raise_for_status()
 
             result = response.json()
-            return result.get('download_url')
+            return result.get("download_url")
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
@@ -195,5 +187,5 @@ class StorageClient:
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

@@ -5,15 +5,11 @@ Defines interfaces for dependency injection and testing.
 Following the protocol-based architecture pattern.
 """
 
-from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Protocol
 
 from .models import (
-    BillingCycle,
-    Currency,
     Invoice,
-    InvoiceStatus,
     Payment,
     PaymentMethodInfo,
     PaymentStatus,
@@ -21,7 +17,6 @@ from .models import (
     RefundStatus,
     Subscription,
     SubscriptionPlan,
-    SubscriptionStatus,
     SubscriptionTier,
 )
 
@@ -72,7 +67,9 @@ class PaymentRepositoryProtocol(Protocol):
         """Get user's current subscription"""
         ...
 
-    async def get_user_active_subscription(self, user_id: str) -> Optional[Subscription]:
+    async def get_user_active_subscription(
+        self, user_id: str
+    ) -> Optional[Subscription]:
         """Get user's active subscription"""
         ...
 
@@ -159,9 +156,7 @@ class PaymentRepositoryProtocol(Protocol):
         """Create a refund"""
         ...
 
-    async def update_refund_status(
-        self, refund_id: str, status: RefundStatus
-    ) -> bool:
+    async def update_refund_status(self, refund_id: str, status: RefundStatus) -> bool:
         """Update refund status"""
         ...
 

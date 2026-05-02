@@ -2,153 +2,156 @@
 OTA Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Basic health check"
+        "description": "Basic health check",
     },
-        {
-            "path": "/api/v1/ota/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/ota/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Detailed health check"
+        "description": "Detailed health check",
     },
     # Firmware Management
     {
         "path": "/api/v1/firmware",
         "methods": ["POST", "GET"],
         "auth_required": True,
-        "description": "Create/list firmware versions"
+        "description": "Create/list firmware versions",
     },
     {
         "path": "/api/v1/firmware/{firmware_id}",
         "methods": ["GET", "DELETE"],
         "auth_required": True,
-        "description": "Get/delete firmware version"
+        "description": "Get/delete firmware version",
     },
     {
         "path": "/api/v1/firmware/{firmware_id}/download",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Download firmware file"
+        "description": "Download firmware file",
     },
     # Update Campaigns
     {
         "path": "/api/v1/campaigns",
         "methods": ["POST", "GET"],
         "auth_required": True,
-        "description": "Create/list update campaigns"
+        "description": "Create/list update campaigns",
     },
     {
         "path": "/api/v1/campaigns/{campaign_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get campaign details"
+        "description": "Get campaign details",
     },
     {
         "path": "/api/v1/campaigns/{campaign_id}/start",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Start campaign"
+        "description": "Start campaign",
     },
     {
         "path": "/api/v1/campaigns/{campaign_id}/pause",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Pause campaign"
+        "description": "Pause campaign",
     },
     {
         "path": "/api/v1/campaigns/{campaign_id}/cancel",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Cancel campaign"
+        "description": "Cancel campaign",
     },
     {
         "path": "/api/v1/campaigns/{campaign_id}/approve",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Approve campaign"
+        "description": "Approve campaign",
     },
     {
         "path": "/api/v1/campaigns/{campaign_id}/rollback",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Rollback campaign"
+        "description": "Rollback campaign",
     },
     # Device Updates
     {
         "path": "/api/v1/devices/{device_id}/update",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Initiate device update"
+        "description": "Initiate device update",
     },
     {
         "path": "/api/v1/devices/{device_id}/updates",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get device update history"
+        "description": "Get device update history",
     },
     {
         "path": "/api/v1/devices/{device_id}/rollback",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Rollback device update"
+        "description": "Rollback device update",
     },
     {
         "path": "/api/v1/devices/bulk/update",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Bulk device update"
+        "description": "Bulk device update",
     },
     # Update Management
     {
         "path": "/api/v1/updates/{update_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get update details"
+        "description": "Get update details",
     },
     {
         "path": "/api/v1/updates/{update_id}/cancel",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Cancel update"
+        "description": "Cancel update",
     },
     {
         "path": "/api/v1/updates/{update_id}/retry",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Retry failed update"
+        "description": "Retry failed update",
     },
     # Statistics
     {
         "path": "/api/v1/stats",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get update statistics"
+        "description": "Get update statistics",
     },
     {
         "path": "/api/v1/stats/campaigns/{campaign_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get campaign statistics"
+        "description": "Get campaign statistics",
     },
     {
         "path": "/api/v1/service/stats",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get service statistics"
-    }
+        "description": "Get service statistics",
+    },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -189,6 +192,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "ota_service",
@@ -199,6 +204,6 @@ SERVICE_METADATA = {
         "update_campaigns",
         "device_updates",
         "rollback_management",
-        "update_statistics"
-    ]
+        "update_statistics",
+    ],
 }

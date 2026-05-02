@@ -11,7 +11,6 @@ High-level service for crypto payments that:
 import logging
 import os
 from typing import Optional, Dict, Any, List
-from decimal import Decimal
 from datetime import datetime
 
 from .crypto_providers import (
@@ -26,8 +25,6 @@ from .crypto_providers import (
     CryptoWebhookEvent,
     CryptoRefundRequest,
     CryptoRefund,
-    Chain,
-    Token,
     CHAIN_CONFIG,
     TOKEN_CONFIG,
 )
@@ -121,8 +118,7 @@ class CryptoPaymentService:
                 await provider.close()
 
     def get_provider(
-        self,
-        provider: Optional[CryptoProvider] = None
+        self, provider: Optional[CryptoProvider] = None
     ) -> CryptoPaymentProvider:
         """Get a payment provider"""
         provider = provider or self.default_provider
@@ -180,7 +176,7 @@ class CryptoPaymentService:
                     "amount": str(request.amount),
                     "currency": request.currency,
                     "provider": payment_provider.provider_name.value,
-                }
+                },
             )
 
         logger.info(
@@ -267,7 +263,7 @@ class CryptoPaymentService:
             if self.event_publisher:
                 await self._publish_event(
                     "crypto_payment.cancelled",
-                    {"payment_id": payment_id, "user_id": payment.user_id}
+                    {"payment_id": payment_id, "user_id": payment.user_id},
                 )
 
         return success
@@ -346,7 +342,7 @@ class CryptoPaymentService:
                     "status": event.status.value,
                     "provider": provider.value,
                     "tx_hash": event.tx_hash,
-                }
+                },
             )
 
         return event
@@ -378,7 +374,7 @@ class CryptoPaymentService:
                     "user_id": payment.user_id,
                     "amount": str(refund.fiat_amount),
                     "wallet_address": request.wallet_address,
-                }
+                },
             )
 
         return refund
@@ -388,9 +384,7 @@ class CryptoPaymentService:
     # =========================================================================
 
     async def _handle_status_change(
-        self,
-        payment: CryptoPayment,
-        new_status: CryptoPaymentStatus
+        self, payment: CryptoPayment, new_status: CryptoPaymentStatus
     ):
         """Handle payment status changes"""
         if new_status == CryptoPaymentStatus.COMPLETED:
@@ -406,7 +400,7 @@ class CryptoPaymentService:
                         "amount": str(payment.fiat_amount),
                         "currency": payment.fiat_currency,
                         "tx_hash": payment.tx_hash,
-                    }
+                    },
                 )
 
         elif new_status == CryptoPaymentStatus.FAILED:
@@ -416,7 +410,7 @@ class CryptoPaymentService:
                     {
                         "payment_id": payment.payment_id,
                         "user_id": payment.user_id,
-                    }
+                    },
                 )
 
         elif new_status == CryptoPaymentStatus.EXPIRED:
@@ -426,7 +420,7 @@ class CryptoPaymentService:
                     {
                         "payment_id": payment.payment_id,
                         "user_id": payment.user_id,
-                    }
+                    },
                 )
 
     async def _credit_user(self, payment: CryptoPayment):
@@ -447,7 +441,7 @@ class CryptoPaymentService:
                         "fiat_amount": str(payment.fiat_amount),
                         "fiat_currency": payment.fiat_currency,
                         "tx_hash": payment.tx_hash,
-                    }
+                    },
                 )
                 logger.info(f"Credited {credits} credits to user {payment.user_id}")
                 return

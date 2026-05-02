@@ -5,7 +5,6 @@ Task Repository
 """
 
 import logging
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -23,7 +22,6 @@ from .models import (
     TaskResponse,
     TaskStatus,
     TaskTemplateResponse,
-    TaskType,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,7 +59,7 @@ class TaskRepository:
         # Priority: Environment variables → Consul → localhost fallback
         postgres_host, postgres_port = config.discover_service(
             service_name="postgres_service",
-            default_host='localhost',
+            default_host="localhost",
             default_port=5432,
             env_host_key="POSTGRES_HOST",
             env_port_key="POSTGRES_PORT",
@@ -69,9 +67,11 @@ class TaskRepository:
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
         self.db = AsyncPostgresClient(
-            host=postgres_host, port=postgres_port, user_id="task_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            host=postgres_host,
+            port=postgres_port,
+            user_id="task_service",
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = "task"
         self.table_name = "user_tasks"
@@ -769,15 +769,11 @@ class TaskRepository:
 
             async with self.db:
                 # Execute all queries
-                task_stats = await self.db.query(
-                    task_stats_query, params=[user_id]
-                )
+                task_stats = await self.db.query(task_stats_query, params=[user_id])
                 exec_stats = await self.db.query(
                     exec_stats_query, params=[user_id, time_threshold]
                 )
-                type_dist = await self.db.query(
-                    type_dist_query, params=[user_id]
-                )
+                type_dist = await self.db.query(type_dist_query, params=[user_id])
                 busiest_hours = await self.db.query(
                     busiest_hours_query, params=[user_id, time_threshold]
                 )
@@ -809,7 +805,9 @@ class TaskRepository:
             busiest_hours_list = []
             if busiest_hours:
                 busiest_hours_list = [
-                    int(row["hour"]) for row in busiest_hours if row.get("hour") is not None
+                    int(row["hour"])
+                    for row in busiest_hours
+                    if row.get("hour") is not None
                 ]
 
             # Parse busiest days
