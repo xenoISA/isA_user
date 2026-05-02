@@ -14,8 +14,10 @@ from pydantic import BaseModel, Field
 # 枚举类型定义
 # ====================
 
+
 class EventType(str, Enum):
     """事件类型枚举"""
+
     USER_LOGIN = "user_login"
     USER_LOGOUT = "user_logout"
     USER_REGISTER = "user_register"
@@ -45,6 +47,7 @@ class EventType(str, Enum):
 
 class EventSeverity(str, Enum):
     """事件严重程度"""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -53,6 +56,7 @@ class EventSeverity(str, Enum):
 
 class EventStatus(str, Enum):
     """事件状态"""
+
     SUCCESS = "success"
     FAILURE = "failure"
     PENDING = "pending"
@@ -61,6 +65,7 @@ class EventStatus(str, Enum):
 
 class AuditCategory(str, Enum):
     """审计分类"""
+
     AUTHENTICATION = "authentication"
     AUTHORIZATION = "authorization"
     DATA_ACCESS = "data_access"
@@ -74,8 +79,10 @@ class AuditCategory(str, Enum):
 # 核心数据模型
 # ====================
 
+
 class AuditEvent(BaseModel):
     """审计事件核心模型"""
+
     id: Optional[str] = None
     event_type: EventType
     category: AuditCategory
@@ -122,6 +129,7 @@ class AuditEvent(BaseModel):
 
 class UserActivity(BaseModel):
     """用户活动记录"""
+
     user_id: str
     session_id: Optional[str] = None
     activity_type: EventType
@@ -135,6 +143,7 @@ class UserActivity(BaseModel):
 
 class SecurityEvent(BaseModel):
     """安全事件模型"""
+
     id: Optional[str] = None
     event_type: EventType
     severity: EventSeverity
@@ -164,6 +173,7 @@ class SecurityEvent(BaseModel):
 
 class ComplianceReport(BaseModel):
     """合规报告模型"""
+
     id: Optional[str] = None
     report_type: str
     compliance_standard: str  # GDPR, SOX, HIPAA, etc.
@@ -196,8 +206,10 @@ class ComplianceReport(BaseModel):
 # 请求/响应模型
 # ====================
 
+
 class AuditEventCreateRequest(BaseModel):
     """创建审计事件请求"""
+
     event_type: EventType
     category: AuditCategory
     severity: EventSeverity = EventSeverity.LOW
@@ -227,6 +239,7 @@ class AuditEventCreateRequest(BaseModel):
 
 class AuditEventResponse(BaseModel):
     """审计事件响应"""
+
     id: str
     event_type: EventType
     category: AuditCategory
@@ -247,6 +260,7 @@ class AuditEventResponse(BaseModel):
 
 class AuditQueryRequest(BaseModel):
     """审计查询请求"""
+
     event_types: Optional[List[EventType]] = None
     categories: Optional[List[AuditCategory]] = None
     severities: Optional[List[EventSeverity]] = None
@@ -273,6 +287,7 @@ class AuditQueryRequest(BaseModel):
 
 class AuditQueryResponse(BaseModel):
     """审计查询响应"""
+
     events: List[AuditEventResponse]
     total_count: int
     page_info: Dict[str, Any]
@@ -282,6 +297,7 @@ class AuditQueryResponse(BaseModel):
 
 class UserActivitySummary(BaseModel):
     """用户活动摘要"""
+
     user_id: str
     total_activities: int
     success_count: int
@@ -294,6 +310,7 @@ class UserActivitySummary(BaseModel):
 
 class SecurityAlertRequest(BaseModel):
     """安全告警请求"""
+
     threat_type: str
     severity: EventSeverity
     source_ip: Optional[str] = None
@@ -304,6 +321,7 @@ class SecurityAlertRequest(BaseModel):
 
 class ComplianceReportRequest(BaseModel):
     """合规报告请求"""
+
     report_type: str
     compliance_standard: str
     period_start: datetime
@@ -316,8 +334,10 @@ class ComplianceReportRequest(BaseModel):
 # 系统和服务模型
 # ====================
 
+
 class HealthResponse(BaseModel):
     """健康检查响应"""
+
     status: str
     service: str
     port: int
@@ -326,6 +346,7 @@ class HealthResponse(BaseModel):
 
 class ServiceInfo(BaseModel):
     """服务信息"""
+
     service: str
     version: str
     description: str
@@ -335,6 +356,7 @@ class ServiceInfo(BaseModel):
 
 class ServiceStats(BaseModel):
     """服务统计"""
+
     total_events: int
     events_today: int
     active_users: int

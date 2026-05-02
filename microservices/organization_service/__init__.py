@@ -9,6 +9,6 @@ from .organization_service import OrganizationService
 from .organization_repository import OrganizationRepository
 
 __all__ = [
-    'OrganizationService',
-    'OrganizationRepository',
+    "OrganizationService",
+    "OrganizationRepository",
 ]

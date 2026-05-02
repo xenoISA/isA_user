@@ -14,7 +14,7 @@ from .models import (
     CampaignCreatedEvent,
     CampaignStartedEvent,
     UpdateCancelledEvent,
-    RollbackInitiatedEvent
+    RollbackInitiatedEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ async def publish_firmware_uploaded(
     device_model: str,
     file_size: int,
     is_security_update: bool,
-    uploaded_by: str
+    uploaded_by: str,
 ) -> bool:
     """
     Publish firmware.uploaded event
@@ -55,13 +55,13 @@ async def publish_firmware_uploaded(
             file_size=file_size,
             is_security_update=is_security_update,
             uploaded_by=uploaded_by,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="firmware.uploaded",
             source="ota_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -82,7 +82,7 @@ async def publish_campaign_created(
     target_device_count: int,
     deployment_strategy: str,
     priority: str,
-    created_by: str
+    created_by: str,
 ) -> bool:
     """
     Publish campaign.created event
@@ -111,13 +111,13 @@ async def publish_campaign_created(
             deployment_strategy=deployment_strategy,
             priority=priority,
             created_by=created_by,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="campaign.created",
             source="ota_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -135,7 +135,7 @@ async def publish_campaign_started(
     name: str,
     firmware_id: str,
     firmware_version: str,
-    target_device_count: int
+    target_device_count: int,
 ) -> bool:
     """
     Publish campaign.started event
@@ -158,13 +158,13 @@ async def publish_campaign_started(
             firmware_id=firmware_id,
             firmware_version=firmware_version,
             target_device_count=target_device_count,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="campaign.started",
             source="ota_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -182,7 +182,7 @@ async def publish_update_cancelled(
     device_id: str,
     firmware_id: str,
     firmware_version: str,
-    campaign_id: Optional[str] = None
+    campaign_id: Optional[str] = None,
 ) -> bool:
     """
     Publish update.cancelled event
@@ -205,13 +205,13 @@ async def publish_update_cancelled(
             firmware_id=firmware_id,
             firmware_version=firmware_version,
             campaign_id=campaign_id,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="update.cancelled",
             source="ota_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -229,7 +229,7 @@ async def publish_rollback_initiated(
     device_id: str,
     from_version: str,
     to_version: str,
-    trigger: str
+    trigger: str,
 ) -> bool:
     """
     Publish rollback.initiated event
@@ -252,13 +252,13 @@ async def publish_rollback_initiated(
             from_version=from_version,
             to_version=to_version,
             trigger=trigger,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="rollback.initiated",
             source="ota_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)

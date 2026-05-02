@@ -23,7 +23,7 @@ class SessionServiceClient:
             base_url: Session service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -54,7 +54,7 @@ class SessionServiceClient:
         user_id: str,
         session_type: str = "conversation",
         metadata: Optional[Dict[str, Any]] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create new session
@@ -77,10 +77,7 @@ class SessionServiceClient:
             ... )
         """
         try:
-            payload = {
-                "user_id": user_id,
-                "session_type": session_type
-            }
+            payload = {"user_id": user_id, "session_type": session_type}
 
             if metadata:
                 payload["metadata"] = metadata
@@ -88,8 +85,7 @@ class SessionServiceClient:
                 payload["context"] = context
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/sessions",
-                json=payload
+                f"{self.base_url}/api/v1/sessions", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -102,9 +98,7 @@ class SessionServiceClient:
             return None
 
     async def get_session(
-        self,
-        session_id: str,
-        user_id: Optional[str] = None
+        self, session_id: str, user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get session by ID
@@ -125,8 +119,7 @@ class SessionServiceClient:
                 params["user_id"] = user_id
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/sessions/{session_id}",
-                params=params
+                f"{self.base_url}/api/v1/sessions/{session_id}", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -144,7 +137,7 @@ class SessionServiceClient:
         user_id: Optional[str] = None,
         status: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Update session
@@ -182,7 +175,7 @@ class SessionServiceClient:
             response = await self.client.put(
                 f"{self.base_url}/api/v1/sessions/{session_id}",
                 json=payload,
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -195,9 +188,7 @@ class SessionServiceClient:
             return None
 
     async def delete_session(
-        self,
-        session_id: str,
-        user_id: Optional[str] = None
+        self, session_id: str, user_id: Optional[str] = None
     ) -> bool:
         """
         End/delete session
@@ -218,8 +209,7 @@ class SessionServiceClient:
                 params["user_id"] = user_id
 
             response = await self.client.delete(
-                f"{self.base_url}/api/v1/sessions/{session_id}",
-                params=params
+                f"{self.base_url}/api/v1/sessions/{session_id}", params=params
             )
             response.raise_for_status()
             return True
@@ -236,7 +226,7 @@ class SessionServiceClient:
         user_id: str,
         active_only: bool = False,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
     ) -> Optional[Dict[str, Any]]:
         """
         Get user sessions
@@ -254,15 +244,10 @@ class SessionServiceClient:
             >>> sessions = await client.get_user_sessions("user123", active_only=True)
         """
         try:
-            params = {
-                "active_only": active_only,
-                "page": page,
-                "page_size": page_size
-            }
+            params = {"active_only": active_only, "page": page, "page_size": page_size}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/users/{user_id}/sessions",
-                params=params
+                f"{self.base_url}/api/v1/users/{user_id}/sessions", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -275,9 +260,7 @@ class SessionServiceClient:
             return None
 
     async def get_session_summary(
-        self,
-        session_id: str,
-        user_id: Optional[str] = None
+        self, session_id: str, user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get session summary
@@ -298,8 +281,7 @@ class SessionServiceClient:
                 params["user_id"] = user_id
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/sessions/{session_id}/summary",
-                params=params
+                f"{self.base_url}/api/v1/sessions/{session_id}/summary", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -321,7 +303,7 @@ class SessionServiceClient:
         role: str,
         content: str,
         user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Add message to session
@@ -349,10 +331,7 @@ class SessionServiceClient:
             if user_id:
                 params["user_id"] = user_id
 
-            payload = {
-                "role": role,
-                "content": content
-            }
+            payload = {"role": role, "content": content}
 
             if metadata:
                 payload["metadata"] = metadata
@@ -360,7 +339,7 @@ class SessionServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/sessions/{session_id}/messages",
                 json=payload,
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -377,7 +356,7 @@ class SessionServiceClient:
         session_id: str,
         user_id: Optional[str] = None,
         page: int = 1,
-        page_size: int = 100
+        page_size: int = 100,
     ) -> Optional[Dict[str, Any]]:
         """
         Get session messages
@@ -395,16 +374,12 @@ class SessionServiceClient:
             >>> messages = await client.get_messages("sess123", "user456")
         """
         try:
-            params = {
-                "page": page,
-                "page_size": page_size
-            }
+            params = {"page": page, "page_size": page_size}
             if user_id:
                 params["user_id"] = user_id
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/sessions/{session_id}/messages",
-                params=params
+                f"{self.base_url}/api/v1/sessions/{session_id}/messages", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -424,7 +399,7 @@ class SessionServiceClient:
         self,
         session_id: str,
         memory_data: Dict[str, Any],
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Save session memory
@@ -452,7 +427,7 @@ class SessionServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/sessions/{session_id}/memory",
                 json=memory_data,
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -465,9 +440,7 @@ class SessionServiceClient:
             return None
 
     async def get_memory(
-        self,
-        session_id: str,
-        user_id: Optional[str] = None
+        self, session_id: str, user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get session memory
@@ -488,8 +461,7 @@ class SessionServiceClient:
                 params["user_id"] = user_id
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/sessions/{session_id}/memory",
-                params=params
+                f"{self.base_url}/api/v1/sessions/{session_id}/memory", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -505,9 +477,7 @@ class SessionServiceClient:
     # Statistics
     # =============================================================================
 
-    async def get_session_stats(
-        self
-    ) -> Optional[Dict[str, Any]]:
+    async def get_session_stats(self) -> Optional[Dict[str, Any]]:
         """
         Get session service statistics
 
@@ -518,9 +488,7 @@ class SessionServiceClient:
             >>> stats = await client.get_session_stats()
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/sessions/stats"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/sessions/stats")
             response.raise_for_status()
             return response.json()
 

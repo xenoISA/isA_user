@@ -16,8 +16,12 @@ from datetime import datetime, timedelta, timezone
 
 # Import only models (no I/O dependencies)
 from .models import (
-    MemoryType, MemoryModel, MemoryOperationResult,
-    MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams
+    MemoryType,
+    MemoryModel,
+    MemoryOperationResult,
+    MemoryCreateRequest,
+    MemoryUpdateRequest,
+    MemoryListParams,
 )
 
 # Type checking imports (not executed at runtime)
@@ -68,42 +72,49 @@ class MemoryService:
             self.factual_service = factual_service
         else:
             from .factual_service import FactualMemoryService
+
             self.factual_service = FactualMemoryService()
 
         if procedural_service is not None:
             self.procedural_service = procedural_service
         else:
             from .procedural_service import ProceduralMemoryService
+
             self.procedural_service = ProceduralMemoryService()
 
         if episodic_service is not None:
             self.episodic_service = episodic_service
         else:
             from .episodic_service import EpisodicMemoryService
+
             self.episodic_service = EpisodicMemoryService()
 
         if semantic_service is not None:
             self.semantic_service = semantic_service
         else:
             from .semantic_service import SemanticMemoryService
+
             self.semantic_service = SemanticMemoryService()
 
         if working_service is not None:
             self.working_service = working_service
         else:
             from .working_service import WorkingMemoryService
+
             self.working_service = WorkingMemoryService()
 
         if session_service is not None:
             self.session_service = session_service
         else:
             from .session_service import SessionMemoryService
+
             self.session_service = SessionMemoryService()
 
         if association_service is not None:
             self.association_service = association_service
         else:
             from .association_service import AssociationService
+
             self.association_service = AssociationService()
 
         # Track background association-linking tasks to prevent GC
@@ -133,16 +144,21 @@ class MemoryService:
                     publish_episodic_memory_stored,
                     publish_procedural_memory_stored,
                     publish_semantic_memory_stored,
-                    publish_session_memory_deactivated
+                    publish_session_memory_deactivated,
                 )
+
                 self._publish_memory_created = publish_memory_created
                 self._publish_memory_updated = publish_memory_updated
                 self._publish_memory_deleted = publish_memory_deleted
                 self._publish_factual_memory_stored = publish_factual_memory_stored
                 self._publish_episodic_memory_stored = publish_episodic_memory_stored
-                self._publish_procedural_memory_stored = publish_procedural_memory_stored
+                self._publish_procedural_memory_stored = (
+                    publish_procedural_memory_stored
+                )
                 self._publish_semantic_memory_stored = publish_semantic_memory_stored
-                self._publish_session_memory_deactivated = publish_session_memory_deactivated
+                self._publish_session_memory_deactivated = (
+                    publish_session_memory_deactivated
+                )
             except ImportError:
                 logger.warning("Event publishers not available")
                 self._publish_memory_created = None
@@ -163,7 +179,7 @@ class MemoryService:
             MemoryType.EPISODIC: self.episodic_service,
             MemoryType.SEMANTIC: self.semantic_service,
             MemoryType.WORKING: self.working_service,
-            MemoryType.SESSION: self.session_service
+            MemoryType.SESSION: self.session_service,
         }
         return service_map.get(memory_type)
 
@@ -176,15 +192,14 @@ class MemoryService:
         """Convert memory model to dictionary for storage"""
         data = memory.model_dump()
         # Ensure id is set
-        if not data.get('id'):
-            data['id'] = str(uuid.uuid4())
+        if not data.get("id"):
+            data["id"] = str(uuid.uuid4())
         return data
 
     # ==================== General Memory Operations ====================
 
     async def create_memory(
-        self,
-        request: MemoryCreateRequest
+        self, request: MemoryCreateRequest
     ) -> MemoryOperationResult:
         """
         Create a new memory
@@ -201,7 +216,7 @@ class MemoryService:
                 return MemoryOperationResult(
                     success=False,
                     operation="create",
-                    message=f"Invalid memory type: {request.memory_type}"
+                    message=f"Invalid memory type: {request.memory_type}",
                 )
 
             # Create base memory data (don't include embedding - it's stored in Qdrant)
@@ -216,41 +231,59 @@ class MemoryService:
                 "tags": request.tags,
                 "context": request.context,
                 "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             # Add memory-type-specific fields
             if request.memory_type == MemoryType.SESSION:
                 # Session memory requires session_id and interaction_sequence
-                memory_data["session_id"] = getattr(request, "session_id", None) or request.context.get("session_id", str(uuid.uuid4()))
-                memory_data["interaction_sequence"] = getattr(request, "interaction_sequence", None) or request.context.get("interaction_sequence", 1)
-                memory_data["conversation_state"] = request.context.get("conversation_state", {})
-                memory_data["session_type"] = request.context.get("session_type", "chat")
+                memory_data["session_id"] = getattr(
+                    request, "session_id", None
+                ) or request.context.get("session_id", str(uuid.uuid4()))
+                memory_data["interaction_sequence"] = getattr(
+                    request, "interaction_sequence", None
+                ) or request.context.get("interaction_sequence", 1)
+                memory_data["conversation_state"] = request.context.get(
+                    "conversation_state", {}
+                )
+                memory_data["session_type"] = request.context.get(
+                    "session_type", "chat"
+                )
                 memory_data["active"] = request.context.get("active", True)
             elif request.memory_type == MemoryType.WORKING:
                 # Working memory requires task_id, task_context, ttl_seconds, and expires_at
                 task_id = getattr(request, "task_id", None)
                 if not task_id:
-                    task_id = request.context.get("task_id") if request.context else None
+                    task_id = (
+                        request.context.get("task_id") if request.context else None
+                    )
                 if not task_id:
                     task_id = str(uuid.uuid4())
                 memory_data["task_id"] = task_id
 
                 task_context = getattr(request, "task_context", None)
                 if not task_context:
-                    task_context = request.context.get("task_context") if request.context else None
+                    task_context = (
+                        request.context.get("task_context") if request.context else None
+                    )
                 if not task_context:
                     # Use the entire context as task_context if nothing else is available
                     task_context = request.context if request.context else {}
                 # Ensure task_context is never None
                 if task_context is None:
                     task_context = {}
-                logger.info(f"task_context type: {type(task_context)}, value: {task_context}")
+                logger.info(
+                    f"task_context type: {type(task_context)}, value: {task_context}"
+                )
                 memory_data["task_context"] = task_context
 
                 # Calculate TTL and expiry
-                ttl_minutes = getattr(request, "ttl_minutes", None) or request.context.get("ttl_minutes")
-                ttl_seconds = getattr(request, "ttl_seconds", None) or request.context.get("ttl_seconds")
+                ttl_minutes = getattr(
+                    request, "ttl_minutes", None
+                ) or request.context.get("ttl_minutes")
+                ttl_seconds = getattr(
+                    request, "ttl_seconds", None
+                ) or request.context.get("ttl_seconds")
                 if ttl_minutes:
                     memory_data["ttl_seconds"] = ttl_minutes * 60
                 elif ttl_seconds:
@@ -259,11 +292,15 @@ class MemoryService:
                     memory_data["ttl_seconds"] = 3600  # Default 1 hour
 
                 # Set expires_at
-                memory_data["expires_at"] = datetime.now(timezone.utc) + timedelta(seconds=memory_data["ttl_seconds"])
+                memory_data["expires_at"] = datetime.now(timezone.utc) + timedelta(
+                    seconds=memory_data["ttl_seconds"]
+                )
                 memory_data["priority"] = request.context.get("priority", 1)
 
             # Create memory
-            logger.info(f"Creating {request.memory_type} memory with data keys: {list(memory_data.keys())}")
+            logger.info(
+                f"Creating {request.memory_type} memory with data keys: {list(memory_data.keys())}"
+            )
             logger.debug(f"Memory data: {memory_data}")
             result = await repo.create(memory_data)
 
@@ -275,44 +312,37 @@ class MemoryService:
                         if self._publish_memory_created:
                             await self._publish_memory_created(
                                 event_bus=self.event_bus,
-                                memory_id=result['id'],
+                                memory_id=result["id"],
                                 memory_type=request.memory_type.value,
                                 user_id=request.user_id,
-                                content=memory_data.get('content', ''),
+                                content=memory_data.get("content", ""),
                                 importance_score=request.importance_score,
-                                tags=memory_data.get('tags'),
-                                metadata=memory_data.get('metadata')
+                                tags=memory_data.get("tags"),
+                                metadata=memory_data.get("metadata"),
                             )
                     except Exception as e:
                         logger.error(f"Failed to publish memory.created event: {e}")
 
                 return MemoryOperationResult(
                     success=True,
-                    memory_id=result['id'],
+                    memory_id=result["id"],
                     operation="create",
                     message="Memory created successfully",
-                    data=result
+                    data=result,
                 )
             else:
                 return MemoryOperationResult(
-                    success=False,
-                    operation="create",
-                    message="Failed to create memory"
+                    success=False, operation="create", message="Failed to create memory"
                 )
 
         except Exception as e:
             logger.error(f"Error creating memory: {e}")
             return MemoryOperationResult(
-                success=False,
-                operation="create",
-                message=f"Error: {str(e)}"
+                success=False, operation="create", message=f"Error: {str(e)}"
             )
 
     async def get_memory(
-        self,
-        memory_id: str,
-        memory_type: MemoryType,
-        user_id: Optional[str] = None
+        self, memory_id: str, memory_type: MemoryType, user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get memory by ID and type
@@ -342,10 +372,7 @@ class MemoryService:
             logger.error(f"Error getting memory: {e}")
             return None
 
-    async def list_memories(
-        self,
-        params: MemoryListParams
-    ) -> List[Dict[str, Any]]:
+    async def list_memories(self, params: MemoryListParams) -> List[Dict[str, Any]]:
         """
         List memories for a user
 
@@ -364,13 +391,13 @@ class MemoryService:
 
                 filters = {}
                 if params.importance_min is not None:
-                    filters['importance_score'] = params.importance_min
+                    filters["importance_score"] = params.importance_min
 
                 return await repo.list_by_user(
                     user_id=params.user_id,
                     limit=params.limit,
                     offset=params.offset,
-                    filters=filters
+                    filters=filters,
                 )
             else:
                 # List all memory types
@@ -381,17 +408,16 @@ class MemoryService:
                         memories = await repo.list_by_user(
                             user_id=params.user_id,
                             limit=params.limit,
-                            offset=params.offset
+                            offset=params.offset,
                         )
                         all_memories.extend(memories)
 
                 # Sort by created_at
                 all_memories.sort(
-                    key=lambda x: x.get('created_at', datetime.min),
-                    reverse=True
+                    key=lambda x: x.get("created_at", datetime.min), reverse=True
                 )
 
-                return all_memories[:params.limit]
+                return all_memories[: params.limit]
 
         except Exception as e:
             logger.error(f"Error listing memories: {e}")
@@ -402,7 +428,7 @@ class MemoryService:
         memory_id: str,
         memory_type: MemoryType,
         request: MemoryUpdateRequest,
-        user_id: str
+        user_id: str,
     ) -> MemoryOperationResult:
         """
         Update a memory
@@ -423,28 +449,28 @@ class MemoryService:
                     success=False,
                     memory_id=memory_id,
                     operation="update",
-                    message=f"Invalid memory type: {memory_type}"
+                    message=f"Invalid memory type: {memory_type}",
                 )
 
             # Build updates dict
             updates = {}
             if request.content is not None:
-                updates['content'] = request.content
+                updates["content"] = request.content
             if request.importance_score is not None:
-                updates['importance_score'] = request.importance_score
+                updates["importance_score"] = request.importance_score
             if request.confidence is not None:
-                updates['confidence'] = request.confidence
+                updates["confidence"] = request.confidence
             if request.tags is not None:
-                updates['tags'] = request.tags
+                updates["tags"] = request.tags
             if request.context is not None:
-                updates['context'] = request.context
+                updates["context"] = request.context
 
             if not updates:
                 return MemoryOperationResult(
                     success=False,
                     memory_id=memory_id,
                     operation="update",
-                    message="No fields to update"
+                    message="No fields to update",
                 )
 
             success = await repo.update(memory_id, updates, user_id)
@@ -460,7 +486,7 @@ class MemoryService:
                                 memory_id=memory_id,
                                 memory_type=memory_type.value,
                                 user_id=user_id,
-                                updated_fields=list(updates.keys())
+                                updated_fields=list(updates.keys()),
                             )
                     except Exception as e:
                         logger.error(f"Failed to publish memory.updated event: {e}")
@@ -469,14 +495,14 @@ class MemoryService:
                     success=True,
                     memory_id=memory_id,
                     operation="update",
-                    message="Memory updated successfully"
+                    message="Memory updated successfully",
                 )
             else:
                 return MemoryOperationResult(
                     success=False,
                     memory_id=memory_id,
                     operation="update",
-                    message="Memory not found or update failed"
+                    message="Memory not found or update failed",
                 )
 
         except Exception as e:
@@ -485,14 +511,11 @@ class MemoryService:
                 success=False,
                 memory_id=memory_id,
                 operation="update",
-                message=f"Error: {str(e)}"
+                message=f"Error: {str(e)}",
             )
 
     async def delete_memory(
-        self,
-        memory_id: str,
-        memory_type: MemoryType,
-        user_id: str
+        self, memory_id: str, memory_type: MemoryType, user_id: str
     ) -> MemoryOperationResult:
         """
         Delete a memory
@@ -512,7 +535,7 @@ class MemoryService:
                     success=False,
                     memory_id=memory_id,
                     operation="delete",
-                    message=f"Invalid memory type: {memory_type}"
+                    message=f"Invalid memory type: {memory_type}",
                 )
 
             success = await repo.delete(memory_id, user_id)
@@ -527,7 +550,7 @@ class MemoryService:
                                 event_bus=self.event_bus,
                                 memory_id=memory_id,
                                 memory_type=memory_type.value,
-                                user_id=user_id
+                                user_id=user_id,
                             )
                     except Exception as e:
                         logger.error(f"Failed to publish memory.deleted event: {e}")
@@ -536,14 +559,14 @@ class MemoryService:
                     success=True,
                     memory_id=memory_id,
                     operation="delete",
-                    message="Memory deleted successfully"
+                    message="Memory deleted successfully",
                 )
             else:
                 return MemoryOperationResult(
                     success=False,
                     memory_id=memory_id,
                     operation="delete",
-                    message="Memory not found or delete failed"
+                    message="Memory not found or delete failed",
                 )
 
         except Exception as e:
@@ -552,7 +575,7 @@ class MemoryService:
                 success=False,
                 memory_id=memory_id,
                 operation="delete",
-                message=f"Error: {str(e)}"
+                message=f"Error: {str(e)}",
             )
 
     # ==================== A-MEM Association Linking ====================
@@ -649,10 +672,7 @@ class MemoryService:
     # ==================== AI-Powered Memory Storage ====================
 
     async def store_factual_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """Extract and store factual memories from dialog using AI"""
         result = await self.factual_service.store_factual_memory(
@@ -677,7 +697,7 @@ class MemoryService:
                         user_id=user_id,
                         count=result.count,
                         importance_score=importance_score,
-                        source="dialog"
+                        source="dialog",
                     )
             except Exception as e:
                 logger.error(f"Failed to publish memory.factual.stored event: {e}")
@@ -685,10 +705,7 @@ class MemoryService:
         return result
 
     async def store_episodic_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """Extract and store episodic memories from dialog using AI"""
         result = await self.episodic_service.store_episodic_memory(
@@ -713,7 +730,7 @@ class MemoryService:
                         user_id=user_id,
                         count=result.count,
                         importance_score=importance_score,
-                        source="dialog"
+                        source="dialog",
                     )
             except Exception as e:
                 logger.error(f"Failed to publish memory.episodic.stored event: {e}")
@@ -721,10 +738,7 @@ class MemoryService:
         return result
 
     async def store_procedural_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """Extract and store procedural memories from dialog using AI"""
         result = await self.procedural_service.store_procedural_memory(
@@ -749,7 +763,7 @@ class MemoryService:
                         user_id=user_id,
                         count=result.count,
                         importance_score=importance_score,
-                        source="dialog"
+                        source="dialog",
                     )
             except Exception as e:
                 logger.error(f"Failed to publish memory.procedural.stored event: {e}")
@@ -757,10 +771,7 @@ class MemoryService:
         return result
 
     async def store_semantic_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """Extract and store semantic memories from dialog using AI"""
         result = await self.semantic_service.store_semantic_memory(
@@ -785,7 +796,7 @@ class MemoryService:
                         user_id=user_id,
                         count=result.count,
                         importance_score=importance_score,
-                        source="dialog"
+                        source="dialog",
                     )
             except Exception as e:
                 logger.error(f"Failed to publish memory.semantic.stored event: {e}")
@@ -795,22 +806,20 @@ class MemoryService:
     # ==================== Factual Memory Operations ====================
 
     async def search_facts_by_subject(
-        self,
-        user_id: str,
-        subject: str,
-        limit: int = 10
+        self, user_id: str, subject: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search factual memories by subject"""
-        return await self.factual_service.repository.search_by_subject(user_id, subject, limit)
+        return await self.factual_service.repository.search_by_subject(
+            user_id, subject, limit
+        )
 
     async def search_facts_by_type(
-        self,
-        user_id: str,
-        fact_type: str,
-        limit: int = 10
+        self, user_id: str, fact_type: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search factual memories by type"""
-        return await self.factual_service.repository.search_by_fact_type(user_id, fact_type, limit)
+        return await self.factual_service.repository.search_by_fact_type(
+            user_id, fact_type, limit
+        )
 
     async def vector_search_factual(
         self,
@@ -835,7 +844,14 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.factual_service.vector_search(user_id, query, limit, score_threshold, query_embedding=query_embedding, with_vectors=with_vectors)
+        return await self.factual_service.vector_search(
+            user_id,
+            query,
+            limit,
+            score_threshold,
+            query_embedding=query_embedding,
+            with_vectors=with_vectors,
+        )
 
     async def vector_search_episodic(
         self,
@@ -860,7 +876,14 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.episodic_service.vector_search(user_id, query, limit, score_threshold, query_embedding=query_embedding, with_vectors=with_vectors)
+        return await self.episodic_service.vector_search(
+            user_id,
+            query,
+            limit,
+            score_threshold,
+            query_embedding=query_embedding,
+            with_vectors=with_vectors,
+        )
 
     async def vector_search_procedural(
         self,
@@ -885,7 +908,14 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.procedural_service.vector_search(user_id, query, limit, score_threshold, query_embedding=query_embedding, with_vectors=with_vectors)
+        return await self.procedural_service.vector_search(
+            user_id,
+            query,
+            limit,
+            score_threshold,
+            query_embedding=query_embedding,
+            with_vectors=with_vectors,
+        )
 
     async def vector_search_semantic(
         self,
@@ -910,7 +940,14 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.semantic_service.vector_search(user_id, query, limit, score_threshold, query_embedding=query_embedding, with_vectors=with_vectors)
+        return await self.semantic_service.vector_search(
+            user_id,
+            query,
+            limit,
+            score_threshold,
+            query_embedding=query_embedding,
+            with_vectors=with_vectors,
+        )
 
     async def vector_search_working(
         self,
@@ -937,7 +974,15 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.working_service.vector_search(user_id, query, limit, score_threshold, include_expired, query_embedding=query_embedding, with_vectors=with_vectors)
+        return await self.working_service.vector_search(
+            user_id,
+            query,
+            limit,
+            score_threshold,
+            include_expired,
+            query_embedding=query_embedding,
+            with_vectors=with_vectors,
+        )
 
     async def vector_search_session(
         self,
@@ -964,36 +1009,38 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.session_service.vector_search(user_id, query, limit, score_threshold, session_id, query_embedding=query_embedding, with_vectors=with_vectors)
+        return await self.session_service.vector_search(
+            user_id,
+            query,
+            limit,
+            score_threshold,
+            session_id,
+            query_embedding=query_embedding,
+            with_vectors=with_vectors,
+        )
 
     # ==================== Procedural Memory Operations ====================
 
     async def search_procedures_by_domain(
-        self,
-        user_id: str,
-        domain: str,
-        limit: int = 10
+        self, user_id: str, domain: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search procedural memories by domain"""
-        return await self.procedural_service.repository.search_by_domain(user_id, domain, limit)
+        return await self.procedural_service.repository.search_by_domain(
+            user_id, domain, limit
+        )
 
     async def search_procedures_by_skill_type(
-        self,
-        user_id: str,
-        skill_type: str,
-        limit: int = 10
+        self, user_id: str, skill_type: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search procedural memories by skill type"""
-        return await self.procedural_service.repository.search_by_skill_type(user_id, skill_type, limit)
+        return await self.procedural_service.repository.search_by_skill_type(
+            user_id, skill_type, limit
+        )
 
     # ==================== Episodic Memory Operations ====================
 
     async def search_episodes_by_timeframe(
-        self,
-        user_id: str,
-        start_date: datetime,
-        end_date: datetime,
-        limit: int = 10
+        self, user_id: str, start_date: datetime, end_date: datetime, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search episodic memories by timeframe"""
         return await self.episodic_service.repository.search_by_timeframe(
@@ -1001,90 +1048,83 @@ class MemoryService:
         )
 
     async def search_episodes_by_event_type(
-        self,
-        user_id: str,
-        event_type: str,
-        limit: int = 10
+        self, user_id: str, event_type: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search episodic memories by event type"""
-        return await self.episodic_service.repository.search_by_event_type(user_id, event_type, limit)
+        return await self.episodic_service.repository.search_by_event_type(
+            user_id, event_type, limit
+        )
 
     # ==================== Semantic Memory Operations ====================
 
     async def search_concepts_by_category(
-        self,
-        user_id: str,
-        category: str,
-        limit: int = 10
+        self, user_id: str, category: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search semantic memories by category"""
-        return await self.semantic_service.repository.search_by_category(user_id, category, limit)
+        return await self.semantic_service.repository.search_by_category(
+            user_id, category, limit
+        )
 
     async def search_concepts_by_type(
-        self,
-        user_id: str,
-        concept_type: str,
-        limit: int = 10
+        self, user_id: str, concept_type: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search semantic memories by concept type"""
-        return await self.semantic_service.repository.search_by_concept_type(user_id, concept_type, limit)
+        return await self.semantic_service.repository.search_by_concept_type(
+            user_id, concept_type, limit
+        )
 
     # ==================== Working Memory Operations ====================
 
-    async def get_active_working_memories(
-        self,
-        user_id: str
-    ) -> List[Dict[str, Any]]:
+    async def get_active_working_memories(self, user_id: str) -> List[Dict[str, Any]]:
         """Get active working memories"""
         return await self.working_service.repository.get_active_memories(user_id)
 
     async def cleanup_expired_memories(
-        self,
-        user_id: Optional[str] = None
+        self, user_id: Optional[str] = None
     ) -> MemoryOperationResult:
         """Clean up expired working memories"""
         try:
-            count = await self.working_service.repository.cleanup_expired_memories(user_id)
+            count = await self.working_service.repository.cleanup_expired_memories(
+                user_id
+            )
             return MemoryOperationResult(
                 success=True,
                 operation="cleanup",
                 message=f"Cleaned up {count} expired memories",
-                affected_count=count
+                affected_count=count,
             )
         except Exception as e:
             logger.error(f"Error cleaning up expired memories: {e}")
             return MemoryOperationResult(
-                success=False,
-                operation="cleanup",
-                message=f"Error: {str(e)}"
+                success=False, operation="cleanup", message=f"Error: {str(e)}"
             )
 
     # ==================== Session Memory Operations ====================
 
     async def get_session_memories(
-        self,
-        user_id: str,
-        session_id: str
+        self, user_id: str, session_id: str
     ) -> List[Dict[str, Any]]:
         """Get memories for a specific session"""
-        return await self.session_service.repository.get_session_memories(user_id, session_id)
+        return await self.session_service.repository.get_session_memories(
+            user_id, session_id
+        )
 
     async def get_session_summary(
-        self,
-        user_id: str,
-        session_id: str
+        self, user_id: str, session_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get session summary"""
-        return await self.session_service.repository.get_session_summary(user_id, session_id)
+        return await self.session_service.repository.get_session_summary(
+            user_id, session_id
+        )
 
     async def deactivate_session(
-        self,
-        user_id: str,
-        session_id: str
+        self, user_id: str, session_id: str
     ) -> MemoryOperationResult:
         """Deactivate a session"""
         try:
-            success = await self.session_service.repository.deactivate_session(user_id, session_id)
+            success = await self.session_service.repository.deactivate_session(
+                user_id, session_id
+            )
             if success:
                 # Publish memory.session.deactivated event
                 if self.event_bus:
@@ -1094,43 +1134,42 @@ class MemoryService:
                             await self._publish_session_memory_deactivated(
                                 event_bus=self.event_bus,
                                 user_id=user_id,
-                                session_id=session_id
+                                session_id=session_id,
                             )
                     except Exception as e:
-                        logger.error(f"Failed to publish memory.session.deactivated event: {e}")
+                        logger.error(
+                            f"Failed to publish memory.session.deactivated event: {e}"
+                        )
 
                 return MemoryOperationResult(
                     success=True,
                     operation="deactivate_session",
-                    message="Session deactivated successfully"
+                    message="Session deactivated successfully",
                 )
             else:
                 return MemoryOperationResult(
                     success=False,
                     operation="deactivate_session",
-                    message="Session not found or already deactivated"
+                    message="Session not found or already deactivated",
                 )
         except Exception as e:
             logger.error(f"Error deactivating session: {e}")
             return MemoryOperationResult(
                 success=False,
                 operation="deactivate_session",
-                message=f"Error: {str(e)}"
+                message=f"Error: {str(e)}",
             )
 
     # ==================== Statistics and Utility ====================
 
-    async def get_memory_statistics(
-        self,
-        user_id: str
-    ) -> Dict[str, Any]:
+    async def get_memory_statistics(self, user_id: str) -> Dict[str, Any]:
         """Get memory statistics for a user"""
         try:
             stats = {
-                'user_id': user_id,
-                'total_memories': 0,
-                'by_type': {},
-                'timestamp': datetime.now(timezone.utc).isoformat()
+                "user_id": user_id,
+                "total_memories": 0,
+                "by_type": {},
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             # Count each memory type
@@ -1138,14 +1177,14 @@ class MemoryService:
                 repo = self._get_repository(memory_type)
                 if repo:
                     count = await repo.get_count(user_id)
-                    stats['by_type'][memory_type.value] = count
-                    stats['total_memories'] += count
+                    stats["by_type"][memory_type.value] = count
+                    stats["total_memories"] += count
 
             return stats
 
         except Exception as e:
             logger.error(f"Error getting memory statistics: {e}")
-            return {'error': str(e), 'user_id': user_id}
+            return {"error": str(e), "user_id": user_id}
 
     # ==================== Decay Operations ====================
 

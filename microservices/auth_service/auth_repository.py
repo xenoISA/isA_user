@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -27,11 +29,11 @@ class AuthRepository:
             config = ConfigManager("auth_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -41,7 +43,7 @@ class AuthRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='auth-service',
+            user_id="auth-service",
             min_pool_size=1,
             max_pool_size=2,
         )
@@ -55,7 +57,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.users_table} WHERE user_id = $1 AND is_active = TRUE",
-                    params=[user_id]
+                    params=[user_id],
                 )
 
             if result:
@@ -66,7 +68,7 @@ class AuthRepository:
                     "subscription_status": result.get("subscription_status"),
                     "is_active": result["is_active"],
                     "created_at": result["created_at"],
-                    "updated_at": result["updated_at"]
+                    "updated_at": result["updated_at"],
                 }
             return None
 
@@ -80,7 +82,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.users_table} WHERE email = $1 AND is_active = TRUE",
-                    params=[email]
+                    params=[email],
                 )
 
             if result:
@@ -92,7 +94,7 @@ class AuthRepository:
                     "is_active": result["is_active"],
                     "email_verified": result.get("email_verified", False),
                     "created_at": result["created_at"],
-                    "updated_at": result["updated_at"]
+                    "updated_at": result["updated_at"],
                 }
             return None
 
@@ -107,7 +109,7 @@ class AuthRepository:
                 result = await self.db.query_row(
                     f"SELECT user_id, email, name, password_hash, email_verified, is_active, admin_roles "
                     f"FROM {self.schema}.{self.users_table} WHERE email = $1",
-                    params=[email]
+                    params=[email],
                 )
 
             if result:
@@ -115,6 +117,7 @@ class AuthRepository:
                 admin_roles = result.get("admin_roles")
                 if isinstance(admin_roles, str):
                     import json
+
                     try:
                         admin_roles = json.loads(admin_roles)
                     except (json.JSONDecodeError, TypeError):
@@ -143,7 +146,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET last_login = $1, updated_at = $1 WHERE user_id = $2",
-                    params=[now, user_id]
+                    params=[now, user_id],
                 )
 
             return result is not None and result > 0
@@ -160,7 +163,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET password_hash = $1, updated_at = $2 WHERE user_id = $3",
-                    params=[password_hash, now, user_id]
+                    params=[password_hash, now, user_id],
                 )
 
             return result is not None and result > 0
@@ -177,7 +180,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET email_verified = $1, updated_at = $2 WHERE user_id = $3",
-                    params=[verified, now, user_id]
+                    params=[verified, now, user_id],
                 )
 
             return result is not None and result > 0
@@ -204,7 +207,7 @@ class AuthRepository:
                 user_data.get("email_verified", False),
                 True,
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -226,7 +229,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET updated_at = $1 WHERE user_id = $2",
-                    params=[now, user_id]
+                    params=[now, user_id],
                 )
 
             return result is not None and result > 0
@@ -235,7 +238,9 @@ class AuthRepository:
             logger.error(f"Failed to update user: {e}")
             raise
 
-    async def create_session(self, session_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def create_session(
+        self, session_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Create authentication session"""
         try:
             now = datetime.now(timezone.utc)
@@ -252,7 +257,7 @@ class AuthRepository:
                 session_data.get("refresh_token"),
                 session_data.get("expires_at"),
                 True,
-                now
+                now,
             ]
 
             async with self.db:
@@ -274,7 +279,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.sessions_table} WHERE session_id = $1 AND is_active = TRUE",
-                    params=[session_id]
+                    params=[session_id],
                 )
 
             if result:
@@ -282,7 +287,9 @@ class AuthRepository:
                 expires_at = result.get("expires_at")
                 if expires_at:
                     if isinstance(expires_at, str):
-                        expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                        expires_at = datetime.fromisoformat(
+                            expires_at.replace("Z", "+00:00")
+                        )
                     if expires_at < datetime.now(timezone.utc):
                         return None
                 return result
@@ -300,7 +307,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.sessions_table} SET last_activity = $1 WHERE session_id = $2",
-                    params=[now, session_id]
+                    params=[now, session_id],
                 )
 
             return result is not None and result > 0
@@ -317,7 +324,7 @@ class AuthRepository:
             async with self.db:
                 result = await self.db.execute(
                     f"UPDATE {self.schema}.{self.sessions_table} SET is_active = FALSE, invalidated_at = $1 WHERE session_id = $2",
-                    params=[now, session_id]
+                    params=[now, session_id],
                 )
 
             return result is not None and result > 0

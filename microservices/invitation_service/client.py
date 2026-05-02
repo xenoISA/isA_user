@@ -23,7 +23,7 @@ class InvitationServiceClient:
             base_url: Invitation service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -55,7 +55,7 @@ class InvitationServiceClient:
         inviter_user_id: str,
         email: str,
         role: str = "member",
-        message: Optional[str] = None
+        message: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create organization invitation
@@ -80,10 +80,7 @@ class InvitationServiceClient:
             ... )
         """
         try:
-            payload = {
-                "email": email,
-                "role": role
-            }
+            payload = {"email": email, "role": role}
 
             if message:
                 payload["message"] = message
@@ -91,7 +88,7 @@ class InvitationServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/invitations",
                 json=payload,
-                headers={"X-User-Id": inviter_user_id}
+                headers={"X-User-Id": inviter_user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -104,8 +101,7 @@ class InvitationServiceClient:
             return None
 
     async def get_invitation_by_token(
-        self,
-        invitation_token: str
+        self, invitation_token: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get invitation details by token
@@ -134,9 +130,7 @@ class InvitationServiceClient:
             return None
 
     async def accept_invitation(
-        self,
-        invitation_token: str,
-        user_id: str
+        self, invitation_token: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Accept organization invitation
@@ -152,15 +146,12 @@ class InvitationServiceClient:
             >>> result = await client.accept_invitation("token_abc123", "user789")
         """
         try:
-            payload = {
-                "invitation_token": invitation_token,
-                "user_id": user_id
-            }
+            payload = {"invitation_token": invitation_token, "user_id": user_id}
 
             response = await self.client.post(
                 f"{self.base_url}/api/v1/invitations/accept",
                 json=payload,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -173,11 +164,7 @@ class InvitationServiceClient:
             return None
 
     async def get_organization_invitations(
-        self,
-        organization_id: str,
-        user_id: str,
-        limit: int = 100,
-        offset: int = 0
+        self, organization_id: str, user_id: str, limit: int = 100, offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         Get organization invitations
@@ -200,23 +187,21 @@ class InvitationServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/organizations/{organization_id}/invitations",
                 params=params,
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get organization invitations: {e.response.status_code}")
+            logger.error(
+                f"Failed to get organization invitations: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting organization invitations: {e}")
             return None
 
-    async def cancel_invitation(
-        self,
-        invitation_id: str,
-        user_id: str
-    ) -> bool:
+    async def cancel_invitation(self, invitation_id: str, user_id: str) -> bool:
         """
         Cancel invitation
 
@@ -233,7 +218,7 @@ class InvitationServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/v1/invitations/{invitation_id}",
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return True
@@ -245,11 +230,7 @@ class InvitationServiceClient:
             logger.error(f"Error canceling invitation: {e}")
             return False
 
-    async def resend_invitation(
-        self,
-        invitation_id: str,
-        user_id: str
-    ) -> bool:
+    async def resend_invitation(self, invitation_id: str, user_id: str) -> bool:
         """
         Resend invitation email
 
@@ -266,7 +247,7 @@ class InvitationServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/invitations/{invitation_id}/resend",
-                headers={"X-User-Id": user_id}
+                headers={"X-User-Id": user_id},
             )
             response.raise_for_status()
             return True

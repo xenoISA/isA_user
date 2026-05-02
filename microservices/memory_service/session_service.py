@@ -29,17 +29,19 @@ class SessionMemoryService:
 
         # Initialize Qdrant client (async) - lazy connection
         self.qdrant = AsyncQdrantClient(
-            host=os.getenv('QDRANT_HOST', 'localhost'),
-            port=int(os.getenv('QDRANT_PORT', 6333)),
-            user_id='memory_service'
+            host=os.getenv("QDRANT_HOST", "localhost"),
+            port=int(os.getenv("QDRANT_PORT", 6333)),
+            user_id="memory_service",
         )
         self._collection_initialized = False  # Track if collection is ready
 
-        logger.info(f"Session Memory Service initialized with ISA Model URL: {self.model_url}")
+        logger.info(
+            f"Session Memory Service initialized with ISA Model URL: {self.model_url}"
+        )
 
     def _get_model_url(self) -> str:
         """Get ISA Model service URL via Consul or environment variable"""
-        env_url = os.getenv('ISA_MODEL_URL')
+        env_url = os.getenv("ISA_MODEL_URL")
         if env_url:
             return env_url
         if self.consul_registry:
@@ -57,7 +59,7 @@ class SessionMemoryService:
         if self._collection_initialized:
             return
 
-        collection_name = 'session_memories'
+        collection_name = "session_memories"
         try:
             async with self.qdrant:
                 info = await self.qdrant.get_collection_info(collection_name)
@@ -65,17 +67,17 @@ class SessionMemoryService:
                     await self.qdrant.create_collection(
                         collection_name=collection_name,
                         vector_size=1536,
-                        distance='Cosine'
+                        distance="Cosine",
                     )
                     await self.qdrant.create_field_index(
                         collection_name=collection_name,
-                        field_name='user_id',
-                        field_type='keyword'
+                        field_name="user_id",
+                        field_type="keyword",
                     )
                     await self.qdrant.create_field_index(
                         collection_name=collection_name,
-                        field_name='session_id',
-                        field_type='keyword'
+                        field_name="session_id",
+                        field_type="keyword",
                     )
                     logger.info(f"Created Qdrant collection: {collection_name}")
             self._collection_initialized = True
@@ -89,7 +91,7 @@ class SessionMemoryService:
         content: str,
         interaction_sequence: int,
         conversation_state: Dict[str, Any],
-        session_type: str = "chat"
+        session_type: str = "chat",
     ) -> MemoryOperationResult:
         """
         Store session memory
@@ -131,7 +133,7 @@ class SessionMemoryService:
                 "tags": [],
                 "context": {},
                 "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             # Store to PostgreSQL
@@ -141,19 +143,28 @@ class SessionMemoryService:
                 # Store embedding to Qdrant - ASYNC
                 try:
                     async with self.qdrant:
-                        await self.qdrant.upsert_points('session_memories', [{
-                            'id': memory_id,
-                            'vector': embedding,
-                            'payload': {
-                                'user_id': user_id,
-                                'session_id': session_id,
-                                'session_type': session_type,
-                                'interaction_sequence': interaction_sequence,
-                                'active': True,
-                                'created_at': datetime.now(timezone.utc).isoformat()
-                            }
-                        }])
-                    logger.info(f"Stored embedding to Qdrant for session memory {memory_id}")
+                        await self.qdrant.upsert_points(
+                            "session_memories",
+                            [
+                                {
+                                    "id": memory_id,
+                                    "vector": embedding,
+                                    "payload": {
+                                        "user_id": user_id,
+                                        "session_id": session_id,
+                                        "session_type": session_type,
+                                        "interaction_sequence": interaction_sequence,
+                                        "active": True,
+                                        "created_at": datetime.now(
+                                            timezone.utc
+                                        ).isoformat(),
+                                    },
+                                }
+                            ],
+                        )
+                    logger.info(
+                        f"Stored embedding to Qdrant for session memory {memory_id}"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to store embedding to Qdrant: {e}")
 
@@ -162,13 +173,13 @@ class SessionMemoryService:
                     memory_id=memory_id,
                     operation="store_session_memory",
                     message="Session memory stored successfully",
-                    data=result
+                    data=result,
                 )
             else:
                 return MemoryOperationResult(
                     success=False,
                     operation="store_session_memory",
-                    message="Failed to store session memory"
+                    message="Failed to store session memory",
                 )
 
         except Exception as e:
@@ -176,7 +187,7 @@ class SessionMemoryService:
             return MemoryOperationResult(
                 success=False,
                 operation="store_session_memory",
-                message=f"Error: {str(e)}"
+                message=f"Error: {str(e)}",
             )
 
     async def _generate_embedding(self, text: str) -> List[float]:
@@ -184,8 +195,7 @@ class SessionMemoryService:
         try:
             async with AsyncISAModel(base_url=self.model_url) as client:
                 embedding = await client.embeddings.create(
-                    input=text,
-                    model="text-embedding-3-small"
+                    input=text, model="text-embedding-3-small"
                 )
                 return embedding.data[0].embedding
         except Exception as e:
@@ -193,25 +203,19 @@ class SessionMemoryService:
             return []
 
     async def get_session_memories(
-        self,
-        user_id: str,
-        session_id: str
+        self, user_id: str, session_id: str
     ) -> List[Dict[str, Any]]:
         """Get all memories for a session"""
         return await self.repository.get_session_memories(user_id, session_id)
 
     async def get_session_summary(
-        self,
-        user_id: str,
-        session_id: str
+        self, user_id: str, session_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get session summary"""
         return await self.repository.get_session_summary(user_id, session_id)
 
     async def deactivate_session(
-        self,
-        user_id: str,
-        session_id: str
+        self, user_id: str, session_id: str
     ) -> MemoryOperationResult:
         """Deactivate all memories in a session"""
         try:
@@ -220,26 +224,23 @@ class SessionMemoryService:
                 return MemoryOperationResult(
                     success=True,
                     operation="deactivate_session",
-                    message="Session deactivated successfully"
+                    message="Session deactivated successfully",
                 )
             else:
                 return MemoryOperationResult(
                     success=False,
                     operation="deactivate_session",
-                    message="Session not found or already deactivated"
+                    message="Session not found or already deactivated",
                 )
         except Exception as e:
             logger.error(f"Error deactivating session: {e}")
             return MemoryOperationResult(
                 success=False,
                 operation="deactivate_session",
-                message=f"Error: {str(e)}"
+                message=f"Error: {str(e)}",
             )
 
-    async def get_active_sessions(
-        self,
-        user_id: str
-    ) -> List[str]:
+    async def get_active_sessions(self, user_id: str) -> List[str]:
         """Get list of active session IDs"""
         return await self.repository.get_active_sessions(user_id)
 
@@ -278,13 +279,13 @@ class SessionMemoryService:
                 logger.warning("Failed to generate query embedding for session memory")
                 return []
 
-            logger.info(f"Generated query embedding with {len(query_embedding)} dimensions for session search: {query[:50]}...")
+            logger.info(
+                f"Generated query embedding with {len(query_embedding)} dimensions for session search: {query[:50]}..."
+            )
 
             # Build filter conditions
             filter_conditions = {
-                "must": [
-                    {"field": "user_id", "match": {"keyword": user_id}}
-                ]
+                "must": [{"field": "user_id", "match": {"keyword": user_id}}]
             }
 
             # Add session_id filter if provided
@@ -295,7 +296,7 @@ class SessionMemoryService:
 
             async with self.qdrant:
                 search_results = await self.qdrant.search_with_filter(
-                    collection_name='session_memories',
+                    collection_name="session_memories",
                     vector=query_embedding,
                     filter_conditions=filter_conditions,
                     limit=limit,
@@ -305,28 +306,38 @@ class SessionMemoryService:
                 )
 
             if not search_results:
-                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
+                logger.info(
+                    f"No vector search results for user {user_id} with threshold {score_threshold}"
+                )
                 return []
 
             # Get memory IDs and scores from results
-            memory_ids = [str(result['id']) for result in search_results]
-            scores = {str(result['id']): result.get('score', 0.0) for result in search_results}
-            vectors = {str(result['id']): result.get('vector') for result in search_results} if with_vectors else {}
+            memory_ids = [str(result["id"]) for result in search_results]
+            scores = {
+                str(result["id"]): result.get("score", 0.0) for result in search_results
+            }
+            vectors = (
+                {str(result["id"]): result.get("vector") for result in search_results}
+                if with_vectors
+                else {}
+            )
 
-            logger.info(f"Vector search found {len(memory_ids)} session memory matches for user {user_id}")
+            logger.info(
+                f"Vector search found {len(memory_ids)} session memory matches for user {user_id}"
+            )
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)
 
             # Add similarity scores (and optionally embeddings) to results
             for memory in memories:
-                memory_id = memory.get('id')
-                memory['similarity_score'] = scores.get(memory_id, 0.0)
+                memory_id = memory.get("id")
+                memory["similarity_score"] = scores.get(memory_id, 0.0)
                 if with_vectors and memory_id in vectors:
-                    memory['embedding'] = vectors[memory_id]
+                    memory["embedding"] = vectors[memory_id]
 
             # Sort by score descending
-            memories.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+            memories.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
 
             return memories
 

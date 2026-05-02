@@ -23,7 +23,7 @@ class OrderServiceClient:
             base_url: Order service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -58,7 +58,7 @@ class OrderServiceClient:
         currency: str = "USD",
         payment_intent_id: Optional[str] = None,
         subscription_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create new order
@@ -99,7 +99,7 @@ class OrderServiceClient:
                 "order_type": order_type,
                 "items": items,
                 "total_amount": total_amount,
-                "currency": currency
+                "currency": currency,
             }
 
             if payment_intent_id:
@@ -110,8 +110,7 @@ class OrderServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/orders",
-                json=payload
+                f"{self.base_url}/api/v1/orders", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -123,10 +122,7 @@ class OrderServiceClient:
             logger.error(f"Error creating order: {e}")
             return None
 
-    async def get_order(
-        self,
-        order_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_order(self, order_id: str) -> Optional[Dict[str, Any]]:
         """
         Get order by ID
 
@@ -161,7 +157,7 @@ class OrderServiceClient:
         status: Optional[str] = None,
         items: Optional[List[Dict[str, Any]]] = None,
         total_amount: Optional[float] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Update order
@@ -199,8 +195,7 @@ class OrderServiceClient:
                 return None
 
             response = await self.client.put(
-                f"{self.base_url}/api/v1/orders/{order_id}",
-                json=payload
+                f"{self.base_url}/api/v1/orders/{order_id}", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -213,9 +208,7 @@ class OrderServiceClient:
             return None
 
     async def cancel_order(
-        self,
-        order_id: str,
-        reason: Optional[str] = None
+        self, order_id: str, reason: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Cancel order
@@ -240,7 +233,7 @@ class OrderServiceClient:
 
             response = await self.client.post(
                 f"{self.base_url}/api/v1/orders/{order_id}/cancel",
-                json=payload if payload else None
+                json=payload if payload else None,
             )
             response.raise_for_status()
             return response.json()
@@ -252,10 +245,7 @@ class OrderServiceClient:
             logger.error(f"Error cancelling order: {e}")
             return None
 
-    async def complete_order(
-        self,
-        order_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def complete_order(self, order_id: str) -> Optional[Dict[str, Any]]:
         """
         Mark order as completed
 
@@ -292,7 +282,7 @@ class OrderServiceClient:
         status: Optional[str] = None,
         order_type: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """
         List orders with filters
@@ -317,10 +307,7 @@ class OrderServiceClient:
             ...     print(f"{order['order_id']}: ${order['total_amount']}")
         """
         try:
-            params = {
-                "limit": limit,
-                "offset": offset
-            }
+            params = {"limit": limit, "offset": offset}
 
             if user_id:
                 params["user_id"] = user_id
@@ -330,8 +317,7 @@ class OrderServiceClient:
                 params["order_type"] = order_type
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/orders",
-                params=params
+                f"{self.base_url}/api/v1/orders", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -344,10 +330,7 @@ class OrderServiceClient:
             return None
 
     async def get_user_orders(
-        self,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, user_id: str, limit: int = 50, offset: int = 0
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get user's orders
@@ -366,14 +349,10 @@ class OrderServiceClient:
             ...     print(f"{order['created_at']}: ${order['total_amount']}")
         """
         try:
-            params = {
-                "limit": limit,
-                "offset": offset
-            }
+            params = {"limit": limit, "offset": offset}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/users/{user_id}/orders",
-                params=params
+                f"{self.base_url}/api/v1/users/{user_id}/orders", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -386,10 +365,7 @@ class OrderServiceClient:
             return None
 
     async def search_orders(
-        self,
-        query: str,
-        search_field: str = "order_id",
-        limit: int = 50
+        self, query: str, search_field: str = "order_id", limit: int = 50
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Search orders
@@ -409,15 +385,10 @@ class OrderServiceClient:
             ... )
         """
         try:
-            params = {
-                "query": query,
-                "search_field": search_field,
-                "limit": limit
-            }
+            params = {"query": query, "search_field": search_field, "limit": limit}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/orders/search",
-                params=params
+                f"{self.base_url}/api/v1/orders/search", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -430,8 +401,7 @@ class OrderServiceClient:
             return None
 
     async def get_orders_by_payment(
-        self,
-        payment_intent_id: str
+        self, payment_intent_id: str
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get orders by payment intent ID
@@ -460,8 +430,7 @@ class OrderServiceClient:
             return None
 
     async def get_orders_by_subscription(
-        self,
-        subscription_id: str
+        self, subscription_id: str
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get orders by subscription ID
@@ -483,7 +452,9 @@ class OrderServiceClient:
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get orders by subscription: {e.response.status_code}")
+            logger.error(
+                f"Failed to get orders by subscription: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting orders by subscription: {e}")

@@ -34,6 +34,7 @@ def _mark_event_processed(event_id: str):
 # Event Handler Registration
 # ============================================================================
 
+
 def get_event_handlers(auth_service, device_auth_service, event_bus):
     """
     Get event handlers for auth service
@@ -66,11 +67,9 @@ def get_event_handlers(auth_service, device_auth_service, event_bus):
 # Example Event Handlers (for future use)
 # ============================================================================
 
+
 async def handle_device_registered(
-    event_data: Dict[str, Any],
-    auth_service,
-    device_auth_service,
-    event_bus
+    event_data: Dict[str, Any], auth_service, device_auth_service, event_bus
 ):
     """
     Handle device.registered event

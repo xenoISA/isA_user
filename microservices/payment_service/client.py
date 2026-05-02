@@ -24,7 +24,7 @@ class PaymentServiceClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via ConfigManager
             if config is None:
@@ -32,11 +32,11 @@ class PaymentServiceClient:
 
             try:
                 host, port = config.discover_service(
-                    service_name='payment_service',
-                    default_host='localhost',
+                    service_name="payment_service",
+                    default_host="localhost",
                     default_port=8207,
-                    env_host_key='PAYMENT_SERVICE_HOST',
-                    env_port_key='PAYMENT_SERVICE_PORT'
+                    env_host_key="PAYMENT_SERVICE_HOST",
+                    env_port_key="PAYMENT_SERVICE_PORT",
                 )
                 self.base_url = f"http://{host}:{port}"
                 logger.info(f"Payment service discovered at {self.base_url}")
@@ -67,7 +67,7 @@ class PaymentServiceClient:
         interval: str,
         currency: str = "USD",
         features: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create subscription plan
@@ -97,7 +97,7 @@ class PaymentServiceClient:
                 "plan_name": plan_name,
                 "price": price,
                 "interval": interval,
-                "currency": currency
+                "currency": currency,
             }
 
             if features:
@@ -106,8 +106,7 @@ class PaymentServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/plans",
-                json=payload
+                f"{self.base_url}/api/v1/plans", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -119,10 +118,7 @@ class PaymentServiceClient:
             logger.error(f"Error creating plan: {e}")
             return None
 
-    async def get_plan(
-        self,
-        plan_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_plan(self, plan_id: str) -> Optional[Dict[str, Any]]:
         """
         Get subscription plan details
 
@@ -136,9 +132,7 @@ class PaymentServiceClient:
             >>> plan = await client.get_plan("plan123")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/plans/{plan_id}"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/plans/{plan_id}")
             response.raise_for_status()
             return response.json()
 
@@ -149,9 +143,7 @@ class PaymentServiceClient:
             logger.error(f"Error getting plan: {e}")
             return None
 
-    async def list_plans(
-        self
-    ) -> Optional[List[Dict[str, Any]]]:
+    async def list_plans(self) -> Optional[List[Dict[str, Any]]]:
         """
         List all subscription plans
 
@@ -162,9 +154,7 @@ class PaymentServiceClient:
             >>> plans = await client.list_plans()
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/plans"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/plans")
             response.raise_for_status()
             return response.json()
 
@@ -180,10 +170,7 @@ class PaymentServiceClient:
     # =============================================================================
 
     async def create_subscription(
-        self,
-        user_id: str,
-        plan_id: str,
-        payment_method_id: Optional[str] = None
+        self, user_id: str, plan_id: str, payment_method_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Create user subscription
@@ -203,17 +190,13 @@ class PaymentServiceClient:
             ... )
         """
         try:
-            payload = {
-                "user_id": user_id,
-                "plan_id": plan_id
-            }
+            payload = {"user_id": user_id, "plan_id": plan_id}
 
             if payment_method_id:
                 payload["payment_method_id"] = payment_method_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/subscriptions",
-                json=payload
+                f"{self.base_url}/api/v1/subscriptions", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -225,10 +208,7 @@ class PaymentServiceClient:
             logger.error(f"Error creating subscription: {e}")
             return None
 
-    async def get_user_subscription(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_user_subscription(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get user's active subscription
 
@@ -256,9 +236,7 @@ class PaymentServiceClient:
             return None
 
     async def update_subscription(
-        self,
-        subscription_id: str,
-        updates: Dict[str, Any]
+        self, subscription_id: str, updates: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """
         Update subscription
@@ -278,8 +256,7 @@ class PaymentServiceClient:
         """
         try:
             response = await self.client.put(
-                f"{self.base_url}/api/v1/subscriptions/{subscription_id}",
-                json=updates
+                f"{self.base_url}/api/v1/subscriptions/{subscription_id}", json=updates
             )
             response.raise_for_status()
             return response.json()
@@ -292,9 +269,7 @@ class PaymentServiceClient:
             return None
 
     async def cancel_subscription(
-        self,
-        subscription_id: str,
-        immediate: bool = False
+        self, subscription_id: str, immediate: bool = False
     ) -> Optional[Dict[str, Any]]:
         """
         Cancel subscription
@@ -314,7 +289,7 @@ class PaymentServiceClient:
 
             response = await self.client.post(
                 f"{self.base_url}/api/v1/subscriptions/{subscription_id}/cancel",
-                json=payload
+                json=payload,
             )
             response.raise_for_status()
             return response.json()
@@ -336,7 +311,7 @@ class PaymentServiceClient:
         amount: float,
         currency: str = "USD",
         description: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create payment intent
@@ -359,11 +334,7 @@ class PaymentServiceClient:
             ... )
         """
         try:
-            payload = {
-                "user_id": user_id,
-                "amount": amount,
-                "currency": currency
-            }
+            payload = {"user_id": user_id, "amount": amount, "currency": currency}
 
             if description:
                 payload["description"] = description
@@ -371,8 +342,7 @@ class PaymentServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/payments/intent",
-                json=payload
+                f"{self.base_url}/api/v1/payments/intent", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -385,9 +355,7 @@ class PaymentServiceClient:
             return None
 
     async def confirm_payment(
-        self,
-        payment_id: str,
-        payment_method_id: Optional[str] = None
+        self, payment_id: str, payment_method_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Confirm payment
@@ -408,8 +376,7 @@ class PaymentServiceClient:
                 payload["payment_method_id"] = payment_method_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/payments/{payment_id}/confirm",
-                json=payload
+                f"{self.base_url}/api/v1/payments/{payment_id}/confirm", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -422,10 +389,7 @@ class PaymentServiceClient:
             return None
 
     async def get_payment_history(
-        self,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, user_id: str, limit: int = 50, offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         Get user payment history
@@ -445,8 +409,7 @@ class PaymentServiceClient:
             params = {"limit": limit, "offset": offset}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/payments/user/{user_id}",
-                params=params
+                f"{self.base_url}/api/v1/payments/user/{user_id}", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -468,7 +431,7 @@ class PaymentServiceClient:
         amount: float,
         description: str,
         currency: str = "USD",
-        due_date: Optional[str] = None
+        due_date: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create invoice
@@ -495,15 +458,14 @@ class PaymentServiceClient:
                 "user_id": user_id,
                 "amount": amount,
                 "description": description,
-                "currency": currency
+                "currency": currency,
             }
 
             if due_date:
                 payload["due_date"] = due_date
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/invoices",
-                json=payload
+                f"{self.base_url}/api/v1/invoices", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -515,10 +477,7 @@ class PaymentServiceClient:
             logger.error(f"Error creating invoice: {e}")
             return None
 
-    async def get_invoice(
-        self,
-        invoice_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_invoice(self, invoice_id: str) -> Optional[Dict[str, Any]]:
         """
         Get invoice details
 
@@ -546,9 +505,7 @@ class PaymentServiceClient:
             return None
 
     async def pay_invoice(
-        self,
-        invoice_id: str,
-        payment_method_id: Optional[str] = None
+        self, invoice_id: str, payment_method_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Pay invoice
@@ -569,8 +526,7 @@ class PaymentServiceClient:
                 payload["payment_method_id"] = payment_method_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/invoices/{invoice_id}/pay",
-                json=payload
+                f"{self.base_url}/api/v1/invoices/{invoice_id}/pay", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -590,7 +546,7 @@ class PaymentServiceClient:
         self,
         payment_id: str,
         amount: Optional[float] = None,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create refund
@@ -618,8 +574,7 @@ class PaymentServiceClient:
                 payload["reason"] = reason
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/refunds",
-                json=payload
+                f"{self.base_url}/api/v1/refunds", json=payload
             )
             response.raise_for_status()
             return response.json()

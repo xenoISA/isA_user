@@ -342,11 +342,13 @@ class AccountClientProtocol(Protocol):
 
 class CampaignServiceError(Exception):
     """Base exception for campaign service errors"""
+
     pass
 
 
 class CampaignNotFoundError(CampaignServiceError):
     """Raised when campaign is not found"""
+
     pass
 
 
@@ -376,21 +378,25 @@ class CampaignValidationError(CampaignServiceError):
 
 class AudienceResolutionError(CampaignServiceError):
     """Raised when audience resolution fails"""
+
     pass
 
 
 class VariantAllocationError(CampaignServiceError):
     """Raised when variant allocation is invalid"""
+
     pass
 
 
 class TriggerEvaluationError(CampaignServiceError):
     """Raised when trigger evaluation fails"""
+
     pass
 
 
 class MessageDeliveryError(CampaignServiceError):
     """Raised when message delivery fails"""
+
     pass
 
 

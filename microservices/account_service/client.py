@@ -23,13 +23,14 @@ class AccountServiceClient:
             config: Optional ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
             self.config = None
         else:
             # Use ConfigManager for service discovery
             # Priority: Environment variables → Consul → localhost fallback
             if config is None:
                 from core.config_manager import ConfigManager
+
                 config = ConfigManager("account_service_client")
 
             self.config = config
@@ -46,11 +47,11 @@ class AccountServiceClient:
         if self.config:
             try:
                 host, port = self.config.discover_service(
-                    service_name='account_service',
-                    default_host='localhost',
+                    service_name="account_service",
+                    default_host="localhost",
                     default_port=8202,
-                    env_host_key='ACCOUNT_SERVICE_HOST',
-                    env_port_key='ACCOUNT_SERVICE_PORT'
+                    env_host_key="ACCOUNT_SERVICE_HOST",
+                    env_port_key="ACCOUNT_SERVICE_PORT",
                 )
                 return f"http://{host}:{port}"
             except Exception as e:
@@ -74,11 +75,7 @@ class AccountServiceClient:
     # =============================================================================
 
     async def ensure_account(
-        self,
-        user_id: str,
-        email: str,
-        name: str,
-        subscription_plan: str = "free"
+        self, user_id: str, email: str, name: str, subscription_plan: str = "free"
     ) -> Optional[Dict[str, Any]]:
         """
         Ensure account exists, create if needed
@@ -108,7 +105,7 @@ class AccountServiceClient:
                     "user_id": user_id,
                     "email": email,
                     "name": name,
-                }
+                },
             )
             response.raise_for_status()
             return response.json()
@@ -185,7 +182,7 @@ class AccountServiceClient:
         user_id: str,
         name: Optional[str] = None,
         email: Optional[str] = None,
-        preferences: Optional[Dict[str, Any]] = None
+        preferences: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Update account profile
@@ -220,7 +217,7 @@ class AccountServiceClient:
 
             response = await self.client.put(
                 f"{self._get_base_url()}/api/v1/accounts/profile/{user_id}",
-                json=update_data
+                json=update_data,
             )
             response.raise_for_status()
             return response.json()
@@ -239,7 +236,7 @@ class AccountServiceClient:
         language: Optional[str] = None,
         notification_email: Optional[bool] = None,
         notification_push: Optional[bool] = None,
-        theme: Optional[str] = None
+        theme: Optional[str] = None,
     ) -> bool:
         """
         Update account preferences
@@ -280,7 +277,7 @@ class AccountServiceClient:
 
             response = await self.client.put(
                 f"{self._get_base_url()}/api/v1/accounts/preferences/{user_id}",
-                json=prefs
+                json=prefs,
             )
             response.raise_for_status()
             return True
@@ -302,7 +299,7 @@ class AccountServiceClient:
         page_size: int = 50,
         is_active: Optional[bool] = None,
         subscription_status: Optional[str] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         List accounts with pagination and filtering
@@ -323,10 +320,7 @@ class AccountServiceClient:
             ...     print(account['name'])
         """
         try:
-            params = {
-                "page": page,
-                "page_size": page_size
-            }
+            params = {"page": page, "page_size": page_size}
             if is_active is not None:
                 params["is_active"] = is_active
             if subscription_status is not None:
@@ -335,8 +329,7 @@ class AccountServiceClient:
                 params["search"] = search
 
             response = await self.client.get(
-                f"{self._get_base_url()}/api/v1/accounts",
-                params=params
+                f"{self._get_base_url()}/api/v1/accounts", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -349,10 +342,7 @@ class AccountServiceClient:
             return None
 
     async def search_accounts(
-        self,
-        query: str,
-        limit: int = 50,
-        include_inactive: bool = False
+        self, query: str, limit: int = 50, include_inactive: bool = False
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Search accounts by query
@@ -376,8 +366,8 @@ class AccountServiceClient:
                 params={
                     "query": query,
                     "limit": limit,
-                    "include_inactive": include_inactive
-                }
+                    "include_inactive": include_inactive,
+                },
             )
             response.raise_for_status()
             return response.json()
@@ -394,10 +384,7 @@ class AccountServiceClient:
     # =============================================================================
 
     async def change_account_status(
-        self,
-        user_id: str,
-        is_active: bool,
-        reason: Optional[str] = None
+        self, user_id: str, is_active: bool, reason: Optional[str] = None
     ) -> bool:
         """
         Change account status (admin operation)
@@ -423,8 +410,7 @@ class AccountServiceClient:
                 payload["reason"] = reason
 
             response = await self.client.put(
-                f"{self._get_base_url()}/api/v1/accounts/status/{user_id}",
-                json=payload
+                f"{self._get_base_url()}/api/v1/accounts/status/{user_id}", json=payload
             )
             response.raise_for_status()
             return True
@@ -436,11 +422,7 @@ class AccountServiceClient:
             logger.error(f"Error changing account status: {e}")
             return False
 
-    async def delete_account(
-        self,
-        user_id: str,
-        reason: Optional[str] = None
-    ) -> bool:
+    async def delete_account(self, user_id: str, reason: Optional[str] = None) -> bool:
         """
         Delete account (soft delete)
 
@@ -461,7 +443,7 @@ class AccountServiceClient:
 
             response = await self.client.delete(
                 f"{self._get_base_url()}/api/v1/accounts/profile/{user_id}",
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return True
@@ -490,7 +472,9 @@ class AccountServiceClient:
             >>> print(f"Active: {stats['active_accounts']}")
         """
         try:
-            response = await self.client.get(f"{self._get_base_url()}/api/v1/accounts/stats")
+            response = await self.client.get(
+                f"{self._get_base_url()}/api/v1/accounts/stats"
+            )
             response.raise_for_status()
             return response.json()
 

@@ -15,8 +15,10 @@ from pydantic import BaseModel, Field
 # 枚举类型定义
 # ====================
 
+
 class PaymentStatus(str, Enum):
     """支付状态"""
+
     PENDING = "pending"
     PROCESSING = "processing"
     SUCCEEDED = "succeeded"
@@ -28,6 +30,7 @@ class PaymentStatus(str, Enum):
 
 class PaymentMethod(str, Enum):
     """支付方式"""
+
     CREDIT_CARD = "credit_card"
     DEBIT_CARD = "debit_card"
     ALIPAY = "alipay"
@@ -39,6 +42,7 @@ class PaymentMethod(str, Enum):
 
 class SubscriptionStatus(str, Enum):
     """订阅状态"""
+
     ACTIVE = "active"
     PAST_DUE = "past_due"
     CANCELED = "canceled"
@@ -51,6 +55,7 @@ class SubscriptionStatus(str, Enum):
 
 class SubscriptionTier(str, Enum):
     """订阅层级"""
+
     FREE = "free"
     BASIC = "basic"
     PRO = "pro"
@@ -60,6 +65,7 @@ class SubscriptionTier(str, Enum):
 
 class BillingCycle(str, Enum):
     """计费周期"""
+
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
     YEARLY = "yearly"
@@ -68,6 +74,7 @@ class BillingCycle(str, Enum):
 
 class InvoiceStatus(str, Enum):
     """发票状态"""
+
     DRAFT = "draft"
     OPEN = "open"
     PAID = "paid"
@@ -77,6 +84,7 @@ class InvoiceStatus(str, Enum):
 
 class RefundStatus(str, Enum):
     """退款状态"""
+
     PENDING = "pending"
     PROCESSING = "processing"
     SUCCEEDED = "succeeded"
@@ -86,6 +94,7 @@ class RefundStatus(str, Enum):
 
 class Currency(str, Enum):
     """货币类型"""
+
     USD = "USD"
     EUR = "EUR"
     GBP = "GBP"
@@ -97,8 +106,10 @@ class Currency(str, Enum):
 # 核心数据模型
 # ====================
 
+
 class SubscriptionPlan(BaseModel):
     """订阅计划模型"""
+
     id: Optional[str] = None
     plan_id: str = Field(..., description="计划ID")
     name: str = Field(..., description="计划名称")
@@ -130,6 +141,7 @@ class SubscriptionPlan(BaseModel):
 
 class Subscription(BaseModel):
     """用户订阅模型"""
+
     id: Optional[str] = None
     subscription_id: str = Field(..., description="订阅ID")
     user_id: str = Field(..., description="用户ID")
@@ -171,6 +183,7 @@ class Subscription(BaseModel):
 
 class Payment(BaseModel):
     """支付记录模型"""
+
     id: Optional[str] = None
     payment_id: str = Field(..., description="支付ID")
     user_id: str = Field(..., description="用户ID")
@@ -211,6 +224,7 @@ class Payment(BaseModel):
 
 class Invoice(BaseModel):
     """发票模型"""
+
     id: Optional[str] = None
     invoice_id: str = Field(..., description="发票ID")
     invoice_number: str = Field(..., description="发票号")
@@ -250,6 +264,7 @@ class Invoice(BaseModel):
 
 class Refund(BaseModel):
     """退款模型"""
+
     id: Optional[str] = None
     refund_id: str = Field(..., description="退款ID")
     payment_id: str = Field(..., description="原支付ID")
@@ -278,6 +293,7 @@ class Refund(BaseModel):
 
 class PaymentMethodInfo(BaseModel):
     """支付方式信息"""
+
     id: Optional[str] = None
     user_id: str
     method_type: PaymentMethod
@@ -308,8 +324,10 @@ class PaymentMethodInfo(BaseModel):
 # 请求/响应模型
 # ====================
 
+
 class CreatePaymentIntentRequest(BaseModel):
     """创建支付意图请求"""
+
     amount: Decimal = Field(..., ge=0, description="支付金额")
     currency: Currency = Currency.USD
     description: Optional[str] = None
@@ -325,6 +343,7 @@ class CreatePaymentIntentRequest(BaseModel):
 
 class CreateSubscriptionRequest(BaseModel):
     """创建订阅请求"""
+
     user_id: str
     plan_id: str
     payment_method_id: Optional[str] = None
@@ -334,6 +353,7 @@ class CreateSubscriptionRequest(BaseModel):
 
 class UpdateSubscriptionRequest(BaseModel):
     """更新订阅请求"""
+
     plan_id: Optional[str] = None
     payment_method_id: Optional[str] = None
     cancel_at_period_end: Optional[bool] = None
@@ -342,6 +362,7 @@ class UpdateSubscriptionRequest(BaseModel):
 
 class CancelSubscriptionRequest(BaseModel):
     """取消订阅请求"""
+
     immediate: bool = False
     reason: Optional[str] = None
     feedback: Optional[str] = None
@@ -349,6 +370,7 @@ class CancelSubscriptionRequest(BaseModel):
 
 class CreateRefundRequest(BaseModel):
     """创建退款请求"""
+
     payment_id: str
     amount: Optional[Decimal] = None  # None表示全额退款
     reason: str
@@ -357,6 +379,7 @@ class CreateRefundRequest(BaseModel):
 
 class PaymentIntentResponse(BaseModel):
     """支付意图响应"""
+
     payment_intent_id: str
     client_secret: Optional[str] = None  # 可选，因为没有Stripe时为None
     amount: Decimal
@@ -367,6 +390,7 @@ class PaymentIntentResponse(BaseModel):
 
 class SubscriptionResponse(BaseModel):
     """订阅响应"""
+
     subscription: Subscription
     plan: SubscriptionPlan
     next_invoice: Optional[Invoice] = None
@@ -375,6 +399,7 @@ class SubscriptionResponse(BaseModel):
 
 class PaymentHistoryResponse(BaseModel):
     """支付历史响应"""
+
     payments: List[Payment]
     total_count: int
     total_amount: Decimal
@@ -383,6 +408,7 @@ class PaymentHistoryResponse(BaseModel):
 
 class InvoiceResponse(BaseModel):
     """发票响应"""
+
     invoice: Invoice
     payment: Optional[Payment] = None
     download_url: Optional[str] = None
@@ -390,6 +416,7 @@ class InvoiceResponse(BaseModel):
 
 class UsageRecord(BaseModel):
     """使用量记录"""
+
     user_id: str
     subscription_id: str
     metric_name: str
@@ -400,6 +427,7 @@ class UsageRecord(BaseModel):
 
 class BillingAddress(BaseModel):
     """账单地址"""
+
     line1: str
     line2: Optional[str] = None
     city: str
@@ -410,6 +438,7 @@ class BillingAddress(BaseModel):
 
 class WebhookEvent(BaseModel):
     """Webhook事件模型"""
+
     id: str
     type: str
     data: Dict[str, Any]
@@ -423,8 +452,10 @@ class WebhookEvent(BaseModel):
 # 系统和服务模型
 # ====================
 
+
 class HealthResponse(BaseModel):
     """健康检查响应"""
+
     status: str
     service: str
     port: int
@@ -433,6 +464,7 @@ class HealthResponse(BaseModel):
 
 class ServiceInfo(BaseModel):
     """服务信息"""
+
     service: str
     version: str
     description: str
@@ -442,6 +474,7 @@ class ServiceInfo(BaseModel):
 
 class ServiceStats(BaseModel):
     """服务统计"""
+
     total_payments: int
     active_subscriptions: int
     revenue_today: Decimal

@@ -41,7 +41,7 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
             amount=Decimal(str(amount)),
             currency=Currency(currency),
             order_id=order_id,
-            metadata={"order_id": order_id}
+            metadata={"order_id": order_id},
         )
 
         await payment_service.create_payment_intent(request)
@@ -50,7 +50,9 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
         logger.error(f"❌ Error handling order.created event: {e}")
 
 
-async def handle_wallet_balance_changed(event_data: Dict[str, Any], payment_service) -> None:
+async def handle_wallet_balance_changed(
+    event_data: Dict[str, Any], payment_service
+) -> None:
     """
     Handle wallet.balance_changed event
 
@@ -67,14 +69,18 @@ async def handle_wallet_balance_changed(event_data: Dict[str, Any], payment_serv
 
         # If balance increased significantly, retry failed payments
         if new_balance and old_balance and new_balance > old_balance:
-            logger.info(f"Wallet balance increased for user {user_id}, checking for retry opportunities")
+            logger.info(
+                f"Wallet balance increased for user {user_id}, checking for retry opportunities"
+            )
             # TODO: Implement retry logic for failed subscription payments
 
     except Exception as e:
         logger.error(f"❌ Error handling wallet.balance_changed event: {e}")
 
 
-async def handle_wallet_insufficient_funds(event_data: Dict[str, Any], payment_service) -> None:
+async def handle_wallet_insufficient_funds(
+    event_data: Dict[str, Any], payment_service
+) -> None:
     """
     Handle wallet.insufficient_funds event
 
@@ -91,13 +97,17 @@ async def handle_wallet_insufficient_funds(event_data: Dict[str, Any], payment_s
 
         # Get user's active subscriptions
         # Mark them for payment retry or pause
-        logger.info(f"User {user_id} has insufficient funds - subscriptions may need attention")
+        logger.info(
+            f"User {user_id} has insufficient funds - subscriptions may need attention"
+        )
 
     except Exception as e:
         logger.error(f"❌ Error handling wallet.insufficient_funds event: {e}")
 
 
-async def handle_subscription_usage_exceeded(event_data: Dict[str, Any], payment_service) -> None:
+async def handle_subscription_usage_exceeded(
+    event_data: Dict[str, Any], payment_service
+) -> None:
     """
     Handle subscription.usage_exceeded event from product_service
 
@@ -116,7 +126,9 @@ async def handle_subscription_usage_exceeded(event_data: Dict[str, Any], payment
 
         # Create overage invoice
         if overage_amount and float(overage_amount) > 0:
-            logger.info(f"Creating overage invoice for subscription {subscription_id}, amount: {overage_amount}")
+            logger.info(
+                f"Creating overage invoice for subscription {subscription_id}, amount: {overage_amount}"
+            )
             # TODO: Implement invoice creation logic
 
     except Exception as e:
@@ -139,8 +151,10 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
         logger.info(f"Processing user.deleted event for user {user_id}")
 
         # Get all active subscriptions for this user
-        if hasattr(payment_service, 'repository'):
-            subscriptions = await payment_service.repository.get_user_subscriptions(user_id)
+        if hasattr(payment_service, "repository"):
+            subscriptions = await payment_service.repository.get_user_subscriptions(
+                user_id
+            )
 
             cancelled_count = 0
             refund_total = 0
@@ -149,16 +163,18 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
                 try:
                     # Cancel subscription
                     await payment_service.repository.cancel_subscription(
-                        subscription_id=subscription.get('subscription_id'),
+                        subscription_id=subscription.get("subscription_id"),
                         reason="user_deleted",
-                        immediate=True
+                        immediate=True,
                     )
                     cancelled_count += 1
 
                     # Calculate prorated refund if applicable
-                    if subscription.get('status') == 'active':
-                        prorated_amount = await payment_service.calculate_prorated_refund(
-                            subscription_id=subscription.get('subscription_id')
+                    if subscription.get("status") == "active":
+                        prorated_amount = (
+                            await payment_service.calculate_prorated_refund(
+                                subscription_id=subscription.get("subscription_id")
+                            )
                         )
                         if prorated_amount and prorated_amount > 0:
                             refund_total += prorated_amount
@@ -173,7 +189,9 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
                     )
 
             # Cancel pending payment intents
-            cancelled_intents = await payment_service.repository.cancel_user_payment_intents(user_id)
+            cancelled_intents = (
+                await payment_service.repository.cancel_user_payment_intents(user_id)
+            )
 
             # Anonymize payment history (keep for accounting, remove PII)
             await payment_service.repository.anonymize_user_payment_history(user_id)
@@ -185,7 +203,9 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
                 f"prorated refund: {refund_total}"
             )
         else:
-            logger.warning(f"Payment service repository not available for user {user_id} cleanup")
+            logger.warning(
+                f"Payment service repository not available for user {user_id} cleanup"
+            )
 
     except Exception as e:
         logger.error(f"❌ Error handling user.deleted event: {e}", exc_info=True)
@@ -208,7 +228,9 @@ async def handle_user_upgraded(event_data: Dict[str, Any], payment_service) -> N
         logger.info(f"Processing user upgrade for user {user_id} to tier {new_tier}")
 
         # Find active subscription and upgrade to matching tier
-        logger.info(f"Checking for subscription upgrade opportunities for user {user_id}")
+        logger.info(
+            f"Checking for subscription upgrade opportunities for user {user_id}"
+        )
         # TODO: Implement automatic subscription tier upgrade
 
     except Exception as e:
@@ -229,10 +251,22 @@ def get_event_handlers(payment_service) -> Dict[str, callable]:
         Dict mapping event patterns to handler functions
     """
     return {
-        "order_service.order.created": lambda event: handle_order_created(event.data, payment_service),
-        "wallet_service.wallet.balance_changed": lambda event: handle_wallet_balance_changed(event.data, payment_service),
-        "wallet_service.wallet.insufficient_funds": lambda event: handle_wallet_insufficient_funds(event.data, payment_service),
-        "product_service.subscription.usage_exceeded": lambda event: handle_subscription_usage_exceeded(event.data, payment_service),
-        "account_service.user.deleted": lambda event: handle_user_deleted(event.data, payment_service),
-        "account_service.user.upgraded": lambda event: handle_user_upgraded(event.data, payment_service),
+        "order_service.order.created": lambda event: handle_order_created(
+            event.data, payment_service
+        ),
+        "wallet_service.wallet.balance_changed": lambda event: handle_wallet_balance_changed(
+            event.data, payment_service
+        ),
+        "wallet_service.wallet.insufficient_funds": lambda event: handle_wallet_insufficient_funds(
+            event.data, payment_service
+        ),
+        "product_service.subscription.usage_exceeded": lambda event: handle_subscription_usage_exceeded(
+            event.data, payment_service
+        ),
+        "account_service.user.deleted": lambda event: handle_user_deleted(
+            event.data, payment_service
+        ),
+        "account_service.user.upgraded": lambda event: handle_user_upgraded(
+            event.data, payment_service
+        ),
     }

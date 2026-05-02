@@ -23,11 +23,12 @@ class ProductClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("product_service")
             except Exception as e:
@@ -74,11 +75,7 @@ class ProductClient:
             logger.error(f"Error getting plan: {e}")
             return None
 
-    async def validate_subscription(
-        self,
-        subscription_id: str,
-        user_id: str
-    ) -> bool:
+    async def validate_subscription(self, subscription_id: str, user_id: str) -> bool:
         """
         Validate subscription
 
@@ -97,8 +94,8 @@ class ProductClient:
             subscription = response.json()
 
             return (
-                subscription.get("user_id") == user_id and
-                subscription.get("status") == "active"
+                subscription.get("user_id") == user_id
+                and subscription.get("status") == "active"
             )
 
         except httpx.HTTPStatusError as e:
@@ -110,7 +107,9 @@ class ProductClient:
             logger.error(f"Error validating subscription: {e}")
             return False
 
-    async def get_user_subscriptions(self, user_id: str) -> Optional[List[Dict[str, Any]]]:
+    async def get_user_subscriptions(
+        self, user_id: str
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         Get user's subscriptions
 

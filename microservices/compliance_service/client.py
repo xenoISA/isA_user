@@ -44,7 +44,7 @@ class ComplianceServiceClient:
         check_types: Optional[List[str]] = None,
         organization_id: Optional[str] = None,
         session_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         检查文本内容合规性
@@ -77,40 +77,39 @@ class ComplianceServiceClient:
                 "content_type": "text",
                 "content": content,
                 "check_types": check_types or ["content_moderation"],
-                "metadata": metadata or {}
+                "metadata": metadata or {},
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/compliance/check",
-                json=request_data
+                f"{self.base_url}/api/compliance/check", json=request_data
             )
 
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"Text check completed: {result.get('status')} for user {user_id}")
+                logger.info(
+                    f"Text check completed: {result.get('status')} for user {user_id}"
+                )
                 return result
             else:
-                logger.error(f"Text check failed: {response.status_code} - {response.text}")
+                logger.error(
+                    f"Text check failed: {response.status_code} - {response.text}"
+                )
                 return {
                     "passed": False,
                     "error": f"Compliance check failed: {response.status_code}",
-                    "status": "fail"
+                    "status": "fail",
                 }
 
         except Exception as e:
             logger.error(f"Error checking text compliance: {e}")
-            return {
-                "passed": False,
-                "error": str(e),
-                "status": "fail"
-            }
+            return {"passed": False, "error": str(e), "status": "fail"}
 
     async def check_prompt(
         self,
         user_id: str,
         prompt: str,
         organization_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         检查AI提示词（防止提示词注入攻击）
@@ -139,21 +138,26 @@ class ComplianceServiceClient:
                 "content_type": "prompt",
                 "content": prompt,
                 "check_types": ["prompt_injection", "content_moderation"],
-                "metadata": metadata or {}
+                "metadata": metadata or {},
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/compliance/check",
-                json=request_data
+                f"{self.base_url}/api/compliance/check", json=request_data
             )
 
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"Prompt check completed: {result.get('status')} for user {user_id}")
+                logger.info(
+                    f"Prompt check completed: {result.get('status')} for user {user_id}"
+                )
                 return result
             else:
                 logger.error(f"Prompt check failed: {response.status_code}")
-                return {"passed": False, "error": "Prompt check failed", "status": "fail"}
+                return {
+                    "passed": False,
+                    "error": "Prompt check failed",
+                    "status": "fail",
+                }
 
         except Exception as e:
             logger.error(f"Error checking prompt: {e}")
@@ -165,7 +169,7 @@ class ComplianceServiceClient:
         file_id: str,
         content_type: str = "file",
         organization_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         检查文件内容合规性
@@ -194,17 +198,18 @@ class ComplianceServiceClient:
                 "content_type": content_type,
                 "content_id": file_id,
                 "check_types": ["content_moderation"],
-                "metadata": metadata or {}
+                "metadata": metadata or {},
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/compliance/check",
-                json=request_data
+                f"{self.base_url}/api/compliance/check", json=request_data
             )
 
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"File check completed: {result.get('status')} for file {file_id}")
+                logger.info(
+                    f"File check completed: {result.get('status')} for file {file_id}"
+                )
                 return result
             else:
                 logger.error(f"File check failed: {response.status_code}")
@@ -215,10 +220,7 @@ class ComplianceServiceClient:
             return {"passed": False, "error": str(e), "status": "fail"}
 
     async def check_pii(
-        self,
-        user_id: str,
-        content: str,
-        organization_id: Optional[str] = None
+        self, user_id: str, content: str, organization_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         专门检查PII（个人信息）
@@ -245,12 +247,11 @@ class ComplianceServiceClient:
                 "organization_id": organization_id,
                 "content_type": "text",
                 "content": content,
-                "check_types": ["pii_detection"]
+                "check_types": ["pii_detection"],
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/compliance/check",
-                json=request_data
+                f"{self.base_url}/api/compliance/check", json=request_data
             )
 
             if response.status_code == 200:
@@ -266,9 +267,7 @@ class ComplianceServiceClient:
     # ==================== User Data Control Methods (GDPR) ====================
 
     async def export_user_data(
-        self,
-        user_id: str,
-        format: str = "json"
+        self, user_id: str, format: str = "json"
     ) -> Dict[str, Any]:
         """
         导出用户数据 (GDPR Article 15 & 20)
@@ -287,7 +286,7 @@ class ComplianceServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/compliance/user/{user_id}/data-export",
-                params={"format": format}
+                params={"format": format},
             )
 
             if response.status_code == 200:
@@ -302,9 +301,7 @@ class ComplianceServiceClient:
             return {"error": str(e)}
 
     async def delete_user_data(
-        self,
-        user_id: str,
-        confirmation: str = "CONFIRM_DELETE"
+        self, user_id: str, confirmation: str = "CONFIRM_DELETE"
     ) -> Dict[str, Any]:
         """
         删除用户数据 (GDPR Article 17 - Right to be Forgotten)
@@ -327,12 +324,14 @@ class ComplianceServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/compliance/user/{user_id}/data",
-                params={"confirmation": confirmation}
+                params={"confirmation": confirmation},
             )
 
             if response.status_code == 200:
                 result = response.json()
-                logger.warning(f"Deleted data for user {user_id}: {result.get('deleted_records')} records")
+                logger.warning(
+                    f"Deleted data for user {user_id}: {result.get('deleted_records')} records"
+                )
                 return result
             else:
                 logger.error(f"Data deletion failed: {response.status_code}")
@@ -342,10 +341,7 @@ class ComplianceServiceClient:
             logger.error(f"Error deleting user data: {e}")
             return {"status": "error", "message": str(e)}
 
-    async def get_user_data_summary(
-        self,
-        user_id: str
-    ) -> Dict[str, Any]:
+    async def get_user_data_summary(self, user_id: str) -> Dict[str, Any]:
         """
         获取用户数据摘要 (GDPR Article 15)
 
@@ -378,10 +374,7 @@ class ComplianceServiceClient:
 
     # ==================== Query and Report Methods ====================
 
-    async def get_check_status(
-        self,
-        check_id: str
-    ) -> Dict[str, Any]:
+    async def get_check_status(self, check_id: str) -> Dict[str, Any]:
         """
         获取合规检查状态
 
@@ -407,10 +400,7 @@ class ComplianceServiceClient:
             return {"error": str(e)}
 
     async def get_user_checks(
-        self,
-        user_id: str,
-        limit: int = 100,
-        status: Optional[str] = None
+        self, user_id: str, limit: int = 100, status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         获取用户的合规检查历史
@@ -429,8 +419,7 @@ class ComplianceServiceClient:
                 params["status"] = status
 
             response = await self.client.get(
-                f"{self.base_url}/api/compliance/checks/user/{user_id}",
-                params=params
+                f"{self.base_url}/api/compliance/checks/user/{user_id}", params=params
             )
 
             if response.status_code == 200:
@@ -444,11 +433,7 @@ class ComplianceServiceClient:
             logger.error(f"Error getting user checks: {e}")
             return []
 
-    async def check_pci_card_data(
-        self,
-        content: str,
-        user_id: str
-    ) -> Dict[str, Any]:
+    async def check_pci_card_data(self, content: str, user_id: str) -> Dict[str, Any]:
         """
         检查内容中是否包含信用卡信息 (PCI-DSS)
 
@@ -470,7 +455,7 @@ class ComplianceServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/compliance/pci/card-data-check",
-                json={"content": content, "user_id": user_id}
+                json={"content": content, "user_id": user_id},
             )
 
             if response.status_code == 200:
@@ -498,7 +483,10 @@ class ComplianceServiceClient:
             if response.status_code == 200:
                 return response.json()
             else:
-                return {"status": "unhealthy", "error": f"Status code: {response.status_code}"}
+                return {
+                    "status": "unhealthy",
+                    "error": f"Status code: {response.status_code}",
+                }
 
         except Exception as e:
             logger.error(f"Health check failed: {e}")
@@ -509,7 +497,10 @@ class ComplianceServiceClient:
 
 _compliance_client: Optional[ComplianceServiceClient] = None
 
-async def get_compliance_client(base_url: str = "http://localhost:8250") -> ComplianceServiceClient:
+
+async def get_compliance_client(
+    base_url: str = "http://localhost:8250",
+) -> ComplianceServiceClient:
     """
     获取Compliance Service客户端实例（单例模式）
 
@@ -528,10 +519,10 @@ async def get_compliance_client(base_url: str = "http://localhost:8250") -> Comp
         _compliance_client = ComplianceServiceClient(base_url)
     return _compliance_client
 
+
 async def close_compliance_client():
     """关闭Compliance Service客户端"""
     global _compliance_client
     if _compliance_client:
         await _compliance_client.close()
         _compliance_client = None
-

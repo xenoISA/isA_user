@@ -29,13 +29,11 @@ __all__ = [
     "EventCreatedEvent",
     "EventProcessedEvent",
     "EventFailedEvent",
-
     # Re-export from publishers
     "EventPublisher",
     "publish_event_created",
     "publish_event_processed",
     "publish_event_failed",
-
     # Re-export from handlers
     "EventHandlers",
     "handle_event_created",

@@ -10,11 +10,23 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from .models import (
-    Event, EventStream, EventSource, EventCategory, EventStatus,
-    EventCreateRequest, EventQueryRequest, EventResponse, EventListResponse,
-    EventStatistics, EventProcessingResult, ProcessingStatus,
-    EventReplayRequest, EventProjection, EventProcessor, EventSubscription,
-    RudderStackEvent
+    Event,
+    EventStream,
+    EventSource,
+    EventCategory,
+    EventStatus,
+    EventCreateRequest,
+    EventQueryRequest,
+    EventResponse,
+    EventListResponse,
+    EventStatistics,
+    EventProcessingResult,
+    ProcessingStatus,
+    EventReplayRequest,
+    EventProjection,
+    EventProcessor,
+    EventSubscription,
+    RudderStackEvent,
 )
 from .event_repository import EventRepository
 from core.nats_client import Event as NATSEvent
@@ -27,7 +39,9 @@ class EventService:
     """事件服务核心类"""
 
     def __init__(self, event_bus=None, config_manager: Optional[ConfigManager] = None):
-        self.config_manager = config_manager if config_manager else ConfigManager("event_service")
+        self.config_manager = (
+            config_manager if config_manager else ConfigManager("event_service")
+        )
         self.repository = EventRepository(config=self.config_manager)
         self.event_bus = event_bus
         self.processors: Dict[str, EventProcessor] = {}
@@ -63,7 +77,7 @@ class EventService:
             data=request.data,
             metadata=request.metadata or {},
             context=request.context or {},
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
         # 存储事件
@@ -75,7 +89,9 @@ class EventService:
         # 触发实时处理器
         asyncio.create_task(self._trigger_realtime_processors(stored_event))
 
-        logger.info(f"Event created: {stored_event.event_id} - {stored_event.event_type}")
+        logger.info(
+            f"Event created: {stored_event.event_id} - {stored_event.event_type}"
+        )
 
         # Publish event.stored event
         if self.event_bus:
@@ -89,8 +105,8 @@ class EventService:
                         "event_source": stored_event.event_source.value,
                         "event_category": stored_event.event_category.value,
                         "user_id": stored_event.user_id,
-                        "timestamp": stored_event.timestamp.isoformat()
-                    }
+                        "timestamp": stored_event.timestamp.isoformat(),
+                    },
                 )
                 await self.event_bus.publish_event(nats_event)
             except Exception as e:
@@ -105,10 +121,12 @@ class EventService:
             data=stored_event.data,
             status=stored_event.status,
             timestamp=stored_event.timestamp,
-            created_at=stored_event.created_at
+            created_at=stored_event.created_at,
         )
 
-    async def create_event_from_rudderstack(self, rudderstack_event: RudderStackEvent) -> EventResponse:
+    async def create_event_from_rudderstack(
+        self, rudderstack_event: RudderStackEvent
+    ) -> EventResponse:
         """从 RudderStack 事件创建事件"""
         # 转换 RudderStack 事件为统一事件格式
         event = Event(
@@ -125,9 +143,11 @@ class EventService:
                 "anonymous_id": rudderstack_event.anonymousId,
                 "sent_at": rudderstack_event.sentAt,
                 "received_at": rudderstack_event.receivedAt,
-                "original_timestamp": rudderstack_event.originalTimestamp
+                "original_timestamp": rudderstack_event.originalTimestamp,
             },
-            timestamp=datetime.fromisoformat(rudderstack_event.timestamp.replace('Z', '+00:00'))
+            timestamp=datetime.fromisoformat(
+                rudderstack_event.timestamp.replace("Z", "+00:00")
+            ),
         )
 
         # 存储事件
@@ -147,7 +167,7 @@ class EventService:
             data=stored_event.data,
             status=stored_event.status,
             timestamp=stored_event.timestamp,
-            created_at=stored_event.created_at
+            created_at=stored_event.created_at,
         )
 
     async def create_event_from_nats(self, nats_event: Dict[str, Any]) -> EventResponse:
@@ -162,13 +182,15 @@ class EventService:
             metadata={
                 "source_service": nats_event.get("source"),
                 "event_id": nats_event.get("id"),
-                "version": nats_event.get("version")
+                "version": nats_event.get("version"),
             },
             context={
                 "subject": nats_event.get("subject"),
-                "correlation_id": nats_event.get("correlation_id")
+                "correlation_id": nats_event.get("correlation_id"),
             },
-            timestamp=datetime.fromisoformat(nats_event.get("timestamp", datetime.utcnow().isoformat()))
+            timestamp=datetime.fromisoformat(
+                nats_event.get("timestamp", datetime.utcnow().isoformat())
+            ),
         )
 
         # 存储事件
@@ -188,7 +210,7 @@ class EventService:
             data=stored_event.data,
             status=stored_event.status,
             timestamp=stored_event.timestamp,
-            created_at=stored_event.created_at
+            created_at=stored_event.created_at,
         )
 
     # ==================== 事件查询 ====================
@@ -204,7 +226,7 @@ class EventService:
             start_time=request.start_time,
             end_time=request.end_time,
             limit=request.limit,
-            offset=request.offset
+            offset=request.offset,
         )
 
         responses = [
@@ -217,8 +239,9 @@ class EventService:
                 data=e.data,
                 status=e.status,
                 timestamp=e.timestamp,
-                created_at=e.created_at
-            ) for e in events
+                created_at=e.created_at,
+            )
+            for e in events
         ]
 
         return EventListResponse(
@@ -226,14 +249,16 @@ class EventService:
             total=total,
             limit=request.limit,
             offset=request.offset,
-            has_more=(request.offset + request.limit) < total
+            has_more=(request.offset + request.limit) < total,
         )
 
     async def get_event(self, event_id: str) -> Optional[Event]:
         """获取单个事件"""
         return await self.repository.get_event(event_id)
 
-    async def get_event_stream(self, stream_id: str, from_version: Optional[int] = None) -> EventStream:
+    async def get_event_stream(
+        self, stream_id: str, from_version: Optional[int] = None
+    ) -> EventStream:
         """获取事件流"""
         events = await self.repository.get_event_stream(stream_id, from_version)
 
@@ -248,7 +273,7 @@ class EventService:
             entity_id=entity_id,
             entity_type=entity_type,
             events=events,
-            version=len(events)
+            version=len(events),
         )
 
     async def get_user_events(self, user_id: str, limit: int = 100) -> List[Event]:
@@ -284,10 +309,7 @@ class EventService:
     # ==================== 事件处理 ====================
 
     async def mark_event_processed(
-        self,
-        event_id: str,
-        processor_name: str,
-        result: EventProcessingResult
+        self, event_id: str, processor_name: str, result: EventProcessingResult
     ) -> bool:
         """标记事件已处理"""
         event = await self.repository.get_event(event_id)
@@ -314,12 +336,14 @@ class EventService:
                             "event_type": event.event_type,
                             "processor_name": processor_name,
                             "duration_ms": result.duration_ms,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(nats_event)
                 except Exception as e:
-                    logger.error(f"Failed to publish event.processed.success event: {e}")
+                    logger.error(
+                        f"Failed to publish event.processed.success event: {e}"
+                    )
 
         elif result.status == ProcessingStatus.FAILED:
             event.status = EventStatus.FAILED
@@ -338,8 +362,8 @@ class EventService:
                             "processor_name": processor_name,
                             "error_message": result.message,
                             "retry_count": event.retry_count,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(nats_event)
                 except Exception as e:
@@ -382,8 +406,7 @@ class EventService:
         elif request.start_time and request.end_time:
             # 按时间范围重放
             events = await self.repository.get_events_by_time_range(
-                request.start_time,
-                request.end_time
+                request.start_time, request.end_time
             )
 
         # Publish event.replay.started event
@@ -397,8 +420,8 @@ class EventService:
                         "stream_id": request.stream_id,
                         "target_service": request.target_service,
                         "dry_run": request.dry_run,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
                 )
                 await self.event_bus.publish_event(nats_event)
             except Exception as e:
@@ -409,7 +432,7 @@ class EventService:
             return {
                 "dry_run": True,
                 "events_count": len(events),
-                "events": [e.event_id for e in events]
+                "events": [e.event_id for e in events],
             }
 
         # 实际重放
@@ -425,25 +448,18 @@ class EventService:
                 logger.error(f"Failed to replay event {event.event_id}: {e}")
                 failed += 1
 
-        return {
-            "replayed": replayed,
-            "failed": failed,
-            "total": len(events)
-        }
+        return {"replayed": replayed, "failed": failed, "total": len(events)}
 
     # ==================== 事件投影 ====================
 
     async def create_projection(
-        self,
-        projection_name: str,
-        entity_id: str,
-        entity_type: str
+        self, projection_name: str, entity_id: str, entity_type: str
     ) -> EventProjection:
         """创建事件投影"""
         projection = EventProjection(
             projection_name=projection_name,
             entity_id=entity_id,
-            entity_type=entity_type
+            entity_type=entity_type,
         )
 
         # 获取相关事件流
@@ -471,8 +487,8 @@ class EventService:
                         "entity_type": entity_type,
                         "events_count": len(events),
                         "version": projection.version,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
                 )
                 await self.event_bus.publish_event(nats_event)
             except Exception as e:
@@ -489,7 +505,9 @@ class EventService:
 
     # ==================== 事件订阅 ====================
 
-    async def create_subscription(self, subscription: EventSubscription) -> EventSubscription:
+    async def create_subscription(
+        self, subscription: EventSubscription
+    ) -> EventSubscription:
         """创建事件订阅"""
         # 保存订阅
         await self.repository.save_subscription(subscription)
@@ -507,10 +525,15 @@ class EventService:
                         "subscription_id": subscription.subscription_id,
                         "subscriber_name": subscription.subscriber_name,
                         "event_types": subscription.event_types,
-                        "event_sources": [s.value if hasattr(s, 'value') else str(s) for s in subscription.event_sources] if subscription.event_sources else [],
+                        "event_sources": [
+                            s.value if hasattr(s, "value") else str(s)
+                            for s in subscription.event_sources
+                        ]
+                        if subscription.event_sources
+                        else [],
                         "enabled": subscription.enabled,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
                 )
                 await self.event_bus.publish_event(nats_event)
             except Exception as e:
@@ -577,10 +600,7 @@ class EventService:
         while self.is_processing:
             try:
                 # 从队列获取事件
-                event = await asyncio.wait_for(
-                    self.processing_queue.get(),
-                    timeout=1.0
-                )
+                event = await asyncio.wait_for(self.processing_queue.get(), timeout=1.0)
 
                 # 处理事件
                 await self._process_event(event)
@@ -601,7 +621,7 @@ class EventService:
                 status=ProcessingStatus.SUCCESS,
                 message="Event processed successfully",
                 processed_at=datetime.utcnow(),
-                duration_ms=0
+                duration_ms=0,
             )
             # 标记事件为已处理
             await self.mark_event_processed(event.event_id, "event_processor", result)
@@ -614,7 +634,7 @@ class EventService:
                 status=ProcessingStatus.FAILED,
                 message=str(e),
                 processed_at=datetime.utcnow(),
-                duration_ms=0
+                duration_ms=0,
             )
             await self.mark_event_processed(event.event_id, "event_processor", result)
 
@@ -687,18 +707,29 @@ class EventService:
         else:
             return EventCategory.SYSTEM
 
-    def _matches_subscription(self, event: Event, subscription: EventSubscription) -> bool:
+    def _matches_subscription(
+        self, event: Event, subscription: EventSubscription
+    ) -> bool:
         """检查事件是否匹配订阅"""
         # 检查事件类型
-        if subscription.event_types and event.event_type not in subscription.event_types:
+        if (
+            subscription.event_types
+            and event.event_type not in subscription.event_types
+        ):
             return False
 
         # 检查事件源
-        if subscription.event_sources and event.event_source not in subscription.event_sources:
+        if (
+            subscription.event_sources
+            and event.event_source not in subscription.event_sources
+        ):
             return False
 
         # 检查事件分类
-        if subscription.event_categories and event.event_category not in subscription.event_categories:
+        if (
+            subscription.event_categories
+            and event.event_category not in subscription.event_categories
+        ):
             return False
 
         return True
@@ -723,10 +754,12 @@ class EventService:
             result = EventProcessingResult(
                 event_id=event.event_id,
                 processor_name=processor.processor_name,
-                status=ProcessingStatus.SUCCESS
+                status=ProcessingStatus.SUCCESS,
             )
 
-            await self.mark_event_processed(event.event_id, processor.processor_name, result)
+            await self.mark_event_processed(
+                event.event_id, processor.processor_name, result
+            )
 
         except Exception as e:
             logger.error(f"Processor {processor.processor_name} failed: {e}")
@@ -735,12 +768,16 @@ class EventService:
                 event_id=event.event_id,
                 processor_name=processor.processor_name,
                 status=ProcessingStatus.FAILED,
-                message=str(e)
+                message=str(e),
             )
 
-            await self.mark_event_processed(event.event_id, processor.processor_name, result)
+            await self.mark_event_processed(
+                event.event_id, processor.processor_name, result
+            )
 
-    async def _deliver_to_subscriber(self, event: Event, subscription: EventSubscription):
+    async def _deliver_to_subscriber(
+        self, event: Event, subscription: EventSubscription
+    ):
         """递送事件到订阅者"""
         if subscription.callback_url:
             # 通过 Webhook 递送
@@ -758,9 +795,7 @@ class EventService:
                 await self.repository.update_projection(projection)
 
     async def _apply_event_to_projection(
-        self,
-        projection: EventProjection,
-        event: Event
+        self, projection: EventProjection, event: Event
     ) -> EventProjection:
         """应用事件到投影"""
         # 更新投影状态
@@ -771,7 +806,9 @@ class EventService:
 
         return projection
 
-    async def _republish_event(self, event: Event, target_service: Optional[str] = None):
+    async def _republish_event(
+        self, event: Event, target_service: Optional[str] = None
+    ):
         """重新发布事件"""
         # 这里应该实现事件重新发布逻辑
         # 可以发布到 NATS 或直接调用服务

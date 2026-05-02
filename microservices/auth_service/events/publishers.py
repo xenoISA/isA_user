@@ -24,12 +24,13 @@ logger = logging.getLogger(__name__)
 # Device Pairing Event Publishers
 # ============================================================================
 
+
 async def publish_device_pairing_token_generated(
     event_bus,
     device_id: str,
     pairing_token: str,
     expires_at: datetime,
-    event_id: Optional[str] = None
+    event_id: Optional[str] = None,
 ):
     """
     Publish device.pairing_token.generated event
@@ -43,16 +44,14 @@ async def publish_device_pairing_token_generated(
     """
     try:
         event_data = create_pairing_token_generated_event_data(
-            device_id=device_id,
-            pairing_token=pairing_token,
-            expires_at=expires_at
+            device_id=device_id, pairing_token=pairing_token, expires_at=expires_at
         )
 
         event = Event(
             event_id=event_id,
             event_type="device.pairing_token.generated",
             source="auth_service",
-            data=event_data.model_dump()
+            data=event_data.model_dump(),
         )
 
         await event_bus.publish(event)
@@ -68,7 +67,7 @@ async def publish_device_pairing_token_verified(
     device_id: str,
     user_id: str,
     pairing_token: str,
-    event_id: Optional[str] = None
+    event_id: Optional[str] = None,
 ):
     """
     Publish device.pairing_token.verified event
@@ -82,20 +81,20 @@ async def publish_device_pairing_token_verified(
     """
     try:
         event_data = create_pairing_token_verified_event_data(
-            device_id=device_id,
-            user_id=user_id,
-            pairing_token=pairing_token
+            device_id=device_id, user_id=user_id, pairing_token=pairing_token
         )
 
         event = Event(
             event_id=event_id,
             event_type="device.pairing_token.verified",
             source="auth_service",
-            data=event_data.model_dump()
+            data=event_data.model_dump(),
         )
 
         await event_bus.publish(event)
-        logger.info(f"Published device.pairing_token.verified for device {device_id}, user {user_id}")
+        logger.info(
+            f"Published device.pairing_token.verified for device {device_id}, user {user_id}"
+        )
 
     except Exception as e:
         logger.error(f"Failed to publish device.pairing_token.verified: {e}")
@@ -108,7 +107,7 @@ async def publish_device_pairing_completed(
     user_id: str,
     device_name: Optional[str] = None,
     device_type: Optional[str] = None,
-    event_id: Optional[str] = None
+    event_id: Optional[str] = None,
 ):
     """
     Publish device.pairing.completed event
@@ -126,18 +125,20 @@ async def publish_device_pairing_completed(
             device_id=device_id,
             user_id=user_id,
             device_name=device_name,
-            device_type=device_type
+            device_type=device_type,
         )
 
         event = Event(
             event_id=event_id,
             event_type="device.pairing.completed",
             source="auth_service",
-            data=event_data.model_dump()
+            data=event_data.model_dump(),
         )
 
         await event_bus.publish(event)
-        logger.info(f"Published device.pairing.completed for device {device_id}, user {user_id}")
+        logger.info(
+            f"Published device.pairing.completed for device {device_id}, user {user_id}"
+        )
 
     except Exception as e:
         logger.error(f"Failed to publish device.pairing.completed: {e}")

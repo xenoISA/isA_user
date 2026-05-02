@@ -12,6 +12,7 @@ from enum import Enum
 
 class RecurrenceType(str, Enum):
     """事件重复类型"""
+
     NONE = "none"
     DAILY = "daily"
     WEEKLY = "weekly"
@@ -22,6 +23,7 @@ class RecurrenceType(str, Enum):
 
 class EventCategory(str, Enum):
     """事件分类"""
+
     WORK = "work"
     PERSONAL = "personal"
     MEETING = "meeting"
@@ -33,6 +35,7 @@ class EventCategory(str, Enum):
 
 class SyncProvider(str, Enum):
     """外部日历提供商"""
+
     GOOGLE = "google_calendar"
     APPLE = "apple_calendar"
     OUTLOOK = "outlook"
@@ -41,6 +44,7 @@ class SyncProvider(str, Enum):
 
 class CalendarEvent(BaseModel):
     """日历事件模型"""
+
     id: Optional[int] = None
     event_id: str = Field(..., description="事件唯一标识")
     user_id: str = Field(..., description="用户ID")
@@ -91,8 +95,10 @@ class CalendarEvent(BaseModel):
 
 # Request Models
 
+
 class EventCreateRequest(BaseModel):
     """创建事件请求"""
+
     user_id: str
     organization_id: Optional[str] = None
     title: str
@@ -115,6 +121,7 @@ class EventCreateRequest(BaseModel):
 
 class EventUpdateRequest(BaseModel):
     """更新事件请求"""
+
     title: Optional[str] = None
     description: Optional[str] = None
     location: Optional[str] = None
@@ -132,6 +139,7 @@ class EventUpdateRequest(BaseModel):
 
 class EventQueryRequest(BaseModel):
     """查询事件请求"""
+
     user_id: str
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
@@ -142,8 +150,10 @@ class EventQueryRequest(BaseModel):
 
 # Response Models
 
+
 class EventResponse(BaseModel):
     """事件响应"""
+
     event_id: str
     user_id: str
     title: str
@@ -168,6 +178,7 @@ class EventResponse(BaseModel):
 
 class EventListResponse(BaseModel):
     """事件列表响应"""
+
     events: List[EventResponse]
     total: int
     page: int
@@ -176,6 +187,7 @@ class EventListResponse(BaseModel):
 
 class SyncStatusResponse(BaseModel):
     """同步状态响应"""
+
     provider: str  # Can be SyncProvider value or other string
     last_synced: Optional[datetime]
     synced_events: int
@@ -193,6 +205,5 @@ __all__ = [
     "EventQueryRequest",
     "EventResponse",
     "EventListResponse",
-    "SyncStatusResponse"
+    "SyncStatusResponse",
 ]
-

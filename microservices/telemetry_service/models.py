@@ -12,6 +12,7 @@ from enum import Enum
 
 class DataType(str, Enum):
     """数据类型"""
+
     NUMERIC = "numeric"
     STRING = "string"
     BOOLEAN = "boolean"
@@ -23,6 +24,7 @@ class DataType(str, Enum):
 
 class MetricType(str, Enum):
     """指标类型"""
+
     GAUGE = "gauge"  # 瞬时值
     COUNTER = "counter"  # 计数器
     HISTOGRAM = "histogram"  # 直方图
@@ -31,6 +33,7 @@ class MetricType(str, Enum):
 
 class AlertLevel(str, Enum):
     """警报级别"""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -40,6 +43,7 @@ class AlertLevel(str, Enum):
 
 class AlertStatus(str, Enum):
     """警报状态"""
+
     ACTIVE = "active"
     ACKNOWLEDGED = "acknowledged"
     RESOLVED = "resolved"
@@ -48,6 +52,7 @@ class AlertStatus(str, Enum):
 
 class AggregationType(str, Enum):
     """聚合类型"""
+
     AVG = "avg"
     MIN = "min"
     MAX = "max"
@@ -60,6 +65,7 @@ class AggregationType(str, Enum):
 
 class TimeRange(str, Enum):
     """时间范围"""
+
     LAST_HOUR = "1h"
     LAST_6_HOURS = "6h"
     LAST_24_HOURS = "24h"
@@ -72,8 +78,10 @@ class TimeRange(str, Enum):
 # Request Models
 # ==================
 
+
 class TelemetryDataPoint(BaseModel):
     """遥测数据点"""
+
     timestamp: datetime
     metric_name: str = Field(..., min_length=1, max_length=100)
     value: Union[int, float, str, bool, Dict[str, Any]]
@@ -84,6 +92,7 @@ class TelemetryDataPoint(BaseModel):
 
 class TelemetryBatchRequest(BaseModel):
     """批量遥测数据请求"""
+
     data_points: List[TelemetryDataPoint] = Field(..., min_items=1, max_items=1000)
     compression: Optional[str] = None  # gzip, lz4, etc.
     batch_id: Optional[str] = None  # 批次ID，用于去重
@@ -91,6 +100,7 @@ class TelemetryBatchRequest(BaseModel):
 
 class MetricDefinitionRequest(BaseModel):
     """指标定义请求"""
+
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     data_type: DataType
@@ -106,6 +116,7 @@ class MetricDefinitionRequest(BaseModel):
 
 class AlertRuleRequest(BaseModel):
     """警报规则请求"""
+
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=1000)
     metric_name: str = Field(..., min_length=1, max_length=100)
@@ -132,8 +143,11 @@ class AlertRuleRequest(BaseModel):
 
 class QueryRequest(BaseModel):
     """查询请求"""
+
     devices: Optional[List[str]] = []  # Changed from device_ids to match test
-    metrics: List[str] = Field(..., min_items=1)  # Changed from metric_names to match test
+    metrics: List[str] = Field(
+        ..., min_items=1
+    )  # Changed from metric_names to match test
     start_time: datetime
     end_time: datetime
     aggregation: Optional[AggregationType] = None
@@ -145,6 +159,7 @@ class QueryRequest(BaseModel):
 
 class RealTimeSubscriptionRequest(BaseModel):
     """实时订阅请求"""
+
     device_ids: Optional[List[str]] = []
     metric_names: Optional[List[str]] = []
     tags: Optional[Dict[str, str]] = {}
@@ -156,8 +171,10 @@ class RealTimeSubscriptionRequest(BaseModel):
 # Response Models
 # ==================
 
+
 class MetricDefinitionResponse(BaseModel):
     """指标定义响应"""
+
     metric_id: str
     name: str
     description: Optional[str]
@@ -177,6 +194,7 @@ class MetricDefinitionResponse(BaseModel):
 
 class TelemetryDataResponse(BaseModel):
     """遥测数据响应"""
+
     device_id: str
     metric_name: str
     data_points: List[TelemetryDataPoint]
@@ -189,6 +207,7 @@ class TelemetryDataResponse(BaseModel):
 
 class AlertRuleResponse(BaseModel):
     """警报规则响应"""
+
     rule_id: str
     name: str
     description: Optional[str]
@@ -219,6 +238,7 @@ class AlertRuleResponse(BaseModel):
 
 class AlertResponse(BaseModel):
     """警报响应"""
+
     alert_id: str
     rule_id: str
     rule_name: str
@@ -249,6 +269,7 @@ class AlertResponse(BaseModel):
 
 class DeviceTelemetryStatsResponse(BaseModel):
     """设备遥测统计响应"""
+
     device_id: str
     total_metrics: int
     active_metrics: int
@@ -268,6 +289,7 @@ class DeviceTelemetryStatsResponse(BaseModel):
 
 class TelemetryStatsResponse(BaseModel):
     """遥测统计响应"""
+
     total_devices: int
     active_devices: int
     total_metrics: int
@@ -292,6 +314,7 @@ class TelemetryStatsResponse(BaseModel):
 
 class RealTimeDataResponse(BaseModel):
     """实时数据响应"""
+
     subscription_id: str
     device_id: str
     data_points: List[TelemetryDataPoint]
@@ -301,6 +324,7 @@ class RealTimeDataResponse(BaseModel):
 
 class AggregatedDataResponse(BaseModel):
     """聚合数据响应"""
+
     device_id: Optional[str]  # None表示多设备聚合
     metric_name: str
     aggregation_type: AggregationType
@@ -313,6 +337,7 @@ class AggregatedDataResponse(BaseModel):
 
 class AlertListResponse(BaseModel):
     """警报列表响应"""
+
     alerts: List[AlertResponse]
     count: int
     active_count: int

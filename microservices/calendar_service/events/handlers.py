@@ -70,7 +70,7 @@ class CalendarEventHandlers:
         except Exception as e:
             logger.error(
                 f"❌ Error handling user.deleted event for user {event_data.get('user_id')}: {e}",
-                exc_info=True
+                exc_info=True,
             )
             # Don't raise - we don't want to break the event processing chain
 
@@ -124,19 +124,18 @@ class CalendarEventHandlers:
                     "task_id": task_id,
                     "task_type": event_data.get("task_type"),
                     "schedule": schedule,
-                }
+                },
             }
 
             # Create calendar event
-            await self.repository.create_event_from_task(user_id, event_data_for_calendar)
+            await self.repository.create_event_from_task(
+                user_id, event_data_for_calendar
+            )
 
             logger.info(f"✅ Created calendar event for task {task_id}")
 
         except Exception as e:
-            logger.error(
-                f"❌ Error handling task.created event: {e}",
-                exc_info=True
-            )
+            logger.error(f"❌ Error handling task.created event: {e}", exc_info=True)
 
     async def handle_task_completed(self, event_data: dict):
         """
@@ -169,8 +168,10 @@ class CalendarEventHandlers:
                 task_id=task_id,
                 updates={
                     "status": "completed" if status == "success" else "cancelled",
-                    "completed_at": datetime.utcnow().isoformat() if status == "success" else None,
-                }
+                    "completed_at": datetime.utcnow().isoformat()
+                    if status == "success"
+                    else None,
+                },
             )
 
             if result:
@@ -179,10 +180,7 @@ class CalendarEventHandlers:
                 logger.debug(f"No calendar event found for task {task_id}")
 
         except Exception as e:
-            logger.error(
-                f"❌ Error handling task.completed event: {e}",
-                exc_info=True
-            )
+            logger.error(f"❌ Error handling task.completed event: {e}", exc_info=True)
 
 
 __all__ = ["CalendarEventHandlers"]

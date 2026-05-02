@@ -24,7 +24,7 @@ class CalendarServiceClient:
             base_url: Calendar服务的基础URL，默认使用服务发现
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -61,7 +61,7 @@ class CalendarServiceClient:
         category: str = "other",
         all_day: bool = False,
         reminders: List[int] = None,
-        **kwargs
+        **kwargs,
     ) -> Optional[Dict[str, Any]]:
         """
         创建日历事件
@@ -103,24 +103,27 @@ class CalendarServiceClient:
                 "category": category,
                 "all_day": all_day,
                 "reminders": reminders or [],
-                **kwargs
+                **kwargs,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/calendar/events",
-                json=data
+                f"{self.base_url}/api/v1/calendar/events", json=data
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to create event: {e.response.status_code} - {e.response.text}")
+            logger.error(
+                f"Failed to create event: {e.response.status_code} - {e.response.text}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error creating event: {e}")
             return None
 
-    async def get_event(self, event_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def get_event(
+        self, event_id: str, user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         获取事件详情
 
@@ -140,8 +143,7 @@ class CalendarServiceClient:
                 params["user_id"] = user_id
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/calendar/events/{event_id}",
-                params=params
+                f"{self.base_url}/api/v1/calendar/events/{event_id}", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -160,7 +162,7 @@ class CalendarServiceClient:
         end_date: Optional[datetime] = None,
         category: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """
         查询事件列表
@@ -186,11 +188,7 @@ class CalendarServiceClient:
             >>> events = result["events"]
         """
         try:
-            params = {
-                "user_id": user_id,
-                "limit": limit,
-                "offset": offset
-            }
+            params = {"user_id": user_id, "limit": limit, "offset": offset}
 
             if start_date:
                 params["start_date"] = start_date.isoformat()
@@ -200,8 +198,7 @@ class CalendarServiceClient:
                 params["category"] = category
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/calendar/events",
-                params=params
+                f"{self.base_url}/api/v1/calendar/events", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -214,10 +211,7 @@ class CalendarServiceClient:
             return None
 
     async def update_event(
-        self,
-        event_id: str,
-        user_id: Optional[str] = None,
-        **updates
+        self, event_id: str, user_id: Optional[str] = None, **updates
     ) -> Optional[Dict[str, Any]]:
         """
         更新事件
@@ -250,7 +244,7 @@ class CalendarServiceClient:
             response = await self.client.put(
                 f"{self.base_url}/api/v1/calendar/events/{event_id}",
                 json=updates,
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -282,8 +276,7 @@ class CalendarServiceClient:
                 params["user_id"] = user_id
 
             response = await self.client.delete(
-                f"{self.base_url}/api/v1/calendar/events/{event_id}",
-                params=params
+                f"{self.base_url}/api/v1/calendar/events/{event_id}", params=params
             )
             response.raise_for_status()
             return True
@@ -299,7 +292,9 @@ class CalendarServiceClient:
     # Query Methods
     # =============================================================================
 
-    async def get_upcoming_events(self, user_id: str, days: int = 7) -> Optional[List[Dict[str, Any]]]:
+    async def get_upcoming_events(
+        self, user_id: str, days: int = 7
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         获取即将到来的事件
 
@@ -318,7 +313,7 @@ class CalendarServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/calendar/upcoming",
-                params={"user_id": user_id, "days": days}
+                params={"user_id": user_id, "days": days},
             )
             response.raise_for_status()
             return response.json()
@@ -345,8 +340,7 @@ class CalendarServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/calendar/today",
-                params={"user_id": user_id}
+                f"{self.base_url}/api/v1/calendar/today", params={"user_id": user_id}
             )
             response.raise_for_status()
             return response.json()
@@ -363,10 +357,7 @@ class CalendarServiceClient:
     # =============================================================================
 
     async def sync_external_calendar(
-        self,
-        user_id: str,
-        provider: str,
-        credentials: Optional[Dict[str, Any]] = None
+        self, user_id: str, provider: str, credentials: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         同步外部日历
@@ -390,7 +381,7 @@ class CalendarServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/calendar/sync",
                 params={"user_id": user_id, "provider": provider},
-                json=credentials or {}
+                json=credentials or {},
             )
             response.raise_for_status()
             return response.json()
@@ -403,9 +394,7 @@ class CalendarServiceClient:
             return None
 
     async def get_sync_status(
-        self,
-        user_id: str,
-        provider: Optional[str] = None
+        self, user_id: str, provider: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         获取同步状态
@@ -426,8 +415,7 @@ class CalendarServiceClient:
                 params["provider"] = provider
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/calendar/sync/status",
-                params=params
+                f"{self.base_url}/api/v1/calendar/sync/status", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -458,4 +446,3 @@ class CalendarServiceClient:
 
 
 __all__ = ["CalendarServiceClient"]
-

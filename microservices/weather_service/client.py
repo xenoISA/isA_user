@@ -23,7 +23,7 @@ class WeatherServiceClient:
             base_url: Weather服务的基础URL，默认使用服务发现
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -50,9 +50,7 @@ class WeatherServiceClient:
     # =============================================================================
 
     async def get_current_weather(
-        self,
-        location: str,
-        units: str = "metric"
+        self, location: str, units: str = "metric"
     ) -> Optional[Dict[str, Any]]:
         """
         获取当前天气
@@ -71,14 +69,10 @@ class WeatherServiceClient:
             >>> print(f"Condition: {weather['condition']}")
         """
         try:
-            params = {
-                "location": location,
-                "units": units
-            }
+            params = {"location": location, "units": units}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/weather/current",
-                params=params
+                f"{self.base_url}/api/v1/weather/current", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -91,10 +85,7 @@ class WeatherServiceClient:
             return None
 
     async def get_forecast(
-        self,
-        location: str,
-        days: int = 5,
-        units: str = "metric"
+        self, location: str, days: int = 5, units: str = "metric"
     ) -> Optional[Dict[str, Any]]:
         """
         获取天气预报
@@ -113,15 +104,10 @@ class WeatherServiceClient:
             ...     print(f"{day['date']}: {day['temp_max']}°C / {day['temp_min']}°C")
         """
         try:
-            params = {
-                "location": location,
-                "days": days,
-                "units": units
-            }
+            params = {"location": location, "days": days, "units": units}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/weather/forecast",
-                params=params
+                f"{self.base_url}/api/v1/weather/forecast", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -151,8 +137,7 @@ class WeatherServiceClient:
         """
         try:
             response = await self.client.get(
-                f"{self.base_url}/api/v1/weather/alerts",
-                params={"location": location}
+                f"{self.base_url}/api/v1/weather/alerts", params={"location": location}
             )
             response.raise_for_status()
             return response.json()
@@ -175,7 +160,7 @@ class WeatherServiceClient:
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
         is_default: bool = False,
-        nickname: Optional[str] = None
+        nickname: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         保存收藏地点
@@ -206,12 +191,11 @@ class WeatherServiceClient:
                 "latitude": latitude,
                 "longitude": longitude,
                 "is_default": is_default,
-                "nickname": nickname
+                "nickname": nickname,
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/weather/locations",
-                json=data
+                f"{self.base_url}/api/v1/weather/locations", json=data
             )
             response.raise_for_status()
             return response.json()
@@ -269,7 +253,7 @@ class WeatherServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/v1/weather/locations/{location_id}",
-                params={"user_id": user_id}
+                params={"user_id": user_id},
             )
             response.raise_for_status()
             return True
@@ -308,7 +292,7 @@ class WeatherServiceClient:
                 return {
                     "current": current,
                     "forecast": forecast["forecast"],
-                    "location": location
+                    "location": location,
                 }
             return None
 
@@ -335,4 +319,3 @@ class WeatherServiceClient:
 
 
 __all__ = ["WeatherServiceClient"]
-

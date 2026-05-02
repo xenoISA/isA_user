@@ -12,7 +12,9 @@ import sys
 import os
 
 # Add parent directory to path to import core modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 from core.blockchain_client import BlockchainClient, InsufficientBalanceError
 from core.config_manager import ConfigManager
 
@@ -25,21 +27,19 @@ config = config_manager.get_service_config()
 gateway_url = config.gateway_url  # Gateway is external, not discovered via Consul
 
 if not gateway_url:
-    logger.warning("Gateway URL not configured, blockchain features will be unavailable")
+    logger.warning(
+        "Gateway URL not configured, blockchain features will be unavailable"
+    )
     blockchain_client = None
 else:
     # Initialize blockchain client (singleton)
     blockchain_client = BlockchainClient(
-        gateway_url=gateway_url,
-        auth_token=None  # Will be set from auth service
+        gateway_url=gateway_url, auth_token=None  # Will be set from auth service
     )
 
 
 async def process_blockchain_payment(
-    user_address: str,
-    amount: str,
-    order_id: str,
-    service_id: str
+    user_address: str, amount: str, order_id: str, service_id: str
 ) -> dict:
     """
     Process a payment using blockchain
@@ -68,7 +68,7 @@ async def process_blockchain_payment(
         tx_result = await blockchain_client.charge_for_service(
             user_address=user_address,
             amount=amount,
-            service_id=f"{service_id}:{order_id}"
+            service_id=f"{service_id}:{order_id}",
         )
 
         # 3. Store transaction in database
@@ -79,7 +79,7 @@ async def process_blockchain_payment(
             "amount": amount,
             "service_id": service_id,
             "tx_hash": tx_result.get("transaction_hash"),
-            "status": "pending"
+            "status": "pending",
         }
 
         # 4. Return transaction details
@@ -88,7 +88,7 @@ async def process_blockchain_payment(
             "order_id": order_id,
             "transaction_hash": tx_result.get("transaction_hash"),
             "status": tx_result.get("status"),
-            "payment_record": payment_record
+            "payment_record": payment_record,
         }
 
     except InsufficientBalanceError as e:
@@ -119,10 +119,7 @@ async def verify_blockchain_payment(tx_hash: str, expected_amount: str) -> bool:
 
 
 async def issue_refund(
-    user_address: str,
-    amount: str,
-    order_id: str,
-    reason: str
+    user_address: str, amount: str, order_id: str, reason: str
 ) -> dict:
     """
     Issue a refund to user via blockchain
@@ -141,14 +138,14 @@ async def issue_refund(
         tx_result = await blockchain_client.reward_user(
             user_address=user_address,
             amount=amount,
-            reason=f"refund:{order_id}:{reason}"
+            reason=f"refund:{order_id}:{reason}",
         )
 
         return {
             "success": True,
             "order_id": order_id,
             "refund_tx_hash": tx_result.get("transaction_hash"),
-            "status": tx_result.get("status")
+            "status": tx_result.get("status"),
         }
 
     except Exception as e:
@@ -170,8 +167,7 @@ async def check_subscription_status(user_address: str, service_id: str) -> dict:
     try:
         # Check if user has access to the service
         has_access = await blockchain_client.check_service_access(
-            user_address=user_address,
-            service_id=service_id
+            user_address=user_address, service_id=service_id
         )
 
         # Get current balance
@@ -182,7 +178,7 @@ async def check_subscription_status(user_address: str, service_id: str) -> dict:
             "service_id": service_id,
             "user_address": user_address,
             "current_balance": balance_info.get("balance"),
-            "balance_eth": balance_info.get("eth")
+            "balance_eth": balance_info.get("eth"),
         }
 
     except Exception as e:
@@ -191,7 +187,7 @@ async def check_subscription_status(user_address: str, service_id: str) -> dict:
             "has_access": False,
             "service_id": service_id,
             "user_address": user_address,
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -203,17 +199,14 @@ blockchain_router = APIRouter(prefix="/blockchain", tags=["blockchain"])
 
 @blockchain_router.post("/payment")
 async def create_blockchain_payment(
-    user_address: str,
-    amount: str,
-    order_id: str,
-    service_id: str
+    user_address: str, amount: str, order_id: str, service_id: str
 ):
     """Process a blockchain payment"""
     return await process_blockchain_payment(
         user_address=user_address,
         amount=amount,
         order_id=order_id,
-        service_id=service_id
+        service_id=service_id,
     )
 
 
@@ -224,23 +217,17 @@ async def verify_payment(tx_hash: str, amount: str):
     return {
         "transaction_hash": tx_hash,
         "verified": is_valid,
-        "expected_amount": amount
+        "expected_amount": amount,
     }
 
 
 @blockchain_router.post("/refund")
 async def create_refund(
-    user_address: str,
-    amount: str,
-    order_id: str,
-    reason: str = "Customer request"
+    user_address: str, amount: str, order_id: str, reason: str = "Customer request"
 ):
     """Issue a blockchain refund"""
     return await issue_refund(
-        user_address=user_address,
-        amount=amount,
-        order_id=order_id,
-        reason=reason
+        user_address=user_address, amount=amount, order_id=order_id, reason=reason
     )
 
 

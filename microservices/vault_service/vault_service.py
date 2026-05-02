@@ -79,14 +79,17 @@ class VaultService:
         # Handle legacy initialization (backwards compatibility)
         if repository is None:
             from .vault_repository import VaultRepository
+
             repository = VaultRepository(config=config)
 
         if encryption is None:
             from .encryption import VaultEncryption
+
             encryption = VaultEncryption()
 
         if blockchain is None:
             from .encryption import BlockchainVaultIntegration
+
             blockchain = BlockchainVaultIntegration(blockchain_client)
 
         self.repository = repository
@@ -114,9 +117,12 @@ class VaultService:
             )
 
             # Encrypt the secret
-            encrypted_data, dek_encrypted, kek_salt, nonce = (
-                self.encryption.encrypt_secret(request.secret_value, user_id)
-            )
+            (
+                encrypted_data,
+                dek_encrypted,
+                kek_salt,
+                nonce,
+            ) = self.encryption.encrypt_secret(request.secret_value, user_id)
             logger.info(
                 f"Secret encrypted successfully, encrypted_data length: {len(encrypted_data)}"
             )
@@ -397,10 +403,13 @@ class VaultService:
             # Update secret value if provided
             if request.secret_value:
                 item = await self.repository.get_vault_item(vault_id)
-                encrypted_data, dek_encrypted, kek_salt, nonce = (
-                    self.encryption.encrypt_secret(
-                        request.secret_value, item["user_id"]
-                    )
+                (
+                    encrypted_data,
+                    dek_encrypted,
+                    kek_salt,
+                    nonce,
+                ) = self.encryption.encrypt_secret(
+                    request.secret_value, item["user_id"]
                 )
 
                 update_data["encrypted_value"] = base64.b64encode(

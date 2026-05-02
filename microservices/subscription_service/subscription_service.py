@@ -28,16 +28,30 @@ from .protocols import (
     TierNotFoundError,
 )
 from .models import (
-    UserSubscription, SubscriptionHistory,
-    BillingAccountType, SubscriptionStatus, BillingCycle, SubscriptionAction, InitiatedBy,
-    CreateSubscriptionRequest, CreateSubscriptionResponse,
-    CancelSubscriptionRequest, CancelSubscriptionResponse,
-    ConsumeCreditsRequest, ConsumeCreditsResponse, CreditBalanceResponse,
-    ReserveCreditsRequest, ReserveCreditsResponse,
-    ReconcileReservationRequest, ReconcileReservationResponse,
-    ReleaseReservationRequest, ReleaseReservationResponse,
+    UserSubscription,
+    SubscriptionHistory,
+    BillingAccountType,
+    SubscriptionStatus,
+    BillingCycle,
+    SubscriptionAction,
+    InitiatedBy,
+    CreateSubscriptionRequest,
+    CreateSubscriptionResponse,
+    CancelSubscriptionRequest,
+    CancelSubscriptionResponse,
+    ConsumeCreditsRequest,
+    ConsumeCreditsResponse,
+    CreditBalanceResponse,
+    ReserveCreditsRequest,
+    ReserveCreditsResponse,
+    ReconcileReservationRequest,
+    ReconcileReservationResponse,
+    ReleaseReservationRequest,
+    ReleaseReservationResponse,
     ReservationStatus,
-    SubscriptionResponse, SubscriptionListResponse, SubscriptionHistoryResponse
+    SubscriptionResponse,
+    SubscriptionListResponse,
+    SubscriptionHistoryResponse,
 )
 
 # Type checking imports (not executed at runtime)
@@ -51,6 +65,7 @@ logger = logging.getLogger(__name__)
 # ====================
 # Subscription Service
 # ====================
+
 
 class SubscriptionService:
     """
@@ -96,7 +111,7 @@ class SubscriptionService:
                 "monthly_credits": 1000000,  # 1M credits
                 "credit_rollover": False,
                 "max_rollover_credits": 0,
-                "trial_days": 0
+                "trial_days": 0,
             },
             "pro": {
                 "tier_id": "tier_pro_001",
@@ -106,7 +121,7 @@ class SubscriptionService:
                 "monthly_credits": 30000000,  # 30M credits
                 "credit_rollover": True,
                 "max_rollover_credits": 15000000,
-                "trial_days": 14
+                "trial_days": 14,
             },
             "max": {
                 "tier_id": "tier_max_001",
@@ -116,7 +131,7 @@ class SubscriptionService:
                 "monthly_credits": 100000000,  # 100M credits
                 "credit_rollover": True,
                 "max_rollover_credits": 50000000,
-                "trial_days": 14
+                "trial_days": 14,
             },
             "team": {
                 "tier_id": "tier_team_001",
@@ -126,7 +141,7 @@ class SubscriptionService:
                 "monthly_credits": 50000000,  # 50M per seat
                 "credit_rollover": True,
                 "max_rollover_credits": 25000000,
-                "trial_days": 14
+                "trial_days": 14,
             },
             "enterprise": {
                 "tier_id": "tier_enterprise_001",
@@ -136,8 +151,8 @@ class SubscriptionService:
                 "monthly_credits": 0,  # Custom
                 "credit_rollover": True,
                 "max_rollover_credits": None,
-                "trial_days": 30
-            }
+                "trial_days": 30,
+            },
         }
         logger.info(f"Loaded {len(self._tier_cache)} subscription tiers")
 
@@ -192,8 +207,7 @@ class SubscriptionService:
     # ====================
 
     async def create_subscription(
-        self,
-        request: CreateSubscriptionRequest
+        self, request: CreateSubscriptionRequest
     ) -> CreateSubscriptionResponse:
         """Create a new subscription for a user"""
         try:
@@ -204,12 +218,12 @@ class SubscriptionService:
             existing = await self.repository.get_user_subscription(
                 user_id=request.user_id,
                 organization_id=request.organization_id,
-                active_only=True
+                active_only=True,
             )
             if existing:
                 return CreateSubscriptionResponse(
                     success=False,
-                    message=f"User already has an active subscription: {existing.subscription_id}"
+                    message=f"User already has an active subscription: {existing.subscription_id}",
                 )
 
             # Calculate period
@@ -252,7 +266,9 @@ class SubscriptionService:
                 organization_id=request.organization_id,
                 tier_id=tier["tier_id"],
                 tier_code=tier["tier_code"],
-                status=SubscriptionStatus.TRIALING if is_trial else SubscriptionStatus.ACTIVE,
+                status=SubscriptionStatus.TRIALING
+                if is_trial
+                else SubscriptionStatus.ACTIVE,
                 billing_cycle=request.billing_cycle,
                 price_paid=price if not is_trial else Decimal("0"),
                 currency="USD",
@@ -270,49 +286,56 @@ class SubscriptionService:
                 payment_method_id=request.payment_method_id,
                 auto_renew=True,
                 next_billing_date=trial_end if is_trial else period_end,
-                metadata=request.metadata or {}
+                metadata=request.metadata or {},
             )
 
             created = await self.repository.create_subscription(subscription)
             if not created:
                 return CreateSubscriptionResponse(
-                    success=False,
-                    message="Failed to create subscription"
+                    success=False, message="Failed to create subscription"
                 )
 
             # Add history entry
-            await self.repository.add_history(SubscriptionHistory(
-                history_id=f"hist_{uuid.uuid4().hex[:16]}",
-                subscription_id=created.subscription_id,
-                user_id=request.user_id,
-                organization_id=request.organization_id,
-                action=SubscriptionAction.TRIAL_STARTED if is_trial else SubscriptionAction.CREATED,
-                new_tier_code=tier["tier_code"],
-                new_status=created.status.value,
-                credits_change=credits_allocated,
-                credits_balance_after=credits_allocated,
-                period_start=now,
-                period_end=period_end,
-                initiated_by=InitiatedBy.USER
-            ))
+            await self.repository.add_history(
+                SubscriptionHistory(
+                    history_id=f"hist_{uuid.uuid4().hex[:16]}",
+                    subscription_id=created.subscription_id,
+                    user_id=request.user_id,
+                    organization_id=request.organization_id,
+                    action=SubscriptionAction.TRIAL_STARTED
+                    if is_trial
+                    else SubscriptionAction.CREATED,
+                    new_tier_code=tier["tier_code"],
+                    new_status=created.status.value,
+                    credits_change=credits_allocated,
+                    credits_balance_after=credits_allocated,
+                    period_start=now,
+                    period_end=period_end,
+                    initiated_by=InitiatedBy.USER,
+                )
+            )
 
             # Publish event
             if self.event_bus:
-                await self._publish_event("subscription.created", {
-                    "subscription_id": created.subscription_id,
-                    "user_id": request.user_id,
-                    "organization_id": request.organization_id,
-                    "tier_code": tier["tier_code"],
-                    "credits_allocated": credits_allocated,
-                    "is_trial": is_trial
-                }, subject=created.subscription_id)
+                await self._publish_event(
+                    "subscription.created",
+                    {
+                        "subscription_id": created.subscription_id,
+                        "user_id": request.user_id,
+                        "organization_id": request.organization_id,
+                        "tier_code": tier["tier_code"],
+                        "credits_allocated": credits_allocated,
+                        "is_trial": is_trial,
+                    },
+                    subject=created.subscription_id,
+                )
 
             return CreateSubscriptionResponse(
                 success=True,
                 message="Subscription created successfully",
                 subscription=created,
                 credits_allocated=credits_allocated,
-                next_billing_date=created.next_billing_date
+                next_billing_date=created.next_billing_date,
             )
 
         except TierNotFoundError as e:
@@ -326,13 +349,10 @@ class SubscriptionService:
         subscription = await self.repository.get_subscription(subscription_id)
         if not subscription:
             return SubscriptionResponse(
-                success=False,
-                message=f"Subscription {subscription_id} not found"
+                success=False, message=f"Subscription {subscription_id} not found"
             )
         return SubscriptionResponse(
-            success=True,
-            message="Subscription found",
-            subscription=subscription
+            success=True, message="Subscription found", subscription=subscription
         )
 
     async def get_user_subscription(
@@ -354,17 +374,14 @@ class SubscriptionService:
             ),
             billing_account_id=billing_account_id,
             actor_user_id=actor_user_id,
-            active_only=True
+            active_only=True,
         )
         if not subscription:
             return SubscriptionResponse(
-                success=False,
-                message="No active subscription found"
+                success=False, message="No active subscription found"
             )
         return SubscriptionResponse(
-            success=True,
-            message="Subscription found",
-            subscription=subscription
+            success=True, message="Subscription found", subscription=subscription
         )
 
     async def get_subscriptions(
@@ -373,7 +390,7 @@ class SubscriptionService:
         organization_id: Optional[str] = None,
         status: Optional[SubscriptionStatus] = None,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
     ) -> SubscriptionListResponse:
         """Get subscriptions with filters"""
         offset = (page - 1) * page_size
@@ -382,7 +399,7 @@ class SubscriptionService:
             organization_id=organization_id,
             status=status,
             limit=page_size,
-            offset=offset
+            offset=offset,
         )
         return SubscriptionListResponse(
             success=True,
@@ -390,24 +407,25 @@ class SubscriptionService:
             subscriptions=subscriptions,
             total=len(subscriptions),
             page=page,
-            page_size=page_size
+            page_size=page_size,
         )
 
     async def cancel_subscription(
-        self,
-        subscription_id: str,
-        request: CancelSubscriptionRequest,
-        user_id: str
+        self, subscription_id: str, request: CancelSubscriptionRequest, user_id: str
     ) -> CancelSubscriptionResponse:
         """Cancel a subscription"""
         try:
             subscription = await self.repository.get_subscription(subscription_id)
             if not subscription:
-                raise SubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+                raise SubscriptionNotFoundError(
+                    f"Subscription {subscription_id} not found"
+                )
 
             # Verify ownership
             if subscription.user_id != user_id:
-                raise SubscriptionValidationError("Not authorized to cancel this subscription")
+                raise SubscriptionValidationError(
+                    "Not authorized to cancel this subscription"
+                )
 
             now = datetime.now(timezone.utc)
 
@@ -417,7 +435,7 @@ class SubscriptionService:
                     "status": SubscriptionStatus.CANCELED.value,
                     "canceled_at": now,
                     "cancellation_reason": request.reason,
-                    "auto_renew": False
+                    "auto_renew": False,
                 }
                 effective_date = now
             else:
@@ -426,41 +444,57 @@ class SubscriptionService:
                     "cancel_at_period_end": True,
                     "canceled_at": now,
                     "cancellation_reason": request.reason,
-                    "auto_renew": False
+                    "auto_renew": False,
                 }
                 effective_date = subscription.current_period_end
 
-            updated = await self.repository.update_subscription(subscription_id, updates)
+            updated = await self.repository.update_subscription(
+                subscription_id, updates
+            )
 
             # Add history
-            await self.repository.add_history(SubscriptionHistory(
-                history_id=f"hist_{uuid.uuid4().hex[:16]}",
-                subscription_id=subscription_id,
-                user_id=user_id,
-                organization_id=subscription.organization_id,
-                action=SubscriptionAction.CANCELED,
-                previous_status=subscription.status.value,
-                new_status=SubscriptionStatus.CANCELED.value if request.immediate else subscription.status.value,
-                credits_balance_after=updated.credits_remaining if updated else subscription.credits_remaining,
-                reason=request.reason,
-                initiated_by=InitiatedBy.USER
-            ))
+            await self.repository.add_history(
+                SubscriptionHistory(
+                    history_id=f"hist_{uuid.uuid4().hex[:16]}",
+                    subscription_id=subscription_id,
+                    user_id=user_id,
+                    organization_id=subscription.organization_id,
+                    action=SubscriptionAction.CANCELED,
+                    previous_status=subscription.status.value,
+                    new_status=SubscriptionStatus.CANCELED.value
+                    if request.immediate
+                    else subscription.status.value,
+                    credits_balance_after=updated.credits_remaining
+                    if updated
+                    else subscription.credits_remaining,
+                    reason=request.reason,
+                    initiated_by=InitiatedBy.USER,
+                )
+            )
 
             # Publish event
             if self.event_bus:
-                await self._publish_event("subscription.canceled", {
-                    "subscription_id": subscription_id,
-                    "user_id": user_id,
-                    "immediate": request.immediate,
-                    "effective_date": effective_date.isoformat()
-                }, subject=subscription_id)
+                await self._publish_event(
+                    "subscription.canceled",
+                    {
+                        "subscription_id": subscription_id,
+                        "user_id": user_id,
+                        "immediate": request.immediate,
+                        "effective_date": effective_date.isoformat(),
+                    },
+                    subject=subscription_id,
+                )
 
             return CancelSubscriptionResponse(
                 success=True,
-                message="Subscription canceled" if request.immediate else "Subscription will cancel at period end",
+                message="Subscription canceled"
+                if request.immediate
+                else "Subscription will cancel at period end",
                 canceled_at=now,
                 effective_date=effective_date,
-                credits_remaining=updated.credits_remaining if updated else subscription.credits_remaining
+                credits_remaining=updated.credits_remaining
+                if updated
+                else subscription.credits_remaining,
             )
 
         except (SubscriptionNotFoundError, SubscriptionValidationError) as e:
@@ -474,8 +508,7 @@ class SubscriptionService:
     # ====================
 
     async def consume_credits(
-        self,
-        request: ConsumeCreditsRequest
+        self, request: ConsumeCreditsRequest
     ) -> ConsumeCreditsResponse:
         """Consume credits from a user's subscription"""
         try:
@@ -493,7 +526,7 @@ class SubscriptionService:
                 billing_account_type=scope["billing_account_type"].value,
                 billing_account_id=scope["billing_account_id"],
                 actor_user_id=scope["actor_user_id"],
-                active_only=True
+                active_only=True,
             )
 
             if not subscription:
@@ -523,7 +556,7 @@ class SubscriptionService:
             # Consume credits
             updated = await self.repository.consume_credits(
                 subscription_id=subscription.subscription_id,
-                credits_to_consume=request.credits_to_consume
+                credits_to_consume=request.credits_to_consume,
             )
 
             if not updated:
@@ -539,36 +572,42 @@ class SubscriptionService:
                 )
 
             # Add history entry
-            await self.repository.add_history(SubscriptionHistory(
-                history_id=f"hist_{uuid.uuid4().hex[:16]}",
-                subscription_id=subscription.subscription_id,
-                user_id=scope["user_id"],
-                organization_id=scope["organization_id"],
-                action=SubscriptionAction.CREDITS_CONSUMED,
-                credits_change=-request.credits_to_consume,
-                credits_balance_after=updated.credits_remaining,
-                reason=f"{request.service_type}: {request.description or 'Usage'}",
-                initiated_by=InitiatedBy.SYSTEM,
-                metadata={
-                    "service_type": request.service_type,
-                    "usage_record_id": request.usage_record_id,
-                    **(request.metadata or {})
-                }
-            ))
+            await self.repository.add_history(
+                SubscriptionHistory(
+                    history_id=f"hist_{uuid.uuid4().hex[:16]}",
+                    subscription_id=subscription.subscription_id,
+                    user_id=scope["user_id"],
+                    organization_id=scope["organization_id"],
+                    action=SubscriptionAction.CREDITS_CONSUMED,
+                    credits_change=-request.credits_to_consume,
+                    credits_balance_after=updated.credits_remaining,
+                    reason=f"{request.service_type}: {request.description or 'Usage'}",
+                    initiated_by=InitiatedBy.SYSTEM,
+                    metadata={
+                        "service_type": request.service_type,
+                        "usage_record_id": request.usage_record_id,
+                        **(request.metadata or {}),
+                    },
+                )
+            )
 
             # Publish event
             if self.event_bus:
-                await self._publish_event("subscription.credits.consumed", {
-                    "subscription_id": subscription.subscription_id,
-                    "user_id": scope["user_id"],
-                    "actor_user_id": scope["actor_user_id"],
-                    "billing_account_type": scope["billing_account_type"].value,
-                    "billing_account_id": scope["billing_account_id"],
-                    "credits_consumed": request.credits_to_consume,
-                    "credits_remaining": updated.credits_remaining,
-                    "service_type": request.service_type,
-                    "usage_record_id": request.usage_record_id
-                }, subject=subscription.subscription_id)
+                await self._publish_event(
+                    "subscription.credits.consumed",
+                    {
+                        "subscription_id": subscription.subscription_id,
+                        "user_id": scope["user_id"],
+                        "actor_user_id": scope["actor_user_id"],
+                        "billing_account_type": scope["billing_account_type"].value,
+                        "billing_account_id": scope["billing_account_id"],
+                        "credits_consumed": request.credits_to_consume,
+                        "credits_remaining": updated.credits_remaining,
+                        "service_type": request.service_type,
+                        "usage_record_id": request.usage_record_id,
+                    },
+                    subject=subscription.subscription_id,
+                )
 
             return ConsumeCreditsResponse(
                 success=True,
@@ -635,7 +674,9 @@ class SubscriptionService:
                 estimated_credits=request.estimated_credits,
                 model=request.model,
                 request_id=request.request_id,
-                metadata={"request_id": request.request_id} if request.request_id else None,
+                metadata={"request_id": request.request_id}
+                if request.request_id
+                else None,
             )
             if not reservation:
                 return ReserveCreditsResponse(
@@ -650,22 +691,26 @@ class SubscriptionService:
                 )
 
             if self.event_bus:
-                await self._publish_event("subscription.credits.reserved", {
-                    "reservation_id": reservation.reservation_id,
-                    "subscription_id": reservation.subscription_id,
-                    "user_id": reservation.user_id,
-                    "actor_user_id": reservation.actor_user_id,
-                    "billing_account_type": (
-                        reservation.billing_account_type.value
-                        if reservation.billing_account_type
-                        else None
-                    ),
-                    "billing_account_id": reservation.billing_account_id,
-                    "organization_id": reservation.organization_id,
-                    "estimated_credits": reservation.estimated_credits,
-                    "request_id": reservation.request_id,
-                    "model": reservation.model,
-                }, subject=reservation.subscription_id)
+                await self._publish_event(
+                    "subscription.credits.reserved",
+                    {
+                        "reservation_id": reservation.reservation_id,
+                        "subscription_id": reservation.subscription_id,
+                        "user_id": reservation.user_id,
+                        "actor_user_id": reservation.actor_user_id,
+                        "billing_account_type": (
+                            reservation.billing_account_type.value
+                            if reservation.billing_account_type
+                            else None
+                        ),
+                        "billing_account_id": reservation.billing_account_id,
+                        "organization_id": reservation.organization_id,
+                        "estimated_credits": reservation.estimated_credits,
+                        "request_id": reservation.request_id,
+                        "model": reservation.model,
+                    },
+                    subject=reservation.subscription_id,
+                )
 
             return ReserveCreditsResponse(
                 success=True,
@@ -713,28 +758,33 @@ class SubscriptionService:
             message = result["message"]
 
             if success and self.event_bus:
-                await self._publish_event("subscription.credits.reconciled", {
-                    "reservation_id": reservation.reservation_id,
-                    "subscription_id": reservation.subscription_id,
-                    "user_id": reservation.user_id,
-                    "actor_user_id": reservation.actor_user_id,
-                    "billing_account_type": (
-                        reservation.billing_account_type.value
-                        if reservation.billing_account_type
-                        else None
-                    ),
-                    "billing_account_id": reservation.billing_account_id,
-                    "organization_id": reservation.organization_id,
-                    "actual_credits": reservation.actual_credits,
-                    "credits_refunded": reservation.credits_refunded,
-                    "extra_credits_consumed": reservation.extra_credits_consumed,
-                }, subject=reservation.subscription_id)
+                await self._publish_event(
+                    "subscription.credits.reconciled",
+                    {
+                        "reservation_id": reservation.reservation_id,
+                        "subscription_id": reservation.subscription_id,
+                        "user_id": reservation.user_id,
+                        "actor_user_id": reservation.actor_user_id,
+                        "billing_account_type": (
+                            reservation.billing_account_type.value
+                            if reservation.billing_account_type
+                            else None
+                        ),
+                        "billing_account_id": reservation.billing_account_id,
+                        "organization_id": reservation.organization_id,
+                        "actual_credits": reservation.actual_credits,
+                        "credits_refunded": reservation.credits_refunded,
+                        "extra_credits_consumed": reservation.extra_credits_consumed,
+                    },
+                    subject=reservation.subscription_id,
+                )
 
             return ReconcileReservationResponse(
                 success=success,
                 message=message,
                 reservation_id=reservation.reservation_id,
-                credits_consumed=reservation.actual_credits or reservation.estimated_credits,
+                credits_consumed=reservation.actual_credits
+                or reservation.estimated_credits,
                 credits_refunded=reservation.credits_refunded,
                 credits_remaining=result["credits_remaining"],
                 subscription_id=reservation.subscription_id,
@@ -772,20 +822,24 @@ class SubscriptionService:
             message = result["message"]
 
             if success and self.event_bus:
-                await self._publish_event("subscription.credits.released", {
-                    "reservation_id": reservation.reservation_id,
-                    "subscription_id": reservation.subscription_id,
-                    "user_id": reservation.user_id,
-                    "actor_user_id": reservation.actor_user_id,
-                    "billing_account_type": (
-                        reservation.billing_account_type.value
-                        if reservation.billing_account_type
-                        else None
-                    ),
-                    "billing_account_id": reservation.billing_account_id,
-                    "organization_id": reservation.organization_id,
-                    "credits_released": reservation.credits_refunded,
-                }, subject=reservation.subscription_id)
+                await self._publish_event(
+                    "subscription.credits.released",
+                    {
+                        "reservation_id": reservation.reservation_id,
+                        "subscription_id": reservation.subscription_id,
+                        "user_id": reservation.user_id,
+                        "actor_user_id": reservation.actor_user_id,
+                        "billing_account_type": (
+                            reservation.billing_account_type.value
+                            if reservation.billing_account_type
+                            else None
+                        ),
+                        "billing_account_id": reservation.billing_account_id,
+                        "organization_id": reservation.organization_id,
+                        "credits_released": reservation.credits_refunded,
+                    },
+                    subject=reservation.subscription_id,
+                )
 
             return ReleaseReservationResponse(
                 success=success,
@@ -830,7 +884,7 @@ class SubscriptionService:
                 billing_account_type=scope["billing_account_type"].value,
                 billing_account_id=scope["billing_account_id"],
                 actor_user_id=scope["actor_user_id"],
-                active_only=True
+                active_only=True,
             )
 
             if not subscription:
@@ -844,7 +898,7 @@ class SubscriptionService:
                     organization_id=scope["organization_id"],
                     subscription_credits_remaining=0,
                     subscription_credits_total=0,
-                    total_credits_available=0
+                    total_credits_available=0,
                 )
 
             tier = self._tier_cache.get(subscription.tier_code, {})
@@ -863,7 +917,7 @@ class SubscriptionService:
                 total_credits_available=subscription.credits_remaining,
                 subscription_id=subscription.subscription_id,
                 tier_code=subscription.tier_code,
-                tier_name=tier.get("tier_name", subscription.tier_code)
+                tier_name=tier.get("tier_name", subscription.tier_code),
             )
 
         except Exception as e:
@@ -875,7 +929,7 @@ class SubscriptionService:
                 actor_user_id=actor_user_id or user_id,
                 billing_account_type=billing_account_type,
                 billing_account_id=billing_account_id,
-                organization_id=organization_id
+                organization_id=organization_id,
             )
 
     # ====================
@@ -883,23 +937,18 @@ class SubscriptionService:
     # ====================
 
     async def get_subscription_history(
-        self,
-        subscription_id: str,
-        page: int = 1,
-        page_size: int = 50
+        self, subscription_id: str, page: int = 1, page_size: int = 50
     ) -> SubscriptionHistoryResponse:
         """Get subscription history"""
         offset = (page - 1) * page_size
         history = await self.repository.get_subscription_history(
-            subscription_id=subscription_id,
-            limit=page_size,
-            offset=offset
+            subscription_id=subscription_id, limit=page_size, offset=offset
         )
         return SubscriptionHistoryResponse(
             success=True,
             message="History retrieved",
             history=history,
-            total=len(history)
+            total=len(history),
         )
 
     # ====================
@@ -911,14 +960,16 @@ class SubscriptionService:
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "tiers_loaded": len(self._tier_cache)
+            "tiers_loaded": len(self._tier_cache),
         }
 
     # ====================
     # Event Publishing
     # ====================
 
-    async def _publish_event(self, event_type: str, data: Dict[str, Any], subject: Optional[str] = None):
+    async def _publish_event(
+        self, event_type: str, data: Dict[str, Any], subject: Optional[str] = None
+    ):
         """Publish an event using the NATS event bus"""
         if self.event_bus:
             event_type_label = (
@@ -929,7 +980,7 @@ class SubscriptionService:
                     event_type=event_type,
                     source="subscription_service",
                     data=data,
-                    subject=subject
+                    subject=subject,
                 )
                 result = await self.event_bus.publish_event(event)
                 if result:
@@ -946,5 +997,5 @@ __all__ = [
     "SubscriptionNotFoundError",
     "SubscriptionValidationError",
     "InsufficientCreditsError",
-    "TierNotFoundError"
+    "TierNotFoundError",
 ]

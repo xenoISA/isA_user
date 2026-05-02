@@ -104,10 +104,15 @@ _SERVICE_ATTR = {
 
 # Allowlists for SQL identifier validation (prevents SQL injection)
 _ALLOWED_SCHEMAS = frozenset({"memory", "public"})
-_ALLOWED_TABLES = frozenset({
-    "memories", "factual_memories", "procedural_memories",
-    "episodic_memories", "semantic_memories",
-})
+_ALLOWED_TABLES = frozenset(
+    {
+        "memories",
+        "factual_memories",
+        "procedural_memories",
+        "episodic_memories",
+        "semantic_memories",
+    }
+)
 
 
 class DecayService:
@@ -154,7 +159,9 @@ class DecayService:
                 for key in totals:
                     totals[key] += result.get(key, 0)
             except Exception as e:
-                logger.error(f"Error decaying {memory_type} memories: {e}", exc_info=True)
+                logger.error(
+                    f"Error decaying {memory_type} memories: {e}", exc_info=True
+                )
 
         logger.info(
             f"Decay cycle complete: {totals['total_processed']} processed, "
@@ -171,13 +178,23 @@ class DecayService:
         """Decay all memories of a given type."""
         attr_name = _SERVICE_ATTR.get(memory_type)
         if not attr_name:
-            return {"total_processed": 0, "decayed_count": 0, "floored_count": 0,
-                    "protected_count": 0, "skipped_count": 0}
+            return {
+                "total_processed": 0,
+                "decayed_count": 0,
+                "floored_count": 0,
+                "protected_count": 0,
+                "skipped_count": 0,
+            }
 
         sub_service = getattr(self.memory_service, attr_name, None)
         if not sub_service or not hasattr(sub_service, "repository"):
-            return {"total_processed": 0, "decayed_count": 0, "floored_count": 0,
-                    "protected_count": 0, "skipped_count": 0}
+            return {
+                "total_processed": 0,
+                "decayed_count": 0,
+                "floored_count": 0,
+                "protected_count": 0,
+                "skipped_count": 0,
+            }
 
         repo = sub_service.repository
 
@@ -241,7 +258,10 @@ class DecayService:
             # Persist the update
             user_id = mem.get("user_id")
             if not user_id:
-                logger.warning("Skipping decay update for memory %s: missing user_id", mem.get("id"))
+                logger.warning(
+                    "Skipping decay update for memory %s: missing user_id",
+                    mem.get("id"),
+                )
                 continue
             try:
                 await repo.update(

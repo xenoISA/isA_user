@@ -110,6 +110,7 @@ class SessionService:
 
         if self._account_client is None:
             from microservices.account_service.client import AccountServiceClient
+
             self._account_client = AccountServiceClient()
 
         self._repos_initialized = True
@@ -742,7 +743,9 @@ class SessionService:
         except SessionValidationError:
             raise
         except Exception as e:
-            logger.error(f"Error searching sessions for user {user_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error searching sessions for user {user_id}: {e}", exc_info=True
+            )
             raise SessionServiceError(f"Failed to search sessions: {str(e)}")
 
     # Utility Methods

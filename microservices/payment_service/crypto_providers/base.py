@@ -69,8 +69,7 @@ class CryptoPaymentProvider(ABC):
 
     @abstractmethod
     async def create_payment(
-        self,
-        request: CryptoPaymentRequest
+        self, request: CryptoPaymentRequest
     ) -> CryptoPaymentResponse:
         """
         Create a new crypto payment.
@@ -84,10 +83,7 @@ class CryptoPaymentProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_payment(
-        self,
-        payment_id: str
-    ) -> Optional[CryptoPayment]:
+    async def get_payment(self, payment_id: str) -> Optional[CryptoPayment]:
         """
         Get payment details by internal payment ID.
 
@@ -101,8 +97,7 @@ class CryptoPaymentProvider(ABC):
 
     @abstractmethod
     async def get_payment_by_provider_id(
-        self,
-        provider_payment_id: str
+        self, provider_payment_id: str
     ) -> Optional[CryptoPayment]:
         """
         Get payment details by provider's payment ID.
@@ -116,10 +111,7 @@ class CryptoPaymentProvider(ABC):
         pass
 
     @abstractmethod
-    async def check_payment_status(
-        self,
-        payment_id: str
-    ) -> CryptoPaymentStatus:
+    async def check_payment_status(self, payment_id: str) -> CryptoPaymentStatus:
         """
         Check current payment status from provider.
 
@@ -132,10 +124,7 @@ class CryptoPaymentProvider(ABC):
         pass
 
     @abstractmethod
-    async def cancel_payment(
-        self,
-        payment_id: str
-    ) -> bool:
+    async def cancel_payment(self, payment_id: str) -> bool:
         """
         Cancel a pending payment.
 
@@ -149,10 +138,7 @@ class CryptoPaymentProvider(ABC):
 
     @abstractmethod
     async def process_webhook(
-        self,
-        payload: bytes,
-        signature: str,
-        headers: Dict[str, str]
+        self, payload: bytes, signature: str, headers: Dict[str, str]
     ) -> Optional[CryptoWebhookEvent]:
         """
         Process incoming webhook from provider.
@@ -169,8 +155,7 @@ class CryptoPaymentProvider(ABC):
 
     @abstractmethod
     async def create_refund(
-        self,
-        request: CryptoRefundRequest
+        self, request: CryptoRefundRequest
     ) -> Optional[CryptoRefund]:
         """
         Create a refund for a completed payment.
@@ -214,11 +199,7 @@ class CryptoPaymentProvider(ABC):
                 supported.append(token)
         return supported
 
-    def format_amount_for_display(
-        self,
-        amount: Decimal,
-        token: Token
-    ) -> str:
+    def format_amount_for_display(self, amount: Decimal, token: Token) -> str:
         """
         Format crypto amount for display.
 
@@ -232,7 +213,7 @@ class CryptoPaymentProvider(ABC):
         from .models import TOKEN_CONFIG
 
         decimals = TOKEN_CONFIG.get(token, {}).get("decimals", 18)
-        display_amount = amount / Decimal(10 ** decimals)
+        display_amount = amount / Decimal(10**decimals)
         return f"{display_amount:.8f}".rstrip("0").rstrip(".")
 
 
@@ -258,8 +239,7 @@ class MockCryptoProvider(CryptoPaymentProvider):
         return [Token.ETH, Token.USDC, Token.USDT]
 
     async def create_payment(
-        self,
-        request: CryptoPaymentRequest
+        self, request: CryptoPaymentRequest
     ) -> CryptoPaymentResponse:
         import uuid
         from datetime import datetime, timedelta
@@ -302,8 +282,7 @@ class MockCryptoProvider(CryptoPaymentProvider):
         return self._payments.get(payment_id)
 
     async def get_payment_by_provider_id(
-        self,
-        provider_payment_id: str
+        self, provider_payment_id: str
     ) -> Optional[CryptoPayment]:
         return self._payments.get(provider_payment_id)
 
@@ -320,17 +299,13 @@ class MockCryptoProvider(CryptoPaymentProvider):
         return False
 
     async def process_webhook(
-        self,
-        payload: bytes,
-        signature: str,
-        headers: Dict[str, str]
+        self, payload: bytes, signature: str, headers: Dict[str, str]
     ) -> Optional[CryptoWebhookEvent]:
         # Mock provider doesn't process real webhooks
         return None
 
     async def create_refund(
-        self,
-        request: CryptoRefundRequest
+        self, request: CryptoRefundRequest
     ) -> Optional[CryptoRefund]:
         import uuid
 

@@ -13,18 +13,32 @@ import os
 import sys
 
 # Add parent directory to path for core imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from .payment_repository import PaymentRepository
 from .models import (
-    SubscriptionPlan, Subscription, Payment, Invoice, Refund,
-    PaymentStatus, SubscriptionStatus,
-    SubscriptionTier, BillingCycle, RefundStatus, InvoiceStatus,
-    CreatePaymentIntentRequest, CreateSubscriptionRequest,
-    UpdateSubscriptionRequest, CancelSubscriptionRequest,
-    CreateRefundRequest, PaymentIntentResponse,
-    SubscriptionResponse, PaymentHistoryResponse,
-    InvoiceResponse, UsageRecord, PaymentMethod
+    SubscriptionPlan,
+    Subscription,
+    Payment,
+    Invoice,
+    Refund,
+    PaymentStatus,
+    SubscriptionStatus,
+    SubscriptionTier,
+    BillingCycle,
+    RefundStatus,
+    InvoiceStatus,
+    CreatePaymentIntentRequest,
+    CreateSubscriptionRequest,
+    UpdateSubscriptionRequest,
+    CancelSubscriptionRequest,
+    CreateRefundRequest,
+    PaymentIntentResponse,
+    SubscriptionResponse,
+    PaymentHistoryResponse,
+    InvoiceResponse,
+    UsageRecord,
+    PaymentMethod,
 )
 
 # Import event publishers
@@ -33,7 +47,7 @@ from .events.publishers import (
     publish_payment_failed,
     publish_payment_intent_created,
     publish_subscription_created,
-    publish_subscription_canceled
+    publish_subscription_canceled,
 )
 
 # Import service clients
@@ -54,7 +68,7 @@ class PaymentService:
         wallet_client: Optional[WalletClient] = None,
         billing_client: Optional[BillingClient] = None,
         product_client: Optional[ProductClient] = None,
-        config=None
+        config=None,
     ):
         """
         初始化支付服务
@@ -84,22 +98,32 @@ class PaymentService:
             logger.info("Stripe initialized with provided secret key")
         elif os.getenv("STRIPE_SECRET_KEY"):
             stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-            logger.info("Stripe initialized from environment variable STRIPE_SECRET_KEY")
+            logger.info(
+                "Stripe initialized from environment variable STRIPE_SECRET_KEY"
+            )
         elif os.getenv("PAYMENT_SERVICE_STRIPE_SECRET_KEY"):
             stripe.api_key = os.getenv("PAYMENT_SERVICE_STRIPE_SECRET_KEY")
             logger.info("Stripe initialized from service-specific environment variable")
         else:
             stripe.api_key = None
-            logger.warning("No Stripe API key configured - payment processing will be limited")
+            logger.warning(
+                "No Stripe API key configured - payment processing will be limited"
+            )
 
         # Detect Stripe test mode (sandbox environment)
-        self.is_stripe_test_mode = stripe.api_key and stripe.api_key.startswith("sk_test_")
+        self.is_stripe_test_mode = stripe.api_key and stripe.api_key.startswith(
+            "sk_test_"
+        )
         if self.is_stripe_test_mode:
-            logger.info("✓ Stripe TEST MODE active - using sandbox environment (no real charges)")
+            logger.info(
+                "✓ Stripe TEST MODE active - using sandbox environment (no real charges)"
+            )
         elif stripe.api_key:
             logger.warning("⚠ Stripe LIVE MODE active - processing REAL transactions")
 
-        self.webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET") or os.getenv("PAYMENT_SERVICE_STRIPE_WEBHOOK_SECRET")
+        self.webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET") or os.getenv(
+            "PAYMENT_SERVICE_STRIPE_WEBHOOK_SECRET"
+        )
 
         logger.info("PaymentService initialized")
 
@@ -117,7 +141,7 @@ class PaymentService:
         features: Dict[str, Any] = None,
         trial_days: int = 0,
         stripe_product_id: Optional[str] = None,
-        stripe_price_id: Optional[str] = None
+        stripe_price_id: Optional[str] = None,
     ) -> SubscriptionPlan:
         """
         创建订阅计划
@@ -153,7 +177,7 @@ class PaymentService:
                 product = stripe.Product.create(
                     name=name,
                     description=f"{tier.value} plan - {billing_cycle.value}",
-                    metadata={"plan_id": plan_id, "tier": tier.value}
+                    metadata={"plan_id": plan_id, "tier": tier.value},
                 )
                 stripe_product_id = product.id
 
@@ -163,16 +187,16 @@ class PaymentService:
                     interval_map = {
                         BillingCycle.MONTHLY: "month",
                         BillingCycle.QUARTERLY: "month",
-                        BillingCycle.YEARLY: "year"
+                        BillingCycle.YEARLY: "year",
                     }
                     interval_count_map = {
                         BillingCycle.MONTHLY: 1,
                         BillingCycle.QUARTERLY: 3,
-                        BillingCycle.YEARLY: 1
+                        BillingCycle.YEARLY: 1,
                     }
                     recurring_config = {
                         "interval": interval_map.get(billing_cycle, "month"),
-                        "interval_count": interval_count_map.get(billing_cycle, 1)
+                        "interval_count": interval_count_map.get(billing_cycle, 1),
                     }
 
                 price_obj = stripe.Price.create(
@@ -180,7 +204,7 @@ class PaymentService:
                     unit_amount=int(price * 100),  # Stripe uses cents
                     currency="usd",
                     recurring=recurring_config if recurring_config else None,
-                    metadata={"plan_id": plan_id}
+                    metadata={"plan_id": plan_id},
                 )
                 stripe_price_id = price_obj.id
 
@@ -197,7 +221,7 @@ class PaymentService:
             features=features or {},
             trial_days=trial_days,
             stripe_product_id=stripe_product_id,
-            stripe_price_id=stripe_price_id
+            stripe_price_id=stripe_price_id,
         )
 
         result = await self.repository.create_subscription_plan(plan)
@@ -209,9 +233,7 @@ class PaymentService:
         return await self.repository.get_subscription_plan(plan_id)
 
     async def list_subscription_plans(
-        self,
-        tier: Optional[SubscriptionTier] = None,
-        is_active: bool = True
+        self, tier: Optional[SubscriptionTier] = None, is_active: bool = True
     ) -> List[SubscriptionPlan]:
         """列出订阅计划"""
         return await self.repository.list_subscription_plans(tier, is_active)
@@ -221,8 +243,7 @@ class PaymentService:
     # ====================
 
     async def create_subscription(
-        self,
-        request: CreateSubscriptionRequest
+        self, request: CreateSubscriptionRequest
     ) -> SubscriptionResponse:
         """
         创建订阅
@@ -235,11 +256,15 @@ class PaymentService:
         """
         # Validate user exists via Account Service (synchronous dependency)
         try:
-            user_account = await self.account_client.get_account_profile(request.user_id)
+            user_account = await self.account_client.get_account_profile(
+                request.user_id
+            )
             if not user_account:
                 logger.error(f"User {request.user_id} not found in Account Service")
                 raise ValueError(f"User {request.user_id} does not exist")
-            logger.info(f"User {request.user_id} validated via Account Service for subscription")
+            logger.info(
+                f"User {request.user_id} validated via Account Service for subscription"
+            )
         except ValueError:
             raise  # Re-raise validation errors
         except Exception as e:
@@ -289,7 +314,9 @@ class PaymentService:
                     customer = stripe.Customer.create(
                         email=request.user_id,
                         payment_method=request.payment_method_id,
-                        invoice_settings={"default_payment_method": request.payment_method_id}
+                        invoice_settings={
+                            "default_payment_method": request.payment_method_id
+                        },
                     )
                 stripe_customer_id = customer.id
 
@@ -298,7 +325,7 @@ class PaymentService:
                     customer=stripe_customer_id,
                     items=[{"price": plan.stripe_price_id}],
                     trial_period_days=trial_days if trial_days > 0 else None,
-                    metadata=request.metadata or {}
+                    metadata=request.metadata or {},
                 )
                 stripe_subscription_id = stripe_subscription.id
 
@@ -320,7 +347,7 @@ class PaymentService:
             payment_method_id=request.payment_method_id,
             stripe_subscription_id=stripe_subscription_id,
             stripe_customer_id=stripe_customer_id,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
 
         created_subscription = await self.repository.create_subscription(subscription)
@@ -336,24 +363,23 @@ class PaymentService:
                 current_period_start=created_subscription.current_period_start,
                 current_period_end=created_subscription.current_period_end,
                 trial_end=created_subscription.trial_end,
-                metadata=created_subscription.metadata or {}
+                metadata=created_subscription.metadata or {},
             )
         except Exception as e:
             logger.error(f"Failed to publish subscription.created event: {e}")
 
         # 准备响应
         response = SubscriptionResponse(
-            subscription=created_subscription,
-            plan=plan,
-            payment_method=None
+            subscription=created_subscription, plan=plan, payment_method=None
         )
 
-        logger.info(f"Subscription created for user {request.user_id}: {created_subscription.subscription_id}")
+        logger.info(
+            f"Subscription created for user {request.user_id}: {created_subscription.subscription_id}"
+        )
         return response
 
     async def get_user_subscription(
-        self,
-        user_id: str
+        self, user_id: str
     ) -> Optional[SubscriptionResponse]:
         """获取用户当前订阅"""
         subscription = await self.repository.get_user_active_subscription(user_id)
@@ -367,13 +393,11 @@ class PaymentService:
             subscription=subscription,
             plan=plan,
             payment_method=payment_method,
-            next_invoice=None
+            next_invoice=None,
         )
 
     async def update_subscription(
-        self,
-        subscription_id: str,
-        request: UpdateSubscriptionRequest
+        self, subscription_id: str, request: UpdateSubscriptionRequest
     ) -> SubscriptionResponse:
         """更新订阅"""
         subscription = await self.repository.get_subscription(subscription_id)
@@ -386,30 +410,32 @@ class PaymentService:
                 update_params = {}
 
                 if request.plan_id:
-                    new_plan = await self.repository.get_subscription_plan(request.plan_id)
+                    new_plan = await self.repository.get_subscription_plan(
+                        request.plan_id
+                    )
                     if new_plan and new_plan.stripe_price_id:
                         # 获取当前订阅项
-                        stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
-                        current_item_id = stripe_sub['items']['data'][0]['id']
+                        stripe_sub = stripe.Subscription.retrieve(
+                            subscription.stripe_subscription_id
+                        )
+                        current_item_id = stripe_sub["items"]["data"][0]["id"]
 
-                        update_params['items'] = [{
-                            "id": current_item_id,
-                            "price": new_plan.stripe_price_id
-                        }]
+                        update_params["items"] = [
+                            {"id": current_item_id, "price": new_plan.stripe_price_id}
+                        ]
 
                 if request.cancel_at_period_end is not None:
-                    update_params['cancel_at_period_end'] = request.cancel_at_period_end
+                    update_params["cancel_at_period_end"] = request.cancel_at_period_end
 
                 if request.payment_method_id:
-                    update_params['default_payment_method'] = request.payment_method_id
+                    update_params["default_payment_method"] = request.payment_method_id
 
                 if request.metadata:
-                    update_params['metadata'] = request.metadata
+                    update_params["metadata"] = request.metadata
 
                 if update_params:
                     stripe.Subscription.modify(
-                        subscription.stripe_subscription_id,
-                        **update_params
+                        subscription.stripe_subscription_id, **update_params
                     )
 
             except Exception as e:
@@ -425,26 +451,23 @@ class PaymentService:
             updates["metadata"] = request.metadata
 
         updated_subscription = await self.repository.update_subscription(
-            subscription_id,
-            updates
+            subscription_id, updates
         )
 
         plan = await self.repository.get_subscription_plan(updated_subscription.plan_id)
-        payment_method = await self.repository.get_user_default_payment_method(updated_subscription.user_id)
+        payment_method = await self.repository.get_user_default_payment_method(
+            updated_subscription.user_id
+        )
 
         response = SubscriptionResponse(
-            subscription=updated_subscription,
-            plan=plan,
-            payment_method=payment_method
+            subscription=updated_subscription, plan=plan, payment_method=payment_method
         )
 
         logger.info(f"Subscription updated: {subscription_id}")
         return response
 
     async def cancel_subscription(
-        self,
-        subscription_id: str,
-        request: CancelSubscriptionRequest
+        self, subscription_id: str, request: CancelSubscriptionRequest
     ) -> Subscription:
         """取消订阅"""
         subscription = await self.repository.get_subscription(subscription_id)
@@ -458,17 +481,14 @@ class PaymentService:
                     stripe.Subscription.delete(subscription.stripe_subscription_id)
                 else:
                     stripe.Subscription.modify(
-                        subscription.stripe_subscription_id,
-                        cancel_at_period_end=True
+                        subscription.stripe_subscription_id, cancel_at_period_end=True
                     )
             except Exception as e:
                 logger.error(f"Failed to cancel Stripe subscription: {str(e)}")
 
         # 更新数据库记录
         cancelled_subscription = await self.repository.cancel_subscription(
-            subscription_id,
-            request.immediate,
-            request.reason
+            subscription_id, request.immediate, request.reason
         )
 
         # Publish subscription.canceled event
@@ -480,7 +500,7 @@ class PaymentService:
                 canceled_at=cancelled_subscription.canceled_at,
                 plan_id=cancelled_subscription.plan_id,
                 reason=request.reason,
-                metadata=cancelled_subscription.metadata or {}
+                metadata=cancelled_subscription.metadata or {},
             )
         except Exception as e:
             logger.error(f"Failed to publish subscription.canceled event: {e}")
@@ -493,8 +513,7 @@ class PaymentService:
     # ====================
 
     async def create_payment_intent(
-        self,
-        request: CreatePaymentIntentRequest
+        self, request: CreatePaymentIntentRequest
     ) -> PaymentIntentResponse:
         """
         创建支付意图
@@ -507,11 +526,15 @@ class PaymentService:
         """
         # Validate user exists via Account Service (synchronous dependency)
         try:
-            user_account = await self.account_client.get_account_profile(request.user_id)
+            user_account = await self.account_client.get_account_profile(
+                request.user_id
+            )
             if not user_account:
                 logger.error(f"User {request.user_id} not found in Account Service")
                 raise ValueError(f"User {request.user_id} does not exist")
-            logger.info(f"User {request.user_id} validated via Account Service for payment")
+            logger.info(
+                f"User {request.user_id} validated via Account Service for payment"
+            )
         except ValueError:
             raise  # Re-raise validation errors
         except Exception as e:
@@ -531,8 +554,8 @@ class PaymentService:
                     metadata=request.metadata or {},
                     automatic_payment_methods={
                         "enabled": True,
-                        "allow_redirects": "never"  # Disable redirect-based payment methods for testing
-                    }
+                        "allow_redirects": "never",  # Disable redirect-based payment methods for testing
+                    },
                 )
                 payment_intent_id = stripe_intent.id
                 client_secret = stripe_intent.client_secret
@@ -556,7 +579,7 @@ class PaymentService:
             status=PaymentStatus.PENDING,
             payment_method=PaymentMethod.STRIPE,
             processor_payment_id=payment_intent_id,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
 
         await self.repository.create_payment(payment)
@@ -570,7 +593,7 @@ class PaymentService:
                 amount=request.amount,
                 currency=request.currency.value,
                 order_id=request.order_id,
-                metadata=request.metadata or {}
+                metadata=request.metadata or {},
             )
         except Exception as e:
             logger.error(f"Failed to publish payment.intent.created event: {e}")
@@ -581,16 +604,14 @@ class PaymentService:
             amount=request.amount,
             currency=request.currency,
             status=PaymentStatus.PENDING,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
 
         logger.info(f"Payment intent created: {payment_intent_id}")
         return response
 
     async def confirm_payment(
-        self,
-        payment_id: str,
-        processor_response: Optional[Dict[str, Any]] = None
+        self, payment_id: str, processor_response: Optional[Dict[str, Any]] = None
     ) -> Payment:
         """确认支付 - Confirm and capture payment in Stripe"""
         payment = await self.repository.get_payment(payment_id)
@@ -603,16 +624,20 @@ class PaymentService:
                 # Confirm the payment intent with test payment method
                 stripe_intent = stripe.PaymentIntent.confirm(
                     payment.processor_payment_id,
-                    payment_method="pm_card_visa"  # Test card for Stripe test mode
+                    payment_method="pm_card_visa",  # Test card for Stripe test mode
                 )
 
                 # Update processor response with Stripe data
                 if not processor_response:
                     processor_response = {}
                 processor_response["stripe_status"] = stripe_intent.status
-                processor_response["stripe_payment_method"] = stripe_intent.payment_method
+                processor_response[
+                    "stripe_payment_method"
+                ] = stripe_intent.payment_method
 
-                logger.info(f"Stripe payment intent confirmed: {payment.processor_payment_id} (status: {stripe_intent.status})")
+                logger.info(
+                    f"Stripe payment intent confirmed: {payment.processor_payment_id} (status: {stripe_intent.status})"
+                )
 
             except Exception as e:
                 logger.error(f"Failed to confirm Stripe payment intent: {str(e)}")
@@ -624,9 +649,7 @@ class PaymentService:
         payment.processor_response = processor_response
 
         updated_payment = await self.repository.update_payment_status(
-            payment_id,
-            PaymentStatus.SUCCEEDED,
-            processor_response
+            payment_id, PaymentStatus.SUCCEEDED, processor_response
         )
 
         if not updated_payment:
@@ -642,7 +665,7 @@ class PaymentService:
                 currency=updated_payment.currency.value,
                 payment_id=updated_payment.payment_id,
                 payment_method=updated_payment.payment_method.value,
-                metadata=updated_payment.processor_response or {}
+                metadata=updated_payment.processor_response or {},
             )
         except Exception as e:
             logger.error(f"Failed to publish payment.completed event: {e}")
@@ -651,10 +674,7 @@ class PaymentService:
         return updated_payment
 
     async def fail_payment(
-        self,
-        payment_id: str,
-        failure_reason: str,
-        failure_code: Optional[str] = None
+        self, payment_id: str, failure_reason: str, failure_code: Optional[str] = None
     ) -> Payment:
         """标记支付失败"""
         payment = await self.repository.get_payment(payment_id)
@@ -670,7 +690,7 @@ class PaymentService:
         updated_payment = await self.repository.update_payment_status(
             payment_id,
             PaymentStatus.FAILED,
-            {"failure_reason": failure_reason, "failure_code": failure_code}
+            {"failure_reason": failure_reason, "failure_code": failure_code},
         )
 
         logger.info(f"Payment failed: {payment_id} - {failure_reason}")
@@ -682,13 +702,11 @@ class PaymentService:
         status: Optional[PaymentStatus] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> PaymentHistoryResponse:
         """获取支付历史"""
         # Repository get_user_payments only takes user_id, limit, status
-        payments = await self.repository.get_user_payments(
-            user_id, limit, status
-        )
+        payments = await self.repository.get_user_payments(user_id, limit, status)
 
         # Filter by date if needed
         if start_date or end_date:
@@ -703,21 +721,23 @@ class PaymentService:
 
         # 计算统计信息
         total_count = len(payments)
-        total_amount = sum(p.amount for p in payments if p.status == PaymentStatus.SUCCEEDED)
+        total_amount = sum(
+            p.amount for p in payments if p.status == PaymentStatus.SUCCEEDED
+        )
 
         filters_applied = {
             "user_id": user_id,
             "status": status.value if status else None,
             "start_date": start_date.isoformat() if start_date else None,
             "end_date": end_date.isoformat() if end_date else None,
-            "limit": limit
+            "limit": limit,
         }
 
         return PaymentHistoryResponse(
             payments=payments,
             total_count=total_count,
             total_amount=total_amount,
-            filters_applied=filters_applied
+            filters_applied=filters_applied,
         )
 
     # ====================
@@ -730,7 +750,7 @@ class PaymentService:
         subscription_id: Optional[str],
         amount_due: Decimal,
         due_date: Optional[datetime],
-        line_items: List[Dict[str, Any]]
+        line_items: List[Dict[str, Any]],
     ) -> Invoice:
         """创建发票"""
         timestamp = datetime.utcnow().timestamp()
@@ -745,7 +765,7 @@ class PaymentService:
             billing_period_start=datetime.utcnow(),
             billing_period_end=datetime.utcnow() + timedelta(days=30),
             due_date=due_date,
-            line_items=line_items
+            line_items=line_items,
         )
 
         created_invoice = await self.repository.create_invoice(invoice)
@@ -766,16 +786,10 @@ class PaymentService:
             payment = await self.repository.get_payment(invoice.payment_intent_id)
 
         return InvoiceResponse(
-            invoice=invoice,
-            payment=payment,
-            download_url=None  # TODO: 实现PDF生成
+            invoice=invoice, payment=payment, download_url=None  # TODO: 实现PDF生成
         )
 
-    async def pay_invoice(
-        self,
-        invoice_id: str,
-        payment_method_id: str
-    ) -> Invoice:
+    async def pay_invoice(self, invoice_id: str, payment_method_id: str) -> Invoice:
         """支付发票"""
         invoice = await self.repository.get_invoice(invoice_id)
         if not invoice:
@@ -789,7 +803,7 @@ class PaymentService:
             amount=invoice.amount_due,
             user_id=invoice.user_id,
             payment_method_id=payment_method_id,
-            description=f"Payment for invoice {invoice.invoice_number}"
+            description=f"Payment for invoice {invoice.invoice_number}",
         )
 
         payment_intent = await self.create_payment_intent(payment_request)
@@ -800,8 +814,7 @@ class PaymentService:
 
         # 这里应该等待支付确认，简化处理直接标记为已支付
         paid_invoice = await self.repository.mark_invoice_paid(
-            invoice_id,
-            payment_intent.payment_intent_id
+            invoice_id, payment_intent.payment_intent_id
         )
 
         logger.info(f"Invoice paid: {invoice_id}")
@@ -811,10 +824,7 @@ class PaymentService:
     # 退款处理
     # ====================
 
-    async def create_refund(
-        self,
-        request: CreateRefundRequest
-    ) -> Refund:
+    async def create_refund(self, request: CreateRefundRequest) -> Refund:
         """创建退款"""
         # 获取原始支付
         payment = await self.repository.get_payment(request.payment_id)
@@ -841,7 +851,7 @@ class PaymentService:
                 stripe_refund = stripe.Refund.create(
                     payment_intent=payment.processor_payment_id,
                     amount=int(refund_amount * 100) if request.amount else None,
-                    reason=stripe_reason  # Use Stripe-accepted reason value
+                    reason=stripe_reason,  # Use Stripe-accepted reason value
                 )
                 refund_id = stripe_refund.id
 
@@ -859,7 +869,7 @@ class PaymentService:
             reason=request.reason,
             status=RefundStatus.PROCESSING,
             requested_by=request.requested_by,
-            processor_refund_id=refund_id
+            processor_refund_id=refund_id,
         )
 
         created_refund = await self.repository.create_refund(refund)
@@ -869,22 +879,18 @@ class PaymentService:
         # 更新支付状态
         if refund_amount == payment.amount:
             await self.repository.update_payment_status(
-                payment.payment_id,
-                PaymentStatus.REFUNDED
+                payment.payment_id, PaymentStatus.REFUNDED
             )
         else:
             await self.repository.update_payment_status(
-                payment.payment_id,
-                PaymentStatus.PARTIAL_REFUND
+                payment.payment_id, PaymentStatus.PARTIAL_REFUND
             )
 
         logger.info(f"Refund created: {refund_id} for payment {request.payment_id}")
         return created_refund
 
     async def process_refund(
-        self,
-        refund_id: str,
-        approved_by: Optional[str] = None
+        self, refund_id: str, approved_by: Optional[str] = None
     ) -> Refund:
         """处理退款"""
         # First check if refund exists
@@ -899,9 +905,7 @@ class PaymentService:
     # ====================
 
     async def handle_stripe_webhook(
-        self,
-        payload: bytes,
-        sig_header: str
+        self, payload: bytes, sig_header: str
     ) -> Dict[str, Any]:
         """
         处理Stripe webhook事件
@@ -922,85 +926,99 @@ class PaymentService:
             logger.info(f"Received Stripe webhook: {event['type']}")
 
             # 处理不同类型的事件
-            event_type = event['type']
-            event_data = event['data']['object']
+            event_type = event["type"]
+            event_data = event["data"]["object"]
 
-            if event_type == 'payment_intent.succeeded':
-                await self.confirm_payment(
-                    event_data['id'],
-                    {"stripe_event": event}
-                )
+            if event_type == "payment_intent.succeeded":
+                await self.confirm_payment(event_data["id"], {"stripe_event": event})
 
                 # Publish payment.completed event via publisher
                 await publish_payment_completed(
                     event_bus=self.event_bus,
-                    payment_intent_id=event_data['id'],
-                    user_id=event_data.get('metadata', {}).get('user_id', ''),
-                    amount=event_data['amount'] / 100,  # Convert from cents
-                    currency=event_data['currency'],
-                    payment_method=event_data.get('payment_method'),
-                    metadata=event_data.get('metadata', {})
+                    payment_intent_id=event_data["id"],
+                    user_id=event_data.get("metadata", {}).get("user_id", ""),
+                    amount=event_data["amount"] / 100,  # Convert from cents
+                    currency=event_data["currency"],
+                    payment_method=event_data.get("payment_method"),
+                    metadata=event_data.get("metadata", {}),
                 )
 
-            elif event_type == 'payment_intent.payment_failed':
+            elif event_type == "payment_intent.payment_failed":
                 await self.fail_payment(
-                    event_data['id'],
-                    event_data.get('last_payment_error', {}).get('message', 'Payment failed'),
-                    event_data.get('last_payment_error', {}).get('code')
+                    event_data["id"],
+                    event_data.get("last_payment_error", {}).get(
+                        "message", "Payment failed"
+                    ),
+                    event_data.get("last_payment_error", {}).get("code"),
                 )
 
                 # Publish payment.failed event via publisher
                 await publish_payment_failed(
                     event_bus=self.event_bus,
-                    payment_intent_id=event_data['id'],
-                    user_id=event_data.get('metadata', {}).get('user_id', ''),
-                    amount=event_data['amount'] / 100,  # Convert from cents
-                    currency=event_data['currency'],
-                    error_message=event_data.get('last_payment_error', {}).get('message'),
-                    error_code=event_data.get('last_payment_error', {}).get('code')
+                    payment_intent_id=event_data["id"],
+                    user_id=event_data.get("metadata", {}).get("user_id", ""),
+                    amount=event_data["amount"] / 100,  # Convert from cents
+                    currency=event_data["currency"],
+                    error_message=event_data.get("last_payment_error", {}).get(
+                        "message"
+                    ),
+                    error_code=event_data.get("last_payment_error", {}).get("code"),
                 )
 
-            elif event_type == 'invoice.payment_succeeded':
-                invoice_id = event_data.get('metadata', {}).get('invoice_id')
+            elif event_type == "invoice.payment_succeeded":
+                invoice_id = event_data.get("metadata", {}).get("invoice_id")
                 if invoice_id:
                     await self.repository.mark_invoice_paid(
-                        invoice_id,
-                        event_data['payment_intent']
+                        invoice_id, event_data["payment_intent"]
                     )
 
-            elif event_type == 'customer.subscription.created':
+            elif event_type == "customer.subscription.created":
                 # Publish subscription.created event via publisher
-                period_start = datetime.fromtimestamp(event_data.get('current_period_start', 0))
-                period_end = datetime.fromtimestamp(event_data.get('current_period_end', 0))
-                trial_end = datetime.fromtimestamp(event_data.get('trial_end')) if event_data.get('trial_end') else None
+                period_start = datetime.fromtimestamp(
+                    event_data.get("current_period_start", 0)
+                )
+                period_end = datetime.fromtimestamp(
+                    event_data.get("current_period_end", 0)
+                )
+                trial_end = (
+                    datetime.fromtimestamp(event_data.get("trial_end"))
+                    if event_data.get("trial_end")
+                    else None
+                )
 
                 await publish_subscription_created(
                     event_bus=self.event_bus,
-                    subscription_id=event_data['id'],
-                    user_id=event_data.get('metadata', {}).get('user_id', ''),
-                    plan_id=event_data['items']['data'][0]['price']['id'] if event_data.get('items') else '',
-                    status=event_data['status'],
+                    subscription_id=event_data["id"],
+                    user_id=event_data.get("metadata", {}).get("user_id", ""),
+                    plan_id=event_data["items"]["data"][0]["price"]["id"]
+                    if event_data.get("items")
+                    else "",
+                    status=event_data["status"],
                     current_period_start=period_start,
                     current_period_end=period_end,
                     trial_end=trial_end,
-                    metadata=event_data.get('metadata', {})
+                    metadata=event_data.get("metadata", {}),
                 )
 
-            elif event_type == 'customer.subscription.updated':
+            elif event_type == "customer.subscription.updated":
                 # 处理订阅更新
                 pass
 
-            elif event_type == 'customer.subscription.deleted':
+            elif event_type == "customer.subscription.deleted":
                 # Publish subscription.canceled event via publisher
-                canceled_at = datetime.fromtimestamp(event_data.get('canceled_at')) if event_data.get('canceled_at') else datetime.utcnow()
+                canceled_at = (
+                    datetime.fromtimestamp(event_data.get("canceled_at"))
+                    if event_data.get("canceled_at")
+                    else datetime.utcnow()
+                )
 
                 await publish_subscription_canceled(
                     event_bus=self.event_bus,
-                    subscription_id=event_data['id'],
-                    user_id=event_data.get('metadata', {}).get('user_id', ''),
+                    subscription_id=event_data["id"],
+                    user_id=event_data.get("metadata", {}).get("user_id", ""),
                     canceled_at=canceled_at,
-                    reason=event_data.get('cancellation_details', {}).get('reason'),
-                    metadata=event_data.get('metadata', {})
+                    reason=event_data.get("cancellation_details", {}).get("reason"),
+                    metadata=event_data.get("metadata", {}),
                 )
 
             return {"success": True, "event": event_type}
@@ -1024,9 +1042,7 @@ class PaymentService:
     # ====================
 
     async def get_revenue_stats(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """获取收入统计"""
         # Repository method name is get_revenue_statistics and only takes days parameter
@@ -1046,7 +1062,7 @@ class PaymentService:
         subscription_id: str,
         metric_name: str,
         quantity: int,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> UsageRecord:
         """记录使用量"""
         usage_record = UsageRecord(
@@ -1055,7 +1071,7 @@ class PaymentService:
             metric_name=metric_name,
             quantity=quantity,
             timestamp=datetime.utcnow(),
-            metadata=metadata
+            metadata=metadata,
         )
 
         # TODO: 实现使用量记录存储

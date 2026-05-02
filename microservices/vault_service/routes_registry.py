@@ -3,84 +3,87 @@ Vault Service Routes Registry
 Defines all API routes for Consul service registration
 """
 from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Basic health check"
+        "description": "Basic health check",
     },
-        {
-            "path": "/api/v1/vault/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/vault/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Detailed health check"
+        "description": "Detailed health check",
     },
     {
         "path": "/info",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service information"
+        "description": "Service information",
     },
     # Secret Management
     {
         "path": "/api/v1/vault/secrets",
         "methods": ["POST", "GET"],
         "auth_required": True,
-        "description": "Create/list secrets"
+        "description": "Create/list secrets",
     },
     {
         "path": "/api/v1/vault/secrets/{vault_id}",
         "methods": ["GET", "PUT", "DELETE"],
         "auth_required": True,
-        "description": "Get/update/delete secret"
+        "description": "Get/update/delete secret",
     },
     {
         "path": "/api/v1/vault/secrets/{vault_id}/rotate",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Rotate secret"
+        "description": "Rotate secret",
     },
     {
         "path": "/api/v1/vault/secrets/{vault_id}/test",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Test secret connection"
+        "description": "Test secret connection",
     },
     # Sharing
     {
         "path": "/api/v1/vault/secrets/{vault_id}/share",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Share secret"
+        "description": "Share secret",
     },
     {
         "path": "/api/v1/vault/shared",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List shared secrets"
+        "description": "List shared secrets",
     },
     # Audit & Stats
     {
         "path": "/api/v1/vault/audit-logs",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get audit logs"
+        "description": "Get audit logs",
     },
     {
         "path": "/api/v1/vault/stats",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get vault statistics"
-    }
+        "description": "Get vault statistics",
+    },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -94,7 +97,9 @@ def get_routes_for_consul() -> Dict[str, Any]:
     for route in SERVICE_ROUTES:
         path = route["path"]
         # 使用紧凑表示：只保留路径的关键部分
-        compact_path = path.replace("/api/v1/vault/", "").replace("{", ":").replace("}", "")
+        compact_path = (
+            path.replace("/api/v1/vault/", "").replace("{", ":").replace("}", "")
+        )
         if "/health" in path or "/info" in path:
             health_routes.append(compact_path)
         elif "/shared" in path or "/share" in path:
@@ -113,6 +118,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "vault_service",
@@ -123,6 +130,6 @@ SERVICE_METADATA = {
         "credential_storage",
         "secret_sharing",
         "audit_logging",
-        "encryption"
-    ]
+        "encryption",
+    ],
 }

@@ -20,10 +20,20 @@ from .protocols import (
     OrderServiceError,
 )
 from .models import (
-    OrderCreateRequest, OrderUpdateRequest, OrderCancelRequest,
-    OrderCompleteRequest, OrderResponse, OrderListResponse,
-    OrderStatistics, OrderFilter,
-    OrderSearchParams, Order, OrderStatus, OrderType, PaymentServiceRequest, WalletServiceRequest
+    OrderCreateRequest,
+    OrderUpdateRequest,
+    OrderCancelRequest,
+    OrderCompleteRequest,
+    OrderResponse,
+    OrderListResponse,
+    OrderStatistics,
+    OrderFilter,
+    OrderSearchParams,
+    Order,
+    OrderStatus,
+    OrderType,
+    PaymentServiceRequest,
+    WalletServiceRequest,
 )
 
 # Type checking imports (not executed at runtime)
@@ -92,8 +102,9 @@ class OrderService:
                     publish_order_updated,
                     publish_order_canceled,
                     publish_order_completed,
-                    publish_order_expired
+                    publish_order_expired,
                 )
+
                 self._publish_order_created = publish_order_created
                 self._publish_order_updated = publish_order_updated
                 self._publish_order_canceled = publish_order_canceled
@@ -138,28 +149,48 @@ class OrderService:
                 async with self.account_client as client:
                     user_account = await client.get_account_profile(request.user_id)
                     if not user_account:
-                        logger.warning(f"User {request.user_id} not found in Account Service - proceeding anyway (dev/test mode)")
+                        logger.warning(
+                            f"User {request.user_id} not found in Account Service - proceeding anyway (dev/test mode)"
+                        )
                     else:
-                        logger.info(f"User {request.user_id} validated via Account Service for order creation")
+                        logger.info(
+                            f"User {request.user_id} validated via Account Service for order creation"
+                        )
             except Exception as e:
                 logger.warning(f"Failed to validate user via Account Service: {e}")
-                logger.info("Proceeding with order creation despite Account Service validation failure")
+                logger.info(
+                    "Proceeding with order creation despite Account Service validation failure"
+                )
 
             # Calculate expiration time
             expires_at = None
             if request.expires_in_minutes:
-                expires_at = datetime.now(timezone.utc) + timedelta(minutes=request.expires_in_minutes)
+                expires_at = datetime.now(timezone.utc) + timedelta(
+                    minutes=request.expires_in_minutes
+                )
 
             # Prepare items payload
-            items_payload = [item.model_dump(mode="json") for item in request.items] if request.items else []
+            items_payload = (
+                [item.model_dump(mode="json") for item in request.items]
+                if request.items
+                else []
+            )
 
             # Compute totals if not provided
             subtotal_amount = request.subtotal_amount
             final_amount = request.final_amount
             if subtotal_amount is None or final_amount is None:
-                computed_subtotal, computed_final = self._calculate_totals(items_payload)
-                subtotal_amount = subtotal_amount if subtotal_amount is not None else computed_subtotal
-                final_amount = final_amount if final_amount is not None else computed_final
+                computed_subtotal, computed_final = self._calculate_totals(
+                    items_payload
+                )
+                subtotal_amount = (
+                    subtotal_amount
+                    if subtotal_amount is not None
+                    else computed_subtotal
+                )
+                final_amount = (
+                    final_amount if final_amount is not None else computed_final
+                )
 
             # Calculate tax if not provided and tax client is available
             tax_amount = request.tax_amount
@@ -175,7 +206,12 @@ class OrderService:
 
             shipping_amount = request.shipping_amount or Decimal("0")
             discount_amount = request.discount_amount or Decimal("0")
-            final_amount = final_amount + (tax_amount or Decimal("0")) + shipping_amount - discount_amount
+            final_amount = (
+                final_amount
+                + (tax_amount or Decimal("0"))
+                + shipping_amount
+                - discount_amount
+            )
 
             # Create order in database
             order = await self.order_repo.create_order(
@@ -193,22 +229,32 @@ class OrderService:
                 shipping_amount=shipping_amount,
                 discount_amount=discount_amount,
                 final_amount=final_amount,
-                shipping_address=request.shipping_address.model_dump(mode="json") if request.shipping_address else None,
-                billing_address=request.billing_address.model_dump(mode="json") if request.billing_address else None,
-                expires_at=expires_at
+                shipping_address=request.shipping_address.model_dump(mode="json")
+                if request.shipping_address
+                else None,
+                billing_address=request.billing_address.model_dump(mode="json")
+                if request.billing_address
+                else None,
+                expires_at=expires_at,
             )
 
             # Reserve inventory for shippable items
             if self.inventory_client:
-                shippable_items = [i for i in items_payload if i.get("fulfillment_type") == "ship"]
+                shippable_items = [
+                    i for i in items_payload if i.get("fulfillment_type") == "ship"
+                ]
                 if shippable_items:
-                    reservation = await self.inventory_client.reserve(order.order_id, shippable_items)
+                    reservation = await self.inventory_client.reserve(
+                        order.order_id, shippable_items
+                    )
                     if not reservation:
-                        await self.order_repo.update_order_status(order.order_id, OrderStatus.FAILED)
+                        await self.order_repo.update_order_status(
+                            order.order_id, OrderStatus.FAILED
+                        )
                         return OrderResponse(
                             success=False,
                             message="Inventory reservation failed",
-                            error_code="INVENTORY_RESERVATION_FAILED"
+                            error_code="INVENTORY_RESERVATION_FAILED",
                         )
 
             payment_intent_id = order.payment_intent_id
@@ -227,8 +273,7 @@ class OrderService:
                 if payment_response and payment_response.get("payment_intent_id"):
                     payment_intent_id = payment_response.get("payment_intent_id")
                     await self.order_repo.update_order(
-                        order_id=order.order_id,
-                        payment_intent_id=payment_intent_id
+                        order_id=order.order_id, payment_intent_id=payment_intent_id
                     )
 
             # Publish ORDER_CREATED event
@@ -244,32 +289,30 @@ class OrderService:
                             total_amount=float(order.total_amount),
                             currency=request.currency,
                             payment_intent_id=payment_intent_id,
-                            items=items_payload
+                            items=items_payload,
                         )
-                        logger.info(f"Published order.created event for order {order.order_id}")
+                        logger.info(
+                            f"Published order.created event for order {order.order_id}"
+                        )
                 except Exception as e:
                     logger.error(f"Failed to publish order.created event: {e}")
 
             logger.info(f"Order created: {order.order_id} for user {request.user_id}")
 
             return OrderResponse(
-                success=True,
-                order=order,
-                message="Order created successfully"
+                success=True, order=order, message="Order created successfully"
             )
 
         except OrderValidationError as e:
             return OrderResponse(
-                success=False,
-                message=str(e),
-                error_code="VALIDATION_ERROR"
+                success=False, message=str(e), error_code="VALIDATION_ERROR"
             )
         except Exception as e:
             logger.error(f"Failed to create order: {e}")
             return OrderResponse(
                 success=False,
                 message=f"Failed to create order: {str(e)}",
-                error_code="CREATE_ERROR"
+                error_code="CREATE_ERROR",
             )
 
     async def get_order(self, order_id: str) -> Optional[Order]:
@@ -280,7 +323,9 @@ class OrderService:
             logger.error(f"Failed to get order {order_id}: {e}")
             raise OrderServiceError(f"Failed to get order: {str(e)}")
 
-    async def update_order(self, order_id: str, request: OrderUpdateRequest) -> OrderResponse:
+    async def update_order(
+        self, order_id: str, request: OrderUpdateRequest
+    ) -> OrderResponse:
         """Update order"""
         try:
             # Get existing order
@@ -289,7 +334,7 @@ class OrderService:
                 return OrderResponse(
                     success=False,
                     message=f"Order not found: {order_id}",
-                    error_code="ORDER_NOT_FOUND"
+                    error_code="ORDER_NOT_FOUND",
                 )
 
             # Update order
@@ -299,10 +344,16 @@ class OrderService:
                 payment_status=request.payment_status,
                 payment_intent_id=request.payment_intent_id,
                 metadata=request.metadata,
-                fulfillment_status=request.fulfillment_status.value if request.fulfillment_status else None,
+                fulfillment_status=request.fulfillment_status.value
+                if request.fulfillment_status
+                else None,
                 tracking_number=request.tracking_number,
-                shipping_address=request.shipping_address.model_dump(mode="json") if request.shipping_address else None,
-                billing_address=request.billing_address.model_dump(mode="json") if request.billing_address else None
+                shipping_address=request.shipping_address.model_dump(mode="json")
+                if request.shipping_address
+                else None,
+                billing_address=request.billing_address.model_dump(mode="json")
+                if request.billing_address
+                else None,
             )
 
             if updated_order:
@@ -310,13 +361,13 @@ class OrderService:
                 return OrderResponse(
                     success=True,
                     order=updated_order,
-                    message="Order updated successfully"
+                    message="Order updated successfully",
                 )
             else:
                 return OrderResponse(
                     success=False,
                     message="Failed to update order",
-                    error_code="UPDATE_ERROR"
+                    error_code="UPDATE_ERROR",
                 )
 
         except Exception as e:
@@ -324,10 +375,12 @@ class OrderService:
             return OrderResponse(
                 success=False,
                 message=f"Failed to update order: {str(e)}",
-                error_code="UPDATE_ERROR"
+                error_code="UPDATE_ERROR",
             )
 
-    async def cancel_order(self, order_id: str, request: OrderCancelRequest) -> OrderResponse:
+    async def cancel_order(
+        self, order_id: str, request: OrderCancelRequest
+    ) -> OrderResponse:
         """Cancel an order"""
         try:
             # Get existing order
@@ -336,15 +389,19 @@ class OrderService:
                 return OrderResponse(
                     success=False,
                     message=f"Order not found: {order_id}",
-                    error_code="ORDER_NOT_FOUND"
+                    error_code="ORDER_NOT_FOUND",
                 )
 
             # Check if order can be cancelled
-            if existing_order.status in [OrderStatus.COMPLETED, OrderStatus.CANCELLED, OrderStatus.REFUNDED]:
+            if existing_order.status in [
+                OrderStatus.COMPLETED,
+                OrderStatus.CANCELLED,
+                OrderStatus.REFUNDED,
+            ]:
                 return OrderResponse(
                     success=False,
                     message=f"Cannot cancel order with status: {existing_order.status.value}",
-                    error_code="INVALID_STATUS"
+                    error_code="INVALID_STATUS",
                 )
 
             # Cancel the order
@@ -368,22 +425,25 @@ class OrderService:
                                 total_amount=float(existing_order.total_amount),
                                 currency=existing_order.currency,
                                 reason=request.reason,
-                                refund_amount=float(request.refund_amount) if request.refund_amount else 0
+                                refund_amount=float(request.refund_amount)
+                                if request.refund_amount
+                                else 0,
                             )
-                            logger.info(f"Published order.canceled event for order {order_id}")
+                            logger.info(
+                                f"Published order.canceled event for order {order_id}"
+                            )
                     except Exception as e:
                         logger.error(f"Failed to publish order.canceled event: {e}")
 
                 logger.info(f"Order cancelled: {order_id}, reason: {request.reason}")
                 return OrderResponse(
-                    success=True,
-                    message="Order cancelled successfully"
+                    success=True, message="Order cancelled successfully"
                 )
             else:
                 return OrderResponse(
                     success=False,
                     message="Failed to cancel order",
-                    error_code="CANCEL_ERROR"
+                    error_code="CANCEL_ERROR",
                 )
 
         except Exception as e:
@@ -391,10 +451,12 @@ class OrderService:
             return OrderResponse(
                 success=False,
                 message=f"Failed to cancel order: {str(e)}",
-                error_code="CANCEL_ERROR"
+                error_code="CANCEL_ERROR",
             )
 
-    async def complete_order(self, order_id: str, request: OrderCompleteRequest) -> OrderResponse:
+    async def complete_order(
+        self, order_id: str, request: OrderCompleteRequest
+    ) -> OrderResponse:
         """Complete an order with payment confirmation"""
         try:
             # Get existing order
@@ -403,7 +465,7 @@ class OrderService:
                 return OrderResponse(
                     success=False,
                     message=f"Order not found: {order_id}",
-                    error_code="ORDER_NOT_FOUND"
+                    error_code="ORDER_NOT_FOUND",
                 )
 
             # Check payment confirmation
@@ -411,25 +473,26 @@ class OrderService:
                 return OrderResponse(
                     success=False,
                     message="Payment not confirmed",
-                    error_code="PAYMENT_NOT_CONFIRMED"
+                    error_code="PAYMENT_NOT_CONFIRMED",
                 )
 
             # Complete the order
             success = await self.order_repo.complete_order(
-                order_id=order_id,
-                payment_intent_id=request.transaction_id
+                order_id=order_id, payment_intent_id=request.transaction_id
             )
 
             if success:
                 # If this is a credit purchase, add credits to wallet
-                if (existing_order.order_type == OrderType.CREDIT_PURCHASE and
-                    existing_order.wallet_id and request.credits_added):
-
+                if (
+                    existing_order.order_type == OrderType.CREDIT_PURCHASE
+                    and existing_order.wallet_id
+                    and request.credits_added
+                ):
                     await self._add_credits_to_wallet(
                         user_id=existing_order.user_id,
                         wallet_id=existing_order.wallet_id,
                         amount=request.credits_added,
-                        order_id=order_id
+                        order_id=order_id,
                     )
 
                 # Publish ORDER_COMPLETED event
@@ -445,22 +508,25 @@ class OrderService:
                                 total_amount=float(existing_order.total_amount),
                                 currency=existing_order.currency,
                                 transaction_id=request.transaction_id,
-                                credits_added=request.credits_added if request.credits_added else 0
+                                credits_added=request.credits_added
+                                if request.credits_added
+                                else 0,
                             )
-                            logger.info(f"Published order.completed event for order {order_id}")
+                            logger.info(
+                                f"Published order.completed event for order {order_id}"
+                            )
                     except Exception as e:
                         logger.error(f"Failed to publish order.completed event: {e}")
 
                 logger.info(f"Order completed: {order_id}")
                 return OrderResponse(
-                    success=True,
-                    message="Order completed successfully"
+                    success=True, message="Order completed successfully"
                 )
             else:
                 return OrderResponse(
                     success=False,
                     message="Failed to complete order",
-                    error_code="COMPLETE_ERROR"
+                    error_code="COMPLETE_ERROR",
                 )
 
         except Exception as e:
@@ -468,7 +534,7 @@ class OrderService:
             return OrderResponse(
                 success=False,
                 message=f"Failed to complete order: {str(e)}",
-                error_code="COMPLETE_ERROR"
+                error_code="COMPLETE_ERROR",
             )
 
     # Order Query Operations
@@ -482,7 +548,7 @@ class OrderService:
                 user_id=filter_params.user_id,
                 order_type=filter_params.order_type,
                 status=filter_params.status,
-                payment_status=filter_params.payment_status
+                payment_status=filter_params.payment_status,
             )
 
             # For simplicity, assume we got all available orders
@@ -494,14 +560,16 @@ class OrderService:
                 total_count=total_count,
                 page=(filter_params.offset // filter_params.limit) + 1,
                 page_size=filter_params.limit,
-                has_next=has_next
+                has_next=has_next,
             )
 
         except Exception as e:
             logger.error(f"Failed to list orders: {e}")
             raise OrderServiceError(f"Failed to list orders: {str(e)}")
 
-    async def get_user_orders(self, user_id: str, limit: int = 50, offset: int = 0) -> List[Order]:
+    async def get_user_orders(
+        self, user_id: str, limit: int = 50, offset: int = 0
+    ) -> List[Order]:
         """Get orders for a specific user"""
         try:
             return await self.order_repo.get_user_orders(user_id, limit, offset)
@@ -513,9 +581,7 @@ class OrderService:
         """Search orders"""
         try:
             return await self.order_repo.search_orders(
-                query=params.query,
-                limit=params.limit,
-                user_id=params.user_id
+                query=params.query, limit=params.limit, user_id=params.user_id
             )
         except Exception as e:
             logger.error(f"Failed to search orders: {e}")
@@ -532,7 +598,7 @@ class OrderService:
                 description=f"Order {order.order_id}",
                 user_id=order.user_id,
                 order_id=order.order_id,
-                metadata={"order_type": order.order_type.value}
+                metadata={"order_type": order.order_type.value},
             )
 
             payment_service_url = self._get_service_url("payment_service", 8207)
@@ -541,14 +607,16 @@ class OrderService:
                 response = await client.post(
                     f"{payment_service_url}/api/payments/intent",
                     json=payment_request.dict(),
-                    timeout=30.0
+                    timeout=30.0,
                 )
 
                 if response.status_code == 200:
                     result = response.json()
                     return result.get("payment_intent_id")
                 else:
-                    logger.error(f"Payment service error: {response.status_code} - {response.text}")
+                    logger.error(
+                        f"Payment service error: {response.status_code} - {response.text}"
+                    )
                     return None
 
         except Exception as e:
@@ -556,11 +624,7 @@ class OrderService:
             return None
 
     async def _add_credits_to_wallet(
-        self,
-        user_id: str,
-        wallet_id: str,
-        amount: Decimal,
-        order_id: str
+        self, user_id: str, wallet_id: str, amount: Decimal, order_id: str
     ) -> bool:
         """Add credits to user wallet"""
         try:
@@ -569,7 +633,7 @@ class OrderService:
                 amount=amount,
                 order_id=order_id,
                 description=f"Credits from order {order_id}",
-                transaction_type="deposit"
+                transaction_type="deposit",
             )
 
             wallet_service_url = self._get_service_url("wallet_service", 8209)
@@ -578,14 +642,16 @@ class OrderService:
                 response = await client.post(
                     f"{wallet_service_url}/api/v1/wallets/{wallet_id}/deposit",
                     json=wallet_request.dict(),
-                    timeout=30.0
+                    timeout=30.0,
                 )
 
                 if response.status_code == 200:
                     result = response.json()
                     return result.get("success", False)
                 else:
-                    logger.error(f"Wallet service error: {response.status_code} - {response.text}")
+                    logger.error(
+                        f"Wallet service error: {response.status_code} - {response.text}"
+                    )
                     return False
 
         except Exception as e:
@@ -602,7 +668,7 @@ class OrderService:
                     amount=refund_amount,
                     order_id=order.order_id,
                     description=f"Refund for order {order.order_id}",
-                    transaction_type="refund"
+                    transaction_type="refund",
                 )
 
                 wallet_service_url = self._get_service_url("wallet_service", 8209)
@@ -611,7 +677,7 @@ class OrderService:
                     response = await client.post(
                         f"{wallet_service_url}/api/v1/wallets/{order.wallet_id}/deposit",
                         json=wallet_request.dict(),
-                        timeout=30.0
+                        timeout=30.0,
                     )
 
                     return response.status_code == 200
@@ -641,7 +707,7 @@ class OrderService:
             return {
                 "status": "healthy",
                 "database": "connected",
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.utcnow(),
             }
         except Exception as e:
             logger.error(f"Health check failed: {e}")
@@ -649,7 +715,7 @@ class OrderService:
                 "status": "unhealthy",
                 "database": "disconnected",
                 "error": str(e),
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.utcnow(),
             }
 
     # Private Helper Methods
@@ -666,10 +732,16 @@ class OrderService:
             raise OrderValidationError("wallet_id is required for credit purchases")
 
         if request.order_type == OrderType.SUBSCRIPTION and not request.subscription_id:
-            raise OrderValidationError("subscription_id is required for subscription orders")
+            raise OrderValidationError(
+                "subscription_id is required for subscription orders"
+            )
 
         # Require shipping address if any item needs shipping
         if request.items:
-            requires_shipping = any(item.fulfillment_type.value == "ship" for item in request.items)
+            requires_shipping = any(
+                item.fulfillment_type.value == "ship" for item in request.items
+            )
             if requires_shipping and not request.shipping_address:
-                raise OrderValidationError("shipping_address is required for shippable items")
+                raise OrderValidationError(
+                    "shipping_address is required for shippable items"
+                )

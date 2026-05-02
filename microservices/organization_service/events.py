@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class OrganizationEventHandler:
     """Event handler for Organization Service"""
 
-    def __init__(self, organization_repository: 'OrganizationRepository'):
+    def __init__(self, organization_repository: "OrganizationRepository"):
         """
         Initialize event handler
 
@@ -70,7 +70,6 @@ class OrganizationEventHandler:
 
             # Get all organizations where user is a member
             try:
-
                 # Remove user from all organization memberships
                 # Note: This is a simplified approach. In production, you might want to:
                 # 1. Check if user is the sole owner and handle appropriately
@@ -78,9 +77,13 @@ class OrganizationEventHandler:
                 # 3. Delete organizations if no other members exist
 
                 # For now, we'll just remove the user from all memberships
-                removed_count = await self.repository.remove_user_from_all_organizations(user_id)
+                removed_count = (
+                    await self.repository.remove_user_from_all_organizations(user_id)
+                )
 
-                logger.info(f"Removed user {user_id} from {removed_count} organizations")
+                logger.info(
+                    f"Removed user {user_id} from {removed_count} organizations"
+                )
 
             except AttributeError:
                 # Method might not exist yet in repository
@@ -90,7 +93,9 @@ class OrganizationEventHandler:
                 )
                 # TODO: Implement repository method to remove user from all organizations
 
-            logger.info(f"Successfully handled user.deleted event for user_id={user_id}")
+            logger.info(
+                f"Successfully handled user.deleted event for user_id={user_id}"
+            )
 
         except Exception as e:
             logger.error(f"Error handling user.deleted event: {e}", exc_info=True)

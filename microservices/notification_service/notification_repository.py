@@ -13,9 +13,16 @@ from google.protobuf.struct_pb2 import Struct, ListValue
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    Notification, NotificationTemplate, InAppNotification,
-    NotificationBatch, NotificationStatus, NotificationType,
-    TemplateStatus, NotificationPriority, PushSubscription, PushPlatform
+    Notification,
+    NotificationTemplate,
+    InAppNotification,
+    NotificationBatch,
+    NotificationStatus,
+    NotificationType,
+    TemplateStatus,
+    NotificationPriority,
+    PushSubscription,
+    PushPlatform,
 )
 
 
@@ -53,11 +60,11 @@ class NotificationRepository:
         # Discover PostgreSQL service
         # Priority: Environment variables → Consul → localhost fallback
         postgres_host, postgres_port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
@@ -65,8 +72,8 @@ class NotificationRepository:
             host=postgres_host,
             port=postgres_port,
             user_id="notification_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = "notification"
 
@@ -74,7 +81,9 @@ class NotificationRepository:
     # 通知模板管理
     # ====================
 
-    async def create_template(self, template: NotificationTemplate) -> NotificationTemplate:
+    async def create_template(
+        self, template: NotificationTemplate
+    ) -> NotificationTemplate:
         """创建通知模板"""
         try:
             now = datetime.now(timezone.utc)
@@ -92,23 +101,31 @@ class NotificationRepository:
                 "version": template.version,
                 "created_by": template.created_by,
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             }
 
             async with self.db:
-                count = await self.db.insert_into("notification_templates", [template_data], schema=self.schema)
+                count = await self.db.insert_into(
+                    "notification_templates", [template_data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 # Query back to get the generated id
-                query = f'SELECT * FROM {self.schema}.notification_templates WHERE template_id = $1'
+                query = f"SELECT * FROM {self.schema}.notification_templates WHERE template_id = $1"
                 async with self.db:
-                    results = await self.db.query(query, [template.template_id], schema=self.schema)
+                    results = await self.db.query(
+                        query, [template.template_id], schema=self.schema
+                    )
 
                 if results and len(results) > 0:
                     created_template = results[0]
                     template.id = created_template["id"]
-                    template.created_at = datetime.fromisoformat(created_template["created_at"])
-                    template.updated_at = datetime.fromisoformat(created_template["updated_at"])
+                    template.created_at = datetime.fromisoformat(
+                        created_template["created_at"]
+                    )
+                    template.updated_at = datetime.fromisoformat(
+                        created_template["updated_at"]
+                    )
                 return template
 
             raise Exception("Failed to create template")
@@ -120,7 +137,7 @@ class NotificationRepository:
     async def get_template(self, template_id: str) -> Optional[NotificationTemplate]:
         """获取通知模板"""
         try:
-            query = f'SELECT * FROM {self.schema}.notification_templates WHERE template_id = $1 LIMIT 1'
+            query = f"SELECT * FROM {self.schema}.notification_templates WHERE template_id = $1 LIMIT 1"
 
             async with self.db:
                 results = await self.db.query(query, [template_id], schema=self.schema)
@@ -139,7 +156,7 @@ class NotificationRepository:
         type: Optional[NotificationType] = None,
         status: Optional[TemplateStatus] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[NotificationTemplate]:
         """列出通知模板"""
         try:
@@ -158,12 +175,12 @@ class NotificationRepository:
                 params.append(status.value)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.notification_templates
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -221,7 +238,11 @@ class NotificationRepository:
             if "status" in updates:
                 param_count += 1
                 update_parts.append(f"status = ${param_count}")
-                status_value = updates["status"].value if hasattr(updates["status"], "value") else updates["status"]
+                status_value = (
+                    updates["status"].value
+                    if hasattr(updates["status"], "value")
+                    else updates["status"]
+                )
                 params.append(status_value)
 
             if "metadata" in updates:
@@ -242,11 +263,11 @@ class NotificationRepository:
             params.append(template_id)
 
             set_clause = ", ".join(update_parts)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.notification_templates
                 SET {set_clause}
                 WHERE template_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -260,7 +281,7 @@ class NotificationRepository:
     async def delete_template(self, template_id: str) -> bool:
         """Delete a notification template"""
         try:
-            query = f'DELETE FROM {self.schema}.notification_templates WHERE template_id = $1'
+            query = f"DELETE FROM {self.schema}.notification_templates WHERE template_id = $1"
 
             async with self.db:
                 count = await self.db.execute(query, [template_id], schema=self.schema)
@@ -295,8 +316,12 @@ class NotificationRepository:
                 "notification_id": notification.notification_id,
                 "user_id": user_id,
                 "type": notification.type.value,
-                "channel": getattr(notification, 'channel', None),
-                "recipient": getattr(notification, 'recipient', notification.recipient_email or notification.recipient_phone or ''),
+                "channel": getattr(notification, "channel", None),
+                "recipient": getattr(
+                    notification,
+                    "recipient",
+                    notification.recipient_email or notification.recipient_phone or "",
+                ),
                 "priority": notification.priority.value,
                 "subject": notification.subject,
                 "content": notification.content,
@@ -304,17 +329,21 @@ class NotificationRepository:
                 "template_id": notification.template_id,
                 "variables": notification.variables or {},  # Direct dict
                 "metadata": notification.metadata or {},  # Direct dict
-                "scheduled_at": notification.scheduled_at if notification.scheduled_at else None,
+                "scheduled_at": notification.scheduled_at
+                if notification.scheduled_at
+                else None,
                 "retry_count": notification.retry_count,
                 "max_retries": notification.max_retries,
                 "status": notification.status.value,
                 "error_message": notification.error_message,
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             }
 
             async with self.db:
-                count = await self.db.insert_into("notifications", [notification_data], schema=self.schema)
+                count = await self.db.insert_into(
+                    "notifications", [notification_data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 notification.created_at = now
@@ -329,10 +358,12 @@ class NotificationRepository:
     async def get_notification(self, notification_id: str) -> Optional[Notification]:
         """获取通知"""
         try:
-            query = f'SELECT * FROM {self.schema}.notifications WHERE notification_id = $1 LIMIT 1'
+            query = f"SELECT * FROM {self.schema}.notifications WHERE notification_id = $1 LIMIT 1"
 
             async with self.db:
-                results = await self.db.query(query, [notification_id], schema=self.schema)
+                results = await self.db.query(
+                    query, [notification_id], schema=self.schema
+                )
 
             if results and len(results) > 0:
                 return self._parse_notification(results[0])
@@ -350,7 +381,7 @@ class NotificationRepository:
         status: Optional[NotificationStatus] = None,
         priority: Optional[NotificationPriority] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Notification]:
         """列出通知"""
         try:
@@ -379,12 +410,12 @@ class NotificationRepository:
                 params.append(priority.value)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.notifications
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -404,12 +435,12 @@ class NotificationRepository:
     async def claim_notification(self, notification_id: str) -> bool:
         """Atomically claim a pending notification for sending"""
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.notifications
                 SET status = $1
                 WHERE notification_id = $2
                 AND status = $3
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(
@@ -433,7 +464,7 @@ class NotificationRepository:
         notification_id: str,
         status: NotificationStatus,
         error_message: Optional[str] = None,
-        provider_message_id: Optional[str] = None
+        provider_message_id: Optional[str] = None,
     ) -> bool:
         """更新通知状态"""
         try:
@@ -466,11 +497,11 @@ class NotificationRepository:
             params.append(notification_id)
 
             set_clause = ", ".join(update_parts)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.notifications
                 SET {set_clause}
                 WHERE notification_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -478,16 +509,22 @@ class NotificationRepository:
             return count is not None and count > 0
 
         except Exception as e:
-            logger.error(f"Failed to update notification status {notification_id}: {str(e)}")
+            logger.error(
+                f"Failed to update notification status {notification_id}: {str(e)}"
+            )
             return False
 
     async def delete_notification(self, notification_id: str) -> bool:
         """Delete a notification"""
         try:
-            query = f'DELETE FROM {self.schema}.notifications WHERE notification_id = $1'
+            query = (
+                f"DELETE FROM {self.schema}.notifications WHERE notification_id = $1"
+            )
 
             async with self.db:
-                count = await self.db.execute(query, [notification_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [notification_id], schema=self.schema
+                )
 
             return count is not None and count > 0
 
@@ -500,7 +537,7 @@ class NotificationRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 WITH claimed AS (
                     SELECT notification_id
                     FROM {self.schema}.notifications
@@ -515,7 +552,7 @@ class NotificationRepository:
                 FROM claimed
                 WHERE notifications.notification_id = claimed.notification_id
                 RETURNING notifications.*
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(
@@ -544,7 +581,9 @@ class NotificationRepository:
     # 应用内通知管理
     # ====================
 
-    async def create_in_app_notification(self, notification: InAppNotification) -> InAppNotification:
+    async def create_in_app_notification(
+        self, notification: InAppNotification
+    ) -> InAppNotification:
         """创建应用内通知"""
         try:
             now = datetime.now(timezone.utc)
@@ -553,23 +592,25 @@ class NotificationRepository:
                 "user_id": notification.user_id,
                 "title": notification.title,
                 "message": notification.message,
-                "type": getattr(notification, 'type', 'info'),
+                "type": getattr(notification, "type", "info"),
                 "category": notification.category,
                 "priority": notification.priority.value,
-                "action_type": getattr(notification, 'action_type', None),
+                "action_type": getattr(notification, "action_type", None),
                 "action_url": notification.action_url,
-                "action_data": getattr(notification, 'action_data', {}),  # Direct dict
+                "action_data": getattr(notification, "action_data", {}),  # Direct dict
                 "icon": notification.icon,
-                "avatar_url": getattr(notification, 'avatar_url', None),
+                "avatar_url": getattr(notification, "avatar_url", None),
                 "is_read": notification.is_read,
                 "is_archived": notification.is_archived,
-                "metadata": getattr(notification, 'metadata', {}),  # Direct dict
+                "metadata": getattr(notification, "metadata", {}),  # Direct dict
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             }
 
             async with self.db:
-                count = await self.db.insert_into("in_app_notifications", [notification_data], schema=self.schema)
+                count = await self.db.insert_into(
+                    "in_app_notifications", [notification_data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 notification.created_at = now
@@ -588,7 +629,7 @@ class NotificationRepository:
         is_archived: Optional[bool] = None,
         category: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[InAppNotification]:
         """列出用户的应用内通知"""
         try:
@@ -612,12 +653,12 @@ class NotificationRepository:
                 params.append(category)
 
             where_clause = " AND ".join(conditions)
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.in_app_notifications
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -634,64 +675,78 @@ class NotificationRepository:
             logger.error(f"Failed to list user in-app notifications: {str(e)}")
             return []
 
-    async def mark_notification_as_read(self, notification_id: str, user_id: str) -> bool:
+    async def mark_notification_as_read(
+        self, notification_id: str, user_id: str
+    ) -> bool:
         """标记通知为已读"""
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.in_app_notifications
                 SET is_read = TRUE, read_at = $1
                 WHERE notification_id = $2 AND user_id = $3
-            '''
+            """
 
             async with self.db:
-                count = await self.db.execute(query, [now, notification_id, user_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [now, notification_id, user_id], schema=self.schema
+                )
 
             # 同时更新主通知表的已读时间
             if count is not None and count > 0:
-                update_query = f'''
+                update_query = f"""
                     UPDATE {self.schema}.notifications
                     SET read_at = $1
                     WHERE notification_id = $2
-                '''
+                """
                 async with self.db:
-                    await self.db.execute(update_query, [now, notification_id], schema=self.schema)
+                    await self.db.execute(
+                        update_query, [now, notification_id], schema=self.schema
+                    )
 
             return count is not None and count > 0
 
         except Exception as e:
-            logger.error(f"Failed to mark notification as read {notification_id}: {str(e)}")
+            logger.error(
+                f"Failed to mark notification as read {notification_id}: {str(e)}"
+            )
             return False
 
-    async def mark_notification_as_archived(self, notification_id: str, user_id: str) -> bool:
+    async def mark_notification_as_archived(
+        self, notification_id: str, user_id: str
+    ) -> bool:
         """标记通知为已归档"""
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.in_app_notifications
                 SET is_archived = TRUE, archived_at = $1
                 WHERE notification_id = $2 AND user_id = $3
-            '''
+            """
 
             async with self.db:
-                count = await self.db.execute(query, [now, notification_id, user_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [now, notification_id, user_id], schema=self.schema
+                )
 
             return count is not None and count > 0
 
         except Exception as e:
-            logger.error(f"Failed to mark notification as archived {notification_id}: {str(e)}")
+            logger.error(
+                f"Failed to mark notification as archived {notification_id}: {str(e)}"
+            )
             return False
 
     async def get_unread_count(self, user_id: str) -> int:
         """获取未读通知数量"""
         try:
-            query = f'''
+            query = f"""
                 SELECT COUNT(*) as count
                 FROM {self.schema}.in_app_notifications
                 WHERE user_id = $1 AND is_read = FALSE AND is_archived = FALSE
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, [user_id], schema=self.schema)
@@ -718,20 +773,22 @@ class NotificationRepository:
                 "name": batch.name,
                 "template_id": batch.template_id,
                 "type": batch.type.value,
-                "total_count": getattr(batch, 'total_recipients', 0),
+                "total_count": getattr(batch, "total_recipients", 0),
                 "sent_count": batch.sent_count,
                 "delivered_count": batch.delivered_count,
                 "failed_count": batch.failed_count,
-                "status": getattr(batch, 'status', 'pending'),
+                "status": getattr(batch, "status", "pending"),
                 "scheduled_at": batch.scheduled_at if batch.scheduled_at else None,
                 "metadata": batch.metadata or {},  # Direct dict
                 "created_by": batch.created_by,
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             }
 
             async with self.db:
-                count = await self.db.insert_into("notification_batches", [batch_data], schema=self.schema)
+                count = await self.db.insert_into(
+                    "notification_batches", [batch_data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 batch.created_at = now
@@ -749,7 +806,7 @@ class NotificationRepository:
         sent_count: Optional[int] = None,
         delivered_count: Optional[int] = None,
         failed_count: Optional[int] = None,
-        completed: bool = False
+        completed: bool = False,
     ) -> bool:
         """更新批量通知统计"""
         try:
@@ -779,7 +836,7 @@ class NotificationRepository:
 
                 param_count += 1
                 update_parts.append(f"status = ${param_count}")
-                params.append('completed')
+                params.append("completed")
 
             if not update_parts:
                 return True
@@ -788,11 +845,11 @@ class NotificationRepository:
             params.append(batch_id)
 
             set_clause = ", ".join(update_parts)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.notification_batches
                 SET {set_clause}
                 WHERE batch_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -806,7 +863,7 @@ class NotificationRepository:
     async def get_batch(self, batch_id: str) -> Optional[NotificationBatch]:
         """Get a notification batch by ID"""
         try:
-            query = f'SELECT * FROM {self.schema}.notification_batches WHERE batch_id = $1 LIMIT 1'
+            query = f"SELECT * FROM {self.schema}.notification_batches WHERE batch_id = $1 LIMIT 1"
 
             async with self.db:
                 results = await self.db.query(query, [batch_id], schema=self.schema)
@@ -847,31 +904,37 @@ class NotificationRepository:
     # Push订阅管理
     # ====================
 
-    async def register_push_subscription(self, subscription: PushSubscription) -> PushSubscription:
+    async def register_push_subscription(
+        self, subscription: PushSubscription
+    ) -> PushSubscription:
         """注册推送订阅"""
         try:
             now = datetime.now(timezone.utc)
             subscription_data = {
-                "subscription_id": getattr(subscription, 'subscription_id', f"{subscription.user_id}_{subscription.device_token}"),
+                "subscription_id": getattr(
+                    subscription,
+                    "subscription_id",
+                    f"{subscription.user_id}_{subscription.device_token}",
+                ),
                 "user_id": subscription.user_id,
                 "device_token": subscription.device_token,
                 "platform": subscription.platform.value,
-                "device_id": getattr(subscription, 'device_id', None),
+                "device_id": getattr(subscription, "device_id", None),
                 "device_name": subscription.device_name,
                 "app_version": subscription.app_version,
-                "os_version": getattr(subscription, 'os_version', None),
+                "os_version": getattr(subscription, "os_version", None),
                 "endpoint": subscription.endpoint,
-                "p256dh": getattr(subscription, 'p256dh_key', None),
-                "auth": getattr(subscription, 'auth_key', None),
-                "topics": getattr(subscription, 'topics', []),  # Direct list -> TEXT[]
+                "p256dh": getattr(subscription, "p256dh_key", None),
+                "auth": getattr(subscription, "auth_key", None),
+                "topics": getattr(subscription, "topics", []),  # Direct list -> TEXT[]
                 "is_active": subscription.is_active,
-                "metadata": getattr(subscription, 'metadata', {}),  # Direct dict
+                "metadata": getattr(subscription, "metadata", {}),  # Direct dict
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             }
 
             # Use INSERT ... ON CONFLICT to upsert
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.push_subscriptions (
                     subscription_id, user_id, device_token, platform, device_id, device_name,
                     app_version, os_version, endpoint, p256dh, auth, topics, is_active,
@@ -891,7 +954,7 @@ class NotificationRepository:
                     metadata = EXCLUDED.metadata,
                     updated_at = EXCLUDED.updated_at
                 RETURNING *
-            '''
+            """
 
             params = [
                 subscription_data["subscription_id"],
@@ -909,7 +972,7 @@ class NotificationRepository:
                 subscription_data["is_active"],
                 subscription_data["metadata"],
                 subscription_data["created_at"],
-                subscription_data["updated_at"]
+                subscription_data["updated_at"],
             ]
 
             async with self.db:
@@ -918,8 +981,12 @@ class NotificationRepository:
             if results and len(results) > 0:
                 created_subscription = results[0]
                 subscription.id = created_subscription["id"]
-                subscription.created_at = datetime.fromisoformat(created_subscription["created_at"])
-                subscription.updated_at = datetime.fromisoformat(created_subscription["updated_at"])
+                subscription.created_at = datetime.fromisoformat(
+                    created_subscription["created_at"]
+                )
+                subscription.updated_at = datetime.fromisoformat(
+                    created_subscription["updated_at"]
+                )
                 return subscription
 
             raise Exception("Failed to register push subscription")
@@ -932,7 +999,7 @@ class NotificationRepository:
         self,
         user_id: str,
         platform: Optional[PushPlatform] = None,
-        is_active: bool = True
+        is_active: bool = True,
     ) -> List[PushSubscription]:
         """获取用户的推送订阅"""
         try:
@@ -946,7 +1013,9 @@ class NotificationRepository:
                 params.append(platform.value)
 
             where_clause = " AND ".join(conditions)
-            query = f'SELECT * FROM {self.schema}.push_subscriptions WHERE {where_clause}'
+            query = (
+                f"SELECT * FROM {self.schema}.push_subscriptions WHERE {where_clause}"
+            )
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -967,14 +1036,16 @@ class NotificationRepository:
         """取消推送订阅"""
         try:
             now = datetime.now(timezone.utc)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.push_subscriptions
                 SET is_active = FALSE, updated_at = $1
                 WHERE user_id = $2 AND device_token = $3
-            '''
+            """
 
             async with self.db:
-                count = await self.db.execute(query, [now, user_id, device_token], schema=self.schema)
+                count = await self.db.execute(
+                    query, [now, user_id, device_token], schema=self.schema
+                )
 
             return count is not None and count > 0
 
@@ -986,14 +1057,16 @@ class NotificationRepository:
         """更新推送订阅最后使用时间"""
         try:
             now = datetime.now(timezone.utc)
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.push_subscriptions
                 SET last_used_at = $1
                 WHERE user_id = $2 AND device_token = $3
-            '''
+            """
 
             async with self.db:
-                count = await self.db.execute(query, [now, user_id, device_token], schema=self.schema)
+                count = await self.db.execute(
+                    query, [now, user_id, device_token], schema=self.schema
+                )
 
             return count is not None and count > 0
 
@@ -1009,7 +1082,7 @@ class NotificationRepository:
         self,
         user_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """获取通知统计"""
         try:
@@ -1033,7 +1106,7 @@ class NotificationRepository:
                 params.append(end_date)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
-            query = f'SELECT * FROM {self.schema}.notifications WHERE {where_clause}'
+            query = f"SELECT * FROM {self.schema}.notifications WHERE {where_clause}"
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -1044,7 +1117,7 @@ class NotificationRepository:
                 "total_failed": 0,
                 "total_pending": 0,
                 "by_type": {},
-                "by_status": {}
+                "by_status": {},
             }
 
             for notification in results:
@@ -1079,7 +1152,7 @@ class NotificationRepository:
                 "total_failed": 0,
                 "total_pending": 0,
                 "by_type": {},
-                "by_status": {}
+                "by_status": {},
             }
 
     # ====================
@@ -1093,7 +1166,7 @@ class NotificationRepository:
                 template_id=data["template_id"],
                 name=data["name"],
                 type=NotificationType(data["type"]),
-                content=data["content"]
+                content=data["content"],
             )
 
             template.id = data.get("id")
@@ -1128,23 +1201,35 @@ class NotificationRepository:
             notification = Notification(
                 notification_id=data["notification_id"],
                 type=NotificationType(data["type"]),
-                content=data.get("content", "")
+                content=data.get("content", ""),
             )
 
             notification.id = data.get("id")
             notification.priority = NotificationPriority(data.get("priority", "normal"))
             notification.recipient_type = RecipientType.USER  # Default
-            notification.recipient_id = data.get("user_id")  # Map user_id to recipient_id
-            notification.recipient_email = data.get("recipient") if "@" in (data.get("recipient") or "") else None
-            notification.recipient_phone = data.get("recipient") if data.get("recipient") and "@" not in data.get("recipient", "") else None
+            notification.recipient_id = data.get(
+                "user_id"
+            )  # Map user_id to recipient_id
+            notification.recipient_email = (
+                data.get("recipient") if "@" in (data.get("recipient") or "") else None
+            )
+            notification.recipient_phone = (
+                data.get("recipient")
+                if data.get("recipient") and "@" not in data.get("recipient", "")
+                else None
+            )
 
             notification.template_id = data.get("template_id")
             notification.subject = data.get("subject")
             notification.html_content = data.get("html_content")
 
             # JSONB fields need to be converted from Protobuf types
-            notification.variables = _convert_protobuf_to_native(data.get("variables", {}))
-            notification.metadata = _convert_protobuf_to_native(data.get("metadata", {}))
+            notification.variables = _convert_protobuf_to_native(
+                data.get("variables", {})
+            )
+            notification.metadata = _convert_protobuf_to_native(
+                data.get("metadata", {})
+            )
 
             notification.retry_count = data.get("retry_count", 0)
             notification.max_retries = data.get("max_retries", 3)
@@ -1172,14 +1257,16 @@ class NotificationRepository:
             logger.error(f"Failed to parse notification: {str(e)}")
             return None
 
-    def _parse_in_app_notification(self, data: Dict[str, Any]) -> Optional[InAppNotification]:
+    def _parse_in_app_notification(
+        self, data: Dict[str, Any]
+    ) -> Optional[InAppNotification]:
         """解析应用内通知数据"""
         try:
             notification = InAppNotification(
                 notification_id=data["notification_id"],
                 user_id=data["user_id"],
                 title=data["title"],
-                message=data["message"]
+                message=data["message"],
             )
 
             notification.id = data.get("id")
@@ -1188,12 +1275,16 @@ class NotificationRepository:
             notification.avatar_url = data.get("avatar_url")
             notification.action_type = data.get("action_type")
             notification.action_url = data.get("action_url")
-            notification.action_data = _convert_protobuf_to_native(data.get("action_data", {}))
+            notification.action_data = _convert_protobuf_to_native(
+                data.get("action_data", {})
+            )
             notification.category = data.get("category")
             notification.priority = NotificationPriority(data.get("priority", "normal"))
             notification.is_read = data.get("is_read", False)
             notification.is_archived = data.get("is_archived", False)
-            notification.metadata = _convert_protobuf_to_native(data.get("metadata", {}))
+            notification.metadata = _convert_protobuf_to_native(
+                data.get("metadata", {})
+            )
 
             if data.get("created_at"):
                 notification.created_at = datetime.fromisoformat(data["created_at"])
@@ -1210,13 +1301,15 @@ class NotificationRepository:
             logger.error(f"Failed to parse in-app notification: {str(e)}")
             return None
 
-    def _parse_push_subscription(self, data: Dict[str, Any]) -> Optional[PushSubscription]:
+    def _parse_push_subscription(
+        self, data: Dict[str, Any]
+    ) -> Optional[PushSubscription]:
         """解析推送订阅数据"""
         try:
             subscription = PushSubscription(
                 user_id=data["user_id"],
                 device_token=data["device_token"],
-                platform=PushPlatform(data["platform"])
+                platform=PushPlatform(data["platform"]),
             )
 
             subscription.id = data.get("id")
@@ -1229,9 +1322,13 @@ class NotificationRepository:
             subscription.device_model = data.get("device_model")
             subscription.app_version = data.get("app_version")
             subscription.os_version = data.get("os_version")
-            subscription.topics = _convert_protobuf_to_native(data.get("topics", []))  # TEXT[] returned as list
+            subscription.topics = _convert_protobuf_to_native(
+                data.get("topics", [])
+            )  # TEXT[] returned as list
             subscription.is_active = data.get("is_active", True)
-            subscription.metadata = _convert_protobuf_to_native(data.get("metadata", {}))
+            subscription.metadata = _convert_protobuf_to_native(
+                data.get("metadata", {})
+            )
 
             if data.get("created_at"):
                 subscription.created_at = datetime.fromisoformat(data["created_at"])

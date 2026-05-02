@@ -14,17 +14,14 @@ from .models import (
     MetricDefinedEvent,
     AlertRuleCreatedEvent,
     AlertTriggeredEvent,
-    AlertResolvedEvent
+    AlertResolvedEvent,
 )
 
 logger = logging.getLogger(__name__)
 
 
 async def publish_telemetry_data_received(
-    event_bus,
-    device_id: str,
-    metrics_count: int,
-    points_count: int
+    event_bus, device_id: str, metrics_count: int, points_count: int
 ) -> bool:
     """
     Publish telemetry.data.received event
@@ -43,13 +40,13 @@ async def publish_telemetry_data_received(
             device_id=device_id,
             metrics_count=metrics_count,
             points_count=points_count,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="telemetry.data.received",
             source="telemetry_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -68,7 +65,7 @@ async def publish_metric_defined(
     data_type: str,
     metric_type: str,
     unit: Optional[str],
-    created_by: str
+    created_by: str,
 ) -> bool:
     """
     Publish metric.defined event
@@ -93,13 +90,13 @@ async def publish_metric_defined(
             metric_type=metric_type,
             unit=unit,
             created_by=created_by,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="metric.defined",
             source="telemetry_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -120,7 +117,7 @@ async def publish_alert_rule_created(
     threshold_value: str,
     level: str,
     enabled: bool,
-    created_by: str
+    created_by: str,
 ) -> bool:
     """
     Publish alert.rule.created event
@@ -149,13 +146,13 @@ async def publish_alert_rule_created(
             level=level,
             enabled=enabled,
             created_by=created_by,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="alert.rule.created",
             source="telemetry_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -176,7 +173,7 @@ async def publish_alert_triggered(
     metric_name: str,
     level: str,
     current_value: str,
-    threshold_value: str
+    threshold_value: str,
 ) -> bool:
     """
     Publish alert.triggered event
@@ -205,13 +202,13 @@ async def publish_alert_triggered(
             level=level,
             current_value=current_value,
             threshold_value=threshold_value,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="alert.triggered",
             source="telemetry_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -232,7 +229,7 @@ async def publish_alert_resolved(
     metric_name: str,
     level: str,
     resolved_by: str,
-    resolution_note: Optional[str] = None
+    resolution_note: Optional[str] = None,
 ) -> bool:
     """
     Publish alert.resolved event
@@ -261,13 +258,13 @@ async def publish_alert_resolved(
             level=level,
             resolved_by=resolved_by,
             resolution_note=resolution_note,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="alert.resolved",
             source="telemetry_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)

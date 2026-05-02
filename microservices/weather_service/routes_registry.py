@@ -3,63 +3,66 @@ Weather Service Routes Registry
 Defines all API routes for Consul service registration
 """
 from typing import Dict, Any
+
 # Define all routes
 SERVICE_ROUTES = [
     {
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/weather/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/weather/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/api/v1/weather/current",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Get current weather for a location"
+        "description": "Get current weather for a location",
     },
     {
         "path": "/api/v1/weather/forecast",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Get weather forecast"
+        "description": "Get weather forecast",
     },
     {
         "path": "/api/v1/weather/alerts",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Get weather alerts"
+        "description": "Get weather alerts",
     },
     {
         "path": "/api/v1/weather/locations",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Save favorite location"
+        "description": "Save favorite location",
     },
     {
         "path": "/api/v1/weather/locations/{user_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user locations"
+        "description": "Get user locations",
     },
     {
         "path": "/api/v1/weather/locations/{location_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Delete location"
+        "description": "Delete location",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -93,6 +96,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "weather_service",
@@ -103,6 +108,6 @@ SERVICE_METADATA = {
         "weather_forecast",
         "weather_alerts",
         "location_management",
-        "weather_caching"
-    ]
+        "weather_caching",
+    ],
 }

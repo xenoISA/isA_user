@@ -30,17 +30,19 @@ class ProceduralMemoryService:
 
         # Initialize Qdrant client (async) - lazy connection
         self.qdrant = AsyncQdrantClient(
-            host=os.getenv('QDRANT_HOST', 'localhost'),
-            port=int(os.getenv('QDRANT_PORT', 6333)),
-            user_id='memory_service'
+            host=os.getenv("QDRANT_HOST", "localhost"),
+            port=int(os.getenv("QDRANT_PORT", 6333)),
+            user_id="memory_service",
         )
         self._collection_initialized = False  # Track if collection is ready
 
-        logger.info(f"Procedural Memory Service initialized with ISA Model URL: {self.model_url}")
+        logger.info(
+            f"Procedural Memory Service initialized with ISA Model URL: {self.model_url}"
+        )
 
     def _get_model_url(self) -> str:
         """Get ISA Model service URL via Consul or environment variable"""
-        env_url = os.getenv('ISA_MODEL_URL')
+        env_url = os.getenv("ISA_MODEL_URL")
         if env_url:
             return env_url
         if self.consul_registry:
@@ -58,7 +60,7 @@ class ProceduralMemoryService:
         if self._collection_initialized:
             return
 
-        collection_name = 'procedural_memories'
+        collection_name = "procedural_memories"
         try:
             async with self.qdrant:
                 info = await self.qdrant.get_collection_info(collection_name)
@@ -66,12 +68,12 @@ class ProceduralMemoryService:
                     await self.qdrant.create_collection(
                         collection_name=collection_name,
                         vector_size=1536,
-                        distance='Cosine'
+                        distance="Cosine",
                     )
                     await self.qdrant.create_field_index(
                         collection_name=collection_name,
-                        field_name='user_id',
-                        field_type='keyword'
+                        field_name="user_id",
+                        field_type="keyword",
                     )
                     logger.info(f"Created Qdrant collection: {collection_name}")
             self._collection_initialized = True
@@ -79,10 +81,7 @@ class ProceduralMemoryService:
             logger.warning(f"Error ensuring Qdrant collection: {e}")
 
     async def store_procedural_memory(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance_score: float = 0.5
+        self, user_id: str, dialog_content: str, importance_score: float = 0.5
     ) -> MemoryOperationResult:
         """
         Extract and store procedural memories from dialog content using AI
@@ -102,21 +101,21 @@ class ProceduralMemoryService:
             # Extract procedures using LLM
             extraction_result = await self._extract_procedures(dialog_content)
 
-            if not extraction_result['success']:
+            if not extraction_result["success"]:
                 return MemoryOperationResult(
                     success=False,
                     operation="store_procedural_memory",
-                    message=f"Failed to extract procedures: {extraction_result.get('error')}"
+                    message=f"Failed to extract procedures: {extraction_result.get('error')}",
                 )
 
-            procedures_data = extraction_result['data']
+            procedures_data = extraction_result["data"]
             stored_count = 0
             stored_ids = []
 
-            for procedure in procedures_data.get('procedures', []):
+            for procedure in procedures_data.get("procedures", []):
                 if self._is_valid_procedure(procedure):
                     memory_id = str(uuid.uuid4())
-                    content = procedure.get('content', '')
+                    content = procedure.get("content", "")
 
                     # Generate embedding
                     embedding = await self._generate_embedding(content)
@@ -127,19 +126,19 @@ class ProceduralMemoryService:
                         "user_id": user_id,
                         "memory_type": "procedural",
                         "content": content,
-                        "skill_type": procedure.get('skill_type', 'general'),
-                        "steps": procedure.get('steps', []),
-                        "prerequisites": procedure.get('prerequisites', []),
-                        "difficulty_level": procedure.get('difficulty_level', 'medium'),
-                        "success_rate": float(procedure.get('success_rate', 0.0)),
-                        "domain": procedure.get('domain', 'general'),
+                        "skill_type": procedure.get("skill_type", "general"),
+                        "steps": procedure.get("steps", []),
+                        "prerequisites": procedure.get("prerequisites", []),
+                        "difficulty_level": procedure.get("difficulty_level", "medium"),
+                        "success_rate": float(procedure.get("success_rate", 0.0)),
+                        "domain": procedure.get("domain", "general"),
                         "importance_score": importance_score,
-                        "confidence": float(procedure.get('confidence', 0.8)),
+                        "confidence": float(procedure.get("confidence", 0.8)),
                         "access_count": 0,
                         "tags": [],
                         "context": {},
                         "created_at": datetime.now(timezone.utc),
-                        "updated_at": datetime.now(timezone.utc)
+                        "updated_at": datetime.now(timezone.utc),
                     }
 
                     # Store to PostgreSQL
@@ -148,18 +147,33 @@ class ProceduralMemoryService:
                         # Store embedding to Qdrant - ASYNC
                         try:
                             async with self.qdrant:
-                                await self.qdrant.upsert_points('procedural_memories', [{
-                                    'id': memory_id,
-                                    'vector': embedding,
-                                    'payload': {
-                                        'user_id': user_id,
-                                        'skill_type': procedure.get('skill_type', 'general'),
-                                        'domain': procedure.get('domain', 'general'),
-                                        'difficulty_level': procedure.get('difficulty_level', 'medium'),
-                                        'created_at': datetime.now(timezone.utc).isoformat()
-                                    }
-                                }])
-                            logger.info(f"Stored embedding to Qdrant for procedural memory {memory_id}")
+                                await self.qdrant.upsert_points(
+                                    "procedural_memories",
+                                    [
+                                        {
+                                            "id": memory_id,
+                                            "vector": embedding,
+                                            "payload": {
+                                                "user_id": user_id,
+                                                "skill_type": procedure.get(
+                                                    "skill_type", "general"
+                                                ),
+                                                "domain": procedure.get(
+                                                    "domain", "general"
+                                                ),
+                                                "difficulty_level": procedure.get(
+                                                    "difficulty_level", "medium"
+                                                ),
+                                                "created_at": datetime.now(
+                                                    timezone.utc
+                                                ).isoformat(),
+                                            },
+                                        }
+                                    ],
+                                )
+                            logger.info(
+                                f"Stored embedding to Qdrant for procedural memory {memory_id}"
+                            )
                         except Exception as e:
                             logger.error(f"Failed to store embedding to Qdrant: {e}")
 
@@ -172,13 +186,13 @@ class ProceduralMemoryService:
                     operation="store_procedural_memory",
                     message=f"Successfully stored {stored_count} procedural memories",
                     affected_count=stored_count,
-                    data={"memory_ids": stored_ids}
+                    data={"memory_ids": stored_ids},
                 )
             else:
                 return MemoryOperationResult(
                     success=False,
                     operation="store_procedural_memory",
-                    message="No valid procedures extracted"
+                    message="No valid procedures extracted",
                 )
 
         except Exception as e:
@@ -186,7 +200,7 @@ class ProceduralMemoryService:
             return MemoryOperationResult(
                 success=False,
                 operation="store_procedural_memory",
-                message=f"Error: {str(e)}"
+                message=f"Error: {str(e)}",
             )
 
     async def _extract_procedures(self, dialog_content: str) -> Dict[str, Any]:
@@ -212,31 +226,34 @@ Return ONLY valid JSON with a "procedures" array."""
                     model="gpt-4.1-nano",
                     messages=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": prompt},
                     ],
                     response_format={"type": "json_object"},
-                    provider="openai"
+                    provider="openai",
                 )
 
                 content = response.choices[0].message.content
                 if not content or content.strip() == "":
                     logger.error("Empty response from LLM")
-                    return {'success': False, 'error': "Empty response from LLM", 'data': {'procedures': []}}
+                    return {
+                        "success": False,
+                        "error": "Empty response from LLM",
+                        "data": {"procedures": []},
+                    }
 
                 result = json.loads(content)
-                return {'success': True, 'data': result}
+                return {"success": True, "data": result}
 
         except Exception as e:
             logger.error(f"Error extracting procedures: {e}")
-            return {'success': False, 'error': str(e), 'data': {'procedures': []}}
+            return {"success": False, "error": str(e), "data": {"procedures": []}}
 
     async def _generate_embedding(self, text: str) -> List[float]:
         """Generate embedding using ISA Model"""
         try:
             async with AsyncISAModel(base_url=self.model_url) as client:
                 embedding = await client.embeddings.create(
-                    input=text,
-                    model="text-embedding-3-small"
+                    input=text, model="text-embedding-3-small"
                 )
                 return embedding.data[0].embedding
         except Exception as e:
@@ -245,23 +262,21 @@ Return ONLY valid JSON with a "procedures" array."""
 
     def _is_valid_procedure(self, procedure: Dict[str, Any]) -> bool:
         """Check if extracted procedure is valid"""
-        return bool(procedure.get('content') and procedure.get('skill_type') and procedure.get('steps'))
+        return bool(
+            procedure.get("content")
+            and procedure.get("skill_type")
+            and procedure.get("steps")
+        )
 
     # Search methods
     async def search_procedures_by_domain(
-        self,
-        user_id: str,
-        domain: str,
-        limit: int = 10
+        self, user_id: str, domain: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search procedures by domain"""
         return await self.repository.search_by_domain(user_id, domain, limit)
 
     async def search_procedures_by_skill_type(
-        self,
-        user_id: str,
-        skill_type: str,
-        limit: int = 10
+        self, user_id: str, skill_type: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search procedures by skill type"""
         return await self.repository.search_by_skill_type(user_id, skill_type, limit)
@@ -296,21 +311,23 @@ Return ONLY valid JSON with a "procedures" array."""
             if query_embedding is None:
                 query_embedding = await self._generate_embedding(query)
             if query_embedding is None:
-                logger.warning("Failed to generate query embedding, falling back to text search")
+                logger.warning(
+                    "Failed to generate query embedding, falling back to text search"
+                )
                 return await self.search_procedures_by_skill_type(user_id, query, limit)
 
-            logger.info(f"Generated query embedding with {len(query_embedding)} dimensions for procedural search: {query[:50]}...")
+            logger.info(
+                f"Generated query embedding with {len(query_embedding)} dimensions for procedural search: {query[:50]}..."
+            )
 
             # Search Qdrant for similar vectors with user_id filter
             filter_conditions = {
-                "must": [
-                    {"field": "user_id", "match": {"keyword": user_id}}
-                ]
+                "must": [{"field": "user_id", "match": {"keyword": user_id}}]
             }
 
             async with self.qdrant:
                 search_results = await self.qdrant.search_with_filter(
-                    collection_name='procedural_memories',
+                    collection_name="procedural_memories",
                     vector=query_embedding,
                     filter_conditions=filter_conditions,
                     limit=limit,
@@ -320,28 +337,38 @@ Return ONLY valid JSON with a "procedures" array."""
                 )
 
             if not search_results:
-                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
+                logger.info(
+                    f"No vector search results for user {user_id} with threshold {score_threshold}"
+                )
                 return []
 
             # Get memory IDs and scores from results
-            memory_ids = [str(result['id']) for result in search_results]
-            scores = {str(result['id']): result.get('score', 0.0) for result in search_results}
-            vectors = {str(result['id']): result.get('vector') for result in search_results} if with_vectors else {}
+            memory_ids = [str(result["id"]) for result in search_results]
+            scores = {
+                str(result["id"]): result.get("score", 0.0) for result in search_results
+            }
+            vectors = (
+                {str(result["id"]): result.get("vector") for result in search_results}
+                if with_vectors
+                else {}
+            )
 
-            logger.info(f"Vector search found {len(memory_ids)} procedural matches for user {user_id}")
+            logger.info(
+                f"Vector search found {len(memory_ids)} procedural matches for user {user_id}"
+            )
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)
 
             # Add similarity scores (and optionally embeddings) to results
             for memory in memories:
-                memory_id = memory.get('id')
-                memory['similarity_score'] = scores.get(memory_id, 0.0)
+                memory_id = memory.get("id")
+                memory["similarity_score"] = scores.get(memory_id, 0.0)
                 if with_vectors and memory_id in vectors:
-                    memory['embedding'] = vectors[memory_id]
+                    memory["embedding"] = vectors[memory_id]
 
             # Sort by score descending
-            memories.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+            memories.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
 
             return memories
 

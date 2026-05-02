@@ -65,14 +65,18 @@ class AuthorizationEventHandlers:
                     success = await self.repository.revoke_user_permission(
                         user_id=user_id,
                         resource_type=permission.resource_type,
-                        resource_name=permission.resource_name
+                        resource_name=permission.resource_name,
                     )
                     if success:
                         revoked_count += 1
                 except Exception as e:
-                    logger.error(f"Failed to revoke permission {permission.resource_type}:{permission.resource_name}: {e}")
+                    logger.error(
+                        f"Failed to revoke permission {permission.resource_type}:{permission.resource_name}: {e}"
+                    )
 
-            logger.info(f"Cleaned up {revoked_count} permissions for deleted user {user_id}")
+            logger.info(
+                f"Cleaned up {revoked_count} permissions for deleted user {user_id}"
+            )
 
         except Exception as e:
             logger.error(f"Error handling user.deleted event: {e}")
@@ -93,23 +97,39 @@ class AuthorizationEventHandlers:
                 logger.error("organization.deleted event missing organization_id")
                 return
 
-            logger.info(f"Handling organization.deleted event for org: {organization_id}")
+            logger.info(
+                f"Handling organization.deleted event for org: {organization_id}"
+            )
 
             # Delete all organization-level permissions
             try:
-                deleted_org_perms = await self.repository.delete_organization_permissions(organization_id)
-                logger.info(f"Deleted {deleted_org_perms} organization permission records")
+                deleted_org_perms = (
+                    await self.repository.delete_organization_permissions(
+                        organization_id
+                    )
+                )
+                logger.info(
+                    f"Deleted {deleted_org_perms} organization permission records"
+                )
             except Exception as e:
                 logger.error(f"Failed to delete organization permissions: {e}")
 
             # Revoke all user permissions granted by this organization
             try:
-                revoked_user_perms = await self.repository.revoke_permissions_by_organization(organization_id)
-                logger.info(f"Revoked {revoked_user_perms} user permissions from org {organization_id}")
+                revoked_user_perms = (
+                    await self.repository.revoke_permissions_by_organization(
+                        organization_id
+                    )
+                )
+                logger.info(
+                    f"Revoked {revoked_user_perms} user permissions from org {organization_id}"
+                )
             except Exception as e:
                 logger.error(f"Failed to revoke user permissions: {e}")
 
-            logger.info(f"Cleaned up permissions for deleted organization {organization_id}")
+            logger.info(
+                f"Cleaned up permissions for deleted organization {organization_id}"
+            )
 
         except Exception as e:
             logger.error(f"Error handling organization.deleted event: {e}")
@@ -137,13 +157,19 @@ class AuthorizationEventHandlers:
                 logger.error("organization.member_added event missing required fields")
                 return
 
-            logger.info(f"Handling organization.member_added: org={organization_id}, user={user_id}, role={role}")
+            logger.info(
+                f"Handling organization.member_added: org={organization_id}, user={user_id}, role={role}"
+            )
 
             # Get organization's configured permissions
-            org_permissions = await self.repository.list_organization_permissions(organization_id)
+            org_permissions = await self.repository.list_organization_permissions(
+                organization_id
+            )
 
             if not org_permissions:
-                logger.info(f"No organization permissions configured for {organization_id}")
+                logger.info(
+                    f"No organization permissions configured for {organization_id}"
+                )
                 return
 
             # Grant each organization permission to the new member
@@ -156,11 +182,13 @@ class AuthorizationEventHandlers:
                     existing = await self.repository.get_user_permission(
                         user_id=user_id,
                         resource_type=org_perm.resource_type,
-                        resource_name=org_perm.resource_name
+                        resource_name=org_perm.resource_name,
                     )
 
                     if existing:
-                        logger.debug(f"Permission already exists: {org_perm.resource_type}:{org_perm.resource_name}")
+                        logger.debug(
+                            f"Permission already exists: {org_perm.resource_type}:{org_perm.resource_name}"
+                        )
                         continue
 
                     # Create user permission record
@@ -172,18 +200,26 @@ class AuthorizationEventHandlers:
                         permission_source=PermissionSource.ORGANIZATION,
                         granted_by_user_id=added_by,
                         organization_id=organization_id,
-                        is_active=True
+                        is_active=True,
                     )
 
-                    result = await self.repository.grant_user_permission(user_permission)
+                    result = await self.repository.grant_user_permission(
+                        user_permission
+                    )
                     if result:
                         granted_count += 1
-                        logger.debug(f"Granted permission: {org_perm.resource_type}:{org_perm.resource_name}")
+                        logger.debug(
+                            f"Granted permission: {org_perm.resource_type}:{org_perm.resource_name}"
+                        )
 
                 except Exception as e:
-                    logger.error(f"Failed to grant permission {org_perm.resource_type}:{org_perm.resource_name}: {e}")
+                    logger.error(
+                        f"Failed to grant permission {org_perm.resource_type}:{org_perm.resource_name}: {e}"
+                    )
 
-            logger.info(f"Auto-granted {granted_count} organization permissions to user {user_id}")
+            logger.info(
+                f"Auto-granted {granted_count} organization permissions to user {user_id}"
+            )
 
         except Exception as e:
             logger.error(f"Error handling organization.member_added event: {e}")
@@ -205,10 +241,14 @@ class AuthorizationEventHandlers:
             user_id = event_data.get("user_id")
 
             if not organization_id or not user_id:
-                logger.error("organization.member_removed event missing required fields")
+                logger.error(
+                    "organization.member_removed event missing required fields"
+                )
                 return
 
-            logger.info(f"Handling organization.member_removed: org={organization_id}, user={user_id}")
+            logger.info(
+                f"Handling organization.member_removed: org={organization_id}, user={user_id}"
+            )
 
             # Get all user permissions
             user_permissions = await self.repository.list_user_permissions(user_id)
@@ -227,15 +267,21 @@ class AuthorizationEventHandlers:
                         success = await self.repository.revoke_user_permission(
                             user_id=user_id,
                             resource_type=permission.resource_type,
-                            resource_name=permission.resource_name
+                            resource_name=permission.resource_name,
                         )
                         if success:
                             revoked_count += 1
-                            logger.debug(f"Revoked permission: {permission.resource_type}:{permission.resource_name}")
+                            logger.debug(
+                                f"Revoked permission: {permission.resource_type}:{permission.resource_name}"
+                            )
                     except Exception as e:
-                        logger.error(f"Failed to revoke permission {permission.resource_type}:{permission.resource_name}: {e}")
+                        logger.error(
+                            f"Failed to revoke permission {permission.resource_type}:{permission.resource_name}: {e}"
+                        )
 
-            logger.info(f"Revoked {revoked_count} organization permissions from user {user_id}")
+            logger.info(
+                f"Revoked {revoked_count} organization permissions from user {user_id}"
+            )
 
         except Exception as e:
             logger.error(f"Error handling organization.member_removed event: {e}")

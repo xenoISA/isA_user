@@ -15,15 +15,23 @@ import asyncio
 
 from .compliance_repository import ComplianceRepository
 from .models import (
-    ComplianceCheck, ComplianceCheckRequest, ComplianceCheckResponse,
-    ContentModerationResult, PIIDetectionResult, PromptInjectionResult,
-    ComplianceCheckType, ComplianceStatus, RiskLevel, ContentType,
-    PIIType, CompliancePolicy
+    ComplianceCheck,
+    ComplianceCheckRequest,
+    ComplianceCheckResponse,
+    ContentModerationResult,
+    PIIDetectionResult,
+    PromptInjectionResult,
+    ComplianceCheckType,
+    ComplianceStatus,
+    RiskLevel,
+    ContentType,
+    PIIType,
+    CompliancePolicy,
 )
 from .events.publishers import (
     publish_compliance_check_performed,
     publish_compliance_violation_detected,
-    publish_compliance_warning_issued
+    publish_compliance_warning_issued,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,26 +52,23 @@ class ComplianceService:
         self._policy_cache: Dict[str, CompliancePolicy] = {}
 
         # 统计
-        self._stats = {
-            "total_checks": 0,
-            "blocked_content": 0,
-            "flagged_content": 0
-        }
+        self._stats = {"total_checks": 0, "blocked_content": 0, "flagged_content": 0}
 
     # ====================
     # 核心检查方法
     # ====================
 
     async def perform_compliance_check(
-        self,
-        request: ComplianceCheckRequest
+        self, request: ComplianceCheckRequest
     ) -> ComplianceCheckResponse:
         """执行合规检查 - 主入口"""
         start_time = time.time()
         check_id = str(uuid.uuid4())
 
         try:
-            logger.info(f"Starting compliance check {check_id} for user {request.user_id}")
+            logger.info(
+                f"Starting compliance check {check_id} for user {request.user_id}"
+            )
 
             # 获取适用的策略
             policy = await self._get_applicable_policy(request)
@@ -72,17 +77,21 @@ class ComplianceService:
             check_results = await self._run_checks(request, check_id)
 
             # 评估总体合规状态
-            overall_status, risk_level, violations, warnings = \
-                self._evaluate_results(check_results, policy)
+            overall_status, risk_level, violations, warnings = self._evaluate_results(
+                check_results, policy
+            )
 
             # 决定行动
-            action_required, action_taken = \
-                await self._determine_action(overall_status, risk_level, policy)
+            action_required, action_taken = await self._determine_action(
+                overall_status, risk_level, policy
+            )
 
             # 创建检查记录
             compliance_check = ComplianceCheck(
                 check_id=check_id,
-                check_type=request.check_types[0] if request.check_types else ComplianceCheckType.CONTENT_MODERATION,
+                check_type=request.check_types[0]
+                if request.check_types
+                else ComplianceCheckType.CONTENT_MODERATION,
                 content_type=request.content_type,
                 status=overall_status,
                 risk_level=risk_level,
@@ -91,13 +100,15 @@ class ComplianceService:
                 session_id=request.session_id,
                 request_id=request.request_id,
                 content_id=request.content_id,
-                content_hash=self._hash_content(request.content) if request.content else None,
+                content_hash=self._hash_content(request.content)
+                if request.content
+                else None,
                 violations=violations,
                 warnings=warnings,
                 detected_issues=[v.get("issue", "") for v in violations],
                 action_taken=action_taken,
                 metadata=request.metadata,
-                checked_at=datetime.utcnow()
+                checked_at=datetime.utcnow(),
             )
 
             # 保存到数据库
@@ -118,7 +129,7 @@ class ComplianceService:
                 action_taken=action_taken,
                 organization_id=request.organization_id,
                 processing_time_ms=(time.time() - start_time) * 1000,
-                metadata=request.metadata
+                metadata=request.metadata,
             )
 
             # 2. If violations detected, publish violation event
@@ -131,9 +142,11 @@ class ComplianceService:
                     risk_level=risk_level.value,
                     action_taken=action_taken,
                     organization_id=request.organization_id,
-                    requires_review=(risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]),
+                    requires_review=(
+                        risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]
+                    ),
                     blocked_content=(action_taken == "blocked"),
-                    metadata=request.metadata
+                    metadata=request.metadata,
                 )
 
             # 3. If warnings issued, publish warning event
@@ -146,7 +159,7 @@ class ComplianceService:
                     risk_level=risk_level.value,
                     organization_id=request.organization_id,
                     allowed_with_warning=(action_taken not in ["blocked", "blocked"]),
-                    metadata=request.metadata
+                    metadata=request.metadata,
                 )
 
             # 构建响应
@@ -166,10 +179,12 @@ class ComplianceService:
                 action_taken=action_taken,
                 message=self._get_response_message(overall_status, risk_level),
                 checked_at=datetime.utcnow(),
-                processing_time_ms=processing_time
+                processing_time_ms=processing_time,
             )
 
-            logger.info(f"Compliance check {check_id} completed: {overall_status.value}")
+            logger.info(
+                f"Compliance check {check_id} completed: {overall_status.value}"
+            )
             return response
 
         except Exception as e:
@@ -179,19 +194,19 @@ class ComplianceService:
                 status=ComplianceStatus.FAIL,
                 risk_level=RiskLevel.HIGH,
                 passed=False,
-                violations=[{"issue": "System error during compliance check", "details": str(e)}],
+                violations=[
+                    {"issue": "System error during compliance check", "details": str(e)}
+                ],
                 warnings=[],
                 action_required="review",
                 action_taken="blocked",
                 message="Compliance check failed due to system error",
                 checked_at=datetime.utcnow(),
-                processing_time_ms=(time.time() - start_time) * 1000
+                processing_time_ms=(time.time() - start_time) * 1000,
             )
 
     async def _run_checks(
-        self,
-        request: ComplianceCheckRequest,
-        check_id: str
+        self, request: ComplianceCheckRequest, check_id: str
     ) -> Dict[str, Any]:
         """运行所有需要的检查"""
         results = {}
@@ -219,9 +234,11 @@ class ComplianceService:
             for i, check_type in enumerate(request.check_types):
                 if i < len(check_results):
                     if isinstance(check_results[i], Exception):
-                        logger.error(f"Check {check_type.value} failed: {check_results[i]}")
+                        logger.error(
+                            f"Check {check_type.value} failed: {check_results[i]}"
+                        )
                     else:
-                        results[check_type.value.split('_')[0]] = check_results[i]
+                        results[check_type.value.split("_")[0]] = check_results[i]
 
         return results
 
@@ -230,22 +247,27 @@ class ComplianceService:
     # ====================
 
     async def _check_content_moderation(
-        self,
-        request: ComplianceCheckRequest,
-        check_id: str
+        self, request: ComplianceCheckRequest, check_id: str
     ) -> ContentModerationResult:
         """内容审核检查"""
         try:
             logger.info(f"Running content moderation for check {check_id}")
 
-            if request.content_type == ContentType.TEXT or request.content_type == ContentType.PROMPT:
+            if (
+                request.content_type == ContentType.TEXT
+                or request.content_type == ContentType.PROMPT
+            ):
                 return await self._moderate_text(request.content, check_id)
 
             elif request.content_type == ContentType.IMAGE:
-                return await self._moderate_image(request.content_id or request.content_url, check_id)
+                return await self._moderate_image(
+                    request.content_id or request.content_url, check_id
+                )
 
             elif request.content_type == ContentType.AUDIO:
-                return await self._moderate_audio(request.content_id or request.content_url, check_id)
+                return await self._moderate_audio(
+                    request.content_id or request.content_url, check_id
+                )
 
             else:
                 # 默认返回通过
@@ -255,7 +277,7 @@ class ComplianceService:
                     status=ComplianceStatus.PASS,
                     risk_level=RiskLevel.NONE,
                     confidence=1.0,
-                    recommendation="allow"
+                    recommendation="allow",
                 )
 
         except Exception as e:
@@ -267,7 +289,7 @@ class ComplianceService:
                 risk_level=RiskLevel.HIGH,
                 confidence=0.0,
                 recommendation="review",
-                explanation=str(e)
+                explanation=str(e),
             )
 
     async def _moderate_text(self, text: str, check_id: str) -> ContentModerationResult:
@@ -279,7 +301,7 @@ class ComplianceService:
                 status=ComplianceStatus.PASS,
                 risk_level=RiskLevel.NONE,
                 confidence=1.0,
-                recommendation="allow"
+                recommendation="allow",
             )
 
         categories = {}
@@ -292,7 +314,9 @@ class ComplianceService:
                 openai_result = await self._call_openai_moderation(text)
                 if openai_result:
                     categories = openai_result.get("categories", {})
-                    for cat, flagged in openai_result.get("category_scores", {}).items():
+                    for cat, flagged in openai_result.get(
+                        "category_scores", {}
+                    ).items():
                         score = float(flagged)
                         categories[cat] = score
                         if score > max_score:
@@ -340,10 +364,14 @@ class ComplianceService:
             flagged_categories=flagged_categories,
             confidence=max_score,
             recommendation=recommendation,
-            explanation=f"Flagged categories: {', '.join(flagged_categories)}" if flagged_categories else None
+            explanation=f"Flagged categories: {', '.join(flagged_categories)}"
+            if flagged_categories
+            else None,
         )
 
-    async def _moderate_image(self, image_ref: str, check_id: str) -> ContentModerationResult:
+    async def _moderate_image(
+        self, image_ref: str, check_id: str
+    ) -> ContentModerationResult:
         """图片内容审核"""
         # 这里应该集成AWS Rekognition, Google Vision API, 或Azure Content Moderator
         # 简化示例:
@@ -362,10 +390,12 @@ class ComplianceService:
             risk_level=RiskLevel.NONE,
             confidence=0.9,
             recommendation="allow",
-            explanation="Image moderation not fully implemented - passed by default"
+            explanation="Image moderation not fully implemented - passed by default",
         )
 
-    async def _moderate_audio(self, audio_ref: str, check_id: str) -> ContentModerationResult:
+    async def _moderate_audio(
+        self, audio_ref: str, check_id: str
+    ) -> ContentModerationResult:
         """音频内容审核"""
         # 音频审核流程:
         # 1. 使用语音转文字 (Whisper, AWS Transcribe, Google Speech-to-Text)
@@ -381,7 +411,7 @@ class ComplianceService:
             risk_level=RiskLevel.NONE,
             confidence=0.9,
             recommendation="allow",
-            explanation="Audio moderation not fully implemented - passed by default"
+            explanation="Audio moderation not fully implemented - passed by default",
         )
 
     # ====================
@@ -389,41 +419,44 @@ class ComplianceService:
     # ====================
 
     async def _check_pii_detection(
-        self,
-        request: ComplianceCheckRequest,
-        check_id: str
+        self, request: ComplianceCheckRequest, check_id: str
     ) -> PIIDetectionResult:
         """PII检测"""
         try:
-            if not request.content or request.content_type not in [ContentType.TEXT, ContentType.PROMPT]:
+            if not request.content or request.content_type not in [
+                ContentType.TEXT,
+                ContentType.PROMPT,
+            ]:
                 return PIIDetectionResult(
                     check_id=check_id,
                     status=ComplianceStatus.PASS,
                     risk_level=RiskLevel.NONE,
                     detected_pii=[],
-                    pii_count=0
+                    pii_count=0,
                 )
 
             detected_pii = []
 
             # 使用正则表达式检测常见PII
             pii_patterns = {
-                PIIType.EMAIL: r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-                PIIType.PHONE: r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',
-                PIIType.SSN: r'\b\d{3}-\d{2}-\d{4}\b',
-                PIIType.CREDIT_CARD: r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b',
-                PIIType.IP_ADDRESS: r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
+                PIIType.EMAIL: r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+                PIIType.PHONE: r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",
+                PIIType.SSN: r"\b\d{3}-\d{2}-\d{4}\b",
+                PIIType.CREDIT_CARD: r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
+                PIIType.IP_ADDRESS: r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
             }
 
             for pii_type, pattern in pii_patterns.items():
                 matches = re.finditer(pattern, request.content)
                 for match in matches:
-                    detected_pii.append({
-                        "type": pii_type.value,
-                        "value": self._mask_pii(match.group()),
-                        "location": match.span(),
-                        "confidence": 0.95
-                    })
+                    detected_pii.append(
+                        {
+                            "type": pii_type.value,
+                            "value": self._mask_pii(match.group()),
+                            "location": match.span(),
+                            "confidence": 0.95,
+                        }
+                    )
 
             # 判断风险级别
             pii_count = len(detected_pii)
@@ -451,7 +484,7 @@ class ComplianceService:
                 pii_count=pii_count,
                 pii_types=[PIIType(p["type"]) for p in detected_pii],
                 risk_level=risk_level,
-                needs_redaction=needs_redaction
+                needs_redaction=needs_redaction,
             )
 
         except Exception as e:
@@ -461,7 +494,7 @@ class ComplianceService:
                 status=ComplianceStatus.FAIL,
                 risk_level=RiskLevel.HIGH,
                 detected_pii=[],
-                pii_count=0
+                pii_count=0,
             )
 
     # ====================
@@ -469,34 +502,35 @@ class ComplianceService:
     # ====================
 
     async def _check_prompt_injection(
-        self,
-        request: ComplianceCheckRequest,
-        check_id: str
+        self, request: ComplianceCheckRequest, check_id: str
     ) -> PromptInjectionResult:
         """提示词注入检测"""
         try:
-            if not request.content or request.content_type not in [ContentType.TEXT, ContentType.PROMPT]:
+            if not request.content or request.content_type not in [
+                ContentType.TEXT,
+                ContentType.PROMPT,
+            ]:
                 return PromptInjectionResult(
                     check_id=check_id,
                     status=ComplianceStatus.PASS,
                     risk_level=RiskLevel.NONE,
                     is_injection_detected=False,
                     confidence=1.0,
-                    recommendation="allow"
+                    recommendation="allow",
                 )
 
             text = request.content.lower()
 
             # 检测常见的注入模式
             injection_patterns = [
-                r'ignore\s+(previous|above|prior)\s+(instructions|prompts?|commands?)',
-                r'forget\s+(everything|all|previous)',
-                r'you\s+are\s+now',
-                r'system\s*:\s*',
-                r'</?\s*system\s*>',
-                r'jailbreak',
-                r'developer\s+mode',
-                r'override\s+(safety|rules|restrictions)',
+                r"ignore\s+(previous|above|prior)\s+(instructions|prompts?|commands?)",
+                r"forget\s+(everything|all|previous)",
+                r"you\s+are\s+now",
+                r"system\s*:\s*",
+                r"</?\s*system\s*>",
+                r"jailbreak",
+                r"developer\s+mode",
+                r"override\s+(safety|rules|restrictions)",
             ]
 
             detected_patterns = []
@@ -509,12 +543,12 @@ class ComplianceService:
 
             # 检测异常结构
             suspicious_tokens = []
-            if '<|' in text or '|>' in text:
-                suspicious_tokens.append('special_tokens')
+            if "<|" in text or "|>" in text:
+                suspicious_tokens.append("special_tokens")
                 max_confidence = max(max_confidence, 0.6)
 
-            if '###' in text or '```' in text:
-                suspicious_tokens.append('code_blocks')
+            if "###" in text or "```" in text:
+                suspicious_tokens.append("code_blocks")
                 max_confidence = max(max_confidence, 0.4)
 
             # 判断结果
@@ -546,7 +580,9 @@ class ComplianceService:
                 detected_patterns=detected_patterns,
                 suspicious_tokens=suspicious_tokens,
                 recommendation=recommendation,
-                explanation=f"Detected patterns: {', '.join(detected_patterns)}" if detected_patterns else None
+                explanation=f"Detected patterns: {', '.join(detected_patterns)}"
+                if detected_patterns
+                else None,
             )
 
         except Exception as e:
@@ -557,7 +593,7 @@ class ComplianceService:
                 risk_level=RiskLevel.HIGH,
                 is_injection_detected=True,
                 confidence=0.0,
-                recommendation="block"
+                recommendation="block",
             )
 
     # ====================
@@ -565,16 +601,14 @@ class ComplianceService:
     # ====================
 
     async def _check_toxicity(
-        self,
-        request: ComplianceCheckRequest,
-        check_id: str
+        self, request: ComplianceCheckRequest, check_id: str
     ) -> Dict[str, Any]:
         """毒性检测"""
         # TODO: 集成 Perspective API 或类似服务
         return {
             "check_id": check_id,
             "toxicity_score": 0.0,
-            "status": ComplianceStatus.PASS.value
+            "status": ComplianceStatus.PASS.value,
         }
 
     # ====================
@@ -602,8 +636,8 @@ class ComplianceService:
         max_score = 0.0
 
         # 简单的关键词检测
-        hate_keywords = ['hate', 'racist', 'discrimination']
-        violence_keywords = ['kill', 'murder', 'violence', 'attack']
+        hate_keywords = ["hate", "racist", "discrimination"]
+        violence_keywords = ["kill", "murder", "violence", "attack"]
 
         text_lower = text.lower()
 
@@ -625,16 +659,10 @@ class ComplianceService:
             if score > 0.5:
                 flagged.append("violence")
 
-        return {
-            "categories": categories,
-            "flagged": flagged,
-            "max_score": max_score
-        }
+        return {"categories": categories, "flagged": flagged, "max_score": max_score}
 
     def _evaluate_results(
-        self,
-        check_results: Dict[str, Any],
-        policy: Optional[CompliancePolicy]
+        self, check_results: Dict[str, Any], policy: Optional[CompliancePolicy]
     ) -> Tuple[ComplianceStatus, RiskLevel, List[Dict], List[Dict]]:
         """评估所有检查结果"""
         violations = []
@@ -647,7 +675,7 @@ class ComplianceService:
             ComplianceStatus.WARNING: 1,
             ComplianceStatus.FLAGGED: 2,
             ComplianceStatus.FAIL: 3,
-            ComplianceStatus.BLOCKED: 4
+            ComplianceStatus.BLOCKED: 4,
         }
 
         risk_priority = {
@@ -655,12 +683,12 @@ class ComplianceService:
             RiskLevel.LOW: 1,
             RiskLevel.MEDIUM: 2,
             RiskLevel.HIGH: 3,
-            RiskLevel.CRITICAL: 4
+            RiskLevel.CRITICAL: 4,
         }
 
         # 遍历所有检查结果
         for check_type, result in check_results.items():
-            if hasattr(result, 'status'):
+            if hasattr(result, "status"):
                 if status_priority[result.status] > status_priority[worst_status]:
                     worst_status = result.status
 
@@ -669,17 +697,30 @@ class ComplianceService:
 
                 # 收集违规和警告
                 if result.status in [ComplianceStatus.FAIL, ComplianceStatus.BLOCKED]:
-                    violations.append({
-                        "check_type": check_type,
-                        "issue": result.recommendation if hasattr(result, 'recommendation') else "Compliance violation",
-                        "details": result.explanation if hasattr(result, 'explanation') else ""
-                    })
-                elif result.status in [ComplianceStatus.WARNING, ComplianceStatus.FLAGGED]:
-                    warnings.append({
-                        "check_type": check_type,
-                        "issue": "Potential compliance issue",
-                        "details": result.explanation if hasattr(result, 'explanation') else ""
-                    })
+                    violations.append(
+                        {
+                            "check_type": check_type,
+                            "issue": result.recommendation
+                            if hasattr(result, "recommendation")
+                            else "Compliance violation",
+                            "details": result.explanation
+                            if hasattr(result, "explanation")
+                            else "",
+                        }
+                    )
+                elif result.status in [
+                    ComplianceStatus.WARNING,
+                    ComplianceStatus.FLAGGED,
+                ]:
+                    warnings.append(
+                        {
+                            "check_type": check_type,
+                            "issue": "Potential compliance issue",
+                            "details": result.explanation
+                            if hasattr(result, "explanation")
+                            else "",
+                        }
+                    )
 
         return worst_status, max_risk, violations, warnings
 
@@ -687,7 +728,7 @@ class ComplianceService:
         self,
         status: ComplianceStatus,
         risk_level: RiskLevel,
-        policy: Optional[CompliancePolicy]
+        policy: Optional[CompliancePolicy],
     ) -> Tuple[str, Optional[str]]:
         """决定应采取的行动"""
         if status == ComplianceStatus.BLOCKED or risk_level == RiskLevel.CRITICAL:
@@ -702,8 +743,7 @@ class ComplianceService:
             return "none", "allowed"
 
     async def _get_applicable_policy(
-        self,
-        request: ComplianceCheckRequest
+        self, request: ComplianceCheckRequest
     ) -> Optional[CompliancePolicy]:
         """获取适用的策略"""
         try:
@@ -711,7 +751,9 @@ class ComplianceService:
                 return await self.repository.get_policy_by_id(request.policy_id)
 
             # 获取组织或全局策略
-            policies = await self.repository.get_active_policies(request.organization_id)
+            policies = await self.repository.get_active_policies(
+                request.organization_id
+            )
 
             # 返回第一个匹配的策略（按优先级排序）
             for policy in policies:
@@ -733,7 +775,9 @@ class ComplianceService:
             return "***"
         return value[:2] + "*" * (len(value) - 4) + value[-2:]
 
-    def _get_response_message(self, status: ComplianceStatus, risk_level: RiskLevel) -> str:
+    def _get_response_message(
+        self, status: ComplianceStatus, risk_level: RiskLevel
+    ) -> str:
         """获取响应消息"""
         if status == ComplianceStatus.PASS:
             return "Content passed all compliance checks"
@@ -749,5 +793,4 @@ class ComplianceService:
             return "Compliance check pending"
 
 
-__all__ = ['ComplianceService']
-
+__all__ = ["ComplianceService"]

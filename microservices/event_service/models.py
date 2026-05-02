@@ -13,18 +13,21 @@ import uuid
 
 # ==================== 事件类型枚举 ====================
 
+
 class EventSource(str, Enum):
     """事件来源"""
-    FRONTEND = "frontend"           # 前端用户行为
-    BACKEND = "backend"             # 后端业务逻辑
-    SYSTEM = "system"               # 系统内部
-    IOT_DEVICE = "iot_device"       # IoT设备
-    EXTERNAL_API = "external_api"   # 外部API
-    SCHEDULED = "scheduled"         # 定时任务
+
+    FRONTEND = "frontend"  # 前端用户行为
+    BACKEND = "backend"  # 后端业务逻辑
+    SYSTEM = "system"  # 系统内部
+    IOT_DEVICE = "iot_device"  # IoT设备
+    EXTERNAL_API = "external_api"  # 外部API
+    SCHEDULED = "scheduled"  # 定时任务
 
 
 class EventCategory(str, Enum):
     """事件分类"""
+
     # 用户行为
     USER_ACTION = "user_action"
     PAGE_VIEW = "page_view"
@@ -53,15 +56,17 @@ class EventCategory(str, Enum):
 
 class EventStatus(str, Enum):
     """事件处理状态"""
-    PENDING = "pending"         # 待处理
-    PROCESSING = "processing"   # 处理中
-    PROCESSED = "processed"     # 已处理
-    FAILED = "failed"          # 处理失败
-    ARCHIVED = "archived"      # 已归档
+
+    PENDING = "pending"  # 待处理
+    PROCESSING = "processing"  # 处理中
+    PROCESSED = "processed"  # 已处理
+    FAILED = "failed"  # 处理失败
+    ARCHIVED = "archived"  # 已归档
 
 
 class ProcessingStatus(str, Enum):
     """处理器状态"""
+
     SUCCESS = "success"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -70,12 +75,16 @@ class ProcessingStatus(str, Enum):
 
 # ==================== 事件模型 ====================
 
+
 class Event(BaseModel):
     """统一事件模型"""
+
     model_config = ConfigDict(from_attributes=True)
 
     # 基础字段
-    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="事件唯一ID")
+    event_id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()), description="事件唯一ID"
+    )
     event_type: str = Field(..., description="事件类型")
     event_source: EventSource = Field(..., description="事件来源")
     event_category: EventCategory = Field(..., description="事件分类")
@@ -114,6 +123,7 @@ class Event(BaseModel):
 
 class EventStream(BaseModel):
     """事件流模型"""
+
     model_config = ConfigDict(from_attributes=True)
 
     stream_id: str = Field(..., description="流ID")
@@ -130,8 +140,10 @@ class EventStream(BaseModel):
 
 # ==================== RudderStack 事件模型 ====================
 
+
 class RudderStackEvent(BaseModel):
     """RudderStack 事件模型"""
+
     model_config = ConfigDict(from_attributes=True)
 
     anonymousId: Optional[str] = Field(None, description="匿名ID")
@@ -148,11 +160,15 @@ class RudderStackEvent(BaseModel):
 
 # ==================== API 请求/响应模型 ====================
 
+
 class EventCreateRequest(BaseModel):
     """创建事件请求"""
+
     event_type: str = Field(..., description="事件类型")
     event_source: Optional[EventSource] = Field(EventSource.BACKEND, description="事件来源")
-    event_category: Optional[EventCategory] = Field(EventCategory.USER_ACTION, description="事件分类")
+    event_category: Optional[EventCategory] = Field(
+        EventCategory.USER_ACTION, description="事件分类"
+    )
     user_id: Optional[str] = Field(None, description="用户ID")
     data: Dict[str, Any] = Field(default_factory=dict, description="事件数据")
     metadata: Optional[Dict[str, Any]] = Field(None, description="元数据")
@@ -161,6 +177,7 @@ class EventCreateRequest(BaseModel):
 
 class EventQueryRequest(BaseModel):
     """查询事件请求"""
+
     user_id: Optional[str] = Field(None, description="用户ID")
     event_type: Optional[str] = Field(None, description="事件类型")
     event_source: Optional[EventSource] = Field(None, description="事件来源")
@@ -174,6 +191,7 @@ class EventQueryRequest(BaseModel):
 
 class EventResponse(BaseModel):
     """事件响应"""
+
     event_id: str
     event_type: str
     event_source: EventSource
@@ -187,6 +205,7 @@ class EventResponse(BaseModel):
 
 class EventListResponse(BaseModel):
     """事件列表响应"""
+
     events: List[EventResponse]
     total: int
     limit: int
@@ -196,13 +215,16 @@ class EventListResponse(BaseModel):
 
 class EventStatistics(BaseModel):
     """事件统计"""
+
     total_events: int = Field(..., description="事件总数")
     pending_events: int = Field(..., description="待处理事件数")
     processed_events: int = Field(..., description="已处理事件数")
     failed_events: int = Field(..., description="失败事件数")
 
     events_by_source: Dict[str, int] = Field(default_factory=dict, description="按来源统计")
-    events_by_category: Dict[str, int] = Field(default_factory=dict, description="按分类统计")
+    events_by_category: Dict[str, int] = Field(
+        default_factory=dict, description="按分类统计"
+    )
     events_by_type: Dict[str, int] = Field(default_factory=dict, description="按类型统计")
 
     events_today: int = Field(0, description="今日事件数")
@@ -214,13 +236,16 @@ class EventStatistics(BaseModel):
     error_rate: float = Field(0.0, description="错误率(%)")
 
     top_users: List[Dict[str, Any]] = Field(default_factory=list, description="活跃用户")
-    top_event_types: List[Dict[str, Any]] = Field(default_factory=list, description="热门事件类型")
+    top_event_types: List[Dict[str, Any]] = Field(
+        default_factory=list, description="热门事件类型"
+    )
 
     calculated_at: datetime = Field(default_factory=datetime.utcnow, description="统计时间")
 
 
 class EventProcessingResult(BaseModel):
     """事件处理结果"""
+
     event_id: str
     processor_name: str
     status: ProcessingStatus
@@ -231,6 +256,7 @@ class EventProcessingResult(BaseModel):
 
 class EventReplayRequest(BaseModel):
     """事件重放请求"""
+
     stream_id: Optional[str] = Field(None, description="流ID")
     event_ids: Optional[List[str]] = Field(None, description="事件ID列表")
     start_time: Optional[datetime] = Field(None, description="开始时间")
@@ -241,6 +267,7 @@ class EventReplayRequest(BaseModel):
 
 class EventProjection(BaseModel):
     """事件投影"""
+
     projection_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     projection_name: str = Field(..., description="投影名称")
     entity_id: str = Field(..., description="实体ID")
@@ -256,8 +283,10 @@ class EventProjection(BaseModel):
 
 # ==================== 处理器配置 ====================
 
+
 class EventProcessor(BaseModel):
     """事件处理器配置"""
+
     processor_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     processor_name: str = Field(..., description="处理器名称")
     processor_type: str = Field(..., description="处理器类型")
@@ -275,6 +304,7 @@ class EventProcessor(BaseModel):
 
 class EventSubscription(BaseModel):
     """事件订阅"""
+
     subscription_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     subscriber_name: str = Field(default="default_subscriber", description="订阅者名称")
     subscriber_type: str = Field(default="service", description="订阅者类型")

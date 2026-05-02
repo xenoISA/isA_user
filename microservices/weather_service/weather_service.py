@@ -12,10 +12,16 @@ from typing import Any, Dict, Optional
 
 from .weather_repository import WeatherRepository
 from .models import (
-    WeatherCurrentRequest, WeatherForecastRequest, LocationSaveRequest,
-    WeatherCurrentResponse, WeatherForecastResponse, ForecastDay,
-    LocationListResponse, WeatherAlertResponse, WeatherAlert,
-    WeatherProvider
+    WeatherCurrentRequest,
+    WeatherForecastRequest,
+    LocationSaveRequest,
+    WeatherCurrentResponse,
+    WeatherForecastResponse,
+    ForecastDay,
+    LocationListResponse,
+    WeatherAlertResponse,
+    WeatherAlert,
+    WeatherProvider,
 )
 from core.nats_client import Event
 

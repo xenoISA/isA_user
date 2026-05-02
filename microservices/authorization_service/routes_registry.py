@@ -3,6 +3,7 @@ Authorization Service Routes Registry
 Defines all API routes for Consul service registration
 """
 from typing import Dict, Any
+
 # Define all routes
 SERVICE_ROUTES = [
     # Health and Service Info
@@ -10,85 +11,87 @@ SERVICE_ROUTES = [
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Basic health check"
+        "description": "Basic health check",
     },
-        {
-            "path": "/api/v1/authorization/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/authorization/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Detailed health check with dependencies"
+        "description": "Detailed health check with dependencies",
     },
     {
         "path": "/api/v1/authorization/info",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service information and capabilities"
+        "description": "Service information and capabilities",
     },
     {
         "path": "/api/v1/authorization/stats",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service statistics and metrics"
+        "description": "Service statistics and metrics",
     },
     # Core Authorization
     {
         "path": "/api/v1/authorization/check-access",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Check resource access permission"
+        "description": "Check resource access permission",
     },
     {
         "path": "/api/v1/authorization/grant",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Grant resource permission"
+        "description": "Grant resource permission",
     },
     {
         "path": "/api/v1/authorization/revoke",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Revoke resource permission"
+        "description": "Revoke resource permission",
     },
     # Permission Management
     {
         "path": "/api/v1/authorization/user-permissions/{user_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get user permission summary"
+        "description": "Get user permission summary",
     },
     {
         "path": "/api/v1/authorization/user-resources/{user_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List user accessible resources"
+        "description": "List user accessible resources",
     },
     # Bulk Operations
     {
         "path": "/api/v1/authorization/bulk-grant",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Bulk grant permissions"
+        "description": "Bulk grant permissions",
     },
     {
         "path": "/api/v1/authorization/bulk-revoke",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Bulk revoke permissions"
+        "description": "Bulk revoke permissions",
     },
     # Administrative
     {
         "path": "/api/v1/authorization/cleanup-expired",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Cleanup expired permissions"
-    }
+        "description": "Cleanup expired permissions",
+    },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -126,6 +129,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "authorization_service",
@@ -137,6 +142,6 @@ SERVICE_METADATA = {
         "bulk_operations",
         "multi_level_authorization",
         "subscription_authorization",
-        "organization_authorization"
-    ]
+        "organization_authorization",
+    ],
 }

@@ -52,7 +52,13 @@ class DocumentRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="document_service", min_pool_size=1, max_pool_size=2)
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="document_service",
+            min_pool_size=1,
+            max_pool_size=2,
+        )
 
         # Table names (document schema)
         self.schema = "document"
@@ -113,8 +119,12 @@ class DocumentRepository:
                 "point_ids": document_data.point_ids or [],
                 "metadata": document_data.metadata or {},
                 "tags": document_data.tags or [],
-                "created_at": datetime.now(timezone.utc).replace(tzinfo=None).replace(tzinfo=None),
-                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).replace(tzinfo=None),
+                "created_at": datetime.now(timezone.utc)
+                .replace(tzinfo=None)
+                .replace(tzinfo=None),
+                "updated_at": datetime.now(timezone.utc)
+                .replace(tzinfo=None)
+                .replace(tzinfo=None),
             }
 
             async with self.db:
@@ -144,7 +154,14 @@ class DocumentRepository:
 
             if result:
                 # Convert protobuf JSONB fields
-                for field in ["metadata", "allowed_users", "allowed_groups", "denied_users", "point_ids", "tags"]:
+                for field in [
+                    "metadata",
+                    "allowed_users",
+                    "allowed_groups",
+                    "denied_users",
+                    "point_ids",
+                    "tags",
+                ]:
                     if field in result:
                         result[field] = self._convert_protobuf_to_native(result[field])
 
@@ -170,7 +187,14 @@ class DocumentRepository:
                 result = await self.db.query_row(query, params, schema=self.schema)
 
             if result:
-                for field in ["metadata", "allowed_users", "allowed_groups", "denied_users", "point_ids", "tags"]:
+                for field in [
+                    "metadata",
+                    "allowed_users",
+                    "allowed_groups",
+                    "denied_users",
+                    "point_ids",
+                    "tags",
+                ]:
                     if field in result:
                         result[field] = self._convert_protobuf_to_native(result[field])
 
@@ -210,7 +234,9 @@ class DocumentRepository:
             if doc_type:
                 param_count += 1
                 conditions.append(f"doc_type = ${param_count}")
-                params.append(doc_type.value if hasattr(doc_type, "value") else str(doc_type))
+                params.append(
+                    doc_type.value if hasattr(doc_type, "value") else str(doc_type)
+                )
 
             where_clause = " AND ".join(conditions)
             param_count += 1
@@ -231,7 +257,14 @@ class DocumentRepository:
 
             # Convert protobuf JSONB fields
             for row in results:
-                for field in ["metadata", "allowed_users", "allowed_groups", "denied_users", "point_ids", "tags"]:
+                for field in [
+                    "metadata",
+                    "allowed_users",
+                    "allowed_groups",
+                    "denied_users",
+                    "point_ids",
+                    "tags",
+                ]:
                     if field in row:
                         row[field] = self._convert_protobuf_to_native(row[field])
 
@@ -300,10 +333,14 @@ class DocumentRepository:
                 update_data["chunk_count"] = chunk_count
 
             if status == DocumentStatus.INDEXED:
-                update_data["indexed_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+                update_data["indexed_at"] = datetime.now(timezone.utc).replace(
+                    tzinfo=None
+                )
 
             if status in [DocumentStatus.UPDATING, DocumentStatus.UPDATE_PENDING]:
-                update_data["last_updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+                update_data["last_updated_at"] = datetime.now(timezone.utc).replace(
+                    tzinfo=None
+                )
 
             result = await self.update_document(doc_id, update_data)
             return result is not None
@@ -331,7 +368,9 @@ class DocumentRepository:
             logger.error(f"Error marking version as old: {e}")
             return False
 
-    async def delete_document(self, doc_id: str, user_id: str, soft: bool = True) -> bool:
+    async def delete_document(
+        self, doc_id: str, user_id: str, soft: bool = True
+    ) -> bool:
         """Delete document (soft or hard)"""
         try:
             if soft:
@@ -383,7 +422,14 @@ class DocumentRepository:
 
             # Convert protobuf JSONB fields
             for row in results:
-                for field in ["metadata", "allowed_users", "allowed_groups", "denied_users", "point_ids", "tags"]:
+                for field in [
+                    "metadata",
+                    "allowed_users",
+                    "allowed_groups",
+                    "denied_users",
+                    "point_ids",
+                    "tags",
+                ]:
                     if field in row:
                         row[field] = self._convert_protobuf_to_native(row[field])
 
@@ -411,6 +457,7 @@ class DocumentRepository:
 
             # Generate new doc_id for version
             import uuid
+
             new_doc_id = f"doc_{uuid.uuid4().hex[:12]}"
 
             # Create new version
@@ -532,7 +579,12 @@ class DocumentRepository:
 
             # Convert protobuf JSONB fields
             for row in results:
-                for field in ["users_added", "users_removed", "groups_added", "groups_removed"]:
+                for field in [
+                    "users_added",
+                    "users_removed",
+                    "groups_added",
+                    "groups_removed",
+                ]:
                     if field in row:
                         row[field] = self._convert_protobuf_to_native(row[field])
 
@@ -593,12 +645,12 @@ class DocumentRepository:
                 doc_type = row.get("doc_type", "unknown")
                 status = row.get("status", "unknown")
 
-                stats["by_type"][doc_type] = stats["by_type"].get(doc_type, 0) + row.get(
-                    "total_documents", 0
-                )
-                stats["by_status"][status] = stats["by_status"].get(status, 0) + row.get(
-                    "total_documents", 0
-                )
+                stats["by_type"][doc_type] = stats["by_type"].get(
+                    doc_type, 0
+                ) + row.get("total_documents", 0)
+                stats["by_status"][status] = stats["by_status"].get(
+                    status, 0
+                ) + row.get("total_documents", 0)
 
             return stats
 

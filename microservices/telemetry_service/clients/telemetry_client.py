@@ -24,7 +24,7 @@ class TelemetryServiceClient:
             base_url: Telemetry service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -57,7 +57,7 @@ class TelemetryServiceClient:
         value: float,
         unit: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
-        timestamp: Optional[datetime] = None
+        timestamp: Optional[datetime] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Send single telemetry data point
@@ -84,10 +84,7 @@ class TelemetryServiceClient:
             ... )
         """
         try:
-            payload = {
-                "metric_name": metric_name,
-                "value": value
-            }
+            payload = {"metric_name": metric_name, "value": value}
 
             if unit:
                 payload["unit"] = unit
@@ -97,8 +94,7 @@ class TelemetryServiceClient:
                 payload["timestamp"] = timestamp.isoformat()
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/devices/{device_id}/telemetry",
-                json=payload
+                f"{self.base_url}/api/v1/devices/{device_id}/telemetry", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -111,9 +107,7 @@ class TelemetryServiceClient:
             return None
 
     async def send_batch_telemetry(
-        self,
-        device_id: str,
-        data_points: List[Dict[str, Any]]
+        self, device_id: str, data_points: List[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
         """
         Send batch telemetry data points
@@ -135,7 +129,7 @@ class TelemetryServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices/{device_id}/telemetry/batch",
-                json={"data_points": data_points}
+                json={"data_points": data_points},
             )
             response.raise_for_status()
             return response.json()
@@ -148,8 +142,7 @@ class TelemetryServiceClient:
             return None
 
     async def send_bulk_telemetry(
-        self,
-        telemetry_data: List[Dict[str, Any]]
+        self, telemetry_data: List[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
         """
         Send bulk telemetry from multiple devices
@@ -178,7 +171,7 @@ class TelemetryServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/telemetry/bulk",
-                json={"telemetry_data": telemetry_data}
+                json={"telemetry_data": telemetry_data},
             )
             response.raise_for_status()
             return response.json()
@@ -201,7 +194,7 @@ class TelemetryServiceClient:
         unit: str,
         metric_type: str = "gauge",
         aggregations: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Define new metric
@@ -231,7 +224,7 @@ class TelemetryServiceClient:
                 "metric_name": metric_name,
                 "description": description,
                 "unit": unit,
-                "metric_type": metric_type
+                "metric_type": metric_type,
             }
 
             if aggregations:
@@ -240,8 +233,7 @@ class TelemetryServiceClient:
                 payload["tags"] = tags
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/metrics",
-                json=payload
+                f"{self.base_url}/api/v1/metrics", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -266,9 +258,7 @@ class TelemetryServiceClient:
             ...     print(f"{metric['metric_name']}: {metric['description']}")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/metrics"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/metrics")
             response.raise_for_status()
             return response.json()
 
@@ -279,10 +269,7 @@ class TelemetryServiceClient:
             logger.error(f"Error listing metrics: {e}")
             return None
 
-    async def get_metric(
-        self,
-        metric_name: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_metric(self, metric_name: str) -> Optional[Dict[str, Any]]:
         """
         Get metric definition
 
@@ -309,10 +296,7 @@ class TelemetryServiceClient:
             logger.error(f"Error getting metric: {e}")
             return None
 
-    async def delete_metric(
-        self,
-        metric_name: str
-    ) -> bool:
+    async def delete_metric(self, metric_name: str) -> bool:
         """
         Delete metric definition
 
@@ -352,7 +336,7 @@ class TelemetryServiceClient:
         tags: Optional[Dict[str, str]] = None,
         aggregation: Optional[str] = None,
         interval: Optional[str] = None,
-        limit: int = 1000
+        limit: int = 1000,
     ) -> Optional[Dict[str, Any]]:
         """
         Query telemetry data
@@ -399,8 +383,7 @@ class TelemetryServiceClient:
                 payload["interval"] = interval
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/query",
-                json=payload
+                f"{self.base_url}/api/v1/query", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -413,9 +396,7 @@ class TelemetryServiceClient:
             return None
 
     async def get_latest_value(
-        self,
-        device_id: str,
-        metric_name: str
+        self, device_id: str, metric_name: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get latest value for device metric
@@ -445,10 +426,7 @@ class TelemetryServiceClient:
             logger.error(f"Error getting latest value: {e}")
             return None
 
-    async def get_device_metrics(
-        self,
-        device_id: str
-    ) -> Optional[List[str]]:
+    async def get_device_metrics(self, device_id: str) -> Optional[List[str]]:
         """
         Get all metrics for device
 
@@ -483,7 +461,7 @@ class TelemetryServiceClient:
         start_time: datetime,
         end_time: datetime,
         aggregation: Optional[str] = None,
-        interval: Optional[str] = None
+        interval: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get metric values for time range
@@ -512,7 +490,7 @@ class TelemetryServiceClient:
         try:
             params = {
                 "start_time": start_time.isoformat(),
-                "end_time": end_time.isoformat()
+                "end_time": end_time.isoformat(),
             }
 
             if aggregation:
@@ -522,7 +500,7 @@ class TelemetryServiceClient:
 
             response = await self.client.get(
                 f"{self.base_url}/api/v1/devices/{device_id}/metrics/{metric_name}/range",
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -542,7 +520,7 @@ class TelemetryServiceClient:
         end_time: datetime,
         interval: str,
         device_ids: Optional[List[str]] = None,
-        tags: Optional[Dict[str, str]] = None
+        tags: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get aggregated data across devices
@@ -575,7 +553,7 @@ class TelemetryServiceClient:
                 "aggregation": aggregation,
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat(),
-                "interval": interval
+                "interval": interval,
             }
 
             if device_ids:
@@ -585,8 +563,7 @@ class TelemetryServiceClient:
                     params[f"tag_{key}"] = value
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/aggregated",
-                params=params
+                f"{self.base_url}/api/v1/aggregated", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -610,7 +587,7 @@ class TelemetryServiceClient:
         threshold: float,
         severity: str = "warning",
         device_id: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None
+        tags: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create alert rule
@@ -642,7 +619,7 @@ class TelemetryServiceClient:
                 "metric_name": metric_name,
                 "condition": condition,
                 "threshold": threshold,
-                "severity": severity
+                "severity": severity,
             }
 
             if device_id:
@@ -651,8 +628,7 @@ class TelemetryServiceClient:
                 payload["tags"] = tags
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/alerts/rules",
-                json=payload
+                f"{self.base_url}/api/v1/alerts/rules", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -675,9 +651,7 @@ class TelemetryServiceClient:
             >>> rules = await client.list_alert_rules()
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/alerts/rules"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/alerts/rules")
             response.raise_for_status()
             return response.json()
 
@@ -693,7 +667,7 @@ class TelemetryServiceClient:
         device_id: Optional[str] = None,
         severity: Optional[str] = None,
         status: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> Optional[Dict[str, Any]]:
         """
         List alerts
@@ -721,8 +695,7 @@ class TelemetryServiceClient:
                 params["status"] = status
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/alerts",
-                params=params
+                f"{self.base_url}/api/v1/alerts", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -734,10 +707,7 @@ class TelemetryServiceClient:
             logger.error(f"Error listing alerts: {e}")
             return None
 
-    async def acknowledge_alert(
-        self,
-        alert_id: str
-    ) -> bool:
+    async def acknowledge_alert(self, alert_id: str) -> bool:
         """
         Acknowledge alert
 
@@ -764,10 +734,7 @@ class TelemetryServiceClient:
             logger.error(f"Error acknowledging alert: {e}")
             return False
 
-    async def resolve_alert(
-        self,
-        alert_id: str
-    ) -> bool:
+    async def resolve_alert(self, alert_id: str) -> bool:
         """
         Resolve alert
 
@@ -798,10 +765,7 @@ class TelemetryServiceClient:
     # Statistics
     # =============================================================================
 
-    async def get_device_stats(
-        self,
-        device_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_device_stats(self, device_id: str) -> Optional[Dict[str, Any]]:
         """
         Get device telemetry statistics
 
@@ -840,9 +804,7 @@ class TelemetryServiceClient:
             >>> print(f"Total data points: {stats['total_data_points']}")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/stats"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/stats")
             response.raise_for_status()
             return response.json()
 

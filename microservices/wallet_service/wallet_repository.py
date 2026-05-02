@@ -13,14 +13,23 @@ import logging
 # Database client setup
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    WalletBalance, WalletTransaction, WalletCreate,
-    TransactionCreate, TransactionType, WalletType,
-    BlockchainNetwork, TransactionFilter, WalletStatistics
+    WalletBalance,
+    WalletTransaction,
+    WalletCreate,
+    TransactionCreate,
+    TransactionType,
+    WalletType,
+    BlockchainNetwork,
+    TransactionFilter,
+    WalletStatistics,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,11 +47,11 @@ class WalletRepository:
         # Discover PostgreSQL service
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -50,8 +59,8 @@ class WalletRepository:
             host=host,
             port=port,
             user_id="wallet_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
 
         self.schema = "wallet"
@@ -68,23 +77,27 @@ class WalletRepository:
 
             # Create wallet record
             wallet_dict = {
-                'wallet_id': wallet_id,
-                'user_id': wallet_data.user_id,
-                'organization_id': getattr(wallet_data, 'organization_id', None),
-                'balance': float(wallet_data.initial_balance),
-                'locked_balance': 0.0,
-                'currency': wallet_data.currency,
-                'wallet_type': wallet_data.wallet_type.value,
-                'blockchain_address': wallet_data.blockchain_address,
-                'blockchain_network': wallet_data.blockchain_network.value if wallet_data.blockchain_network else None,
-                'metadata': wallet_data.metadata or {},  # Direct dict
-                'is_active': True,
-                'created_at': now,
-                'updated_at': now
+                "wallet_id": wallet_id,
+                "user_id": wallet_data.user_id,
+                "organization_id": getattr(wallet_data, "organization_id", None),
+                "balance": float(wallet_data.initial_balance),
+                "locked_balance": 0.0,
+                "currency": wallet_data.currency,
+                "wallet_type": wallet_data.wallet_type.value,
+                "blockchain_address": wallet_data.blockchain_address,
+                "blockchain_network": wallet_data.blockchain_network.value
+                if wallet_data.blockchain_network
+                else None,
+                "metadata": wallet_data.metadata or {},  # Direct dict
+                "is_active": True,
+                "created_at": now,
+                "updated_at": now,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.wallets_table, [wallet_dict], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.wallets_table, [wallet_dict], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 # Create initial transaction if balance > 0
@@ -96,10 +109,10 @@ class WalletRepository:
                             transaction_type=TransactionType.DEPOSIT,
                             amount=wallet_data.initial_balance,
                             description="Initial wallet funding",
-                            metadata={"initial_funding": True}
+                            metadata={"initial_funding": True},
                         ),
                         balance_before=Decimal(0),
-                        balance_after=wallet_data.initial_balance
+                        balance_after=wallet_data.initial_balance,
                     )
 
                 return await self.get_wallet(wallet_id)
@@ -113,7 +126,9 @@ class WalletRepository:
     async def get_wallet(self, wallet_id: str) -> Optional[WalletBalance]:
         """Get wallet by ID"""
         try:
-            query = f"SELECT * FROM {self.schema}.{self.wallets_table} WHERE wallet_id = $1"
+            query = (
+                f"SELECT * FROM {self.schema}.{self.wallets_table} WHERE wallet_id = $1"
+            )
 
             async with self.db:
                 result = await self.db.query_row(query, [wallet_id], schema=self.schema)
@@ -125,7 +140,9 @@ class WalletRepository:
             logger.error(f"Error getting wallet {wallet_id}: {e}")
             return None
 
-    async def get_user_wallets(self, user_id: str, wallet_type: Optional[WalletType] = None) -> List[WalletBalance]:
+    async def get_user_wallets(
+        self, user_id: str, wallet_type: Optional[WalletType] = None
+    ) -> List[WalletBalance]:
         """Get all wallets for a user"""
         try:
             conditions = ["user_id = $1"]
@@ -163,7 +180,9 @@ class WalletRepository:
         wallets = await self.get_user_wallets(user_id, WalletType.FIAT)
         return wallets[0] if wallets else None
 
-    async def update_balance(self, wallet_id: str, amount: Decimal, operation: str = "add") -> Optional[Decimal]:
+    async def update_balance(
+        self, wallet_id: str, amount: Decimal, operation: str = "add"
+    ) -> Optional[Decimal]:
         """Update wallet balance"""
         try:
             # Get current wallet
@@ -191,7 +210,7 @@ class WalletRepository:
                 count = await self.db.execute(
                     query,
                     [float(new_balance), datetime.now(timezone.utc), wallet_id],
-                    schema=self.schema
+                    schema=self.schema,
                 )
 
             if count is not None and count > 0:
@@ -208,7 +227,7 @@ class WalletRepository:
         amount: Decimal,
         description: Optional[str] = None,
         reference_id: Optional[str] = None,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
     ) -> Optional[WalletTransaction]:
         """Deposit funds to wallet"""
         try:
@@ -231,10 +250,10 @@ class WalletRepository:
                     amount=amount,
                     description=description or f"Deposit: {amount}",
                     reference_id=reference_id,
-                    metadata=metadata or {}
+                    metadata=metadata or {},
                 ),
                 balance_before=wallet.balance,
-                balance_after=new_balance
+                balance_after=new_balance,
             )
 
             return transaction
@@ -248,7 +267,7 @@ class WalletRepository:
         amount: Decimal,
         description: Optional[str] = None,
         destination: Optional[str] = None,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
     ) -> Optional[WalletTransaction]:
         """Withdraw funds from wallet"""
         try:
@@ -274,10 +293,10 @@ class WalletRepository:
                     transaction_type=TransactionType.WITHDRAW,
                     amount=amount,
                     description=description or f"Withdrawal: {amount}",
-                    metadata=tx_metadata
+                    metadata=tx_metadata,
                 ),
                 balance_before=wallet.balance,
-                balance_after=new_balance
+                balance_after=new_balance,
             )
 
             return transaction
@@ -291,7 +310,7 @@ class WalletRepository:
         amount: Decimal,
         description: Optional[str] = None,
         usage_record_id: Optional[int] = None,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
     ) -> Optional[WalletTransaction]:
         """Consume credits from wallet"""
         try:
@@ -314,10 +333,10 @@ class WalletRepository:
                     amount=amount,
                     description=description or f"Consumed: {amount}",
                     usage_record_id=usage_record_id,
-                    metadata=metadata or {}
+                    metadata=metadata or {},
                 ),
                 balance_before=wallet.balance,
-                balance_after=new_balance
+                balance_after=new_balance,
             )
 
             return transaction
@@ -331,7 +350,7 @@ class WalletRepository:
         to_wallet_id: str,
         amount: Decimal,
         description: Optional[str] = None,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
     ) -> Optional[Tuple[WalletTransaction, WalletTransaction]]:
         """Transfer funds between wallets"""
         try:
@@ -350,7 +369,9 @@ class WalletRepository:
 
             # Withdraw from source wallet
             from_balance_before = from_wallet.balance
-            from_new_balance = await self.update_balance(from_wallet_id, amount, "subtract")
+            from_new_balance = await self.update_balance(
+                from_wallet_id, amount, "subtract"
+            )
             if from_new_balance is None:
                 return None
 
@@ -364,10 +385,9 @@ class WalletRepository:
 
             # Create transactions for both wallets
             transfer_metadata = metadata or {}
-            transfer_metadata.update({
-                "transfer_type": "internal",
-                "counterparty_wallet_id": to_wallet_id
-            })
+            transfer_metadata.update(
+                {"transfer_type": "internal", "counterparty_wallet_id": to_wallet_id}
+            )
 
             from_transaction = await self._create_transaction(
                 TransactionCreate(
@@ -377,17 +397,16 @@ class WalletRepository:
                     amount=amount,
                     description=description or "Transfer out",
                     to_wallet_id=to_wallet_id,
-                    metadata=transfer_metadata
+                    metadata=transfer_metadata,
                 ),
                 balance_before=from_balance_before,
-                balance_after=from_new_balance
+                balance_after=from_new_balance,
             )
 
             to_metadata = metadata or {}
-            to_metadata.update({
-                "transfer_type": "internal",
-                "counterparty_wallet_id": from_wallet_id
-            })
+            to_metadata.update(
+                {"transfer_type": "internal", "counterparty_wallet_id": from_wallet_id}
+            )
 
             to_transaction = await self._create_transaction(
                 TransactionCreate(
@@ -396,10 +415,10 @@ class WalletRepository:
                     transaction_type=TransactionType.TRANSFER,
                     amount=amount,
                     description=description or "Transfer in",
-                    metadata=to_metadata
+                    metadata=to_metadata,
                 ),
                 balance_before=to_balance_before,
-                balance_after=to_new_balance
+                balance_after=to_new_balance,
             )
 
             if from_transaction and to_transaction:
@@ -416,7 +435,7 @@ class WalletRepository:
         original_transaction_id: str,
         amount: Optional[Decimal] = None,
         reason: str = "Refund",
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
     ) -> Optional[WalletTransaction]:
         """Refund a previous transaction"""
         try:
@@ -427,32 +446,38 @@ class WalletRepository:
             """
 
             async with self.db:
-                original = await self.db.query_row(query, [original_transaction_id], schema=self.schema)
+                original = await self.db.query_row(
+                    query, [original_transaction_id], schema=self.schema
+                )
 
             if not original:
                 return None
 
             # Determine refund amount
-            refund_amount = amount or Decimal(str(original['amount']))
-            if refund_amount > Decimal(str(original['amount'])):
+            refund_amount = amount or Decimal(str(original["amount"]))
+            if refund_amount > Decimal(str(original["amount"])):
                 return None
 
             # Get wallet
-            wallet = await self.get_wallet(original['wallet_id'])
+            wallet = await self.get_wallet(original["wallet_id"])
             if not wallet:
                 return None
 
             # Update balance (add back)
-            new_balance = await self.update_balance(wallet.wallet_id, refund_amount, "add")
+            new_balance = await self.update_balance(
+                wallet.wallet_id, refund_amount, "add"
+            )
             if new_balance is None:
                 return None
 
             # Create refund transaction
             refund_metadata = metadata or {}
-            refund_metadata.update({
-                "original_transaction_id": original_transaction_id,
-                "refund_reason": reason
-            })
+            refund_metadata.update(
+                {
+                    "original_transaction_id": original_transaction_id,
+                    "refund_reason": reason,
+                }
+            )
 
             transaction = await self._create_transaction(
                 TransactionCreate(
@@ -462,10 +487,10 @@ class WalletRepository:
                     amount=refund_amount,
                     description=f"Refund: {reason}",
                     reference_id=original_transaction_id,
-                    metadata=refund_metadata
+                    metadata=refund_metadata,
                 ),
                 balance_before=wallet.balance,
-                balance_after=new_balance
+                balance_after=new_balance,
             )
 
             return transaction
@@ -473,7 +498,9 @@ class WalletRepository:
             logger.error(f"Error processing refund: {e}")
             return None
 
-    async def get_transactions(self, filter_params: TransactionFilter) -> List[WalletTransaction]:
+    async def get_transactions(
+        self, filter_params: TransactionFilter
+    ) -> List[WalletTransaction]:
         """Get filtered transaction history"""
         try:
             conditions = []
@@ -541,7 +568,7 @@ class WalletRepository:
         self,
         wallet_id: str,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> Optional[WalletStatistics]:
         """Get wallet statistics"""
         try:
@@ -557,58 +584,58 @@ class WalletRepository:
                 wallet_id=wallet_id,
                 start_date=start_date,
                 end_date=end_date,
-                limit=100  # Max allowed by TransactionFilter validation
+                limit=100,  # Max allowed by TransactionFilter validation
             )
             transactions = await self.get_transactions(filter_params)
 
             # Calculate statistics
             stats = {
-                'total_deposits': Decimal(0),
-                'total_withdrawals': Decimal(0),
-                'total_consumed': Decimal(0),
-                'total_refunded': Decimal(0),
-                'total_transfers_in': Decimal(0),
-                'total_transfers_out': Decimal(0),
-                'transaction_count': len(transactions),
-                'blockchain_transactions': 0,
-                'total_gas_fees': Decimal(0)
+                "total_deposits": Decimal(0),
+                "total_withdrawals": Decimal(0),
+                "total_consumed": Decimal(0),
+                "total_refunded": Decimal(0),
+                "total_transfers_in": Decimal(0),
+                "total_transfers_out": Decimal(0),
+                "transaction_count": len(transactions),
+                "blockchain_transactions": 0,
+                "total_gas_fees": Decimal(0),
             }
 
             for tx in transactions:
                 if tx.transaction_type == TransactionType.DEPOSIT:
-                    stats['total_deposits'] += tx.amount
+                    stats["total_deposits"] += tx.amount
                 elif tx.transaction_type == TransactionType.WITHDRAW:
-                    stats['total_withdrawals'] += tx.amount
+                    stats["total_withdrawals"] += tx.amount
                 elif tx.transaction_type == TransactionType.CONSUME:
-                    stats['total_consumed'] += tx.amount
+                    stats["total_consumed"] += tx.amount
                 elif tx.transaction_type == TransactionType.REFUND:
-                    stats['total_refunded'] += tx.amount
+                    stats["total_refunded"] += tx.amount
                 elif tx.transaction_type == TransactionType.TRANSFER:
-                    if tx.metadata and tx.metadata.get('direction') == 'in':
-                        stats['total_transfers_in'] += tx.amount
+                    if tx.metadata and tx.metadata.get("direction") == "in":
+                        stats["total_transfers_in"] += tx.amount
                     else:
-                        stats['total_transfers_out'] += tx.amount
+                        stats["total_transfers_out"] += tx.amount
 
                 if tx.blockchain_tx_hash:
-                    stats['blockchain_transactions'] += 1
+                    stats["blockchain_transactions"] += 1
                 if tx.gas_fee:
-                    stats['total_gas_fees'] += tx.gas_fee
+                    stats["total_gas_fees"] += tx.gas_fee
 
             return WalletStatistics(
                 wallet_id=wallet_id,
                 user_id=wallet.user_id,
                 current_balance=wallet.balance,
-                total_deposits=stats['total_deposits'],
-                total_withdrawals=stats['total_withdrawals'],
-                total_consumed=stats['total_consumed'],
-                total_refunded=stats['total_refunded'],
-                total_transfers_in=stats['total_transfers_in'],
-                total_transfers_out=stats['total_transfers_out'],
-                transaction_count=stats['transaction_count'],
-                blockchain_transactions=stats['blockchain_transactions'],
-                total_gas_fees=stats['total_gas_fees'],
+                total_deposits=stats["total_deposits"],
+                total_withdrawals=stats["total_withdrawals"],
+                total_consumed=stats["total_consumed"],
+                total_refunded=stats["total_refunded"],
+                total_transfers_in=stats["total_transfers_in"],
+                total_transfers_out=stats["total_transfers_out"],
+                transaction_count=stats["transaction_count"],
+                blockchain_transactions=stats["blockchain_transactions"],
+                total_gas_fees=stats["total_gas_fees"],
                 period_start=start_date,
-                period_end=end_date
+                period_end=end_date,
             )
         except Exception as e:
             logger.error(f"Error calculating statistics: {e}")
@@ -618,40 +645,44 @@ class WalletRepository:
         self,
         transaction_data: TransactionCreate,
         balance_before: Decimal,
-        balance_after: Decimal
+        balance_after: Decimal,
     ) -> Optional[WalletTransaction]:
         """Create transaction record"""
         try:
             transaction_id = str(uuid.uuid4())
 
             transaction_dict = {
-                'transaction_id': transaction_id,
-                'wallet_id': transaction_data.wallet_id,
-                'user_id': transaction_data.user_id,
-                'transaction_type': transaction_data.transaction_type.value,
-                'amount': float(transaction_data.amount),
-                'balance_before': float(balance_before),
-                'balance_after': float(balance_after),
-                'currency': 'USD',
-                'status': 'completed',
-                'fee_amount': 0.0,
-                'description': transaction_data.description,
-                'reference_id': transaction_data.reference_id,
-                'reference_type': 'usage' if transaction_data.usage_record_id else None,
-                'to_wallet_id': transaction_data.to_wallet_id,
-                'blockchain_txn_hash': transaction_data.blockchain_tx_hash,
-                'metadata': transaction_data.metadata or {},  # Direct dict
-                'created_at': datetime.now(timezone.utc),
-                'updated_at': datetime.now(timezone.utc)
+                "transaction_id": transaction_id,
+                "wallet_id": transaction_data.wallet_id,
+                "user_id": transaction_data.user_id,
+                "transaction_type": transaction_data.transaction_type.value,
+                "amount": float(transaction_data.amount),
+                "balance_before": float(balance_before),
+                "balance_after": float(balance_after),
+                "currency": "USD",
+                "status": "completed",
+                "fee_amount": 0.0,
+                "description": transaction_data.description,
+                "reference_id": transaction_data.reference_id,
+                "reference_type": "usage" if transaction_data.usage_record_id else None,
+                "to_wallet_id": transaction_data.to_wallet_id,
+                "blockchain_txn_hash": transaction_data.blockchain_tx_hash,
+                "metadata": transaction_data.metadata or {},  # Direct dict
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.transactions_table, [transaction_dict], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.transactions_table, [transaction_dict], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 query = f"SELECT * FROM {self.schema}.{self.transactions_table} WHERE transaction_id = $1"
                 async with self.db:
-                    result = await self.db.query_row(query, [transaction_id], schema=self.schema)
+                    result = await self.db.query_row(
+                        query, [transaction_id], schema=self.schema
+                    )
                 if result:
                     return self._dict_to_transaction(result)
 
@@ -664,75 +695,85 @@ class WalletRepository:
     def _dict_to_wallet_balance(self, data: Dict[str, Any]) -> WalletBalance:
         """Convert database dict to WalletBalance model"""
         # Handle metadata
-        metadata = data.get('metadata')
+        metadata = data.get("metadata")
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
         elif not isinstance(metadata, dict):
             metadata = {}
 
-        balance = Decimal(str(data['balance']))
-        locked_balance = Decimal(str(data.get('locked_balance', 0)))
+        balance = Decimal(str(data["balance"]))
+        locked_balance = Decimal(str(data.get("locked_balance", 0)))
 
         # Handle updated_at as datetime or string
-        updated_at = data['updated_at']
+        updated_at = data["updated_at"]
         if isinstance(updated_at, str):
-            updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+            updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
 
         return WalletBalance(
-            wallet_id=data['wallet_id'],
-            user_id=data['user_id'],
+            wallet_id=data["wallet_id"],
+            user_id=data["user_id"],
             balance=balance,
             locked_balance=locked_balance,
             available_balance=balance - locked_balance,
-            currency=data['currency'],
-            wallet_type=WalletType(data['wallet_type']),
+            currency=data["currency"],
+            wallet_type=WalletType(data["wallet_type"]),
             last_updated=updated_at,
-            blockchain_address=data.get('blockchain_address'),
-            blockchain_network=BlockchainNetwork(data['blockchain_network']) if data.get('blockchain_network') else None,
-            on_chain_balance=Decimal(str(data['on_chain_balance'])) if data.get('on_chain_balance') else None,
-            sync_status=data.get('sync_status')
+            blockchain_address=data.get("blockchain_address"),
+            blockchain_network=BlockchainNetwork(data["blockchain_network"])
+            if data.get("blockchain_network")
+            else None,
+            on_chain_balance=Decimal(str(data["on_chain_balance"]))
+            if data.get("on_chain_balance")
+            else None,
+            sync_status=data.get("sync_status"),
         )
 
     def _dict_to_transaction(self, data: Dict[str, Any]) -> WalletTransaction:
         """Convert database dict to WalletTransaction model"""
         # Handle metadata
-        metadata = data.get('metadata')
+        metadata = data.get("metadata")
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
         elif not isinstance(metadata, dict):
             metadata = {}
 
         # Handle datetime fields - may be datetime objects or strings
-        created_at = data['created_at']
+        created_at = data["created_at"]
         if isinstance(created_at, str):
-            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+            created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
 
-        updated_at = data.get('updated_at')
+        updated_at = data.get("updated_at")
         if updated_at and isinstance(updated_at, str):
-            updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+            updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
 
         return WalletTransaction(
-            transaction_id=data['transaction_id'],
-            wallet_id=data['wallet_id'],
-            user_id=data['user_id'],
-            transaction_type=TransactionType(data['transaction_type']),
-            amount=Decimal(str(data['amount'])),
-            balance_before=Decimal(str(data['balance_before'])),
-            balance_after=Decimal(str(data['balance_after'])),
-            fee=Decimal(str(data.get('fee_amount', 0))),
-            description=data.get('description'),
-            reference_id=data.get('reference_id'),
-            usage_record_id=data.get('reference_id') if data.get('reference_type') == 'usage' else None,
-            from_wallet_id=data.get('from_wallet_id'),
-            to_wallet_id=data.get('to_wallet_id'),
-            blockchain_tx_hash=data.get('blockchain_txn_hash'),
+            transaction_id=data["transaction_id"],
+            wallet_id=data["wallet_id"],
+            user_id=data["user_id"],
+            transaction_type=TransactionType(data["transaction_type"]),
+            amount=Decimal(str(data["amount"])),
+            balance_before=Decimal(str(data["balance_before"])),
+            balance_after=Decimal(str(data["balance_after"])),
+            fee=Decimal(str(data.get("fee_amount", 0))),
+            description=data.get("description"),
+            reference_id=data.get("reference_id"),
+            usage_record_id=data.get("reference_id")
+            if data.get("reference_type") == "usage"
+            else None,
+            from_wallet_id=data.get("from_wallet_id"),
+            to_wallet_id=data.get("to_wallet_id"),
+            blockchain_tx_hash=data.get("blockchain_txn_hash"),
             blockchain_network=None,  # Not stored in current schema
-            blockchain_status=data.get('status'),
-            blockchain_confirmations=data.get('blockchain_confirmation_count'),
-            gas_fee=Decimal(str(data['fee_amount'])) if data.get('fee_amount') else None,
+            blockchain_status=data.get("status"),
+            blockchain_confirmations=data.get("blockchain_confirmation_count"),
+            gas_fee=Decimal(str(data["fee_amount"]))
+            if data.get("fee_amount")
+            else None,
             metadata=metadata,
             created_at=created_at,
-            updated_at=updated_at
+            updated_at=updated_at,
         )

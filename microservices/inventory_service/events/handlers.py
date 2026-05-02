@@ -11,7 +11,7 @@ from .publishers import (
     publish_stock_reserved,
     publish_stock_committed,
     publish_stock_released,
-    publish_stock_failed
+    publish_stock_failed,
 )
 from .models import ReservedItem
 
@@ -19,9 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_order_created(
-    event_data: Dict[str, Any],
-    repository,
-    event_bus
+    event_data: Dict[str, Any], repository, event_bus
 ) -> None:
     """
     Handle order.created event
@@ -34,7 +32,9 @@ async def handle_order_created(
         items = event_data.get("items") or []
 
         if not order_id or not items:
-            logger.warning("order.created event missing required fields (order_id or items)")
+            logger.warning(
+                "order.created event missing required fields (order_id or items)"
+            )
             return
 
         logger.info(f"Processing order.created event for order {order_id}")
@@ -48,16 +48,14 @@ async def handle_order_created(
             unit_price = item.get("unit_price") or item.get("price")
 
             if sku_id:
-                reserved_items.append(ReservedItem(
-                    sku_id=sku_id,
-                    quantity=quantity,
-                    unit_price=unit_price
-                ))
-                items_for_db.append({
-                    "sku_id": sku_id,
-                    "quantity": quantity,
-                    "unit_price": unit_price
-                })
+                reserved_items.append(
+                    ReservedItem(
+                        sku_id=sku_id, quantity=quantity, unit_price=unit_price
+                    )
+                )
+                items_for_db.append(
+                    {"sku_id": sku_id, "quantity": quantity, "unit_price": unit_price}
+                )
 
         if not reserved_items:
             logger.warning(f"No valid items to reserve for order {order_id}")
@@ -67,7 +65,7 @@ async def handle_order_created(
                 user_id=user_id,
                 items=items,
                 error_message="No valid items to reserve",
-                error_code="NO_VALID_ITEMS"
+                error_code="NO_VALID_ITEMS",
             )
             return
 
@@ -76,7 +74,7 @@ async def handle_order_created(
             order_id=order_id,
             user_id=user_id,
             items=items_for_db,
-            expires_in_minutes=30
+            expires_in_minutes=30,
         )
 
         reservation_id = reservation["reservation_id"]
@@ -90,10 +88,12 @@ async def handle_order_created(
             user_id=user_id,
             items=reserved_items,
             expires_at=expires_at,
-            metadata={"source_event": "order.created"}
+            metadata={"source_event": "order.created"},
         )
 
-        logger.info(f"Reserved inventory for order {order_id}, reservation {reservation_id}")
+        logger.info(
+            f"Reserved inventory for order {order_id}, reservation {reservation_id}"
+        )
 
     except Exception as e:
         logger.error(f"Error handling order.created event: {e}")
@@ -105,16 +105,14 @@ async def handle_order_created(
                 user_id=event_data.get("user_id", "unknown"),
                 items=event_data.get("items", []),
                 error_message=str(e),
-                error_code="RESERVATION_ERROR"
+                error_code="RESERVATION_ERROR",
             )
         except Exception as pub_error:
             logger.error(f"Failed to publish stock.failed event: {pub_error}")
 
 
 async def handle_payment_completed(
-    event_data: Dict[str, Any],
-    repository,
-    event_bus
+    event_data: Dict[str, Any], repository, event_bus
 ) -> None:
     """
     Handle payment.completed event
@@ -160,19 +158,19 @@ async def handle_payment_completed(
             reservation_id=reservation_id,
             user_id=user_id or reservation.get("user_id"),
             items=reserved_items,
-            metadata={"source_event": "payment.completed"}
+            metadata={"source_event": "payment.completed"},
         )
 
-        logger.info(f"Committed inventory for order {order_id}, reservation {reservation_id}")
+        logger.info(
+            f"Committed inventory for order {order_id}, reservation {reservation_id}"
+        )
 
     except Exception as e:
         logger.error(f"Error handling payment.completed event: {e}")
 
 
 async def handle_order_canceled(
-    event_data: Dict[str, Any],
-    repository,
-    event_bus
+    event_data: Dict[str, Any], repository, event_bus
 ) -> None:
     """
     Handle order.canceled event
@@ -194,7 +192,9 @@ async def handle_order_canceled(
         reservation = await repository.get_active_reservation_for_order(order_id)
 
         if not reservation:
-            logger.info(f"No active reservation found for order {order_id} (may already be released)")
+            logger.info(
+                f"No active reservation found for order {order_id} (may already be released)"
+            )
             return
 
         reservation_id = reservation["reservation_id"]
@@ -214,19 +214,18 @@ async def handle_order_canceled(
             user_id=user_id or reservation.get("user_id"),
             items=reserved_items,
             reason=cancellation_reason or "order_canceled",
-            metadata={"source_event": "order.canceled"}
+            metadata={"source_event": "order.canceled"},
         )
 
-        logger.info(f"Released inventory for order {order_id}, reservation {reservation_id}")
+        logger.info(
+            f"Released inventory for order {order_id}, reservation {reservation_id}"
+        )
 
     except Exception as e:
         logger.error(f"Error handling order.canceled event: {e}")
 
 
-def get_event_handlers(
-    repository,
-    event_bus
-) -> Dict[str, callable]:
+def get_event_handlers(repository, event_bus) -> Dict[str, callable]:
     """
     Return a mapping of event patterns to handler functions
 

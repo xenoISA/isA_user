@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 # Event Type Definitions (Service-Specific)
 # =============================================================================
 
+
 class AccountEventType(str, Enum):
     """
     Events published by account_service.
@@ -21,6 +22,7 @@ class AccountEventType(str, Enum):
     Stream: account-stream
     Subjects: account.>
     """
+
     USER_CREATED = "user.created"
     USER_UPDATED = "user.updated"
     USER_DELETED = "user.deleted"
@@ -31,11 +33,13 @@ class AccountEventType(str, Enum):
 
 class AccountSubscribedEventType(str, Enum):
     """Events that account_service subscribes to from other services."""
+
     pass  # No subscribed events
 
 
 class AccountStreamConfig:
     """Stream configuration for account_service"""
+
     STREAM_NAME = "account-stream"
     SUBJECTS = ["account.>"]
     MAX_MESSAGES = 100000

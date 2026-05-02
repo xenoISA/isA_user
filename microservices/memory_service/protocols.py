@@ -9,21 +9,25 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 class MemoryServiceError(Exception):
     """Base exception for memory service errors"""
+
     pass
 
 
 class MemoryNotFoundError(MemoryServiceError):
     """Memory resource not found"""
+
     pass
 
 
 class MemoryValidationError(MemoryServiceError):
     """Memory data validation error"""
+
     pass
 
 
 class MemoryPermissionError(MemoryServiceError):
     """Memory permission error"""
+
     pass
 
 
@@ -40,11 +44,15 @@ class MemoryRepositoryProtocol(Protocol):
         """Create a new memory"""
         ...
 
-    async def get_by_id(self, memory_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def get_by_id(
+        self, memory_id: str, user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """Get memory by ID"""
         ...
 
-    async def update(self, memory_id: str, updates: Dict[str, Any], user_id: str) -> bool:
+    async def update(
+        self, memory_id: str, updates: Dict[str, Any], user_id: str
+    ) -> bool:
         """Update a memory"""
         ...
 
@@ -57,7 +65,7 @@ class MemoryRepositoryProtocol(Protocol):
         user_id: str,
         limit: int = 100,
         offset: int = 0,
-        filters: Optional[Dict] = None
+        filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         """List memories for a user"""
         ...
@@ -133,6 +141,7 @@ class SemanticServiceProtocol(MemoryTypeServiceProtocol):
 @runtime_checkable
 class WorkingServiceProtocol(MemoryTypeServiceProtocol):
     """Interface for Working Memory Service"""
+
     pass
 
 
@@ -140,11 +149,15 @@ class WorkingServiceProtocol(MemoryTypeServiceProtocol):
 class SessionServiceProtocol(MemoryTypeServiceProtocol):
     """Interface for Session Memory Service"""
 
-    async def get_session_memories(self, user_id: str, session_id: str) -> List[Dict[str, Any]]:
+    async def get_session_memories(
+        self, user_id: str, session_id: str
+    ) -> List[Dict[str, Any]]:
         """Get memories for a session"""
         ...
 
-    async def get_session_summary(self, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+    async def get_session_summary(
+        self, user_id: str, session_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Get session summary"""
         ...
 

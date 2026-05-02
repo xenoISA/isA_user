@@ -105,6 +105,7 @@ class MediaService:
         else:
             # Import here to avoid import-time I/O
             from .media_repository import MediaRepository
+
             self.repository = MediaRepository()
 
         self.event_bus = event_bus
@@ -113,7 +114,9 @@ class MediaService:
         if storage_client is not None:
             self.storage_client = storage_client
         else:
-            self.storage_client = StorageServiceClient() if StorageServiceClient else None
+            self.storage_client = (
+                StorageServiceClient() if StorageServiceClient else None
+            )
 
         if device_client is not None:
             self.device_client = device_client

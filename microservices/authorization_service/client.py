@@ -23,7 +23,7 @@ class AuthorizationServiceClient:
             base_url: Authorization service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -55,7 +55,7 @@ class AuthorizationServiceClient:
         resource_type: str,
         resource_id: str,
         permission: str,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Check if user has permission to access resource
@@ -86,15 +86,14 @@ class AuthorizationServiceClient:
                 "user_id": user_id,
                 "resource_type": resource_type,
                 "resource_id": resource_id,
-                "permission": permission
+                "permission": permission,
             }
 
             if organization_id:
                 payload["organization_id"] = organization_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/authorization/check-access",
-                json=payload
+                f"{self.base_url}/api/v1/authorization/check-access", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -119,7 +118,7 @@ class AuthorizationServiceClient:
         granted_by: str,
         organization_id: Optional[str] = None,
         expires_at: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Grant permissions to user for resource
@@ -152,7 +151,7 @@ class AuthorizationServiceClient:
                 "resource_type": resource_type,
                 "resource_id": resource_id,
                 "permissions": permissions,
-                "granted_by": granted_by
+                "granted_by": granted_by,
             }
 
             if organization_id:
@@ -163,8 +162,7 @@ class AuthorizationServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/authorization/grant",
-                json=payload
+                f"{self.base_url}/api/v1/authorization/grant", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -182,7 +180,7 @@ class AuthorizationServiceClient:
         resource_type: str,
         resource_id: str,
         permissions: Optional[List[str]] = None,
-        revoked_by: Optional[str] = None
+        revoked_by: Optional[str] = None,
     ) -> bool:
         """
         Revoke permissions from user for resource
@@ -209,7 +207,7 @@ class AuthorizationServiceClient:
             payload = {
                 "user_id": user_id,
                 "resource_type": resource_type,
-                "resource_id": resource_id
+                "resource_id": resource_id,
             }
 
             if permissions:
@@ -218,8 +216,7 @@ class AuthorizationServiceClient:
                 payload["revoked_by"] = revoked_by
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/authorization/revoke",
-                json=payload
+                f"{self.base_url}/api/v1/authorization/revoke", json=payload
             )
             response.raise_for_status()
             return True
@@ -232,9 +229,7 @@ class AuthorizationServiceClient:
             return False
 
     async def bulk_grant_permissions(
-        self,
-        grants: List[Dict[str, Any]],
-        granted_by: str
+        self, grants: List[Dict[str, Any]], granted_by: str
     ) -> Optional[Dict[str, Any]]:
         """
         Grant multiple permissions in bulk
@@ -266,10 +261,7 @@ class AuthorizationServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/authorization/bulk-grant",
-                json={
-                    "grants": grants,
-                    "granted_by": granted_by
-                }
+                json={"grants": grants, "granted_by": granted_by},
             )
             response.raise_for_status()
             return response.json()
@@ -282,9 +274,7 @@ class AuthorizationServiceClient:
             return None
 
     async def bulk_revoke_permissions(
-        self,
-        revocations: List[Dict[str, Any]],
-        revoked_by: str
+        self, revocations: List[Dict[str, Any]], revoked_by: str
     ) -> Optional[Dict[str, Any]]:
         """
         Revoke multiple permissions in bulk
@@ -314,10 +304,7 @@ class AuthorizationServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/authorization/bulk-revoke",
-                json={
-                    "revocations": revocations,
-                    "revoked_by": revoked_by
-                }
+                json={"revocations": revocations, "revoked_by": revoked_by},
             )
             response.raise_for_status()
             return response.json()
@@ -334,9 +321,7 @@ class AuthorizationServiceClient:
     # =============================================================================
 
     async def get_user_permissions(
-        self,
-        user_id: str,
-        resource_type: Optional[str] = None
+        self, user_id: str, resource_type: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get all permissions for a user
@@ -361,7 +346,7 @@ class AuthorizationServiceClient:
 
             response = await self.client.get(
                 f"{self.base_url}/api/v1/authorization/user-permissions/{user_id}",
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -374,10 +359,7 @@ class AuthorizationServiceClient:
             return None
 
     async def get_user_accessible_resources(
-        self,
-        user_id: str,
-        resource_type: str,
-        permission: Optional[str] = None
+        self, user_id: str, resource_type: str, permission: Optional[str] = None
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get all resources user can access
@@ -406,13 +388,15 @@ class AuthorizationServiceClient:
 
             response = await self.client.get(
                 f"{self.base_url}/api/v1/authorization/user-resources/{user_id}",
-                params=params
+                params=params,
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get accessible resources: {e.response.status_code}")
+            logger.error(
+                f"Failed to get accessible resources: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting accessible resources: {e}")
@@ -463,7 +447,9 @@ class AuthorizationServiceClient:
             >>> print(f"Total permissions: {stats['total_permissions']}")
         """
         try:
-            response = await self.client.get(f"{self.base_url}/api/v1/authorization/stats")
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/authorization/stats"
+            )
             response.raise_for_status()
             return response.json()
 

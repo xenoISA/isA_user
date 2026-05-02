@@ -13,14 +13,28 @@ import uuid
 # Database client setup
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    SubscriptionPlan, Subscription, Payment, Invoice, Refund, PaymentMethodInfo,
-    PaymentStatus, SubscriptionStatus, InvoiceStatus, RefundStatus,
-    SubscriptionTier, BillingCycle, Currency, PaymentMethod
+    SubscriptionPlan,
+    Subscription,
+    Payment,
+    Invoice,
+    Refund,
+    PaymentMethodInfo,
+    PaymentStatus,
+    SubscriptionStatus,
+    InvoiceStatus,
+    RefundStatus,
+    SubscriptionTier,
+    BillingCycle,
+    Currency,
+    PaymentMethod,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,11 +52,11 @@ class PaymentRepository:
         # Discover PostgreSQL service
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -50,8 +64,8 @@ class PaymentRepository:
             host=host,
             port=port,
             user_id="payment_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
 
         # Schema and table names
@@ -84,7 +98,9 @@ class PaymentRepository:
     # 订阅计划管理
     # ====================
 
-    async def create_subscription_plan(self, plan: SubscriptionPlan) -> Optional[SubscriptionPlan]:
+    async def create_subscription_plan(
+        self, plan: SubscriptionPlan
+    ) -> Optional[SubscriptionPlan]:
         """创建订阅计划"""
         try:
             data = {
@@ -105,19 +121,23 @@ class PaymentRepository:
                 "is_active": plan.is_active,
                 "is_public": plan.is_public,
                 "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
-            logger.info(f"Inserting subscription plan into {self.schema}.{self.plans_table} | plan_id={data['plan_id']}")
+            logger.info(
+                f"Inserting subscription plan into {self.schema}.{self.plans_table} | plan_id={data['plan_id']}"
+            )
 
             try:
                 async with self.db:
-                    count = await self.db.insert_into(self.plans_table, [data], schema=self.schema)
+                    count = await self.db.insert_into(
+                        self.plans_table, [data], schema=self.schema
+                    )
             except Exception as insert_err:
                 logger.error(
                     f"INSERT failed for {self.schema}.{self.plans_table} | "
                     f"plan_id={data['plan_id']} | error={insert_err}",
-                    exc_info=True
+                    exc_info=True,
                 )
                 raise
 
@@ -152,9 +172,7 @@ class PaymentRepository:
             return None
 
     async def list_subscription_plans(
-        self,
-        tier: Optional[SubscriptionTier] = None,
-        is_public: bool = True
+        self, tier: Optional[SubscriptionTier] = None, is_public: bool = True
     ) -> List[SubscriptionPlan]:
         """列出订阅计划"""
         try:
@@ -189,11 +207,14 @@ class PaymentRepository:
     # 订阅管理
     # ====================
 
-    async def create_subscription(self, subscription: Subscription) -> Optional[Subscription]:
+    async def create_subscription(
+        self, subscription: Subscription
+    ) -> Optional[Subscription]:
         """创建订阅"""
         try:
             data = {
-                "subscription_id": subscription.subscription_id or f"sub_{uuid.uuid4().hex[:8]}",
+                "subscription_id": subscription.subscription_id
+                or f"sub_{uuid.uuid4().hex[:8]}",
                 "user_id": subscription.user_id,
                 "organization_id": subscription.organization_id,
                 "plan_id": subscription.plan_id,
@@ -202,23 +223,33 @@ class PaymentRepository:
                 "current_period_start": subscription.current_period_start,
                 "current_period_end": subscription.current_period_end,
                 "billing_cycle": subscription.billing_cycle.value,
-                "trial_start": subscription.trial_start if subscription.trial_start else None,
+                "trial_start": subscription.trial_start
+                if subscription.trial_start
+                else None,
                 "trial_end": subscription.trial_end if subscription.trial_end else None,
                 "cancel_at_period_end": subscription.cancel_at_period_end,
-                "canceled_at": subscription.canceled_at if subscription.canceled_at else None,
+                "canceled_at": subscription.canceled_at
+                if subscription.canceled_at
+                else None,
                 "cancellation_reason": subscription.cancellation_reason,
                 "payment_method_id": subscription.payment_method_id,
-                "last_payment_date": subscription.last_payment_date if subscription.last_payment_date else None,
-                "next_payment_date": subscription.next_payment_date if subscription.next_payment_date else None,
+                "last_payment_date": subscription.last_payment_date
+                if subscription.last_payment_date
+                else None,
+                "next_payment_date": subscription.next_payment_date
+                if subscription.next_payment_date
+                else None,
                 "stripe_subscription_id": subscription.stripe_subscription_id,
                 "stripe_customer_id": subscription.stripe_customer_id,
                 "metadata": subscription.metadata or {},  # Direct dict
                 "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.subscriptions_table, [data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.subscriptions_table, [data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 return await self.get_subscription(data["subscription_id"])
@@ -252,9 +283,7 @@ class PaymentRepository:
             return None
 
     async def update_subscription(
-        self,
-        subscription_id: str,
-        updates: Dict[str, Any]
+        self, subscription_id: str, updates: Dict[str, Any]
     ) -> Optional[Subscription]:
         """更新订阅"""
         try:
@@ -304,7 +333,9 @@ class PaymentRepository:
             logger.error(f"更新订阅失败: {e}")
             return None
 
-    async def get_user_active_subscription(self, user_id: str) -> Optional[Subscription]:
+    async def get_user_active_subscription(
+        self, user_id: str
+    ) -> Optional[Subscription]:
         """获取用户当前激活的订阅"""
         try:
             query = f"""
@@ -318,8 +349,12 @@ class PaymentRepository:
             async with self.db:
                 result = await self.db.query_row(
                     query,
-                    [user_id, SubscriptionStatus.ACTIVE.value, SubscriptionStatus.TRIALING.value],
-                    schema=self.schema
+                    [
+                        user_id,
+                        SubscriptionStatus.ACTIVE.value,
+                        SubscriptionStatus.TRIALING.value,
+                    ],
+                    schema=self.schema,
                 )
 
             if result:
@@ -330,7 +365,9 @@ class PaymentRepository:
             logger.error(f"获取用户激活订阅失败: {e}")
             return None
 
-    async def get_user_default_payment_method(self, user_id: str) -> Optional[PaymentMethodInfo]:
+    async def get_user_default_payment_method(
+        self, user_id: str
+    ) -> Optional[PaymentMethodInfo]:
         """获取用户默认支付方式"""
         try:
             query = f"""
@@ -359,7 +396,9 @@ class PaymentRepository:
             """
 
             async with self.db:
-                result = await self.db.query_row(query, [subscription_id], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [subscription_id], schema=self.schema
+                )
 
             if result:
                 return self._convert_to_subscription(result)
@@ -373,14 +412,14 @@ class PaymentRepository:
         self,
         subscription_id: str,
         immediate: bool = False,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
     ) -> Optional[Subscription]:
         """取消订阅"""
         try:
             updates = {
                 "canceled_at": datetime.now(timezone.utc),
                 "cancellation_reason": reason,
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             if immediate:
@@ -449,11 +488,13 @@ class PaymentRepository:
                 "failure_code": payment.failure_code,
                 "created_at": datetime.now(timezone.utc),
                 "paid_at": payment.paid_at if payment.paid_at else None,
-                "failed_at": payment.failed_at if payment.failed_at else None
+                "failed_at": payment.failed_at if payment.failed_at else None,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.payments_table, [data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.payments_table, [data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 return await self.get_payment(data["payment_id"])
@@ -473,7 +514,9 @@ class PaymentRepository:
             """
 
             async with self.db:
-                result = await self.db.query_row(query, [payment_id], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [payment_id], schema=self.schema
+                )
 
             if result:
                 return self._convert_to_payment(result)
@@ -487,14 +530,11 @@ class PaymentRepository:
         self,
         payment_id: str,
         status: PaymentStatus,
-        processor_response: Optional[Dict[str, Any]] = None
+        processor_response: Optional[Dict[str, Any]] = None,
     ) -> Optional[Payment]:
         """更新支付状态"""
         try:
-            updates = {
-                "status": status.value,
-                "updated_at": datetime.now(timezone.utc)
-            }
+            updates = {"status": status.value, "updated_at": datetime.now(timezone.utc)}
 
             if status == PaymentStatus.SUCCEEDED:
                 updates["paid_at"] = datetime.now(timezone.utc)
@@ -539,10 +579,7 @@ class PaymentRepository:
             return None
 
     async def get_user_payments(
-        self,
-        user_id: str,
-        limit: int = 10,
-        status: Optional[PaymentStatus] = None
+        self, user_id: str, limit: int = 10, status: Optional[PaymentStatus] = None
     ) -> List[Payment]:
         """获取用户支付历史"""
         try:
@@ -601,11 +638,13 @@ class PaymentRepository:
                 "due_date": invoice.due_date if invoice.due_date else None,
                 "paid_at": invoice.paid_at if invoice.paid_at else None,
                 "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.invoices_table, [data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.invoices_table, [data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 return await self.get_invoice(data["invoice_id"])
@@ -625,7 +664,9 @@ class PaymentRepository:
             """
 
             async with self.db:
-                result = await self.db.query_row(query, [invoice_id], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [invoice_id], schema=self.schema
+                )
 
             if result:
                 return self._convert_to_invoice(result)
@@ -636,9 +677,7 @@ class PaymentRepository:
             return None
 
     async def mark_invoice_paid(
-        self,
-        invoice_id: str,
-        payment_intent_id: str
+        self, invoice_id: str, payment_intent_id: str
     ) -> Optional[Invoice]:
         """标记发票为已支付"""
         try:
@@ -646,7 +685,7 @@ class PaymentRepository:
                 "status": InvoiceStatus.PAID.value,
                 "payment_intent_id": payment_intent_id,
                 "paid_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             # Build SET clause
@@ -721,16 +760,20 @@ class PaymentRepository:
                 "approved_by": refund.approved_by,
                 "requested_at": refund.requested_at,
                 "processed_at": refund.processed_at if refund.processed_at else None,
-                "completed_at": refund.completed_at if refund.completed_at else None
+                "completed_at": refund.completed_at if refund.completed_at else None,
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.refunds_table, [data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.refunds_table, [data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 query = f"SELECT * FROM {self.schema}.{self.refunds_table} WHERE refund_id = $1"
                 async with self.db:
-                    result = await self.db.query_row(query, [data["refund_id"]], schema=self.schema)
+                    result = await self.db.query_row(
+                        query, [data["refund_id"]], schema=self.schema
+                    )
                 if result:
                     return self._convert_to_refund(result)
 
@@ -743,10 +786,7 @@ class PaymentRepository:
     async def update_refund_status(self, refund_id: str, status: RefundStatus) -> bool:
         """更新退款状态"""
         try:
-            updates = {
-                "status": status.value,
-                "updated_at": datetime.now(timezone.utc)
-            }
+            updates = {"status": status.value, "updated_at": datetime.now(timezone.utc)}
 
             if status == RefundStatus.PROCESSING:
                 updates["processed_at"] = datetime.now(timezone.utc)
@@ -783,9 +823,7 @@ class PaymentRepository:
             return False
 
     async def process_refund(
-        self,
-        refund_id: str,
-        approved_by: Optional[str] = None
+        self, refund_id: str, approved_by: Optional[str] = None
     ) -> Optional[Refund]:
         """处理退款"""
         try:
@@ -793,7 +831,7 @@ class PaymentRepository:
                 "status": RefundStatus.SUCCEEDED.value,
                 "approved_by": approved_by,
                 "processed_at": datetime.now(timezone.utc),
-                "completed_at": datetime.now(timezone.utc)
+                "completed_at": datetime.now(timezone.utc),
             }
 
             # Build SET clause
@@ -823,7 +861,9 @@ class PaymentRepository:
                 # Fetch the updated refund
                 fetch_query = f"SELECT * FROM {self.schema}.{self.refunds_table} WHERE refund_id = $1"
                 async with self.db:
-                    result = await self.db.query_row(fetch_query, [refund_id], schema=self.schema)
+                    result = await self.db.query_row(
+                        fetch_query, [refund_id], schema=self.schema
+                    )
                 if result:
                     return self._convert_to_refund(result)
 
@@ -838,7 +878,9 @@ class PaymentRepository:
     # 支付方式管理
     # ====================
 
-    async def save_payment_method(self, method: PaymentMethodInfo) -> Optional[PaymentMethodInfo]:
+    async def save_payment_method(
+        self, method: PaymentMethodInfo
+    ) -> Optional[PaymentMethodInfo]:
         """保存支付方式"""
         try:
             data = {
@@ -855,16 +897,20 @@ class PaymentRepository:
                 "stripe_payment_method_id": method.stripe_payment_method_id,
                 "is_default": method.is_default,
                 "is_verified": method.is_verified,
-                "created_at": datetime.now(timezone.utc)
+                "created_at": datetime.now(timezone.utc),
             }
 
             async with self.db:
-                count = await self.db.insert_into(self.payment_methods_table, [data], schema=self.schema)
+                count = await self.db.insert_into(
+                    self.payment_methods_table, [data], schema=self.schema
+                )
 
             if count is not None and count > 0:
                 query = f"SELECT * FROM {self.schema}.{self.payment_methods_table} WHERE method_id = $1"
                 async with self.db:
-                    result = await self.db.query_row(query, [data["method_id"]], schema=self.schema)
+                    result = await self.db.query_row(
+                        query, [data["method_id"]], schema=self.schema
+                    )
                 if result:
                     return self._convert_to_payment_method(result)
 
@@ -913,7 +959,7 @@ class PaymentRepository:
                 results = await self.db.query(
                     query,
                     [PaymentStatus.SUCCEEDED.value, start_date],
-                    schema=self.schema
+                    schema=self.schema,
                 )
 
             if results:
@@ -925,16 +971,22 @@ class PaymentRepository:
                 for payment in results:
                     created_at_str = payment.get("created_at")
                     if created_at_str:
-                        date = datetime.fromisoformat(created_at_str.replace('Z', '+00:00')).date()
+                        date = datetime.fromisoformat(
+                            created_at_str.replace("Z", "+00:00")
+                        ).date()
                         date_str = date.isoformat()
-                        daily_revenue[date_str] = daily_revenue.get(date_str, 0) + float(payment.get("amount", 0))
+                        daily_revenue[date_str] = daily_revenue.get(
+                            date_str, 0
+                        ) + float(payment.get("amount", 0))
 
                 return {
                     "total_revenue": total_revenue,
                     "payment_count": payment_count,
-                    "average_payment": total_revenue / payment_count if payment_count > 0 else 0,
+                    "average_payment": total_revenue / payment_count
+                    if payment_count > 0
+                    else 0,
                     "daily_revenue": daily_revenue,
-                    "period_days": days
+                    "period_days": days,
                 }
 
             return {
@@ -942,7 +994,7 @@ class PaymentRepository:
                 "payment_count": 0,
                 "average_payment": 0,
                 "daily_revenue": {},
-                "period_days": days
+                "period_days": days,
             }
 
         except Exception as e:
@@ -959,7 +1011,9 @@ class PaymentRepository:
             """
 
             async with self.db:
-                active_result = await self.db.query_row(active_query, [], schema=self.schema)
+                active_result = await self.db.query_row(
+                    active_query, [], schema=self.schema
+                )
 
             active_count = int(active_result.get("count", 0)) if active_result else 0
 
@@ -971,8 +1025,12 @@ class PaymentRepository:
                     WHERE tier = $1 AND status IN ('active', 'trialing')
                 """
                 async with self.db:
-                    tier_result = await self.db.query_row(tier_query, [tier.value], schema=self.schema)
-                tier_stats[tier.value] = int(tier_result.get("count", 0)) if tier_result else 0
+                    tier_result = await self.db.query_row(
+                        tier_query, [tier.value], schema=self.schema
+                    )
+                tier_stats[tier.value] = (
+                    int(tier_result.get("count", 0)) if tier_result else 0
+                )
 
             # Churn rate
             thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
@@ -985,17 +1043,21 @@ class PaymentRepository:
                 canceled_result = await self.db.query_row(
                     canceled_query,
                     [SubscriptionStatus.CANCELED.value, thirty_days_ago],
-                    schema=self.schema
+                    schema=self.schema,
                 )
 
-            canceled_count = int(canceled_result.get("count", 0)) if canceled_result else 0
-            churn_rate = (canceled_count / active_count * 100) if active_count > 0 else 0
+            canceled_count = (
+                int(canceled_result.get("count", 0)) if canceled_result else 0
+            )
+            churn_rate = (
+                (canceled_count / active_count * 100) if active_count > 0 else 0
+            )
 
             return {
                 "active_subscriptions": active_count,
                 "tier_distribution": tier_stats,
                 "churn_rate": churn_rate,
-                "canceled_last_30_days": canceled_count
+                "canceled_last_30_days": canceled_count,
             }
 
         except Exception as e:
@@ -1012,6 +1074,7 @@ class PaymentRepository:
         features = data.get("features")
         if isinstance(features, str):
             import json
+
             features = json.loads(features)
         elif not isinstance(features, dict):
             features = {}
@@ -1034,8 +1097,12 @@ class PaymentRepository:
             stripe_product_id=data.get("stripe_product_id"),
             is_active=data.get("is_active", True),
             is_public=data.get("is_public", True),
-            created_at=datetime.fromisoformat(data["created_at"].replace('Z', '+00:00')) if data.get("created_at") else None,
-            updated_at=datetime.fromisoformat(data["updated_at"].replace('Z', '+00:00')) if data.get("updated_at") else None
+            created_at=datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
+            if data.get("created_at")
+            else None,
+            updated_at=datetime.fromisoformat(data["updated_at"].replace("Z", "+00:00"))
+            if data.get("updated_at")
+            else None,
         )
 
     def _convert_to_subscription(self, data: Dict[str, Any]) -> Subscription:
@@ -1044,6 +1111,7 @@ class PaymentRepository:
         metadata = data.get("metadata")
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
         elif not isinstance(metadata, dict):
             metadata = {}
@@ -1056,22 +1124,48 @@ class PaymentRepository:
             plan_id=data["plan_id"],
             status=SubscriptionStatus(data["status"]),
             tier=SubscriptionTier(data["tier"]),
-            current_period_start=datetime.fromisoformat(data["current_period_start"].replace('Z', '+00:00')),
-            current_period_end=datetime.fromisoformat(data["current_period_end"].replace('Z', '+00:00')),
+            current_period_start=datetime.fromisoformat(
+                data["current_period_start"].replace("Z", "+00:00")
+            ),
+            current_period_end=datetime.fromisoformat(
+                data["current_period_end"].replace("Z", "+00:00")
+            ),
             billing_cycle=BillingCycle(data["billing_cycle"]),
-            trial_start=datetime.fromisoformat(data["trial_start"].replace('Z', '+00:00')) if data.get("trial_start") else None,
-            trial_end=datetime.fromisoformat(data["trial_end"].replace('Z', '+00:00')) if data.get("trial_end") else None,
+            trial_start=datetime.fromisoformat(
+                data["trial_start"].replace("Z", "+00:00")
+            )
+            if data.get("trial_start")
+            else None,
+            trial_end=datetime.fromisoformat(data["trial_end"].replace("Z", "+00:00"))
+            if data.get("trial_end")
+            else None,
             cancel_at_period_end=data.get("cancel_at_period_end", False),
-            canceled_at=datetime.fromisoformat(data["canceled_at"].replace('Z', '+00:00')) if data.get("canceled_at") else None,
+            canceled_at=datetime.fromisoformat(
+                data["canceled_at"].replace("Z", "+00:00")
+            )
+            if data.get("canceled_at")
+            else None,
             cancellation_reason=data.get("cancellation_reason"),
             payment_method_id=data.get("payment_method_id"),
-            last_payment_date=datetime.fromisoformat(data["last_payment_date"].replace('Z', '+00:00')) if data.get("last_payment_date") else None,
-            next_payment_date=datetime.fromisoformat(data["next_payment_date"].replace('Z', '+00:00')) if data.get("next_payment_date") else None,
+            last_payment_date=datetime.fromisoformat(
+                data["last_payment_date"].replace("Z", "+00:00")
+            )
+            if data.get("last_payment_date")
+            else None,
+            next_payment_date=datetime.fromisoformat(
+                data["next_payment_date"].replace("Z", "+00:00")
+            )
+            if data.get("next_payment_date")
+            else None,
             stripe_subscription_id=data.get("stripe_subscription_id"),
             stripe_customer_id=data.get("stripe_customer_id"),
             metadata=metadata,
-            created_at=datetime.fromisoformat(data["created_at"].replace('Z', '+00:00')) if data.get("created_at") else None,
-            updated_at=datetime.fromisoformat(data["updated_at"].replace('Z', '+00:00')) if data.get("updated_at") else None
+            created_at=datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
+            if data.get("created_at")
+            else None,
+            updated_at=datetime.fromisoformat(data["updated_at"].replace("Z", "+00:00"))
+            if data.get("updated_at")
+            else None,
         )
 
     def _convert_to_payment(self, data: Dict[str, Any]) -> Payment:
@@ -1080,6 +1174,7 @@ class PaymentRepository:
         processor_response = data.get("processor_response")
         if isinstance(processor_response, str):
             import json
+
             processor_response = json.loads(processor_response)
         elif not isinstance(processor_response, dict):
             processor_response = {}
@@ -1106,9 +1201,15 @@ class PaymentRepository:
             processor_response=processor_response,
             failure_reason=data.get("failure_reason"),
             failure_code=data.get("failure_code"),
-            created_at=datetime.fromisoformat(data["created_at"].replace('Z', '+00:00')) if data.get("created_at") else None,
-            paid_at=datetime.fromisoformat(data["paid_at"].replace('Z', '+00:00')) if data.get("paid_at") else None,
-            failed_at=datetime.fromisoformat(data["failed_at"].replace('Z', '+00:00')) if data.get("failed_at") else None
+            created_at=datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
+            if data.get("created_at")
+            else None,
+            paid_at=datetime.fromisoformat(data["paid_at"].replace("Z", "+00:00"))
+            if data.get("paid_at")
+            else None,
+            failed_at=datetime.fromisoformat(data["failed_at"].replace("Z", "+00:00"))
+            if data.get("failed_at")
+            else None,
         )
 
     def _convert_to_invoice(self, data: Dict[str, Any]) -> Invoice:
@@ -1117,6 +1218,7 @@ class PaymentRepository:
         line_items = data.get("line_items")
         if isinstance(line_items, str):
             import json
+
             line_items = json.loads(line_items)
         elif not isinstance(line_items, list):
             line_items = []
@@ -1133,16 +1235,28 @@ class PaymentRepository:
             amount_paid=Decimal(str(data["amount_paid"])),
             amount_due=Decimal(str(data["amount_due"])),
             currency=Currency(data["currency"]),
-            billing_period_start=datetime.fromisoformat(data["billing_period_start"].replace('Z', '+00:00')),
-            billing_period_end=datetime.fromisoformat(data["billing_period_end"].replace('Z', '+00:00')),
+            billing_period_start=datetime.fromisoformat(
+                data["billing_period_start"].replace("Z", "+00:00")
+            ),
+            billing_period_end=datetime.fromisoformat(
+                data["billing_period_end"].replace("Z", "+00:00")
+            ),
             payment_method_id=data.get("payment_method_id"),
             payment_intent_id=data.get("payment_intent_id"),
             line_items=line_items,
             stripe_invoice_id=data.get("stripe_invoice_id"),
-            due_date=datetime.fromisoformat(data["due_date"].replace('Z', '+00:00')) if data.get("due_date") else None,
-            paid_at=datetime.fromisoformat(data["paid_at"].replace('Z', '+00:00')) if data.get("paid_at") else None,
-            created_at=datetime.fromisoformat(data["created_at"].replace('Z', '+00:00')) if data.get("created_at") else None,
-            updated_at=datetime.fromisoformat(data["updated_at"].replace('Z', '+00:00')) if data.get("updated_at") else None
+            due_date=datetime.fromisoformat(data["due_date"].replace("Z", "+00:00"))
+            if data.get("due_date")
+            else None,
+            paid_at=datetime.fromisoformat(data["paid_at"].replace("Z", "+00:00"))
+            if data.get("paid_at")
+            else None,
+            created_at=datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
+            if data.get("created_at")
+            else None,
+            updated_at=datetime.fromisoformat(data["updated_at"].replace("Z", "+00:00"))
+            if data.get("updated_at")
+            else None,
         )
 
     def _convert_to_refund(self, data: Dict[str, Any]) -> Refund:
@@ -1151,6 +1265,7 @@ class PaymentRepository:
         processor_response = data.get("processor_response")
         if isinstance(processor_response, str):
             import json
+
             processor_response = json.loads(processor_response)
         elif not isinstance(processor_response, dict):
             processor_response = {}
@@ -1169,9 +1284,19 @@ class PaymentRepository:
             processor_response=processor_response,
             requested_by=data.get("requested_by"),
             approved_by=data.get("approved_by"),
-            requested_at=datetime.fromisoformat(data["requested_at"].replace('Z', '+00:00')),
-            processed_at=datetime.fromisoformat(data["processed_at"].replace('Z', '+00:00')) if data.get("processed_at") else None,
-            completed_at=datetime.fromisoformat(data["completed_at"].replace('Z', '+00:00')) if data.get("completed_at") else None
+            requested_at=datetime.fromisoformat(
+                data["requested_at"].replace("Z", "+00:00")
+            ),
+            processed_at=datetime.fromisoformat(
+                data["processed_at"].replace("Z", "+00:00")
+            )
+            if data.get("processed_at")
+            else None,
+            completed_at=datetime.fromisoformat(
+                data["completed_at"].replace("Z", "+00:00")
+            )
+            if data.get("completed_at")
+            else None,
         )
 
     def _convert_to_payment_method(self, data: Dict[str, Any]) -> PaymentMethodInfo:
@@ -1190,5 +1315,7 @@ class PaymentRepository:
             stripe_payment_method_id=data.get("stripe_payment_method_id"),
             is_default=data.get("is_default", False),
             is_verified=data.get("is_verified", False),
-            created_at=datetime.fromisoformat(data["created_at"].replace('Z', '+00:00')) if data.get("created_at") else None
+            created_at=datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
+            if data.get("created_at")
+            else None,
         )

@@ -35,8 +35,7 @@ class MemoryClient:
             api_key: Optional API key for authentication
         """
         self._client = MemoryServiceClient(
-            base_url=base_url or "http://localhost:8223",
-            api_key=api_key
+            base_url=base_url or "http://localhost:8223", api_key=api_key
         )
 
     async def close(self):
@@ -53,7 +52,9 @@ class MemoryClient:
     # Session-specific convenience methods
     # =============================================================================
 
-    async def get_session_context(self, user_id: str, session_id: str) -> Dict[str, Any]:
+    async def get_session_context(
+        self, user_id: str, session_id: str
+    ) -> Dict[str, Any]:
         """
         Get relevant memories for session context.
 
@@ -69,23 +70,26 @@ class MemoryClient:
         try:
             # Get session-specific memories
             session_memories = await self._client.get_session_memories(
-                session_id=session_id,
-                user_id=user_id
+                session_id=session_id, user_id=user_id
             )
 
             # Get active working memories
             working_memories = await self._client.get_active_working_memories(user_id)
 
             return {
-                "session_memories": session_memories.get("memories", []) if session_memories else [],
-                "working_memories": working_memories.get("memories", []) if working_memories else [],
-                "session_id": session_id
+                "session_memories": session_memories.get("memories", [])
+                if session_memories
+                else [],
+                "working_memories": working_memories.get("memories", [])
+                if working_memories
+                else [],
+                "session_id": session_id,
             }
         except Exception:
             return {
                 "session_memories": [],
                 "working_memories": [],
-                "session_id": session_id
+                "session_id": session_id,
             }
 
     async def save_session_memory(
@@ -94,7 +98,7 @@ class MemoryClient:
         session_id: str,
         content: str,
         memory_type: str = "session",
-        importance: float = 0.5
+        importance: float = 0.5,
     ) -> bool:
         """
         Save a memory from the current session.
@@ -110,14 +114,17 @@ class MemoryClient:
             True if saved successfully
         """
         try:
-            from microservices.memory_service.models import MemoryCreateRequest, MemoryType
+            from microservices.memory_service.models import (
+                MemoryCreateRequest,
+                MemoryType,
+            )
 
             request = MemoryCreateRequest(
                 user_id=user_id,
                 memory_type=MemoryType(memory_type),
                 content=content,
                 importance_score=importance,
-                metadata={"session_id": session_id}
+                metadata={"session_id": session_id},
             )
 
             result = await self._client.create_memory(request)
@@ -126,10 +133,7 @@ class MemoryClient:
             return False
 
     async def extract_memories_from_dialog(
-        self,
-        user_id: str,
-        dialog_content: str,
-        importance: float = 0.5
+        self, user_id: str, dialog_content: str, importance: float = 0.5
     ) -> Dict[str, Any]:
         """
         Extract and store memories from dialog using AI.
@@ -149,7 +153,7 @@ class MemoryClient:
             factual = await self._client.extract_factual_memory(
                 user_id=user_id,
                 dialog_content=dialog_content,
-                importance_score=importance
+                importance_score=importance,
             )
             results["factual"] = factual
         except Exception:
@@ -160,7 +164,7 @@ class MemoryClient:
             episodic = await self._client.extract_episodic_memory(
                 user_id=user_id,
                 dialog_content=dialog_content,
-                importance_score=importance
+                importance_score=importance,
             )
             results["episodic"] = episodic
         except Exception:
@@ -181,8 +185,7 @@ class MemoryClient:
         """
         try:
             result = await self._client.deactivate_session(
-                session_id=session_id,
-                user_id=user_id
+                session_id=session_id, user_id=user_id
             )
             return result is not None and result.success
         except Exception:
@@ -208,16 +211,11 @@ class MemoryClient:
     # =============================================================================
 
     async def list_memories(
-        self,
-        user_id: str,
-        memory_type: Optional[str] = None,
-        limit: int = 50
+        self, user_id: str, memory_type: Optional[str] = None, limit: int = 50
     ):
         """List user memories"""
         return await self._client.list_memories(
-            user_id=user_id,
-            memory_type=memory_type,
-            limit=limit
+            user_id=user_id, memory_type=memory_type, limit=limit
         )
 
     async def health_check(self) -> bool:

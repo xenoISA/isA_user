@@ -23,11 +23,12 @@ class StorageClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("storage_service")
             except Exception as e:
@@ -74,11 +75,7 @@ class StorageClient:
             logger.error(f"Error getting storage usage: {e}")
             return None
 
-    async def validate_quota(
-        self,
-        user_id: str,
-        additional_size: int
-    ) -> bool:
+    async def validate_quota(self, user_id: str, additional_size: int) -> bool:
         """
         Validate if user has enough quota for additional storage
 
@@ -94,8 +91,8 @@ class StorageClient:
             if not usage:
                 return False
 
-            used = usage.get('used_bytes', 0)
-            quota = usage.get('quota_bytes', 0)
+            used = usage.get("used_bytes", 0)
+            quota = usage.get("quota_bytes", 0)
 
             return (used + additional_size) <= quota
 
@@ -129,11 +126,7 @@ class StorageClient:
             logger.error(f"Error getting storage quota: {e}")
             return None
 
-    async def update_quota(
-        self,
-        user_id: str,
-        new_quota_bytes: int
-    ) -> bool:
+    async def update_quota(self, user_id: str, new_quota_bytes: int) -> bool:
         """
         Update user's storage quota
 
@@ -145,14 +138,10 @@ class StorageClient:
             True if successful
         """
         try:
-            payload = {
-                "user_id": user_id,
-                "quota_bytes": new_quota_bytes
-            }
+            payload = {"user_id": user_id, "quota_bytes": new_quota_bytes}
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/storage/quota/update",
-                json=payload
+                f"{self.base_url}/api/v1/storage/quota/update", json=payload
             )
             response.raise_for_status()
             return True

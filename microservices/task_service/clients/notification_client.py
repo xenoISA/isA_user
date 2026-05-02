@@ -15,7 +15,9 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from microservices.notification_service.clients.notification_client import NotificationServiceClient
+from microservices.notification_service.clients.notification_client import (
+    NotificationServiceClient,
+)
 
 
 class NotificationClient:

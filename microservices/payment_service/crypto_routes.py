@@ -24,8 +24,10 @@ router = APIRouter(prefix="/crypto", tags=["crypto-payments"])
 # Request/Response Models
 # ============================================================================
 
+
 class CreateCryptoPaymentRequest(BaseModel):
     """API request to create crypto payment"""
+
     user_id: str
     organization_id: Optional[str] = None
     amount: Decimal = Field(..., gt=0, description="Amount in fiat currency")
@@ -40,6 +42,7 @@ class CreateCryptoPaymentRequest(BaseModel):
 
 class CryptoPaymentDetail(BaseModel):
     """Detailed payment information"""
+
     payment_id: str
     user_id: str
     organization_id: Optional[str] = None
@@ -60,6 +63,7 @@ class CryptoPaymentDetail(BaseModel):
 
 class CreateRefundRequest(BaseModel):
     """API request to create refund"""
+
     payment_id: str
     amount: Optional[Decimal] = None
     reason: str
@@ -69,16 +73,19 @@ class CreateRefundRequest(BaseModel):
 
 class SupportedChainsResponse(BaseModel):
     """Response with supported chains"""
+
     chains: List[Dict[str, Any]]
 
 
 class SupportedTokensResponse(BaseModel):
     """Response with supported tokens"""
+
     tokens: List[Dict[str, Any]]
 
 
 class ProvidersResponse(BaseModel):
     """Response with available providers"""
+
     providers: List[str]
     default_provider: str
 
@@ -86,6 +93,7 @@ class ProvidersResponse(BaseModel):
 # ============================================================================
 # Dependencies
 # ============================================================================
+
 
 async def get_service() -> CryptoPaymentService:
     """Get crypto payment service"""
@@ -96,10 +104,9 @@ async def get_service() -> CryptoPaymentService:
 # Routes
 # ============================================================================
 
+
 @router.get("/info", summary="Get crypto payment service info")
-async def get_info(
-    service: CryptoPaymentService = Depends(get_service)
-):
+async def get_info(service: CryptoPaymentService = Depends(get_service)):
     """Get crypto payment service information and capabilities"""
     return {
         "service": "crypto_payments",
@@ -111,10 +118,10 @@ async def get_info(
     }
 
 
-@router.get("/providers", response_model=ProvidersResponse, summary="List available providers")
-async def list_providers(
-    service: CryptoPaymentService = Depends(get_service)
-):
+@router.get(
+    "/providers", response_model=ProvidersResponse, summary="List available providers"
+)
+async def list_providers(service: CryptoPaymentService = Depends(get_service)):
     """Get list of available crypto payment providers"""
     return ProvidersResponse(
         providers=[p.value for p in service.get_available_providers()],
@@ -122,26 +129,28 @@ async def list_providers(
     )
 
 
-@router.get("/chains", response_model=SupportedChainsResponse, summary="List supported chains")
-async def list_chains(
-    service: CryptoPaymentService = Depends(get_service)
-):
+@router.get(
+    "/chains", response_model=SupportedChainsResponse, summary="List supported chains"
+)
+async def list_chains(service: CryptoPaymentService = Depends(get_service)):
     """Get list of supported blockchain networks"""
     return SupportedChainsResponse(chains=service.get_supported_chains())
 
 
-@router.get("/tokens", response_model=SupportedTokensResponse, summary="List supported tokens")
-async def list_tokens(
-    service: CryptoPaymentService = Depends(get_service)
-):
+@router.get(
+    "/tokens", response_model=SupportedTokensResponse, summary="List supported tokens"
+)
+async def list_tokens(service: CryptoPaymentService = Depends(get_service)):
     """Get list of supported cryptocurrencies/tokens"""
     return SupportedTokensResponse(tokens=service.get_supported_tokens())
 
 
-@router.post("/payments", response_model=CryptoPaymentResponse, summary="Create crypto payment")
+@router.post(
+    "/payments", response_model=CryptoPaymentResponse, summary="Create crypto payment"
+)
 async def create_payment(
     request: CreateCryptoPaymentRequest,
-    service: CryptoPaymentService = Depends(get_service)
+    service: CryptoPaymentService = Depends(get_service),
 ):
     """
     Create a new crypto payment.
@@ -156,8 +165,7 @@ async def create_payment(
                 provider = CryptoProvider(request.provider)
             except ValueError:
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid provider: {request.provider}"
+                    status_code=400, detail=f"Invalid provider: {request.provider}"
                 )
 
         # Create payment request
@@ -184,8 +192,7 @@ async def create_payment(
 
 @router.get("/payments/{payment_id}", summary="Get payment details")
 async def get_payment(
-    payment_id: str,
-    service: CryptoPaymentService = Depends(get_service)
+    payment_id: str, service: CryptoPaymentService = Depends(get_service)
 ):
     """Get details of a crypto payment"""
     payment = await service.get_payment(payment_id)
@@ -214,8 +221,7 @@ async def get_payment(
 
 @router.get("/payments/{payment_id}/status", summary="Check payment status")
 async def check_payment_status(
-    payment_id: str,
-    service: CryptoPaymentService = Depends(get_service)
+    payment_id: str, service: CryptoPaymentService = Depends(get_service)
 ):
     """Check and return current payment status"""
     status = await service.check_payment_status(payment_id)
@@ -227,15 +233,14 @@ async def check_payment_status(
 
 @router.post("/payments/{payment_id}/cancel", summary="Cancel payment")
 async def cancel_payment(
-    payment_id: str,
-    service: CryptoPaymentService = Depends(get_service)
+    payment_id: str, service: CryptoPaymentService = Depends(get_service)
 ):
     """Cancel a pending payment"""
     success = await service.cancel_payment(payment_id)
     if not success:
         raise HTTPException(
             status_code=400,
-            detail="Cannot cancel payment - may not exist or not pending"
+            detail="Cannot cancel payment - may not exist or not pending",
         )
 
     return {"payment_id": payment_id, "status": "cancelled"}
@@ -247,7 +252,7 @@ async def get_user_payments(
     status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    service: CryptoPaymentService = Depends(get_service)
+    service: CryptoPaymentService = Depends(get_service),
 ):
     """Get crypto payments for a user"""
     # This would query the database
@@ -265,10 +270,10 @@ async def get_user_payments(
 # Refunds
 # ============================================================================
 
+
 @router.post("/refunds", summary="Create refund")
 async def create_refund(
-    request: CreateRefundRequest,
-    service: CryptoPaymentService = Depends(get_service)
+    request: CreateRefundRequest, service: CryptoPaymentService = Depends(get_service)
 ):
     """
     Request a refund for a completed crypto payment.
@@ -288,7 +293,7 @@ async def create_refund(
         if not refund:
             raise HTTPException(
                 status_code=400,
-                detail="Cannot create refund - payment may not exist or not completed"
+                detail="Cannot create refund - payment may not exist or not completed",
             )
 
         return {
@@ -308,11 +313,12 @@ async def create_refund(
 # Webhooks
 # ============================================================================
 
+
 @router.post("/webhooks/coinbase", summary="Coinbase Commerce webhook")
 async def coinbase_webhook(
     request: Request,
     x_cc_webhook_signature: str = Header(None, alias="X-CC-Webhook-Signature"),
-    service: CryptoPaymentService = Depends(get_service)
+    service: CryptoPaymentService = Depends(get_service),
 ):
     """
     Handle Coinbase Commerce webhook events.
@@ -351,10 +357,9 @@ async def coinbase_webhook(
 # Health
 # ============================================================================
 
+
 @router.get("/health", summary="Crypto payment health check")
-async def health_check(
-    service: CryptoPaymentService = Depends(get_service)
-):
+async def health_check(service: CryptoPaymentService = Depends(get_service)):
     """Check health of crypto payment providers"""
     providers_health = {}
 
@@ -362,7 +367,9 @@ async def health_check(
         try:
             provider = service.get_provider(provider_enum)
             healthy = await provider.health_check()
-            providers_health[provider_enum.value] = "healthy" if healthy else "unhealthy"
+            providers_health[provider_enum.value] = (
+                "healthy" if healthy else "unhealthy"
+            )
         except Exception as e:
             providers_health[provider_enum.value] = f"error: {e}"
 

@@ -16,10 +16,21 @@ from datetime import datetime, timedelta
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import AuditRepositoryProtocol
 from .models import (
-    AuditEvent, UserActivity, SecurityEvent, ComplianceReport,
-    AuditEventCreateRequest, AuditEventResponse, AuditQueryRequest, AuditQueryResponse,
-    UserActivitySummary, SecurityAlertRequest, ComplianceReportRequest, EventSeverity,
-    EventStatus, AuditCategory, EventType
+    AuditEvent,
+    UserActivity,
+    SecurityEvent,
+    ComplianceReport,
+    AuditEventCreateRequest,
+    AuditEventResponse,
+    AuditQueryRequest,
+    AuditQueryResponse,
+    UserActivitySummary,
+    SecurityAlertRequest,
+    ComplianceReportRequest,
+    EventSeverity,
+    EventStatus,
+    AuditCategory,
+    EventType,
 )
 
 # Type checking imports (not executed at runtime)
@@ -46,37 +57,40 @@ class AuditService:
         self.repository = repository  # Will be set by factory if None
 
         # 风险评分配置
-        self.risk_thresholds = {
-            "low": 30,
-            "medium": 60,
-            "high": 80,
-            "critical": 95
-        }
+        self.risk_thresholds = {"low": 30, "medium": 60, "high": 80, "critical": 95}
 
         # 合规标准配置
         self.compliance_standards = {
             "GDPR": {
                 "retention_days": 2555,  # 7 years
                 "required_fields": ["user_id", "action", "timestamp", "ip_address"],
-                "sensitive_events": ["user.deleted", "authorization.permission.granted"]
+                "sensitive_events": [
+                    "user.deleted",
+                    "authorization.permission.granted",
+                ],
             },
             "SOX": {
                 "retention_days": 2555,  # 7 years
                 "required_fields": ["user_id", "action", "timestamp"],
-                "sensitive_events": ["audit.resource.update", "authorization.permission.updated"]
+                "sensitive_events": [
+                    "audit.resource.update",
+                    "authorization.permission.updated",
+                ],
             },
             "HIPAA": {
                 "retention_days": 2190,  # 6 years
                 "required_fields": ["user_id", "action", "timestamp", "resource_type"],
-                "sensitive_events": ["audit.resource.access", "user.updated"]
-            }
+                "sensitive_events": ["audit.resource.access", "user.updated"],
+            },
         }
 
     # ====================
     # 核心审计事件管理
     # ====================
 
-    async def log_event(self, request: AuditEventCreateRequest) -> Optional[AuditEventResponse]:
+    async def log_event(
+        self, request: AuditEventCreateRequest
+    ) -> Optional[AuditEventResponse]:
         """记录审计事件"""
         try:
             logger.info(f"记录审计事件: {request.event_type.value} - {request.action}")
@@ -90,28 +104,22 @@ class AuditService:
                 status=EventStatus.SUCCESS if request.success else EventStatus.FAILURE,
                 action=request.action,
                 description=request.description,
-
                 user_id=request.user_id,
                 session_id=request.session_id,
                 organization_id=request.organization_id,
-
                 resource_type=request.resource_type,
                 resource_id=request.resource_id,
                 resource_name=request.resource_name,
-
                 ip_address=request.ip_address,
                 user_agent=request.user_agent,
                 api_endpoint=request.api_endpoint,
                 http_method=request.http_method,
-
                 success=request.success,
                 error_code=request.error_code,
                 error_message=request.error_message,
-
                 metadata=request.metadata,
                 tags=request.tags,
-
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
             )
 
             # 自动设置合规相关字段
@@ -141,7 +149,7 @@ class AuditService:
                 resource_name=created_event.resource_name,
                 success=created_event.success,
                 timestamp=created_event.timestamp,
-                metadata=created_event.metadata
+                metadata=created_event.metadata,
             )
 
         except Exception as e:
@@ -178,7 +186,7 @@ class AuditService:
                     resource_name=event.resource_name,
                     success=event.success,
                     timestamp=event.timestamp,
-                    metadata=event.metadata
+                    metadata=event.metadata,
                 )
                 for event in events
             ]
@@ -189,17 +197,23 @@ class AuditService:
                 page_info={
                     "limit": query.limit,
                     "offset": query.offset,
-                    "has_more": total_count >= query.limit
+                    "has_more": total_count >= query.limit,
                 },
                 filters_applied={
-                    "event_types": [et.value for et in query.event_types] if query.event_types else None,
-                    "categories": [cat.value for cat in query.categories] if query.categories else None,
+                    "event_types": [et.value for et in query.event_types]
+                    if query.event_types
+                    else None,
+                    "categories": [cat.value for cat in query.categories]
+                    if query.categories
+                    else None,
                     "user_id": query.user_id,
                     "time_range": {
-                        "start": query.start_time.isoformat() if query.start_time else None,
-                        "end": query.end_time.isoformat() if query.end_time else None
-                    }
-                }
+                        "start": query.start_time.isoformat()
+                        if query.start_time
+                        else None,
+                        "end": query.end_time.isoformat() if query.end_time else None,
+                    },
+                },
             )
 
         except Exception as e:
@@ -207,15 +221,21 @@ class AuditService:
             return AuditQueryResponse(
                 events=[],
                 total_count=0,
-                page_info={"limit": query.limit, "offset": query.offset, "has_more": False},
-                filters_applied={}
+                page_info={
+                    "limit": query.limit,
+                    "offset": query.offset,
+                    "has_more": False,
+                },
+                filters_applied={},
             )
 
     # ====================
     # 用户活动分析
     # ====================
 
-    async def get_user_activities(self, user_id: str, days: int = 30, limit: int = 100) -> List[UserActivity]:
+    async def get_user_activities(
+        self, user_id: str, days: int = 30, limit: int = 100
+    ) -> List[UserActivity]:
         """获取用户活动记录"""
         try:
             logger.info(f"获取用户活动: {user_id}, 天数={days}")
@@ -227,25 +247,31 @@ class AuditService:
             logger.error(f"获取用户活动失败: {e}")
             return []
 
-    async def get_user_activity_summary(self, user_id: str, days: int = 30) -> UserActivitySummary:
+    async def get_user_activity_summary(
+        self, user_id: str, days: int = 30
+    ) -> UserActivitySummary:
         """获取用户活动摘要"""
         try:
             logger.info(f"生成用户活动摘要: {user_id}")
 
-            summary_data = await self.repository.get_user_activity_summary(user_id, days)
+            summary_data = await self.repository.get_user_activity_summary(
+                user_id, days
+            )
 
             return UserActivitySummary(
                 user_id=user_id,
                 total_activities=summary_data.get("total_activities", 0),
                 success_count=summary_data.get("success_count", 0),
                 failure_count=summary_data.get("failure_count", 0),
-                last_activity=datetime.fromisoformat(summary_data["last_activity"]) if summary_data.get("last_activity") else None,
+                last_activity=datetime.fromisoformat(summary_data["last_activity"])
+                if summary_data.get("last_activity")
+                else None,
                 most_common_activities=summary_data.get("most_common_activities", []),
                 risk_score=summary_data.get("risk_score", 0.0),
                 metadata={
                     "period_days": days,
-                    "analysis_timestamp": datetime.utcnow().isoformat()
-                }
+                    "analysis_timestamp": datetime.utcnow().isoformat(),
+                },
             )
 
         except Exception as e:
@@ -257,14 +283,16 @@ class AuditService:
                 failure_count=0,
                 last_activity=None,
                 most_common_activities=[],
-                risk_score=0.0
+                risk_score=0.0,
             )
 
     # ====================
     # 安全事件管理
     # ====================
 
-    async def create_security_alert(self, alert: SecurityAlertRequest) -> Optional[SecurityEvent]:
+    async def create_security_alert(
+        self, alert: SecurityAlertRequest
+    ) -> Optional[SecurityEvent]:
         """创建安全告警"""
         try:
             logger.warning(f"创建安全告警: {alert.threat_type} - {alert.severity.value}")
@@ -274,18 +302,14 @@ class AuditService:
                 event_type="audit.security.alert",
                 severity=alert.severity,
                 threat_level=self._calculate_threat_level(alert.severity),
-
                 source_ip=alert.source_ip,
                 target_resource=alert.target_resource,
-
                 detection_method="manual_report",
                 confidence_score=0.8,
-
                 response_action="investigation_required",
                 investigation_status="open",
-
                 detected_at=datetime.utcnow(),
-                metadata=alert.metadata
+                metadata=alert.metadata,
             )
 
             created_event = await self.repository.create_security_event(security_event)
@@ -300,7 +324,9 @@ class AuditService:
             logger.error(f"创建安全告警失败: {e}")
             return None
 
-    async def get_security_events(self, days: int = 7, severity: Optional[EventSeverity] = None) -> List[SecurityEvent]:
+    async def get_security_events(
+        self, days: int = 7, severity: Optional[EventSeverity] = None
+    ) -> List[SecurityEvent]:
         """获取安全事件列表"""
         try:
             return await self.repository.get_security_events(days, severity)
@@ -312,7 +338,9 @@ class AuditService:
     # 合规报告
     # ====================
 
-    async def generate_compliance_report(self, request: ComplianceReportRequest) -> Optional[ComplianceReport]:
+    async def generate_compliance_report(
+        self, request: ComplianceReportRequest
+    ) -> Optional[ComplianceReport]:
         """生成合规报告"""
         try:
             logger.info(f"生成合规报告: {request.compliance_standard}")
@@ -327,20 +355,24 @@ class AuditService:
             query = AuditQueryRequest(
                 start_time=request.period_start,
                 end_time=request.period_end,
-                limit=1000  # Maximum allowed by model validation
+                limit=1000,  # Maximum allowed by model validation
             )
 
             if request.filters:
                 # 应用自定义过滤器
                 if "event_types" in request.filters:
-                    query.event_types = [EventType(et) for et in request.filters["event_types"]]
+                    query.event_types = [
+                        EventType(et) for et in request.filters["event_types"]
+                    ]
                 if "user_id" in request.filters:
                     query.user_id = request.filters["user_id"]
 
             events = await self.repository.query_audit_events(query)
 
             # 分析合规性
-            compliance_analysis = await self._analyze_compliance(events, standard_config)
+            compliance_analysis = await self._analyze_compliance(
+                events, standard_config
+            )
 
             # 生成报告
             report = ComplianceReport(
@@ -348,24 +380,23 @@ class AuditService:
                 compliance_standard=request.compliance_standard,
                 period_start=request.period_start,
                 period_end=request.period_end,
-
                 total_events=len(events),
                 compliant_events=compliance_analysis["compliant_count"],
                 non_compliant_events=compliance_analysis["non_compliant_count"],
                 compliance_score=compliance_analysis["compliance_score"],
-
-                findings=compliance_analysis["findings"] if request.include_details else None,
+                findings=compliance_analysis["findings"]
+                if request.include_details
+                else None,
                 recommendations=compliance_analysis["recommendations"],
                 risk_assessment=compliance_analysis["risk_assessment"],
-
                 generated_at=datetime.utcnow(),
                 generated_by="audit_service",
                 status="final",
                 metadata={
                     "standard_config": standard_config,
                     "query_filters": request.filters,
-                    "include_details": request.include_details
-                }
+                    "include_details": request.include_details,
+                },
             )
 
             return report
@@ -397,7 +428,7 @@ class AuditService:
                 "events_today": 0,
                 "active_users": 0,
                 "security_alerts": 0,
-                "compliance_score": 0.0
+                "compliance_score": 0.0,
             }
 
     # ====================
@@ -411,10 +442,7 @@ class AuditService:
 
             cleaned_events = await self.repository.cleanup_old_events(retention_days)
 
-            return {
-                "cleaned_events": cleaned_events,
-                "retention_days": retention_days
-            }
+            return {"cleaned_events": cleaned_events, "retention_days": retention_days}
 
         except Exception as e:
             logger.error(f"清理数据失败: {e}")
@@ -443,11 +471,16 @@ class AuditService:
                 compliance_flags.append("GDPR")
 
             # SOX相关事件
-            if event.resource_type and event.event_type in ["audit.resource.update", "authorization.permission.updated"]:
+            if event.resource_type and event.event_type in [
+                "audit.resource.update",
+                "authorization.permission.updated",
+            ]:
                 compliance_flags.append("SOX")
 
             # HIPAA相关事件
-            if event.resource_type and "health" in (event.resource_type.lower() if event.resource_type else ""):
+            if event.resource_type and "health" in (
+                event.resource_type.lower() if event.resource_type else ""
+            ):
                 compliance_flags.append("HIPAA")
 
             event.compliance_flags = compliance_flags if compliance_flags else None
@@ -467,7 +500,10 @@ class AuditService:
                 logger.warning(f"认证失败事件: 用户={event.user_id}, IP={event.ip_address}")
 
             # 检查权限变更
-            if event.event_type in ["authorization.permission.granted", "authorization.permission.revoked"]:
+            if event.event_type in [
+                "authorization.permission.granted",
+                "authorization.permission.revoked",
+            ]:
                 logger.info(f"权限变更事件: {event.action}")
 
         except Exception as e:
@@ -508,7 +544,9 @@ class AuditService:
         else:
             return "low"
 
-    async def _analyze_compliance(self, events: List[AuditEvent], standard_config: Dict[str, Any]) -> Dict[str, Any]:
+    async def _analyze_compliance(
+        self, events: List[AuditEvent], standard_config: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """分析合规性"""
         try:
             required_fields = standard_config["required_fields"]
@@ -538,15 +576,19 @@ class AuditService:
                     compliant_count += 1
                 else:
                     non_compliant_count += 1
-                    findings.append({
-                        "event_id": event.id,
-                        "event_type": event.event_type.value,
-                        "timestamp": event.timestamp.isoformat(),
-                        "issues": event_findings
-                    })
+                    findings.append(
+                        {
+                            "event_id": event.id,
+                            "event_type": event.event_type.value,
+                            "timestamp": event.timestamp.isoformat(),
+                            "issues": event_findings,
+                        }
+                    )
 
             total_events = len(events)
-            compliance_score = (compliant_count / total_events * 100) if total_events > 0 else 100
+            compliance_score = (
+                (compliant_count / total_events * 100) if total_events > 0 else 100
+            )
 
             # 生成建议
             recommendations = []
@@ -573,8 +615,8 @@ class AuditService:
                 "risk_assessment": {
                     "risk_level": risk_level,
                     "compliance_score": compliance_score,
-                    "total_events": total_events
-                }
+                    "total_events": total_events,
+                },
             }
 
         except Exception as e:
@@ -585,7 +627,7 @@ class AuditService:
                 "compliance_score": 0.0,
                 "findings": [],
                 "recommendations": ["合规性分析失败，需要人工审查"],
-                "risk_assessment": {"risk_level": "unknown"}
+                "risk_assessment": {"risk_level": "unknown"},
             }
 
     async def _calculate_overall_compliance_score(self) -> float:

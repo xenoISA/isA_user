@@ -22,11 +22,12 @@ class NotificationServiceClient:
             base_url: Notification service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("notification_service")
             except Exception as e:
@@ -59,7 +60,7 @@ class NotificationServiceClient:
         priority: str = "normal",
         data: Optional[Dict[str, Any]] = None,
         template_id: Optional[str] = None,
-        template_data: Optional[Dict[str, Any]] = None
+        template_data: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Send notification to user
@@ -94,7 +95,7 @@ class NotificationServiceClient:
                 "notification_type": notification_type,
                 "title": title,
                 "message": message,
-                "priority": priority
+                "priority": priority,
             }
 
             if channels:
@@ -107,8 +108,7 @@ class NotificationServiceClient:
                 payload["template_data"] = template_data
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/notifications/send",
-                json=payload
+                f"{self.base_url}/api/v1/notifications/send", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -121,8 +121,7 @@ class NotificationServiceClient:
             return None
 
     async def send_batch_notifications(
-        self,
-        notifications: List[Dict[str, Any]]
+        self, notifications: List[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
         """
         Send multiple notifications in batch
@@ -155,13 +154,15 @@ class NotificationServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/notifications/batch",
-                json={"notifications": notifications}
+                json={"notifications": notifications},
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to send batch notifications: {e.response.status_code}")
+            logger.error(
+                f"Failed to send batch notifications: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error sending batch notifications: {e}")
@@ -172,10 +173,7 @@ class NotificationServiceClient:
     # =============================================================================
 
     async def get_in_app_notifications(
-        self,
-        user_id: str,
-        unread_only: bool = False,
-        limit: int = 50
+        self, user_id: str, unread_only: bool = False, limit: int = 50
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get user's in-app notifications
@@ -202,23 +200,21 @@ class NotificationServiceClient:
                 params["unread_only"] = unread_only
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/notifications/in-app/{user_id}",
-                params=params
+                f"{self.base_url}/api/v1/notifications/in-app/{user_id}", params=params
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get in-app notifications: {e.response.status_code}")
+            logger.error(
+                f"Failed to get in-app notifications: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting in-app notifications: {e}")
             return None
 
-    async def mark_notification_read(
-        self,
-        notification_id: str
-    ) -> bool:
+    async def mark_notification_read(self, notification_id: str) -> bool:
         """
         Mark in-app notification as read
 
@@ -245,10 +241,7 @@ class NotificationServiceClient:
             logger.error(f"Error marking notification read: {e}")
             return False
 
-    async def archive_notification(
-        self,
-        notification_id: str
-    ) -> bool:
+    async def archive_notification(self, notification_id: str) -> bool:
         """
         Archive in-app notification
 
@@ -275,10 +268,7 @@ class NotificationServiceClient:
             logger.error(f"Error archiving notification: {e}")
             return False
 
-    async def get_unread_count(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_unread_count(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get user's unread notification count
 
@@ -315,7 +305,7 @@ class NotificationServiceClient:
         user_id: str,
         endpoint: str,
         keys: Dict[str, str],
-        device_type: Optional[str] = None
+        device_type: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Subscribe to push notifications
@@ -337,18 +327,13 @@ class NotificationServiceClient:
             ... )
         """
         try:
-            payload = {
-                "user_id": user_id,
-                "endpoint": endpoint,
-                "keys": keys
-            }
+            payload = {"user_id": user_id, "endpoint": endpoint, "keys": keys}
 
             if device_type:
                 payload["device_type"] = device_type
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/notifications/push/subscribe",
-                json=payload
+                f"{self.base_url}/api/v1/notifications/push/subscribe", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -361,8 +346,7 @@ class NotificationServiceClient:
             return None
 
     async def get_push_subscriptions(
-        self,
-        user_id: str
+        self, user_id: str
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get user's push subscriptions
@@ -390,11 +374,7 @@ class NotificationServiceClient:
             logger.error(f"Error getting push subscriptions: {e}")
             return None
 
-    async def unsubscribe_push(
-        self,
-        user_id: str,
-        endpoint: str
-    ) -> bool:
+    async def unsubscribe_push(self, user_id: str, endpoint: str) -> bool:
         """
         Unsubscribe from push notifications
 
@@ -414,10 +394,7 @@ class NotificationServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/v1/notifications/push/unsubscribe",
-                json={
-                    "user_id": user_id,
-                    "endpoint": endpoint
-                }
+                json={"user_id": user_id, "endpoint": endpoint},
             )
             response.raise_for_status()
             return True
@@ -441,7 +418,7 @@ class NotificationServiceClient:
         channels: List[str],
         title_template: str,
         message_template: str,
-        email_html: Optional[str] = None
+        email_html: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create notification template
@@ -475,15 +452,14 @@ class NotificationServiceClient:
                 "notification_type": notification_type,
                 "channels": channels,
                 "title_template": title_template,
-                "message_template": message_template
+                "message_template": message_template,
             }
 
             if email_html:
                 payload["email_html"] = email_html
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/notifications/templates",
-                json=payload
+                f"{self.base_url}/api/v1/notifications/templates", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -495,10 +471,7 @@ class NotificationServiceClient:
             logger.error(f"Error creating template: {e}")
             return None
 
-    async def get_template(
-        self,
-        template_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_template(self, template_id: str) -> Optional[Dict[str, Any]]:
         """
         Get notification template
 
@@ -558,7 +531,7 @@ class NotificationServiceClient:
         user_id: Optional[str] = None,
         notification_type: Optional[str] = None,
         status: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Query notifications
@@ -589,8 +562,7 @@ class NotificationServiceClient:
                 params["status"] = status
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/notifications",
-                params=params
+                f"{self.base_url}/api/v1/notifications", params=params
             )
             response.raise_for_status()
             return response.json()

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 # Event Type Definitions (Service-Specific)
 # =============================================================================
 
+
 class ProductEventType(str, Enum):
     """
     Events published by product_service.
@@ -21,6 +22,7 @@ class ProductEventType(str, Enum):
     Stream: product-stream
     Subjects: product.>
     """
+
     PRODUCT_CREATED = "product.created"
     PRODUCT_UPDATED = "product.updated"
     PRODUCT_AVAILABILITY_CHANGED = "product.availability.changed"
@@ -29,11 +31,13 @@ class ProductEventType(str, Enum):
 
 class ProductSubscribedEventType(str, Enum):
     """Events that product_service subscribes to from other services."""
+
     pass  # No subscribed events
 
 
 class ProductStreamConfig:
     """Stream configuration for product_service"""
+
     STREAM_NAME = "product-stream"
     SUBJECTS = ["product.>"]
     MAX_MESSAGES = 100000
@@ -42,6 +46,7 @@ class ProductStreamConfig:
 
 class SubscriptionCreatedEvent(BaseModel):
     """Event published when a new subscription is created"""
+
     subscription_id: str
     user_id: str
     organization_id: Optional[str] = None
@@ -57,6 +62,7 @@ class SubscriptionCreatedEvent(BaseModel):
 
 class SubscriptionStatusChangedEvent(BaseModel):
     """Event published when subscription status changes"""
+
     subscription_id: str
     user_id: str
     organization_id: Optional[str] = None
@@ -70,6 +76,7 @@ class SubscriptionStatusChangedEvent(BaseModel):
 
 class SubscriptionActivatedEvent(BaseModel):
     """Event published when subscription is activated"""
+
     subscription_id: str
     user_id: str
     organization_id: Optional[str] = None
@@ -80,6 +87,7 @@ class SubscriptionActivatedEvent(BaseModel):
 
 class SubscriptionCanceledEvent(BaseModel):
     """Event published when subscription is canceled"""
+
     subscription_id: str
     user_id: str
     organization_id: Optional[str] = None
@@ -90,6 +98,7 @@ class SubscriptionCanceledEvent(BaseModel):
 
 class SubscriptionExpiredEvent(BaseModel):
     """Event published when subscription expires"""
+
     subscription_id: str
     user_id: str
     organization_id: Optional[str] = None
@@ -100,6 +109,7 @@ class SubscriptionExpiredEvent(BaseModel):
 
 class ProductUsageRecordedEvent(BaseModel):
     """Event published when product usage is recorded"""
+
     usage_record_id: str
     user_id: str
     organization_id: Optional[str] = None

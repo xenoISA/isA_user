@@ -13,6 +13,7 @@ from enum import Enum
 
 class TransactionType(str, Enum):
     """Transaction types for wallet operations"""
+
     DEPOSIT = "deposit"
     WITHDRAW = "withdraw"
     CONSUME = "consume"
@@ -26,6 +27,7 @@ class TransactionType(str, Enum):
 
 class WalletType(str, Enum):
     """Wallet types supporting different asset classes"""
+
     FIAT = "fiat"  # Traditional credits/points
     CRYPTO = "crypto"  # Blockchain-based tokens
     HYBRID = "hybrid"  # Both fiat and crypto
@@ -33,6 +35,7 @@ class WalletType(str, Enum):
 
 class BlockchainNetwork(str, Enum):
     """Supported blockchain networks"""
+
     ETHEREUM = "ethereum"
     BINANCE_SMART_CHAIN = "bsc"
     POLYGON = "polygon"
@@ -42,6 +45,7 @@ class BlockchainNetwork(str, Enum):
 
 class WalletBalance(BaseModel):
     """Wallet balance information"""
+
     model_config = ConfigDict(from_attributes=True)
 
     wallet_id: str
@@ -62,6 +66,7 @@ class WalletBalance(BaseModel):
 
 class WalletTransaction(BaseModel):
     """Wallet transaction record"""
+
     model_config = ConfigDict(from_attributes=True)
 
     transaction_id: str
@@ -97,6 +102,7 @@ class WalletTransaction(BaseModel):
 
 class WalletCreate(BaseModel):
     """Create new wallet request"""
+
     user_id: str
     wallet_type: WalletType = WalletType.FIAT
     initial_balance: Decimal = Field(decimal_places=8, ge=0, default=Decimal(0))
@@ -108,6 +114,7 @@ class WalletCreate(BaseModel):
 
 class WalletUpdate(BaseModel):
     """Update wallet request"""
+
     blockchain_address: Optional[str] = None
     blockchain_network: Optional[BlockchainNetwork] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -115,6 +122,7 @@ class WalletUpdate(BaseModel):
 
 class TransactionCreate(BaseModel):
     """Create transaction request"""
+
     wallet_id: str
     user_id: str
     transaction_type: TransactionType
@@ -135,6 +143,7 @@ class TransactionCreate(BaseModel):
 
 class DepositRequest(BaseModel):
     """Deposit funds to wallet"""
+
     amount: Decimal = Field(decimal_places=8, gt=0)
     description: Optional[str] = None
     reference_id: Optional[str] = None  # Payment reference
@@ -143,6 +152,7 @@ class DepositRequest(BaseModel):
 
 class WithdrawRequest(BaseModel):
     """Withdraw funds from wallet"""
+
     amount: Decimal = Field(decimal_places=8, gt=0)
     description: Optional[str] = None
     destination: Optional[str] = None  # Blockchain address or bank account
@@ -151,6 +161,7 @@ class WithdrawRequest(BaseModel):
 
 class ConsumeRequest(BaseModel):
     """Consume credits/tokens from wallet"""
+
     amount: Decimal = Field(decimal_places=8, gt=0)
     description: Optional[str] = None
     usage_record_id: Optional[int] = None
@@ -159,6 +170,7 @@ class ConsumeRequest(BaseModel):
 
 class TransferRequest(BaseModel):
     """Transfer between wallets"""
+
     to_wallet_id: str
     amount: Decimal = Field(decimal_places=8, gt=0)
     description: Optional[str] = None
@@ -167,14 +179,18 @@ class TransferRequest(BaseModel):
 
 class RefundRequest(BaseModel):
     """Refund transaction"""
+
     original_transaction_id: str
-    amount: Optional[Decimal] = Field(decimal_places=8, gt=0, default=None)  # None = full refund
+    amount: Optional[Decimal] = Field(
+        decimal_places=8, gt=0, default=None
+    )  # None = full refund
     reason: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BlockchainSyncRequest(BaseModel):
     """Sync wallet with blockchain"""
+
     wallet_id: str
     blockchain_network: BlockchainNetwork
     blockchain_address: str
@@ -183,6 +199,7 @@ class BlockchainSyncRequest(BaseModel):
 
 class WalletStatistics(BaseModel):
     """Wallet usage statistics"""
+
     wallet_id: str
     user_id: str
     current_balance: Decimal
@@ -207,6 +224,7 @@ class WalletStatistics(BaseModel):
 
 class TransactionFilter(BaseModel):
     """Filter criteria for transaction queries"""
+
     wallet_id: Optional[str] = None
     user_id: Optional[str] = None
     transaction_type: Optional[TransactionType] = None
@@ -222,6 +240,7 @@ class TransactionFilter(BaseModel):
 
 class WalletResponse(BaseModel):
     """Standard wallet operation response"""
+
     success: bool
     message: str
     wallet_id: Optional[str] = None
@@ -232,6 +251,7 @@ class WalletResponse(BaseModel):
 
 class BlockchainIntegration(BaseModel):
     """Blockchain integration configuration"""
+
     network: BlockchainNetwork
     rpc_url: str
     chain_id: int
@@ -249,26 +269,30 @@ class BlockchainIntegration(BaseModel):
 # Reference: /docs/design/billing-credit-subscription-design.md
 # 1 Credit = $0.00001 USD (100,000 Credits = $1)
 
+
 class CreditType(str, Enum):
     """Credit types with different expiration policies"""
-    PURCHASED = "purchased"        # Never expires, priority 100
-    BONUS = "bonus"                # May expire, priority 200
-    REFERRAL = "referral"          # May expire, priority 200
-    PROMOTIONAL = "promotional"    # May expire, priority 300
+
+    PURCHASED = "purchased"  # Never expires, priority 100
+    BONUS = "bonus"  # May expire, priority 200
+    REFERRAL = "referral"  # May expire, priority 200
+    PROMOTIONAL = "promotional"  # May expire, priority 300
 
 
 class CreditTransactionType(str, Enum):
     """Credit transaction types"""
-    CREDIT_PURCHASE = "credit_purchase"      # Purchasing credits with USD
-    CREDIT_CONSUME = "credit_consume"        # Using credits for services
-    CREDIT_REFUND = "credit_refund"          # Refunding credits
-    CREDIT_EXPIRE = "credit_expire"          # Credits expired
-    CREDIT_TRANSFER = "credit_transfer"      # Transfer between accounts
-    CREDIT_BONUS = "credit_bonus"            # Bonus credit allocation
+
+    CREDIT_PURCHASE = "credit_purchase"  # Purchasing credits with USD
+    CREDIT_CONSUME = "credit_consume"  # Using credits for services
+    CREDIT_REFUND = "credit_refund"  # Refunding credits
+    CREDIT_EXPIRE = "credit_expire"  # Credits expired
+    CREDIT_TRANSFER = "credit_transfer"  # Transfer between accounts
+    CREDIT_BONUS = "credit_bonus"  # Bonus credit allocation
 
 
 class CreditAccount(BaseModel):
     """Credit account model - stores purchased/bonus credits"""
+
     id: Optional[int] = None
     credit_account_id: str = Field(..., description="Unique credit account ID")
 
@@ -283,7 +307,9 @@ class CreditAccount(BaseModel):
     # Balance (in credits - 1 Credit = $0.00001 USD)
     balance: int = Field(default=0, ge=0, description="Current balance in credits")
     total_credited: int = Field(default=0, ge=0, description="Total credits ever added")
-    total_consumed: int = Field(default=0, ge=0, description="Total credits ever consumed")
+    total_consumed: int = Field(
+        default=0, ge=0, description="Total credits ever consumed"
+    )
 
     # Expiration
     expires_at: Optional[datetime] = None  # NULL = never expires
@@ -308,6 +334,7 @@ class CreditAccount(BaseModel):
 
 class CreditTransaction(BaseModel):
     """Credit transaction model - audit trail for credit operations"""
+
     id: Optional[int] = None
     transaction_id: str = Field(..., description="Unique transaction ID")
 
@@ -351,8 +378,10 @@ class CreditTransaction(BaseModel):
 # Credit Request/Response Models
 # ====================
 
+
 class PurchaseCreditsRequest(BaseModel):
     """Request to purchase credits"""
+
     user_id: str
     organization_id: Optional[str] = None
     credits_amount: int = Field(..., gt=0, description="Credits to purchase")
@@ -362,6 +391,7 @@ class PurchaseCreditsRequest(BaseModel):
 
 class PurchaseCreditsResponse(BaseModel):
     """Response after purchasing credits"""
+
     success: bool
     message: str
     credit_account_id: Optional[str] = None
@@ -373,6 +403,7 @@ class PurchaseCreditsResponse(BaseModel):
 
 class ConsumeCreditsRequest(BaseModel):
     """Request to consume credits"""
+
     user_id: str
     organization_id: Optional[str] = None
     credits_amount: int = Field(..., gt=0, description="Credits to consume")
@@ -384,6 +415,7 @@ class ConsumeCreditsRequest(BaseModel):
 
 class ConsumeCreditsResponse(BaseModel):
     """Response after consuming credits"""
+
     success: bool
     message: str
     credits_consumed: int = 0
@@ -394,6 +426,7 @@ class ConsumeCreditsResponse(BaseModel):
 
 class CreditBalanceResponse(BaseModel):
     """Credit balance response"""
+
     success: bool
     message: str
     user_id: str
@@ -415,6 +448,7 @@ class CreditBalanceResponse(BaseModel):
 
 class CreditHistoryResponse(BaseModel):
     """Credit transaction history response"""
+
     success: bool
     message: str
     transactions: List[CreditTransaction] = Field(default_factory=list)

@@ -83,11 +83,7 @@ class SubscriptionClient:
         except Exception:
             return False
 
-    async def check_product_access(
-        self,
-        user_id: str,
-        product_id: str
-    ) -> bool:
+    async def check_product_access(self, user_id: str, product_id: str) -> bool:
         """
         Check if user's subscription includes access to a product.
 
@@ -130,11 +126,7 @@ class SubscriptionClient:
         except Exception:
             return "free"
 
-    async def check_feature_access(
-        self,
-        user_id: str,
-        feature_name: str
-    ) -> bool:
+    async def check_feature_access(self, user_id: str, feature_name: str) -> bool:
         """
         Check if user's subscription includes a specific feature.
 

@@ -17,7 +17,7 @@ import sys
 import os
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import (
@@ -27,10 +27,18 @@ from .protocols import (
     AlbumServiceError,
 )
 from .models import (
-    AlbumCreateRequest, AlbumUpdateRequest, AlbumAddPhotosRequest,
-    AlbumRemovePhotosRequest, AlbumSyncRequest, AlbumResponse,
-    AlbumSummaryResponse, AlbumPhotoResponse, AlbumSyncStatusResponse,
-    AlbumListResponse, Album, SyncStatus
+    AlbumCreateRequest,
+    AlbumUpdateRequest,
+    AlbumAddPhotosRequest,
+    AlbumRemovePhotosRequest,
+    AlbumSyncRequest,
+    AlbumResponse,
+    AlbumSummaryResponse,
+    AlbumPhotoResponse,
+    AlbumSyncStatusResponse,
+    AlbumListResponse,
+    Album,
+    SyncStatus,
 )
 from core.nats_client import Event
 
@@ -42,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 # ==================== Album Service ====================
+
 
 class AlbumService:
     """
@@ -72,9 +81,7 @@ class AlbumService:
     # ==================== Album Lifecycle Operations ====================
 
     async def create_album(
-        self,
-        request: AlbumCreateRequest,
-        user_id: str
+        self, request: AlbumCreateRequest, user_id: str
     ) -> AlbumResponse:
         """
         Create a new album
@@ -108,7 +115,7 @@ class AlbumService:
                 sync_frames=request.sync_frames,
                 is_family_shared=request.is_family_shared,
                 tags=request.tags,
-                metadata={}
+                metadata={},
             )
 
             # Save to database
@@ -131,8 +138,8 @@ class AlbumService:
                             "is_family_shared": created_album.is_family_shared,
                             "auto_sync": created_album.auto_sync,
                             "sync_frames": created_album.sync_frames,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                     logger.info(f"Published album.created event for album {album_id}")
@@ -146,11 +153,7 @@ class AlbumService:
             logger.error(f"Failed to create album: {e}")
             raise AlbumServiceError(f"Failed to create album: {str(e)}")
 
-    async def get_album(
-        self,
-        album_id: str,
-        user_id: str
-    ) -> AlbumResponse:
+    async def get_album(self, album_id: str, user_id: str) -> AlbumResponse:
         """
         Get album by ID
 
@@ -185,7 +188,7 @@ class AlbumService:
         page: int = 1,
         page_size: int = 50,
         organization_id: Optional[str] = None,
-        is_family_shared: Optional[bool] = None
+        is_family_shared: Optional[bool] = None,
     ) -> AlbumListResponse:
         """
         List albums for a user with pagination
@@ -210,7 +213,7 @@ class AlbumService:
                 organization_id=organization_id,
                 is_family_shared=is_family_shared,
                 limit=page_size + 1,  # Get one extra to check if there's a next page
-                offset=offset
+                offset=offset,
             )
 
             # Check if there's a next page
@@ -227,7 +230,7 @@ class AlbumService:
                     cover_photo_id=album.cover_photo_id,
                     photo_count=album.photo_count,
                     is_family_shared=album.is_family_shared,
-                    created_at=album.created_at
+                    created_at=album.created_at,
                 )
                 for album in albums
             ]
@@ -237,7 +240,7 @@ class AlbumService:
                 total_count=len(album_summaries),  # This is approximate
                 page=page,
                 page_size=page_size,
-                has_next=has_next
+                has_next=has_next,
             )
 
         except Exception as e:
@@ -245,10 +248,7 @@ class AlbumService:
             raise AlbumServiceError(f"Failed to list albums: {str(e)}")
 
     async def update_album(
-        self,
-        album_id: str,
-        user_id: str,
-        request: AlbumUpdateRequest
+        self, album_id: str, user_id: str, request: AlbumUpdateRequest
     ) -> AlbumResponse:
         """
         Update album
@@ -307,8 +307,8 @@ class AlbumService:
                             "album_id": album_id,
                             "user_id": user_id,
                             "updates": update_data,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                     logger.info(f"Published album.updated event for album {album_id}")
@@ -324,11 +324,7 @@ class AlbumService:
             logger.error(f"Failed to update album: {e}")
             raise AlbumServiceError(f"Failed to update album: {str(e)}")
 
-    async def delete_album(
-        self,
-        album_id: str,
-        user_id: str
-    ) -> bool:
+    async def delete_album(self, album_id: str, user_id: str) -> bool:
         """
         Delete album
 
@@ -362,11 +358,13 @@ class AlbumService:
                             data={
                                 "album_id": album_id,
                                 "user_id": user_id,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            },
                         )
                         await self.event_bus.publish_event(event)
-                        logger.info(f"Published album.deleted event for album {album_id}")
+                        logger.info(
+                            f"Published album.deleted event for album {album_id}"
+                        )
                     except Exception as e:
                         logger.error(f"Failed to publish album.deleted event: {e}")
 
@@ -383,10 +381,7 @@ class AlbumService:
     # ==================== Album Photo Operations ====================
 
     async def add_photos_to_album(
-        self,
-        album_id: str,
-        user_id: str,
-        request: AlbumAddPhotosRequest
+        self, album_id: str, user_id: str, request: AlbumAddPhotosRequest
     ) -> Dict[str, Any]:
         """
         Add photos to album
@@ -414,9 +409,7 @@ class AlbumService:
 
             # Add photos
             added_count = await self.repo.add_photos_to_album(
-                album_id=album_id,
-                photo_ids=request.photo_ids,
-                added_by=user_id
+                album_id=album_id, photo_ids=request.photo_ids, added_by=user_id
             )
 
             # Publish album.photo.added event
@@ -430,11 +423,13 @@ class AlbumService:
                             "user_id": user_id,
                             "photo_ids": request.photo_ids,
                             "added_count": added_count,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
-                    logger.info(f"Published album.photo.added event for album {album_id}")
+                    logger.info(
+                        f"Published album.photo.added event for album {album_id}"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to publish album.photo.added event: {e}")
 
@@ -443,7 +438,7 @@ class AlbumService:
             return {
                 "album_id": album_id,
                 "added_count": added_count,
-                "total_photos": album.photo_count + added_count
+                "total_photos": album.photo_count + added_count,
             }
 
         except AlbumNotFoundError:
@@ -453,10 +448,7 @@ class AlbumService:
             raise AlbumServiceError(f"Failed to add photos: {str(e)}")
 
     async def remove_photos_from_album(
-        self,
-        album_id: str,
-        user_id: str,
-        request: AlbumRemovePhotosRequest
+        self, album_id: str, user_id: str, request: AlbumRemovePhotosRequest
     ) -> Dict[str, Any]:
         """
         Remove photos from album
@@ -481,8 +473,7 @@ class AlbumService:
 
             # Remove photos
             removed_count = await self.repo.remove_photos_from_album(
-                album_id=album_id,
-                photo_ids=request.photo_ids
+                album_id=album_id, photo_ids=request.photo_ids
             )
 
             # Publish album.photo.removed event
@@ -496,11 +487,13 @@ class AlbumService:
                             "user_id": user_id,
                             "photo_ids": request.photo_ids,
                             "removed_count": removed_count,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
-                    logger.info(f"Published album.photo.removed event for album {album_id}")
+                    logger.info(
+                        f"Published album.photo.removed event for album {album_id}"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to publish album.photo.removed event: {e}")
 
@@ -509,7 +502,7 @@ class AlbumService:
             return {
                 "album_id": album_id,
                 "removed_count": removed_count,
-                "total_photos": max(0, album.photo_count - removed_count)
+                "total_photos": max(0, album.photo_count - removed_count),
             }
 
         except AlbumNotFoundError:
@@ -519,11 +512,7 @@ class AlbumService:
             raise AlbumServiceError(f"Failed to remove photos: {str(e)}")
 
     async def get_album_photos(
-        self,
-        album_id: str,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, album_id: str, user_id: str, limit: int = 50, offset: int = 0
     ) -> List[AlbumPhotoResponse]:
         """
         Get photos in an album
@@ -548,12 +537,13 @@ class AlbumService:
 
             # Get photos
             photos = await self.repo.get_album_photos(
-                album_id=album_id,
-                limit=limit,
-                offset=offset
+                album_id=album_id, limit=limit, offset=offset
             )
 
-            return [AlbumPhotoResponse.model_validate(photo.model_dump()) for photo in photos]
+            return [
+                AlbumPhotoResponse.model_validate(photo.model_dump())
+                for photo in photos
+            ]
 
         except AlbumNotFoundError:
             raise
@@ -564,10 +554,7 @@ class AlbumService:
     # ==================== Album Sync Operations ====================
 
     async def sync_album_to_frame(
-        self,
-        album_id: str,
-        user_id: str,
-        request: AlbumSyncRequest
+        self, album_id: str, user_id: str, request: AlbumSyncRequest
     ) -> AlbumSyncStatusResponse:
         """
         Sync album to smart frame
@@ -600,20 +587,19 @@ class AlbumService:
                 "synced_photos": 0,
                 "pending_photos": album.photo_count,
                 "failed_photos": 0,
-                "error_message": None
+                "error_message": None,
             }
 
             await self.repo.update_album_sync_status(
                 album_id=album_id,
                 frame_id=request.frame_id,
                 user_id=user_id,
-                status_data=status_data
+                status_data=status_data,
             )
 
             # Get updated sync status
             sync_status = await self.repo.get_album_sync_status(
-                album_id=album_id,
-                frame_id=request.frame_id
+                album_id=album_id, frame_id=request.frame_id
             )
 
             if not sync_status:
@@ -627,7 +613,7 @@ class AlbumService:
                     pending_photos=album.photo_count,
                     failed_photos=0,
                     last_sync_timestamp=datetime.now(timezone.utc),
-                    error_message=None
+                    error_message=None,
                 )
 
             # Publish album.synced event
@@ -642,8 +628,8 @@ class AlbumService:
                             "frame_id": request.frame_id,
                             "sync_status": SyncStatus.IN_PROGRESS.value,
                             "total_photos": album.photo_count,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
                     )
                     await self.event_bus.publish_event(event)
                     logger.info(f"Published album.synced event for album {album_id}")
@@ -661,10 +647,7 @@ class AlbumService:
             raise AlbumServiceError(f"Failed to sync album: {str(e)}")
 
     async def get_album_sync_status(
-        self,
-        album_id: str,
-        frame_id: str,
-        user_id: str
+        self, album_id: str, frame_id: str, user_id: str
     ) -> AlbumSyncStatusResponse:
         """
         Get album sync status for a specific frame
@@ -685,8 +668,7 @@ class AlbumService:
 
             # Get sync status
             sync_status = await self.repo.get_album_sync_status(
-                album_id=album_id,
-                frame_id=frame_id
+                album_id=album_id, frame_id=frame_id
             )
 
             if not sync_status:
@@ -700,7 +682,7 @@ class AlbumService:
                     pending_photos=album.photo_count,
                     failed_photos=0,
                     last_sync_timestamp=None,
-                    error_message=None
+                    error_message=None,
                 )
 
             return AlbumSyncStatusResponse.model_validate(sync_status.model_dump())
@@ -722,7 +704,9 @@ class AlbumService:
             raise AlbumValidationError("Album name too long (max 255 characters)")
 
         if request.description and len(request.description) > 1000:
-            raise AlbumValidationError("Album description too long (max 1000 characters)")
+            raise AlbumValidationError(
+                "Album description too long (max 1000 characters)"
+            )
 
     # ==================== Utility Methods ====================
 

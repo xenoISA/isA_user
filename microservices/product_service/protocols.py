@@ -18,21 +18,25 @@ from .models import (
 
 class ProductNotFoundError(Exception):
     """Product not found error"""
+
     pass
 
 
 class SubscriptionNotFoundError(Exception):
     """Subscription not found error"""
+
     pass
 
 
 class PlanNotFoundError(Exception):
     """Service plan not found error"""
+
     pass
 
 
 class UsageRecordingError(Exception):
     """Usage recording error"""
+
     pass
 
 
@@ -57,7 +61,7 @@ class ProductRepositoryProtocol(Protocol):
         product_type: Optional[ProductType] = None,
         is_active: Optional[bool] = True,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Product]:
         """Get products with filters"""
         ...
@@ -88,7 +92,7 @@ class ProductRepositoryProtocol(Protocol):
         self,
         product_id: str,
         user_id: Optional[str] = None,
-        subscription_id: Optional[str] = None
+        subscription_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Get product pricing information"""
         ...
@@ -120,9 +124,7 @@ class ProductRepositoryProtocol(Protocol):
         ...
 
     async def get_user_subscriptions(
-        self,
-        user_id: str,
-        status: Optional[str] = None
+        self, user_id: str, status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get subscriptions for user"""
         ...
@@ -139,7 +141,7 @@ class ProductRepositoryProtocol(Protocol):
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         usage_details: Optional[Dict[str, Any]] = None,
-        usage_timestamp: Optional[datetime] = None
+        usage_timestamp: Optional[datetime] = None,
     ) -> str:
         """Record product usage, returns usage_record_id"""
         ...
@@ -153,7 +155,7 @@ class ProductRepositoryProtocol(Protocol):
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Get usage records with filters"""
         ...
@@ -166,7 +168,7 @@ class ProductRepositoryProtocol(Protocol):
         organization_id: Optional[str] = None,
         product_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Get usage statistics"""
         ...
@@ -190,9 +192,7 @@ class EventBusProtocol(Protocol):
         """Publish an event"""
         ...
 
-    async def subscribe_to_events(
-        self, pattern: str, handler: Any
-    ) -> None:
+    async def subscribe_to_events(self, pattern: str, handler: Any) -> None:
         """Subscribe to events matching pattern"""
         ...
 
@@ -222,9 +222,7 @@ class AccountClientProtocol(Protocol):
 class OrganizationClientProtocol(Protocol):
     """Interface for Organization Service Client"""
 
-    async def get_organization(
-        self, organization_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_organization(self, organization_id: str) -> Optional[Dict[str, Any]]:
         """Get organization by ID"""
         ...
 

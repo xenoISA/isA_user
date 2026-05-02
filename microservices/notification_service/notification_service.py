@@ -20,14 +20,25 @@ import asyncio
 
 # Import only models (no I/O dependencies)
 from .models import (
-    Notification, NotificationTemplate, InAppNotification,
-    NotificationBatch, SendNotificationRequest, SendBatchRequest,
-    CreateTemplateRequest, UpdateTemplateRequest,
-    NotificationResponse, TemplateResponse, BatchResponse,
-    NotificationStatus, NotificationType, TemplateStatus,
+    Notification,
+    NotificationTemplate,
+    InAppNotification,
+    NotificationBatch,
+    SendNotificationRequest,
+    SendBatchRequest,
+    CreateTemplateRequest,
+    UpdateTemplateRequest,
+    NotificationResponse,
+    TemplateResponse,
+    BatchResponse,
+    NotificationStatus,
+    NotificationType,
+    TemplateStatus,
     NotificationStatsResponse,
-    RecipientType, PushSubscription, PushPlatform,
-    RegisterPushSubscriptionRequest
+    RecipientType,
+    PushSubscription,
+    PushPlatform,
+    RegisterPushSubscriptionRequest,
 )
 
 # Type checking imports (not executed at runtime)
@@ -70,6 +81,7 @@ class NotificationService:
             self.repository = repository
         else:
             from .notification_repository import NotificationRepository
+
             self.repository = NotificationRepository(config=config_manager)
 
         # Lazy load event publishers
@@ -81,12 +93,14 @@ class NotificationService:
             self.account_client = account_client
         else:
             from .clients import AccountServiceClient
+
             self.account_client = AccountServiceClient(config_manager)
 
         if organization_client is not None:
             self.organization_client = organization_client
         else:
             from .clients import OrganizationServiceClient
+
             self.organization_client = OrganizationServiceClient(config_manager)
 
         # Resend API配置
@@ -102,9 +116,9 @@ class NotificationService:
                 base_url=self.resend_base_url,
                 headers={
                     "Authorization": f"Bearer {self.resend_api_key}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
                 },
-                timeout=30.0
+                timeout=30.0,
             )
         else:
             self.email_client = None
@@ -116,6 +130,7 @@ class NotificationService:
             if self.event_bus:
                 try:
                     from .events.publishers import NotificationEventPublishers
+
                     self.event_publishers = NotificationEventPublishers(self.event_bus)
                 except ImportError:
                     logger.warning("Event publishers not available")
@@ -143,15 +158,14 @@ class NotificationService:
                 html_content=request.html_content,
                 variables=request.variables,
                 metadata=request.metadata,
-                status=TemplateStatus.ACTIVE
+                status=TemplateStatus.ACTIVE,
             )
 
             # 保存到数据库
             created_template = await self.repository.create_template(template)
 
             return TemplateResponse(
-                template=created_template,
-                message="Template created successfully"
+                template=created_template, message="Template created successfully"
             )
 
         except Exception as e:
@@ -167,15 +181,13 @@ class NotificationService:
         type: Optional[NotificationType] = None,
         status: Optional[TemplateStatus] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[NotificationTemplate]:
         """列出通知模板"""
         return await self.repository.list_templates(type, status, limit, offset)
 
     async def update_template(
-        self,
-        template_id: str,
-        request: UpdateTemplateRequest
+        self, template_id: str, request: UpdateTemplateRequest
     ) -> TemplateResponse:
         """更新通知模板"""
         try:
@@ -205,8 +217,7 @@ class NotificationService:
                 # 获取更新后的模板
                 template = await self.repository.get_template(template_id)
                 return TemplateResponse(
-                    template=template,
-                    message="Template updated successfully"
+                    template=template, message="Template updated successfully"
                 )
             else:
                 raise Exception("Failed to update template")
@@ -219,11 +230,15 @@ class NotificationService:
     # 发送通知
     # ====================
 
-    async def send_notification(self, request: SendNotificationRequest) -> NotificationResponse:
+    async def send_notification(
+        self, request: SendNotificationRequest
+    ) -> NotificationResponse:
         """发送单个通知"""
         try:
             # 生成通知ID
-            notification_id = f"ntf_{request.type.value}_{datetime.utcnow().timestamp()}"
+            notification_id = (
+                f"ntf_{request.type.value}_{datetime.utcnow().timestamp()}"
+            )
 
             # 如果指定了模板，加载模板内容
             if request.template_id:
@@ -231,21 +246,18 @@ class NotificationService:
                 if template:
                     # 使用模板内容，替换变量
                     content = self._replace_template_variables(
-                        template.content,
-                        request.variables
+                        template.content, request.variables
                     )
                     html_content = None
                     if template.html_content:
                         html_content = self._replace_template_variables(
-                            template.html_content,
-                            request.variables
+                            template.html_content, request.variables
                         )
 
                     # 如果请求中没有指定主题，使用模板主题
                     if not request.subject and template.subject:
                         request.subject = self._replace_template_variables(
-                            template.subject,
-                            request.variables
+                            template.subject, request.variables
                         )
                 else:
                     content = request.content or ""
@@ -259,7 +271,9 @@ class NotificationService:
                 notification_id=notification_id,
                 type=request.type,
                 priority=request.priority,
-                recipient_type=RecipientType.EMAIL if request.recipient_email else RecipientType.USER,
+                recipient_type=RecipientType.EMAIL
+                if request.recipient_email
+                else RecipientType.USER,
                 recipient_id=request.recipient_id,
                 recipient_email=request.recipient_email,
                 recipient_phone=request.recipient_phone,
@@ -271,11 +285,13 @@ class NotificationService:
                 scheduled_at=request.scheduled_at,
                 metadata=request.metadata,
                 tags=request.tags,
-                status=NotificationStatus.PENDING
+                status=NotificationStatus.PENDING,
             )
 
             # 保存到数据库
-            created_notification = await self.repository.create_notification(notification)
+            created_notification = await self.repository.create_notification(
+                notification
+            )
 
             # 如果没有设置计划时间，立即发送
             if not request.scheduled_at or request.scheduled_at <= datetime.utcnow():
@@ -283,7 +299,7 @@ class NotificationService:
 
             return NotificationResponse(
                 notification=created_notification,
-                message="Notification created and queued for sending"
+                message="Notification created and queued for sending",
             )
 
         except Exception as e:
@@ -306,7 +322,7 @@ class NotificationService:
                 recipients=request.recipients,
                 total_recipients=len(request.recipients),
                 scheduled_at=request.scheduled_at,
-                metadata=request.metadata
+                metadata=request.metadata,
             )
 
             # 保存批次
@@ -319,7 +335,7 @@ class NotificationService:
 
             return BatchResponse(
                 batch=created_batch,
-                message=f"Batch created with {len(request.recipients)} recipients"
+                message=f"Batch created with {len(request.recipients)} recipients",
             )
 
         except Exception as e:
@@ -330,15 +346,14 @@ class NotificationService:
         """处理批量发送"""
         try:
             # 更新批次状态为开始
-            await self.repository.update_batch_stats(
-                batch.batch_id,
-                sent_count=0
-            )
+            await self.repository.update_batch_stats(batch.batch_id, sent_count=0)
 
             # 获取模板
             template = await self.repository.get_template(batch.template_id)
             if not template:
-                logger.error(f"Template {batch.template_id} not found for batch {batch.batch_id}")
+                logger.error(
+                    f"Template {batch.template_id} not found for batch {batch.batch_id}"
+                )
                 return
 
             sent_count = 0
@@ -357,10 +372,7 @@ class NotificationService:
                         recipient_email=recipient.get("email"),
                         recipient_phone=recipient.get("phone"),
                         variables=recipient.get("variables", {}),
-                        metadata={
-                            "batch_id": batch.batch_id,
-                            **batch.metadata
-                        }
+                        metadata={"batch_id": batch.batch_id, **batch.metadata},
                     )
 
                     # 发送通知
@@ -374,7 +386,9 @@ class NotificationService:
                         failed_count += 1
 
                 except Exception as e:
-                    logger.error(f"Failed to send to recipient in batch {batch.batch_id}: {str(e)}")
+                    logger.error(
+                        f"Failed to send to recipient in batch {batch.batch_id}: {str(e)}"
+                    )
                     failed_count += 1
 
                 # 定期更新批次统计
@@ -383,7 +397,7 @@ class NotificationService:
                         batch.batch_id,
                         sent_count=sent_count,
                         delivered_count=delivered_count,
-                        failed_count=failed_count
+                        failed_count=failed_count,
                     )
 
             # 最终更新批次统计
@@ -392,7 +406,7 @@ class NotificationService:
                 sent_count=sent_count,
                 delivered_count=delivered_count,
                 failed_count=failed_count,
-                completed=True
+                completed=True,
             )
 
         except Exception as e:
@@ -423,11 +437,13 @@ class NotificationService:
                 await self._send_in_app_notification(notification)
             elif notification.type == NotificationType.SMS:
                 # SMS功能暂未实现
-                logger.warning(f"SMS notification not implemented: {notification.notification_id}")
+                logger.warning(
+                    f"SMS notification not implemented: {notification.notification_id}"
+                )
                 await self.repository.update_notification_status(
                     notification.notification_id,
                     NotificationStatus.FAILED,
-                    error_message="SMS provider not configured"
+                    error_message="SMS provider not configured",
                 )
             elif notification.type == NotificationType.PUSH:
                 await self._send_push_notification(notification)
@@ -435,11 +451,13 @@ class NotificationService:
                 await self._send_webhook_notification(notification)
 
         except Exception as e:
-            logger.error(f"Failed to process notification {notification.notification_id}: {str(e)}")
+            logger.error(
+                f"Failed to process notification {notification.notification_id}: {str(e)}"
+            )
             await self.repository.update_notification_status(
                 notification.notification_id,
                 NotificationStatus.FAILED,
-                error_message=str(e)
+                error_message=str(e),
             )
 
     async def _send_email_notification(self, notification: Notification):
@@ -456,7 +474,7 @@ class NotificationService:
                 "from": self.default_from_email,
                 "to": [notification.recipient_email],
                 "subject": notification.subject or "Notification",
-                "html": notification.html_content or notification.content
+                "html": notification.html_content or notification.content,
             }
 
             # 如果有纯文本内容，也添加
@@ -472,7 +490,7 @@ class NotificationService:
                 await self.repository.update_notification_status(
                     notification.notification_id,
                     NotificationStatus.SENT,
-                    provider_message_id=result_data.get("id")
+                    provider_message_id=result_data.get("id"),
                 )
                 logger.info(f"Email sent successfully: {notification.notification_id}")
 
@@ -485,30 +503,36 @@ class NotificationService:
                         recipient_email=notification.recipient_email,
                         status=notification.status.value,
                         subject=notification.subject,
-                        priority=notification.priority.value
+                        priority=notification.priority.value,
                     )
             else:
-                error_message = f"Email API error: {response.status_code} - {response.text}"
+                error_message = (
+                    f"Email API error: {response.status_code} - {response.text}"
+                )
                 await self.repository.update_notification_status(
                     notification.notification_id,
                     NotificationStatus.FAILED,
-                    error_message=error_message
+                    error_message=error_message,
                 )
                 logger.error(error_message)
 
         except Exception as e:
-            logger.error(f"Failed to send email notification {notification.notification_id}: {str(e)}")
+            logger.error(
+                f"Failed to send email notification {notification.notification_id}: {str(e)}"
+            )
             await self.repository.update_notification_status(
                 notification.notification_id,
                 NotificationStatus.FAILED,
-                error_message=str(e)
+                error_message=str(e),
             )
 
     async def _send_in_app_notification(self, notification: Notification):
         """发送应用内通知"""
         try:
             if not notification.recipient_id:
-                raise Exception("Recipient user ID not provided for in-app notification")
+                raise Exception(
+                    "Recipient user ID not provided for in-app notification"
+                )
 
             # 创建应用内通知
             in_app_notification = InAppNotification(
@@ -516,7 +540,7 @@ class NotificationService:
                 user_id=notification.recipient_id,
                 title=notification.subject or "Notification",
                 message=notification.content,
-                priority=notification.priority
+                priority=notification.priority,
             )
 
             # 保存到数据库
@@ -524,8 +548,7 @@ class NotificationService:
 
             # 更新状态为已发送
             await self.repository.update_notification_status(
-                notification.notification_id,
-                NotificationStatus.DELIVERED
+                notification.notification_id, NotificationStatus.DELIVERED
             )
 
             logger.info(f"In-app notification created: {notification.notification_id}")
@@ -539,15 +562,17 @@ class NotificationService:
                     recipient_email=notification.recipient_email,
                     status=notification.status.value,
                     subject=notification.subject,
-                    priority=notification.priority.value
+                    priority=notification.priority.value,
                 )
 
         except Exception as e:
-            logger.error(f"Failed to send in-app notification {notification.notification_id}: {str(e)}")
+            logger.error(
+                f"Failed to send in-app notification {notification.notification_id}: {str(e)}"
+            )
             await self.repository.update_notification_status(
                 notification.notification_id,
                 NotificationStatus.FAILED,
-                error_message=str(e)
+                error_message=str(e),
             )
 
     async def _send_webhook_notification(self, notification: Notification):
@@ -566,15 +591,13 @@ class NotificationService:
                 "content": notification.content,
                 "variables": notification.variables,
                 "metadata": notification.metadata,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
             # 发送webhook
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    webhook_url,
-                    json=webhook_data,
-                    timeout=30.0
+                    webhook_url, json=webhook_data, timeout=30.0
                 )
 
                 if response.status_code in [200, 201, 202, 204]:
@@ -582,9 +605,11 @@ class NotificationService:
                     await self.repository.update_notification_status(
                         notification.notification_id,
                         NotificationStatus.DELIVERED,
-                        provider_message_id=f"webhook_{response.status_code}"
+                        provider_message_id=f"webhook_{response.status_code}",
                     )
-                    logger.info(f"Webhook sent successfully: {notification.notification_id}")
+                    logger.info(
+                        f"Webhook sent successfully: {notification.notification_id}"
+                    )
 
                     # Publish notification.sent event using publishers
                     if self.event_publishers:
@@ -595,23 +620,25 @@ class NotificationService:
                             recipient_email=notification.recipient_email,
                             status=notification.status.value,
                             subject=notification.subject,
-                            priority=notification.priority.value
+                            priority=notification.priority.value,
                         )
                 else:
                     error_message = f"Webhook error: {response.status_code}"
                     await self.repository.update_notification_status(
                         notification.notification_id,
                         NotificationStatus.FAILED,
-                        error_message=error_message
+                        error_message=error_message,
                     )
                     logger.error(error_message)
 
         except Exception as e:
-            logger.error(f"Failed to send webhook notification {notification.notification_id}: {str(e)}")
+            logger.error(
+                f"Failed to send webhook notification {notification.notification_id}: {str(e)}"
+            )
             await self.repository.update_notification_status(
                 notification.notification_id,
                 NotificationStatus.FAILED,
-                error_message=str(e)
+                error_message=str(e),
             )
 
     # ====================
@@ -625,28 +652,24 @@ class NotificationService:
         is_archived: Optional[bool] = None,
         category: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[InAppNotification]:
         """列出用户的应用内通知"""
         return await self.repository.list_user_in_app_notifications(
             user_id, is_read, is_archived, category, limit, offset
         )
 
-    async def mark_notification_read(
-        self,
-        notification_id: str,
-        user_id: str
-    ) -> bool:
+    async def mark_notification_read(self, notification_id: str, user_id: str) -> bool:
         """标记通知为已读"""
         return await self.repository.mark_notification_as_read(notification_id, user_id)
 
     async def mark_notification_archived(
-        self,
-        notification_id: str,
-        user_id: str
+        self, notification_id: str, user_id: str
     ) -> bool:
         """标记通知为已归档"""
-        return await self.repository.mark_notification_as_archived(notification_id, user_id)
+        return await self.repository.mark_notification_as_archived(
+            notification_id, user_id
+        )
 
     async def get_unread_count(self, user_id: str) -> int:
         """获取未读通知数量"""
@@ -660,15 +683,14 @@ class NotificationService:
 
             # 获取用户的所有活跃推送订阅
             subscriptions = await self.repository.get_user_push_subscriptions(
-                notification.recipient_id,
-                is_active=True
+                notification.recipient_id, is_active=True
             )
 
             if not subscriptions:
                 await self.repository.update_notification_status(
                     notification.notification_id,
                     NotificationStatus.FAILED,
-                    error_message="No active push subscriptions found for user"
+                    error_message="No active push subscriptions found for user",
                 )
                 return
 
@@ -687,12 +709,13 @@ class NotificationService:
                     success_count += 1
                     # 更新最后使用时间
                     await self.repository.update_push_last_used(
-                        subscription.user_id,
-                        subscription.device_token
+                        subscription.user_id, subscription.device_token
                     )
 
                 except Exception as e:
-                    logger.error(f"Failed to send push to {subscription.platform.value}: {str(e)}")
+                    logger.error(
+                        f"Failed to send push to {subscription.platform.value}: {str(e)}"
+                    )
                     failed_count += 1
 
             # 更新通知状态
@@ -700,7 +723,7 @@ class NotificationService:
                 await self.repository.update_notification_status(
                     notification.notification_id,
                     NotificationStatus.DELIVERED,
-                    provider_message_id=f"push_{success_count}_devices"
+                    provider_message_id=f"push_{success_count}_devices",
                 )
 
                 # Publish notification.sent event using publishers
@@ -712,24 +735,28 @@ class NotificationService:
                         recipient_email=notification.recipient_email,
                         status=notification.status.value,
                         subject=notification.subject,
-                        priority=notification.priority.value
+                        priority=notification.priority.value,
                     )
             else:
                 await self.repository.update_notification_status(
                     notification.notification_id,
                     NotificationStatus.FAILED,
-                    error_message=f"Failed to send to all {failed_count} devices"
+                    error_message=f"Failed to send to all {failed_count} devices",
                 )
 
         except Exception as e:
-            logger.error(f"Failed to send push notification {notification.notification_id}: {str(e)}")
+            logger.error(
+                f"Failed to send push notification {notification.notification_id}: {str(e)}"
+            )
             await self.repository.update_notification_status(
                 notification.notification_id,
                 NotificationStatus.FAILED,
-                error_message=str(e)
+                error_message=str(e),
             )
 
-    async def _send_web_push(self, notification: Notification, subscription: PushSubscription):
+    async def _send_web_push(
+        self, notification: Notification, subscription: PushSubscription
+    ):
         """发送Web推送通知"""
         try:
             # Web Push需要使用pywebpush库
@@ -744,8 +771,8 @@ class NotificationService:
                 "badge": "/badge-72x72.png",
                 "data": {
                     "notification_id": notification.notification_id,
-                    "url": notification.metadata.get("action_url", "/")
-                }
+                    "url": notification.metadata.get("action_url", "/"),
+                },
             }
 
             # 发送Web Push
@@ -754,14 +781,12 @@ class NotificationService:
                     "endpoint": subscription.endpoint,
                     "keys": {
                         "auth": subscription.auth_key,
-                        "p256dh": subscription.p256dh_key
-                    }
+                        "p256dh": subscription.p256dh_key,
+                    },
                 },
                 data=json.dumps(push_data),
                 vapid_private_key=os.environ.get("VAPID_PRIVATE_KEY"),
-                vapid_claims={
-                    "sub": f"mailto:{self.default_from_email}"
-                }
+                vapid_claims={"sub": f"mailto:{self.default_from_email}"},
             )
 
             logger.info(f"Web push sent successfully: {notification.notification_id}")
@@ -776,7 +801,9 @@ class NotificationService:
             logger.error(f"Failed to send web push: {str(e)}")
             raise
 
-    async def _send_ios_push(self, notification: Notification, subscription: PushSubscription):
+    async def _send_ios_push(
+        self, notification: Notification, subscription: PushSubscription
+    ):
         """发送iOS推送通知（使用APNs）"""
         try:
             # iOS推送需要使用apns2库
@@ -788,12 +815,12 @@ class NotificationService:
                 "aps": {
                     "alert": {
                         "title": notification.subject or "New Notification",
-                        "body": notification.content
+                        "body": notification.content,
                     },
                     "badge": 1,
-                    "sound": "default"
+                    "sound": "default",
                 },
-                "notification_id": notification.notification_id
+                "notification_id": notification.notification_id,
             }
 
             # TODO: 实际实现需要配置APNs
@@ -808,7 +835,9 @@ class NotificationService:
             logger.error(f"Failed to send iOS push: {str(e)}")
             raise
 
-    async def _send_android_push(self, notification: Notification, subscription: PushSubscription):
+    async def _send_android_push(
+        self, notification: Notification, subscription: PushSubscription
+    ):
         """发送Android推送通知（使用FCM）"""
         try:
             # Android推送使用Firebase Cloud Messaging (FCM)
@@ -824,12 +853,12 @@ class NotificationService:
                 "notification": {
                     "title": notification.subject or "New Notification",
                     "body": notification.content,
-                    "icon": "notification_icon"
+                    "icon": "notification_icon",
                 },
                 "data": {
                     "notification_id": notification.notification_id,
-                    "click_action": notification.metadata.get("action_url", "")
-                }
+                    "click_action": notification.metadata.get("action_url", ""),
+                },
             }
 
             # 发送到FCM
@@ -838,14 +867,16 @@ class NotificationService:
                     "https://fcm.googleapis.com/fcm/send",
                     headers={
                         "Authorization": f"key={fcm_server_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json=fcm_message,
-                    timeout=30.0
+                    timeout=30.0,
                 )
 
                 if response.status_code == 200:
-                    logger.info(f"Android push sent successfully: {notification.notification_id}")
+                    logger.info(
+                        f"Android push sent successfully: {notification.notification_id}"
+                    )
                 else:
                     raise Exception(f"FCM error: {response.status_code}")
 
@@ -858,8 +889,7 @@ class NotificationService:
     # ====================
 
     async def register_push_subscription(
-        self,
-        request: RegisterPushSubscriptionRequest
+        self, request: RegisterPushSubscriptionRequest
     ) -> PushSubscription:
         """注册推送订阅"""
         try:
@@ -873,7 +903,7 @@ class NotificationService:
                 device_name=request.device_name,
                 device_model=request.device_model,
                 app_version=request.app_version,
-                is_active=True
+                is_active=True,
             )
 
             return await self.repository.register_push_subscription(subscription)
@@ -883,20 +913,14 @@ class NotificationService:
             raise
 
     async def get_user_push_subscriptions(
-        self,
-        user_id: str,
-        platform: Optional[PushPlatform] = None
+        self, user_id: str, platform: Optional[PushPlatform] = None
     ) -> List[PushSubscription]:
         """获取用户的推送订阅"""
         return await self.repository.get_user_push_subscriptions(
             user_id, platform, is_active=True
         )
 
-    async def unsubscribe_push(
-        self,
-        user_id: str,
-        device_token: str
-    ) -> bool:
+    async def unsubscribe_push(self, user_id: str, device_token: str) -> bool:
         """取消推送订阅"""
         return await self.repository.unsubscribe_push(user_id, device_token)
 
@@ -905,9 +929,7 @@ class NotificationService:
     # ====================
 
     async def get_notification_stats(
-        self,
-        user_id: Optional[str] = None,
-        period: str = "all_time"
+        self, user_id: Optional[str] = None, period: str = "all_time"
     ) -> NotificationStatsResponse:
         """获取通知统计"""
         try:
@@ -936,7 +958,7 @@ class NotificationService:
                 total_pending=stats["total_pending"],
                 by_type=stats["by_type"],
                 by_status=stats["by_status"],
-                period=period
+                period=period,
             )
 
         except Exception as e:
@@ -947,17 +969,22 @@ class NotificationService:
         """处理待发送的通知（后台任务）"""
         try:
             # 获取待发送的通知
-            pending_notifications = await self.repository.get_pending_notifications(limit=50)
+            pending_notifications = await self.repository.get_pending_notifications(
+                limit=50
+            )
 
             # 并发处理通知
             tasks = []
             for notification in pending_notifications:
                 # 检查是否过期
-                if notification.expires_at and notification.expires_at < datetime.utcnow():
+                if (
+                    notification.expires_at
+                    and notification.expires_at < datetime.utcnow()
+                ):
                     await self.repository.update_notification_status(
                         notification.notification_id,
                         NotificationStatus.CANCELLED,
-                        error_message="Notification expired"
+                        error_message="Notification expired",
                     )
                     continue
 
@@ -984,16 +1011,14 @@ class NotificationService:
     # ====================
 
     def _replace_template_variables(
-        self,
-        content: str,
-        variables: Dict[str, Any]
+        self, content: str, variables: Dict[str, Any]
     ) -> str:
         """替换模板变量"""
         if not variables:
             return content
 
         # 使用正则表达式替换变量 {{variable_name}}
-        pattern = r'\{\{(\w+)\}\}'
+        pattern = r"\{\{(\w+)\}\}"
 
         def replace_var(match):
             var_name = match.group(1)

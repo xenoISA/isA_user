@@ -23,7 +23,7 @@ class DeviceServiceClient:
             base_url: Device service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -64,7 +64,7 @@ class DeviceServiceClient:
         security_level: str = "standard",
         organization_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Register new device
@@ -102,7 +102,7 @@ class DeviceServiceClient:
             payload = {
                 "device_name": device_name,
                 "device_type": device_type,
-                "security_level": security_level
+                "security_level": security_level,
             }
 
             if manufacturer:
@@ -129,7 +129,7 @@ class DeviceServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices",
                 json=payload,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -142,9 +142,7 @@ class DeviceServiceClient:
             return None
 
     async def get_device(
-        self,
-        device_id: str,
-        user_id: str
+        self, device_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get device details
@@ -162,7 +160,7 @@ class DeviceServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/devices/{device_id}",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -175,10 +173,7 @@ class DeviceServiceClient:
             return None
 
     async def update_device(
-        self,
-        device_id: str,
-        user_id: str,
-        updates: Dict[str, Any]
+        self, device_id: str, user_id: str, updates: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """
         Update device information
@@ -202,7 +197,7 @@ class DeviceServiceClient:
             response = await self.client.put(
                 f"{self.base_url}/api/v1/devices/{device_id}",
                 json=updates,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -214,11 +209,7 @@ class DeviceServiceClient:
             logger.error(f"Error updating device: {e}")
             return None
 
-    async def decommission_device(
-        self,
-        device_id: str,
-        user_id: str
-    ) -> bool:
+    async def decommission_device(self, device_id: str, user_id: str) -> bool:
         """
         Decommission device
 
@@ -235,7 +226,7 @@ class DeviceServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/v1/devices/{device_id}",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return True
@@ -255,7 +246,7 @@ class DeviceServiceClient:
         connectivity: Optional[str] = None,
         group_id: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """
         List user devices
@@ -289,7 +280,7 @@ class DeviceServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/devices",
                 params=params,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -306,9 +297,7 @@ class DeviceServiceClient:
     # =============================================================================
 
     async def authenticate_device(
-        self,
-        device_id: str,
-        device_secret: str
+        self, device_id: str, device_secret: str
     ) -> Optional[Dict[str, Any]]:
         """
         Authenticate device and get access token
@@ -327,10 +316,7 @@ class DeviceServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices/auth",
-                json={
-                    "device_id": device_id,
-                    "device_secret": device_secret
-                }
+                json={"device_id": device_id, "device_secret": device_secret},
             )
             response.raise_for_status()
             return response.json()
@@ -354,7 +340,7 @@ class DeviceServiceClient:
         parameters: Optional[Dict[str, Any]] = None,
         timeout: int = 30,
         priority: int = 5,
-        require_ack: bool = False
+        require_ack: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Send command to device
@@ -385,13 +371,13 @@ class DeviceServiceClient:
                 "parameters": parameters or {},
                 "timeout": timeout,
                 "priority": priority,
-                "require_ack": require_ack
+                "require_ack": require_ack,
             }
 
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices/{device_id}/commands",
                 json=payload,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -411,7 +397,7 @@ class DeviceServiceClient:
         parameters: Optional[Dict[str, Any]] = None,
         timeout: int = 30,
         priority: int = 5,
-        require_ack: bool = False
+        require_ack: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Send command to multiple devices
@@ -442,13 +428,13 @@ class DeviceServiceClient:
                 "parameters": parameters or {},
                 "timeout": timeout,
                 "priority": priority,
-                "require_ack": require_ack
+                "require_ack": require_ack,
             }
 
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices/bulk/commands",
                 json=payload,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -465,9 +451,7 @@ class DeviceServiceClient:
     # =============================================================================
 
     async def get_device_health(
-        self,
-        device_id: str,
-        user_id: str
+        self, device_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get device health status
@@ -485,7 +469,7 @@ class DeviceServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/devices/{device_id}/health",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -497,10 +481,7 @@ class DeviceServiceClient:
             logger.error(f"Error getting device health: {e}")
             return None
 
-    async def get_device_stats(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_device_stats(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get user device statistics
 
@@ -516,7 +497,7 @@ class DeviceServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/devices/stats",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -537,7 +518,7 @@ class DeviceServiceClient:
         group_name: str,
         user_id: str,
         description: Optional[str] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create device group
@@ -558,9 +539,7 @@ class DeviceServiceClient:
             ... )
         """
         try:
-            payload = {
-                "group_name": group_name
-            }
+            payload = {"group_name": group_name}
 
             if description:
                 payload["description"] = description
@@ -570,7 +549,7 @@ class DeviceServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/groups",
                 json=payload,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -583,10 +562,7 @@ class DeviceServiceClient:
             return None
 
     async def add_device_to_group(
-        self,
-        group_id: str,
-        device_id: str,
-        user_id: str
+        self, group_id: str, device_id: str, user_id: str
     ) -> bool:
         """
         Add device to group
@@ -605,7 +581,7 @@ class DeviceServiceClient:
         try:
             response = await self.client.put(
                 f"{self.base_url}/api/v1/groups/{group_id}/devices/{device_id}",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return True
@@ -621,10 +597,7 @@ class DeviceServiceClient:
     # Smart Frame Specific Operations
     # =============================================================================
 
-    async def list_smart_frames(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def list_smart_frames(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         List smart frames with family sharing permissions
 
@@ -640,7 +613,7 @@ class DeviceServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/devices/frames",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -653,10 +626,7 @@ class DeviceServiceClient:
             return None
 
     async def control_frame_display(
-        self,
-        frame_id: str,
-        user_id: str,
-        command_data: Dict[str, Any]
+        self, frame_id: str, user_id: str, command_data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """
         Control smart frame display
@@ -680,7 +650,7 @@ class DeviceServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices/frames/{frame_id}/display",
                 json=command_data,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -698,7 +668,7 @@ class DeviceServiceClient:
         user_id: str,
         album_ids: List[str],
         sync_type: str = "incremental",
-        force: bool = False
+        force: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Sync content to smart frame
@@ -721,16 +691,12 @@ class DeviceServiceClient:
             ... )
         """
         try:
-            payload = {
-                "album_ids": album_ids,
-                "sync_type": sync_type,
-                "force": force
-            }
+            payload = {"album_ids": album_ids, "sync_type": sync_type, "force": force}
 
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices/frames/{frame_id}/sync",
                 json=payload,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -743,10 +709,7 @@ class DeviceServiceClient:
             return None
 
     async def update_frame_config(
-        self,
-        frame_id: str,
-        user_id: str,
-        config_updates: Dict[str, Any]
+        self, frame_id: str, user_id: str, config_updates: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """
         Update smart frame configuration
@@ -770,7 +733,7 @@ class DeviceServiceClient:
             response = await self.client.put(
                 f"{self.base_url}/api/v1/devices/frames/{frame_id}/config",
                 json=config_updates,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()

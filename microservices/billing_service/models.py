@@ -15,19 +15,22 @@ from pydantic import BaseModel, Field
 # 枚举类型定义
 # ====================
 
+
 class BillingStatus(str, Enum):
     """计费状态"""
-    PENDING = "pending"                  # 待处理
-    PROCESSING = "processing"            # 处理中
-    COMPLETED = "completed"              # 已完成
-    FAILED = "failed"                    # 失败
-    REFUNDED = "refunded"                # 已退款
+
+    PENDING = "pending"  # 待处理
+    PROCESSING = "processing"  # 处理中
+    COMPLETED = "completed"  # 已完成
+    FAILED = "failed"  # 失败
+    REFUNDED = "refunded"  # 已退款
 
 
 class BillingMethod(str, Enum):
     """计费方式"""
+
     WALLET_DEDUCTION = "wallet_deduction"  # 钱包扣费
-    PAYMENT_CHARGE = "payment_charge"      # 支付扣费
+    PAYMENT_CHARGE = "payment_charge"  # 支付扣费
     CREDIT_CONSUMPTION = "credit_consumption"  # 积分消费
     SUBSCRIPTION_CREDIT = "subscription_credit"  # 订阅信用额度扣费
     SUBSCRIPTION_INCLUDED = "subscription_included"  # 订阅包含
@@ -35,43 +38,47 @@ class BillingMethod(str, Enum):
 
 class EventType(str, Enum):
     """计费事件类型"""
-    USAGE_RECORDED = "usage_recorded"      # 使用量记录
+
+    USAGE_RECORDED = "usage_recorded"  # 使用量记录
     BILLING_PROCESSED = "billing_processed"  # 计费处理
     PAYMENT_COMPLETED = "payment_completed"  # 支付完成
-    REFUND_ISSUED = "refund_issued"        # 退款发放
-    QUOTA_EXCEEDED = "quota_exceeded"      # 配额超出
-    BILLING_FAILED = "billing_failed"     # 计费失败
+    REFUND_ISSUED = "refund_issued"  # 退款发放
+    QUOTA_EXCEEDED = "quota_exceeded"  # 配额超出
+    BILLING_FAILED = "billing_failed"  # 计费失败
 
 
 class ServiceType(str, Enum):
     """服务类型"""
-    MODEL_INFERENCE = "model_inference"    # 模型推理
-    MCP_SERVICE = "mcp_service"           # MCP服务
-    AGENT_EXECUTION = "agent_execution"    # Agent执行
-    AGENT_RUNTIME = "agent_runtime"       # Dedicated/shared agent runtime
-    STORAGE_MINIO = "storage_minio"       # Minio存储
-    DATA_SERVICE = "data_service"         # Data product query service
-    DATA_PIPELINE = "data_pipeline"       # Data pipeline execution
-    WEB_SERVICE = "web_service"           # Web automation/search service
-    PYTHON_REPL = "python_repl"           # Python execution service
-    COMPUTE_GENERAL = "compute_general"   # Shared compute infrastructure
-    GPU_TRAINING = "gpu_training"         # Local GPU training and fine-tuning
-    VECTOR_STORAGE = "vector_storage"     # Vector storage and retrieval
-    NATS_MESSAGING = "nats_messaging"     # Messaging infrastructure
-    API_GATEWAY = "api_gateway"           # API网关
-    NOTIFICATION = "notification"          # 通知服务
-    OTHER = "other"                       # 其他
+
+    MODEL_INFERENCE = "model_inference"  # 模型推理
+    MCP_SERVICE = "mcp_service"  # MCP服务
+    AGENT_EXECUTION = "agent_execution"  # Agent执行
+    AGENT_RUNTIME = "agent_runtime"  # Dedicated/shared agent runtime
+    STORAGE_MINIO = "storage_minio"  # Minio存储
+    DATA_SERVICE = "data_service"  # Data product query service
+    DATA_PIPELINE = "data_pipeline"  # Data pipeline execution
+    WEB_SERVICE = "web_service"  # Web automation/search service
+    PYTHON_REPL = "python_repl"  # Python execution service
+    COMPUTE_GENERAL = "compute_general"  # Shared compute infrastructure
+    GPU_TRAINING = "gpu_training"  # Local GPU training and fine-tuning
+    VECTOR_STORAGE = "vector_storage"  # Vector storage and retrieval
+    NATS_MESSAGING = "nats_messaging"  # Messaging infrastructure
+    API_GATEWAY = "api_gateway"  # API网关
+    NOTIFICATION = "notification"  # 通知服务
+    OTHER = "other"  # 其他
 
 
 class Currency(str, Enum):
     """货币类型"""
+
     USD = "USD"
     CNY = "CNY"
-    CREDIT = "CREDIT"                     # 平台积分
+    CREDIT = "CREDIT"  # 平台积分
 
 
 class BillingAccountType(str, Enum):
     """Canonical owner of a billable event."""
+
     USER = "user"
     ORGANIZATION = "organization"
 
@@ -80,8 +87,10 @@ class BillingAccountType(str, Enum):
 # 核心数据模型
 # ====================
 
+
 class BillingRecord(BaseModel):
     """计费记录模型"""
+
     id: Optional[int] = None
     billing_id: str = Field(..., description="计费记录ID")
 
@@ -130,6 +139,7 @@ class BillingRecord(BaseModel):
 
 class BillingEvent(BaseModel):
     """计费事件模型"""
+
     id: Optional[int] = None
     event_id: str = Field(..., description="事件ID")
 
@@ -164,6 +174,7 @@ class BillingEvent(BaseModel):
 
 class UsageAggregation(BaseModel):
     """使用量聚合模型"""
+
     id: Optional[int] = None
     aggregation_id: str = Field(..., description="聚合ID")
 
@@ -191,8 +202,7 @@ class UsageAggregation(BaseModel):
 
     # 服务详细使用量
     service_breakdown: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="服务使用量详细分解"
+        default_factory=dict, description="服务使用量详细分解"
     )
 
     # 计费状态
@@ -205,6 +215,7 @@ class UsageAggregation(BaseModel):
 
 class BillingQuota(BaseModel):
     """计费配额模型"""
+
     id: Optional[int] = None
     quota_id: str = Field(..., description="配额ID")
 
@@ -240,8 +251,10 @@ class BillingQuota(BaseModel):
 # 请求/响应模型
 # ====================
 
+
 class RecordUsageRequest(BaseModel):
     """记录使用量请求"""
+
     user_id: str
     actor_user_id: Optional[str] = None
     billing_account_type: Optional[BillingAccountType] = None
@@ -273,6 +286,7 @@ class RecordUsageRequest(BaseModel):
 
 class BillingCalculationRequest(BaseModel):
     """计费计算请求"""
+
     user_id: str
     actor_user_id: Optional[str] = None
     billing_account_type: Optional[BillingAccountType] = None
@@ -287,6 +301,7 @@ class BillingCalculationRequest(BaseModel):
 
 class BillingCalculationResponse(BaseModel):
     """计费计算响应"""
+
     success: bool
     message: str
 
@@ -322,6 +337,7 @@ class BillingCalculationResponse(BaseModel):
 
 class ProcessBillingRequest(BaseModel):
     """Billing processing request."""
+
     usage_record_id: str
     billing_method: BillingMethod
     service_type: Optional[ServiceType] = None
@@ -337,6 +353,7 @@ class ProcessBillingRequest(BaseModel):
 
 class ProcessBillingResponse(BaseModel):
     """处理计费响应"""
+
     success: bool
     message: str
     billing_record_id: Optional[str] = None
@@ -356,6 +373,7 @@ class ProcessBillingResponse(BaseModel):
 
 class UsageStatsRequest(BaseModel):
     """使用量统计请求"""
+
     user_id: Optional[str] = None
     organization_id: Optional[str] = None
     agent_id: Optional[str] = None
@@ -371,6 +389,7 @@ class UsageStatsRequest(BaseModel):
 
 class UsageStatsResponse(BaseModel):
     """使用量统计响应"""
+
     period_start: datetime
     period_end: datetime
     period_type: str
@@ -392,6 +411,7 @@ class UsageStatsResponse(BaseModel):
 
 class QuotaCheckRequest(BaseModel):
     """配额检查请求"""
+
     user_id: Optional[str] = None
     actor_user_id: Optional[str] = None
     billing_account_type: Optional[BillingAccountType] = None
@@ -405,6 +425,7 @@ class QuotaCheckRequest(BaseModel):
 
 class QuotaCheckResponse(BaseModel):
     """配额检查响应"""
+
     allowed: bool
     message: str
 
@@ -423,14 +444,17 @@ class QuotaCheckResponse(BaseModel):
 # 系统模型
 # ====================
 
+
 class UserQuotaResponse(BaseModel):
     """用户配额响应"""
+
     user_id: str
     quotas: List["BillingQuota"]
 
 
 class BillingRecordsListResponse(BaseModel):
     """计费记录列表响应"""
+
     records: List["BillingRecord"]
     total: int
     page: int
@@ -439,6 +463,7 @@ class BillingRecordsListResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """健康检查响应"""
+
     status: str
     service: str
     port: int
@@ -448,6 +473,7 @@ class HealthResponse(BaseModel):
 
 class ServiceInfo(BaseModel):
     """服务信息"""
+
     service: str
     version: str
     description: str
@@ -458,6 +484,7 @@ class ServiceInfo(BaseModel):
 
 class BillingStats(BaseModel):
     """计费统计"""
+
     total_billing_records: int
     pending_billing_records: int
     completed_billing_records: int

@@ -34,14 +34,20 @@ class AlbumRepository:
 
         host, port = config.discover_service(
             service_name="postgres_service",
-            default_host='localhost',
+            default_host="localhost",
             default_port=5432,
             env_host_key="POSTGRES_HOST",
             env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="album_service", min_pool_size=1, max_pool_size=2)
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="album_service",
+            min_pool_size=1,
+            max_pool_size=2,
+        )
 
         # Table names (album schema)
         self.schema = "album"
@@ -336,7 +342,9 @@ class AlbumRepository:
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            return [AlbumPhoto.model_validate(row) for row in results] if results else []
+            return (
+                [AlbumPhoto.model_validate(row) for row in results] if results else []
+            )
 
         except Exception as e:
             logger.error(f"Error getting album photos: {e}")
@@ -499,7 +507,11 @@ class AlbumRepository:
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            return [AlbumSyncStatus.model_validate(row) for row in results] if results else []
+            return (
+                [AlbumSyncStatus.model_validate(row) for row in results]
+                if results
+                else []
+            )
 
         except Exception as e:
             logger.error(f"Error listing album sync statuses: {e}")

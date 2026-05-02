@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 # Event Type Definitions (Service-Specific)
 # =============================================================================
 
+
 class OrganizationEventType(str, Enum):
     """
     Events published by organization_service.
@@ -21,6 +22,7 @@ class OrganizationEventType(str, Enum):
     Stream: organization-stream
     Subjects: organization.>
     """
+
     ORG_CREATED = "organization.created"
     ORG_UPDATED = "organization.updated"
     ORG_DELETED = "organization.deleted"
@@ -31,11 +33,13 @@ class OrganizationEventType(str, Enum):
 
 class OrganizationSubscribedEventType(str, Enum):
     """Events that organization_service subscribes to from other services."""
+
     USER_DELETED = "user.deleted"
 
 
 class OrganizationStreamConfig:
     """Stream configuration for organization_service"""
+
     STREAM_NAME = "organization-stream"
     SUBJECTS = ["organization.>"]
     MAX_MESSAGES = 100000

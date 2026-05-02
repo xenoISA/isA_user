@@ -22,11 +22,12 @@ class AccountClient:
             base_url: Account service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("account_service")
             except Exception as e:

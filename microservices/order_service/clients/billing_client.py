@@ -25,11 +25,12 @@ class BillingClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via Consul
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("billing_service")
             except Exception as e:
@@ -57,7 +58,7 @@ class BillingClient:
         currency: str = "USD",
         order_type: Optional[str] = None,
         payment_id: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create billing record for order
@@ -83,12 +84,11 @@ class BillingClient:
                 "order_type": order_type,
                 "payment_id": payment_id,
                 "description": description or f"Order {order_id}",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/billing/records",
-                json=payload
+                f"{self.base_url}/api/v1/billing/records", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -127,10 +127,7 @@ class BillingClient:
             return None
 
     async def get_user_billing_history(
-        self,
-        user_id: str,
-        limit: int = 100,
-        offset: int = 0
+        self, user_id: str, limit: int = 100, offset: int = 0
     ) -> Optional[list]:
         """
         Get user's billing history
@@ -144,14 +141,10 @@ class BillingClient:
             List of billing records
         """
         try:
-            params = {
-                "limit": limit,
-                "offset": offset
-            }
+            params = {"limit": limit, "offset": offset}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/billing/users/{user_id}/history",
-                params=params
+                f"{self.base_url}/api/v1/billing/users/{user_id}/history", params=params
             )
             response.raise_for_status()
             return response.json()

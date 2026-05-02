@@ -407,7 +407,6 @@ class DeviceAuthService:
             if self.event_bus:
                 from events.publishers import publish_device_pairing_token_verified
 
-
                 await publish_device_pairing_token_verified(
                     event_bus=self.event_bus,
                     device_id=device_id,

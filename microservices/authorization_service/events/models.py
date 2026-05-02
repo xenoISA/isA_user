@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 # Event Type Definitions (Service-Specific)
 # =============================================================================
 
+
 class AuthorizationEventType(str, Enum):
     """
     Events published by authorization_service.
@@ -21,6 +22,7 @@ class AuthorizationEventType(str, Enum):
     Stream: authorization-stream
     Subjects: authorization.>
     """
+
     PERMISSION_GRANTED = "authorization.permission.granted"
     PERMISSION_REVOKED = "authorization.permission.revoked"
     ACCESS_CHECKED = "authorization.access.checked"
@@ -30,6 +32,7 @@ class AuthorizationEventType(str, Enum):
 
 class AuthorizationSubscribedEventType(str, Enum):
     """Events that authorization_service subscribes to from other services."""
+
     USER_DELETED = "user.deleted"
     ORG_MEMBER_ADDED = "organization.member_added"
     ORG_MEMBER_REMOVED = "organization.member_removed"
@@ -37,6 +40,7 @@ class AuthorizationSubscribedEventType(str, Enum):
 
 class AuthorizationStreamConfig:
     """Stream configuration for authorization_service"""
+
     STREAM_NAME = "authorization-stream"
     SUBJECTS = ["authorization.>"]
     MAX_MESSAGES = 100000
@@ -59,8 +63,12 @@ class PermissionGrantedEventData(BaseModel):
     resource_name: str = Field(..., description="Resource name")
     access_level: str = Field(..., description="Access level granted")
     permission_source: str = Field(..., description="Permission source")
-    granted_by_user_id: Optional[str] = Field(None, description="ID of user who granted the permission")
-    organization_id: Optional[str] = Field(None, description="Organization ID if applicable")
+    granted_by_user_id: Optional[str] = Field(
+        None, description="ID of user who granted the permission"
+    )
+    organization_id: Optional[str] = Field(
+        None, description="Organization ID if applicable"
+    )
     granted_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
@@ -87,7 +95,9 @@ class PermissionRevokedEventData(BaseModel):
     user_id: str = Field(..., description="User ID")
     resource_type: str = Field(..., description="Resource type")
     resource_name: str = Field(..., description="Resource name")
-    revoked_by_user_id: Optional[str] = Field(None, description="ID of user who revoked the permission")
+    revoked_by_user_id: Optional[str] = Field(
+        None, description="ID of user who revoked the permission"
+    )
     reason: Optional[str] = Field(None, description="Reason for revocation")
     revoked_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -112,8 +122,12 @@ class BulkPermissionsGrantedEventData(BaseModel):
 
     user_ids: List[str] = Field(..., description="List of user IDs")
     permission_count: int = Field(..., description="Number of permissions granted")
-    granted_by_user_id: Optional[str] = Field(None, description="ID of user who granted permissions")
-    organization_id: Optional[str] = Field(None, description="Organization ID if applicable")
+    granted_by_user_id: Optional[str] = Field(
+        None, description="ID of user who granted permissions"
+    )
+    organization_id: Optional[str] = Field(
+        None, description="Organization ID if applicable"
+    )
     granted_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
@@ -136,7 +150,9 @@ class BulkPermissionsRevokedEventData(BaseModel):
 
     user_ids: List[str] = Field(..., description="List of user IDs")
     permission_count: int = Field(..., description="Number of permissions revoked")
-    revoked_by_user_id: Optional[str] = Field(None, description="ID of user who revoked permissions")
+    revoked_by_user_id: Optional[str] = Field(
+        None, description="ID of user who revoked permissions"
+    )
     reason: Optional[str] = Field(None, description="Reason for bulk revocation")
     revoked_at: datetime = Field(default_factory=datetime.utcnow)
 

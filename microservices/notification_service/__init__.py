@@ -9,7 +9,4 @@ from .notification_service import NotificationService
 from .notification_repository import NotificationRepository
 
 __version__ = "1.0.0"
-__all__ = [
-    "NotificationService",
-    "NotificationRepository"
-]
+__all__ = ["NotificationService", "NotificationRepository"]

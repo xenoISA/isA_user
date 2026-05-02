@@ -14,10 +14,11 @@ class TaxClient:
 
     def __init__(self, base_url: Optional[str] = None, config=None):
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             try:
                 from core.service_discovery import get_service_discovery
+
                 sd = get_service_discovery()
                 self.base_url = sd.get_service_url("tax_service")
             except Exception as e:
@@ -36,7 +37,13 @@ class TaxClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
-    async def calculate(self, order_id: Optional[str], items: List[Dict[str, Any]], address: Dict[str, Any], currency: str) -> Optional[Dict[str, Any]]:
+    async def calculate(
+        self,
+        order_id: Optional[str],
+        items: List[Dict[str, Any]],
+        address: Dict[str, Any],
+        currency: str,
+    ) -> Optional[Dict[str, Any]]:
         try:
             payload = {
                 "order_id": order_id,
@@ -44,7 +51,9 @@ class TaxClient:
                 "address": address,
                 "currency": currency,
             }
-            response = await self.client.post(f"{self.base_url}/api/v1/tax/calculate", json=payload)
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/tax/calculate", json=payload
+            )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:

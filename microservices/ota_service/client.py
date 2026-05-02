@@ -24,7 +24,7 @@ class OTAServiceClient:
             config: ConfigManager instance for service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery via ConfigManager
             if config is None:
@@ -32,11 +32,11 @@ class OTAServiceClient:
 
             try:
                 host, port = config.discover_service(
-                    service_name='ota_service',
-                    default_host='localhost',
+                    service_name="ota_service",
+                    default_host="localhost",
                     default_port=8221,
-                    env_host_key='OTA_SERVICE_HOST',
-                    env_port_key='OTA_SERVICE_PORT'
+                    env_host_key="OTA_SERVICE_HOST",
+                    env_port_key="OTA_SERVICE_PORT",
                 )
                 self.base_url = f"http://{host}:{port}"
                 logger.info(f"OTA service discovered at {self.base_url}")
@@ -69,7 +69,7 @@ class OTAServiceClient:
         user_id: str,
         description: Optional[str] = None,
         release_notes: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Upload firmware file
@@ -100,11 +100,10 @@ class OTAServiceClient:
         try:
             from io import BytesIO
 
-            files = {"file": (filename, BytesIO(firmware_file), "application/octet-stream")}
-            data = {
-                "version": version,
-                "device_type": device_type
+            files = {
+                "file": (filename, BytesIO(firmware_file), "application/octet-stream")
             }
+            data = {"version": version, "device_type": device_type}
 
             if description:
                 data["description"] = description
@@ -112,13 +111,14 @@ class OTAServiceClient:
                 data["release_notes"] = release_notes
             if metadata:
                 import json
+
                 data["metadata"] = json.dumps(metadata)
 
             response = await self.client.post(
                 f"{self.base_url}/api/v1/firmware",
                 files=files,
                 data=data,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -131,9 +131,7 @@ class OTAServiceClient:
             return None
 
     async def get_firmware(
-        self,
-        firmware_id: str,
-        user_id: str
+        self, firmware_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get firmware details
@@ -151,7 +149,7 @@ class OTAServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/firmware/{firmware_id}",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -169,7 +167,7 @@ class OTAServiceClient:
         device_type: Optional[str] = None,
         version: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[List[Dict[str, Any]]]:
         """
         List firmware
@@ -197,7 +195,7 @@ class OTAServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/firmware",
                 params=params,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -209,11 +207,7 @@ class OTAServiceClient:
             logger.error(f"Error listing firmware: {e}")
             return None
 
-    async def delete_firmware(
-        self,
-        firmware_id: str,
-        user_id: str
-    ) -> bool:
+    async def delete_firmware(self, firmware_id: str, user_id: str) -> bool:
         """
         Delete firmware
 
@@ -230,7 +224,7 @@ class OTAServiceClient:
         try:
             response = await self.client.delete(
                 f"{self.base_url}/api/v1/firmware/{firmware_id}",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return True
@@ -255,7 +249,7 @@ class OTAServiceClient:
         deployment_strategy: str = "progressive",
         schedule_time: Optional[str] = None,
         target_devices: Optional[List[str]] = None,
-        auto_approve: bool = False
+        auto_approve: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Create update campaign
@@ -286,7 +280,7 @@ class OTAServiceClient:
                 "campaign_name": campaign_name,
                 "firmware_id": firmware_id,
                 "deployment_strategy": deployment_strategy,
-                "auto_approve": auto_approve
+                "auto_approve": auto_approve,
             }
 
             if device_filters:
@@ -299,7 +293,7 @@ class OTAServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/campaigns",
                 json=payload,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -312,9 +306,7 @@ class OTAServiceClient:
             return None
 
     async def get_campaign(
-        self,
-        campaign_id: str,
-        user_id: str
+        self, campaign_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get campaign details
@@ -332,7 +324,7 @@ class OTAServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/campaigns/{campaign_id}",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -344,11 +336,7 @@ class OTAServiceClient:
             logger.error(f"Error getting campaign: {e}")
             return None
 
-    async def start_campaign(
-        self,
-        campaign_id: str,
-        user_id: str
-    ) -> bool:
+    async def start_campaign(self, campaign_id: str, user_id: str) -> bool:
         """
         Start update campaign
 
@@ -365,7 +353,7 @@ class OTAServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/campaigns/{campaign_id}/start",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return True
@@ -377,11 +365,7 @@ class OTAServiceClient:
             logger.error(f"Error starting campaign: {e}")
             return False
 
-    async def pause_campaign(
-        self,
-        campaign_id: str,
-        user_id: str
-    ) -> bool:
+    async def pause_campaign(self, campaign_id: str, user_id: str) -> bool:
         """
         Pause update campaign
 
@@ -398,7 +382,7 @@ class OTAServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/campaigns/{campaign_id}/pause",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return True
@@ -410,11 +394,7 @@ class OTAServiceClient:
             logger.error(f"Error pausing campaign: {e}")
             return False
 
-    async def cancel_campaign(
-        self,
-        campaign_id: str,
-        user_id: str
-    ) -> bool:
+    async def cancel_campaign(self, campaign_id: str, user_id: str) -> bool:
         """
         Cancel update campaign
 
@@ -431,7 +411,7 @@ class OTAServiceClient:
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/campaigns/{campaign_id}/cancel",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return True
@@ -453,7 +433,7 @@ class OTAServiceClient:
         firmware_id: str,
         user_id: str,
         force: bool = False,
-        schedule_time: Optional[str] = None
+        schedule_time: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Initiate device update
@@ -476,10 +456,7 @@ class OTAServiceClient:
             ... )
         """
         try:
-            payload = {
-                "firmware_id": firmware_id,
-                "force": force
-            }
+            payload = {"firmware_id": firmware_id, "force": force}
 
             if schedule_time:
                 payload["schedule_time"] = schedule_time
@@ -487,7 +464,7 @@ class OTAServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices/{device_id}/update",
                 json=payload,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -500,9 +477,7 @@ class OTAServiceClient:
             return None
 
     async def get_update_status(
-        self,
-        update_id: str,
-        user_id: str
+        self, update_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get update status
@@ -520,7 +495,7 @@ class OTAServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/updates/{update_id}",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -533,11 +508,7 @@ class OTAServiceClient:
             return None
 
     async def get_device_update_history(
-        self,
-        device_id: str,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, device_id: str, user_id: str, limit: int = 50, offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         Get device update history
@@ -560,23 +531,22 @@ class OTAServiceClient:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/devices/{device_id}/updates",
                 params=params,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get device update history: {e.response.status_code}")
+            logger.error(
+                f"Failed to get device update history: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error getting device update history: {e}")
             return None
 
     async def rollback_device(
-        self,
-        device_id: str,
-        user_id: str,
-        target_version: Optional[str] = None
+        self, device_id: str, user_id: str, target_version: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Rollback device firmware
@@ -600,7 +570,7 @@ class OTAServiceClient:
             response = await self.client.post(
                 f"{self.base_url}/api/v1/devices/{device_id}/rollback",
                 json=payload,
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()
@@ -616,10 +586,7 @@ class OTAServiceClient:
     # Statistics
     # =============================================================================
 
-    async def get_update_stats(
-        self,
-        user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_update_stats(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get update statistics
 
@@ -635,7 +602,7 @@ class OTAServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/stats",
-                headers={"X-Internal-Call": "true", "X-User-Id": user_id}
+                headers={"X-Internal-Call": "true", "X-User-Id": user_id},
             )
             response.raise_for_status()
             return response.json()

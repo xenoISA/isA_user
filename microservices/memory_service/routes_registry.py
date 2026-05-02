@@ -3,141 +3,144 @@ Memory Service Routes Registry
 Defines all API routes for Consul service registration
 """
 from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/memories/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/memories/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     # Memory Extraction
     {
         "path": "/memories/factual/extract",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Extract factual memories using AI"
+        "description": "Extract factual memories using AI",
     },
     {
         "path": "/memories/episodic/extract",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Extract episodic memories using AI"
+        "description": "Extract episodic memories using AI",
     },
     {
         "path": "/memories/procedural/extract",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Extract procedural memories using AI"
+        "description": "Extract procedural memories using AI",
     },
     {
         "path": "/memories/semantic/extract",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Extract semantic memories using AI"
+        "description": "Extract semantic memories using AI",
     },
     # Memory Storage
     {
         "path": "/memories",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create memories"
+        "description": "List/create memories",
     },
     {
         "path": "/memories/{memory_type}/{memory_id}",
         "methods": ["GET", "PUT", "DELETE"],
         "auth_required": True,
-        "description": "Get/update/delete specific memory"
+        "description": "Get/update/delete specific memory",
     },
     # Session Memory
     {
         "path": "/memories/session/store",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Store session memory"
+        "description": "Store session memory",
     },
     {
         "path": "/memories/session/{session_id}/context",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get session context with AI-enhanced memory"
+        "description": "Get session context with AI-enhanced memory",
     },
     {
         "path": "/memories/session/{session_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get session memory history"
+        "description": "Get session memory history",
     },
     {
         "path": "/memories/session/{session_id}/deactivate",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Deactivate session memory"
+        "description": "Deactivate session memory",
     },
     # Working Memory
     {
         "path": "/memories/working/store",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Store working memory"
+        "description": "Store working memory",
     },
     {
         "path": "/memories/working/active",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get active working memories"
+        "description": "Get active working memories",
     },
     {
         "path": "/memories/working/cleanup",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Cleanup expired working memories"
+        "description": "Cleanup expired working memories",
     },
     # Memory Search
     {
         "path": "/memories/factual/search/subject",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Search factual memories by subject"
+        "description": "Search factual memories by subject",
     },
     {
         "path": "/memories/episodic/search/event_type",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Search episodic memories by event type"
+        "description": "Search episodic memories by event type",
     },
     {
         "path": "/memories/semantic/search/category",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Search semantic memories by category"
+        "description": "Search semantic memories by category",
     },
     {
         "path": "/memories/search",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Semantic search across all memories"
+        "description": "Semantic search across all memories",
     },
     # Memory Statistics
     {
         "path": "/memories/statistics",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get memory statistics"
+        "description": "Get memory statistics",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -183,6 +186,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "memory_service",
@@ -197,6 +202,6 @@ SERVICE_METADATA = {
         "session_memory",
         "ai_extraction",
         "vector_search",
-        "memory_statistics"
-    ]
+        "memory_statistics",
+    ],
 }

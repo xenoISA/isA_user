@@ -5,10 +5,7 @@ Audit Service Event Handlers
 """
 
 import logging
-from ..models import (
-    AuditEventCreateRequest, EventSeverity,
-    AuditCategory, EventType
-)
+from ..models import AuditEventCreateRequest, EventSeverity, AuditCategory, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +47,18 @@ class AuditEventHandlers:
             severity = self._determine_event_severity(event_type_str, data)
 
             # Extract user_id from event data
-            user_id = data.get("user_id") or data.get("shared_by") or data.get("added_by") or "system"
+            user_id = (
+                data.get("user_id")
+                or data.get("shared_by")
+                or data.get("added_by")
+                or "system"
+            )
             organization_id = data.get("organization_id")
 
             # Determine resource information
-            resource_type, resource_id, resource_name = self._extract_resource_info(event_type_str, data)
+            resource_type, resource_id, resource_name = self._extract_resource_info(
+                event_type_str, data
+            )
 
             # Build description
             description = f"NATS event: {event_type_str} from {source}"
@@ -85,9 +89,9 @@ class AuditEventHandlers:
                     "nats_event_type": event_type_str,
                     "nats_timestamp": timestamp,
                     "original_data": data,
-                    **metadata
+                    **metadata,
                 },
-                tags=["nats_event", source, event_type_str]
+                tags=["nats_event", source, event_type_str],
             )
 
             # Log the audit event
@@ -98,9 +102,13 @@ class AuditEventHandlers:
                 self.processed_event_ids.add(event.id)
                 # Limit cache size
                 if len(self.processed_event_ids) > 10000:
-                    self.processed_event_ids = set(list(self.processed_event_ids)[5000:])
+                    self.processed_event_ids = set(
+                        list(self.processed_event_ids)[5000:]
+                    )
 
-                logger.info(f"Logged NATS event {event.id} ({event_type_str}) to audit trail")
+                logger.info(
+                    f"Logged NATS event {event.id} ({event_type_str}) to audit trail"
+                )
             else:
                 logger.error(f"Failed to log NATS event {event.id} to audit trail")
 
@@ -114,7 +122,11 @@ class AuditEventHandlers:
             if "created" in nats_event_type:
                 return "user.registered"
             elif "updated" in nats_event_type or "logged_in" in nats_event_type:
-                return "user.logged_in" if "logged_in" in nats_event_type else "user.updated"
+                return (
+                    "user.logged_in"
+                    if "logged_in" in nats_event_type
+                    else "user.updated"
+                )
             elif "deleted" in nats_event_type:
                 return "user.deleted"
         elif "payment." in nats_event_type or "subscription." in nats_event_type:
@@ -148,7 +160,11 @@ class AuditEventHandlers:
         """Determine audit category based on event type"""
         if "user." in nats_event_type or "device.authenticated" in nats_event_type:
             return AuditCategory.AUTHENTICATION
-        elif "permission" in nats_event_type or "member" in nats_event_type or "file.shared" in nats_event_type:
+        elif (
+            "permission" in nats_event_type
+            or "member" in nats_event_type
+            or "file.shared" in nats_event_type
+        ):
             return AuditCategory.AUTHORIZATION
         elif "payment" in nats_event_type or "subscription" in nats_event_type:
             return AuditCategory.CONFIGURATION  # Use CONFIGURATION instead of FINANCIAL
@@ -157,13 +173,21 @@ class AuditEventHandlers:
 
         return AuditCategory.SYSTEM
 
-    def _determine_event_severity(self, nats_event_type: str, data: dict) -> EventSeverity:
+    def _determine_event_severity(
+        self, nats_event_type: str, data: dict
+    ) -> EventSeverity:
         """Determine event severity"""
         # High severity events
-        if any(keyword in nats_event_type for keyword in ["deleted", "removed", "failed", "offline"]):
+        if any(
+            keyword in nats_event_type
+            for keyword in ["deleted", "removed", "failed", "offline"]
+        ):
             return EventSeverity.HIGH
         # Medium severity events
-        elif any(keyword in nats_event_type for keyword in ["updated", "shared", "member_added"]):
+        elif any(
+            keyword in nats_event_type
+            for keyword in ["updated", "shared", "member_added"]
+        ):
             return EventSeverity.MEDIUM
         # Low severity events
         else:

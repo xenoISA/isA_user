@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 # Event Type Definitions (Service-Specific)
 # =============================================================================
 
+
 class LocationEventType(str, Enum):
     """
     Events published by location_service.
@@ -21,6 +22,7 @@ class LocationEventType(str, Enum):
     Stream: location-stream
     Subjects: location.>
     """
+
     LOCATION_UPDATED = "location.updated"
     LOCATION_BATCH_UPDATED = "location.batch.updated"
     GEOFENCE_CREATED = "location.geofence.created"
@@ -30,17 +32,18 @@ class LocationEventType(str, Enum):
 
 class LocationSubscribedEventType(str, Enum):
     """Events that location_service subscribes to from other services."""
+
     USER_DELETED = "user.deleted"
     DEVICE_REGISTERED = "device.registered"
 
 
 class LocationStreamConfig:
     """Stream configuration for location_service"""
+
     STREAM_NAME = "location-stream"
     SUBJECTS = ["location.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "location"
-
 
 
 class DeviceDeletedEventData(BaseModel):

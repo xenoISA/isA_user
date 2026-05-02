@@ -43,7 +43,13 @@ class CalendarRepository:
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="calendar_service", min_pool_size=1, max_pool_size=2)
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="calendar_service",
+            min_pool_size=1,
+            max_pool_size=2,
+        )
 
         self.schema = "calendar"
         self.table_name = "calendar_events"

@@ -29,6 +29,7 @@ from .models import (
 )
 from .task_repository import TaskRepository
 
+
 # Temporary ServiceError class until shared module is available
 class ServiceError(Exception):
     """服务通信错误"""

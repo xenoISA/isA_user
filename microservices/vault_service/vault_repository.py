@@ -12,7 +12,10 @@ import base64
 import os
 
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -20,9 +23,15 @@ from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import ListValue, Struct
 
 from .models import (
-    VaultItem, VaultAccessLog, VaultShare,
-    SecretType, VaultAction, PermissionLevel,
-    VaultItemResponse, VaultShareResponse, VaultAccessLogResponse
+    VaultItem,
+    VaultAccessLog,
+    VaultShare,
+    SecretType,
+    VaultAction,
+    PermissionLevel,
+    VaultItemResponse,
+    VaultShareResponse,
+    VaultAccessLogResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,15 +47,21 @@ class VaultRepository:
 
         # Discover PostgreSQL service
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="vault_service", min_pool_size=1, max_pool_size=2)
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="vault_service",
+            min_pool_size=1,
+            max_pool_size=2,
+        )
         self.schema = "vault"
         self.vault_table = "vault_items"
         self.access_log_table = "vault_access_logs"
@@ -58,7 +73,9 @@ class VaultRepository:
             return MessageToDict(value)
         return value
 
-    def _parse_vault_item(self, data: Dict[str, Any], include_encrypted: bool = False) -> Dict[str, Any]:
+    def _parse_vault_item(
+        self, data: Dict[str, Any], include_encrypted: bool = False
+    ) -> Dict[str, Any]:
         """Parse vault item data from database"""
         result = {
             "vault_id": data["vault_id"],
@@ -81,7 +98,7 @@ class VaultRepository:
             "rotation_days": data.get("rotation_days"),
             "blockchain_reference": data.get("blockchain_reference"),
             "created_at": data["created_at"],
-            "updated_at": data["updated_at"]
+            "updated_at": data["updated_at"],
         }
 
         if include_encrypted:
@@ -91,16 +108,22 @@ class VaultRepository:
 
     # ============ Vault Item Operations ============
 
-    async def create_vault_item(self, vault_item: VaultItem) -> Optional[VaultItemResponse]:
+    async def create_vault_item(
+        self, vault_item: VaultItem
+    ) -> Optional[VaultItemResponse]:
         """Create a new vault item"""
         try:
             vault_id = str(uuid.uuid4())
             now = datetime.now(timezone.utc)
 
             # Prepare vault data
-            encrypted_value_b64 = base64.b64encode(vault_item.encrypted_value).decode() if vault_item.encrypted_value else None
+            encrypted_value_b64 = (
+                base64.b64encode(vault_item.encrypted_value).decode()
+                if vault_item.encrypted_value
+                else None
+            )
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.vault_table} (
                     vault_id, user_id, organization_id, secret_type, provider,
                     name, description, encrypted_value, encryption_method, encryption_key_id,
@@ -108,7 +131,7 @@ class VaultRepository:
                     rotation_enabled, rotation_days, blockchain_reference, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
                 RETURNING *
-            '''
+            """
 
             params = [
                 vault_id,
@@ -131,7 +154,7 @@ class VaultRepository:
                 vault_item.rotation_days,
                 vault_item.blockchain_reference,
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -150,7 +173,9 @@ class VaultRepository:
     async def get_vault_item(self, vault_id: str) -> Optional[Dict[str, Any]]:
         """Get vault item by ID (includes encrypted data)"""
         try:
-            query = f'SELECT * FROM {self.schema}.{self.vault_table} WHERE vault_id = $1'
+            query = (
+                f"SELECT * FROM {self.schema}.{self.vault_table} WHERE vault_id = $1"
+            )
 
             async with self.db:
                 results = await self.db.query(query, [vault_id], schema=self.schema)
@@ -171,7 +196,7 @@ class VaultRepository:
         tags: Optional[List[str]] = None,
         active_only: bool = True,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[VaultItemResponse]:
         """List vault items for a user"""
         try:
@@ -206,12 +231,12 @@ class VaultRepository:
             offset_param = f"${param_count}"
             params.append(offset)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.vault_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit_param} OFFSET {offset_param}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -229,7 +254,9 @@ class VaultRepository:
             logger.error(f"Error listing vault items: {e}", exc_info=True)
             return []
 
-    async def update_vault_item(self, vault_id: str, update_data: Dict[str, Any]) -> bool:
+    async def update_vault_item(
+        self, vault_id: str, update_data: Dict[str, Any]
+    ) -> bool:
         """Update vault item"""
         try:
             now = datetime.now(timezone.utc)
@@ -255,11 +282,11 @@ class VaultRepository:
 
             set_clause = ", ".join(set_clauses)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.vault_table}
                 SET {set_clause}
                 WHERE vault_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -275,14 +302,16 @@ class VaultRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.vault_table}
                 SET is_active = $1, updated_at = $2
                 WHERE vault_id = $3
-            '''
+            """
 
             async with self.db:
-                count = await self.db.execute(query, [False, now, vault_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [False, now, vault_id], schema=self.schema
+                )
 
             return count is not None and count > 0
 
@@ -295,16 +324,18 @@ class VaultRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.vault_table}
                 SET access_count = access_count + 1,
                     last_accessed_at = $1,
                     updated_at = $2
                 WHERE vault_id = $3
-            '''
+            """
 
             async with self.db:
-                count = await self.db.execute(query, [now, now, vault_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [now, now, vault_id], schema=self.schema
+                )
 
             return count is not None and count > 0
 
@@ -314,19 +345,21 @@ class VaultRepository:
 
     # ============ Access Log Operations ============
 
-    async def create_access_log(self, log: VaultAccessLog) -> Optional[VaultAccessLogResponse]:
+    async def create_access_log(
+        self, log: VaultAccessLog
+    ) -> Optional[VaultAccessLogResponse]:
         """Create access log entry"""
         try:
             log_id = str(uuid.uuid4())
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.access_log_table} (
                     log_id, vault_id, user_id, action, ip_address, user_agent,
                     success, error_message, metadata, created_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 RETURNING *
-            '''
+            """
 
             params = [
                 log_id,
@@ -338,7 +371,7 @@ class VaultRepository:
                 log.success,
                 log.error_message,
                 log.metadata,
-                now
+                now,
             ]
 
             async with self.db:
@@ -356,7 +389,7 @@ class VaultRepository:
                     success=data["success"],
                     error_message=data.get("error_message"),
                     metadata=self._convert_protobuf_to_native(data.get("metadata", {})),
-                    created_at=data["created_at"]
+                    created_at=data["created_at"],
                 )
 
             return None
@@ -370,7 +403,7 @@ class VaultRepository:
         vault_id: Optional[str] = None,
         user_id: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[VaultAccessLogResponse]:
         """Get access logs"""
         try:
@@ -398,12 +431,12 @@ class VaultRepository:
             offset_param = f"${param_count}"
             params.append(offset)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.access_log_table}
                 {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit_param} OFFSET {offset_param}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -411,18 +444,22 @@ class VaultRepository:
             if results and len(results) > 0:
                 logs = []
                 for data in results:
-                    logs.append(VaultAccessLogResponse(
-                        log_id=data["log_id"],
-                        vault_id=data["vault_id"],
-                        user_id=data["user_id"],
-                        action=VaultAction(data["action"]),
-                        ip_address=data.get("ip_address"),
-                        user_agent=data.get("user_agent"),
-                        success=data["success"],
-                        error_message=data.get("error_message"),
-                        metadata=self._convert_protobuf_to_native(data.get("metadata", {})),
-                        created_at=data["created_at"]
-                    ))
+                    logs.append(
+                        VaultAccessLogResponse(
+                            log_id=data["log_id"],
+                            vault_id=data["vault_id"],
+                            user_id=data["user_id"],
+                            action=VaultAction(data["action"]),
+                            ip_address=data.get("ip_address"),
+                            user_agent=data.get("user_agent"),
+                            success=data["success"],
+                            error_message=data.get("error_message"),
+                            metadata=self._convert_protobuf_to_native(
+                                data.get("metadata", {})
+                            ),
+                            created_at=data["created_at"],
+                        )
+                    )
                 return logs
 
             return []
@@ -439,13 +476,13 @@ class VaultRepository:
             share_id = str(uuid.uuid4())
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.share_table} (
                     share_id, vault_id, owner_user_id, shared_with_user_id,
                     shared_with_org_id, permission_level, expires_at, is_active, created_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING *
-            '''
+            """
 
             params = [
                 share_id,
@@ -456,7 +493,7 @@ class VaultRepository:
                 share.permission_level.value,
                 share.expires_at,
                 share.is_active,
-                now
+                now,
             ]
 
             async with self.db:
@@ -473,7 +510,7 @@ class VaultRepository:
                     permission_level=PermissionLevel(data["permission_level"]),
                     expires_at=data.get("expires_at"),
                     is_active=data["is_active"],
-                    created_at=data["created_at"]
+                    created_at=data["created_at"],
                 )
 
             return None
@@ -485,28 +522,32 @@ class VaultRepository:
     async def get_shares_for_vault(self, vault_id: str) -> List[VaultShareResponse]:
         """Get all shares for a vault item"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.share_table}
                 WHERE vault_id = $1 AND is_active = $2
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [vault_id, True], schema=self.schema)
+                results = await self.db.query(
+                    query, [vault_id, True], schema=self.schema
+                )
 
             if results and len(results) > 0:
                 shares = []
                 for data in results:
-                    shares.append(VaultShareResponse(
-                        share_id=data["share_id"],
-                        vault_id=data["vault_id"],
-                        owner_user_id=data["owner_user_id"],
-                        shared_with_user_id=data.get("shared_with_user_id"),
-                        shared_with_org_id=data.get("shared_with_org_id"),
-                        permission_level=PermissionLevel(data["permission_level"]),
-                        expires_at=data.get("expires_at"),
-                        is_active=data["is_active"],
-                        created_at=data["created_at"]
-                    ))
+                    shares.append(
+                        VaultShareResponse(
+                            share_id=data["share_id"],
+                            vault_id=data["vault_id"],
+                            owner_user_id=data["owner_user_id"],
+                            shared_with_user_id=data.get("shared_with_user_id"),
+                            shared_with_org_id=data.get("shared_with_org_id"),
+                            permission_level=PermissionLevel(data["permission_level"]),
+                            expires_at=data.get("expires_at"),
+                            is_active=data["is_active"],
+                            created_at=data["created_at"],
+                        )
+                    )
                 return shares
 
             return []
@@ -518,28 +559,32 @@ class VaultRepository:
     async def get_shares_for_user(self, user_id: str) -> List[VaultShareResponse]:
         """Get all secrets shared with a user"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.share_table}
                 WHERE shared_with_user_id = $1 AND is_active = $2
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [user_id, True], schema=self.schema)
+                results = await self.db.query(
+                    query, [user_id, True], schema=self.schema
+                )
 
             if results and len(results) > 0:
                 shares = []
                 for data in results:
-                    shares.append(VaultShareResponse(
-                        share_id=data["share_id"],
-                        vault_id=data["vault_id"],
-                        owner_user_id=data["owner_user_id"],
-                        shared_with_user_id=data.get("shared_with_user_id"),
-                        shared_with_org_id=data.get("shared_with_org_id"),
-                        permission_level=PermissionLevel(data["permission_level"]),
-                        expires_at=data.get("expires_at"),
-                        is_active=data["is_active"],
-                        created_at=data["created_at"]
-                    ))
+                    shares.append(
+                        VaultShareResponse(
+                            share_id=data["share_id"],
+                            vault_id=data["vault_id"],
+                            owner_user_id=data["owner_user_id"],
+                            shared_with_user_id=data.get("shared_with_user_id"),
+                            shared_with_org_id=data.get("shared_with_org_id"),
+                            permission_level=PermissionLevel(data["permission_level"]),
+                            expires_at=data.get("expires_at"),
+                            is_active=data["is_active"],
+                            created_at=data["created_at"],
+                        )
+                    )
                 return shares
 
             return []
@@ -551,14 +596,16 @@ class VaultRepository:
     async def revoke_share(self, share_id: str) -> bool:
         """Revoke a share"""
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.share_table}
                 SET is_active = $1
                 WHERE share_id = $2
-            '''
+            """
 
             async with self.db:
-                count = await self.db.execute(query, [False, share_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [False, share_id], schema=self.schema
+                )
 
             return count is not None and count > 0
 
@@ -576,8 +623,8 @@ class VaultRepository:
         try:
             # Check if user owns the item
             item = await self.get_vault_item(vault_id)
-            if item and item.get('user_id') == user_id:
-                return 'owner'
+            if item and item.get("user_id") == user_id:
+                return "owner"
 
             # Check if item is shared with user
             shares = await self.get_shares_for_vault(vault_id)
@@ -603,10 +650,10 @@ class VaultRepository:
             where_clause = "WHERE user_id = $1" if user_id else ""
             params = [user_id] if user_id else []
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.vault_table}
                 {where_clause}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -619,7 +666,7 @@ class VaultRepository:
                     "secrets_by_type": {},
                     "secrets_by_provider": {},
                     "total_access_count": 0,
-                    "blockchain_verified_secrets": 0
+                    "blockchain_verified_secrets": 0,
                 }
 
             now = datetime.now(timezone.utc)
@@ -631,40 +678,46 @@ class VaultRepository:
                 "secrets_by_type": {},
                 "secrets_by_provider": {},
                 "total_access_count": 0,
-                "blockchain_verified_secrets": 0
+                "blockchain_verified_secrets": 0,
             }
 
             for item in results:
-                if item.get('is_active'):
-                    stats['active_secrets'] += 1
+                if item.get("is_active"):
+                    stats["active_secrets"] += 1
 
-                if item.get('expires_at') and item['expires_at'] < now:
-                    stats['expired_secrets'] += 1
+                if item.get("expires_at") and item["expires_at"] < now:
+                    stats["expired_secrets"] += 1
 
-                secret_type = item.get('secret_type', 'unknown')
-                stats['secrets_by_type'][secret_type] = stats['secrets_by_type'].get(secret_type, 0) + 1
+                secret_type = item.get("secret_type", "unknown")
+                stats["secrets_by_type"][secret_type] = (
+                    stats["secrets_by_type"].get(secret_type, 0) + 1
+                )
 
-                provider = item.get('provider')
+                provider = item.get("provider")
                 if provider:
-                    stats['secrets_by_provider'][provider] = stats['secrets_by_provider'].get(provider, 0) + 1
+                    stats["secrets_by_provider"][provider] = (
+                        stats["secrets_by_provider"].get(provider, 0) + 1
+                    )
 
-                stats['total_access_count'] += item.get('access_count', 0)
+                stats["total_access_count"] += item.get("access_count", 0)
 
-                if item.get('blockchain_reference'):
-                    stats['blockchain_verified_secrets'] += 1
+                if item.get("blockchain_reference"):
+                    stats["blockchain_verified_secrets"] += 1
 
             # Get shared secrets count
             if user_id:
-                share_query = f'''
+                share_query = f"""
                     SELECT COUNT(*) as count FROM {self.schema}.{self.share_table}
                     WHERE owner_user_id = $1 AND is_active = $2
-                '''
+                """
 
                 async with self.db:
-                    share_results = await self.db.query(share_query, [user_id, True], schema=self.schema)
+                    share_results = await self.db.query(
+                        share_query, [user_id, True], schema=self.schema
+                    )
 
                 if share_results and len(share_results) > 0:
-                    stats['shared_secrets'] = share_results[0].get('count', 0)
+                    stats["shared_secrets"] = share_results[0].get("count", 0)
 
             return stats
 
@@ -672,13 +725,15 @@ class VaultRepository:
             logger.error(f"Error getting vault stats: {e}")
             return {}
 
-    async def get_expiring_secrets(self, user_id: str, days: int = 7) -> List[VaultItemResponse]:
+    async def get_expiring_secrets(
+        self, user_id: str, days: int = 7
+    ) -> List[VaultItemResponse]:
         """Get secrets expiring in the next N days"""
         try:
             now = datetime.now(timezone.utc)
             future_date = now + timedelta(days=days)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.vault_table}
                 WHERE user_id = $1
                   AND is_active = $2
@@ -686,10 +741,12 @@ class VaultRepository:
                   AND expires_at >= $3
                   AND expires_at < $4
                 ORDER BY expires_at ASC
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [user_id, True, now, future_date], schema=self.schema)
+                results = await self.db.query(
+                    query, [user_id, True, now, future_date], schema=self.schema
+                )
 
             if results and len(results) > 0:
                 items = []
@@ -712,34 +769,50 @@ class VaultRepository:
         """删除用户所有 vault 数据（GDPR Article 17: Right to Erasure）"""
         try:
             # Delete vault items
-            items_query = f'DELETE FROM {self.schema}.{self.vault_table} WHERE user_id = $1'
+            items_query = (
+                f"DELETE FROM {self.schema}.{self.vault_table} WHERE user_id = $1"
+            )
 
             async with self.db:
-                items_count = await self.db.execute(items_query, [user_id], schema=self.schema)
+                items_count = await self.db.execute(
+                    items_query, [user_id], schema=self.schema
+                )
 
             # Delete shares where user is the owner
-            shares_query = f'DELETE FROM {self.schema}.{self.share_table} WHERE shared_by = $1'
+            shares_query = (
+                f"DELETE FROM {self.schema}.{self.share_table} WHERE shared_by = $1"
+            )
 
             async with self.db:
-                shares_count = await self.db.execute(shares_query, [user_id], schema=self.schema)
+                shares_count = await self.db.execute(
+                    shares_query, [user_id], schema=self.schema
+                )
 
             # Delete shares where user is the recipient
-            shares_to_query = f'DELETE FROM {self.schema}.{self.share_table} WHERE shared_with = $1'
+            shares_to_query = (
+                f"DELETE FROM {self.schema}.{self.share_table} WHERE shared_with = $1"
+            )
 
             async with self.db:
-                shares_to_count = await self.db.execute(shares_to_query, [user_id], schema=self.schema)
+                shares_to_count = await self.db.execute(
+                    shares_to_query, [user_id], schema=self.schema
+                )
 
             # Delete access logs
-            logs_query = f'DELETE FROM {self.schema}.{self.access_log_table} WHERE user_id = $1'
+            logs_query = (
+                f"DELETE FROM {self.schema}.{self.access_log_table} WHERE user_id = $1"
+            )
 
             async with self.db:
-                logs_count = await self.db.execute(logs_query, [user_id], schema=self.schema)
+                logs_count = await self.db.execute(
+                    logs_query, [user_id], schema=self.schema
+                )
 
             total_deleted = (
-                (items_count if items_count is not None else 0) +
-                (shares_count if shares_count is not None else 0) +
-                (shares_to_count if shares_to_count is not None else 0) +
-                (logs_count if logs_count is not None else 0)
+                (items_count if items_count is not None else 0)
+                + (shares_count if shares_count is not None else 0)
+                + (shares_to_count if shares_to_count is not None else 0)
+                + (logs_count if logs_count is not None else 0)
             )
 
             logger.info(

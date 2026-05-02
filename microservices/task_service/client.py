@@ -24,7 +24,7 @@ class TaskServiceClient:
             base_url: Task service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -64,7 +64,7 @@ class TaskServiceClient:
         retry_policy: Optional[Dict[str, Any]] = None,
         timeout_seconds: Optional[int] = None,
         parameters: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create new task
@@ -103,7 +103,7 @@ class TaskServiceClient:
                 "task_type": task_type,
                 "user_id": user_id,
                 "priority": priority,
-                "schedule_type": schedule_type
+                "schedule_type": schedule_type,
             }
 
             if organization_id:
@@ -126,8 +126,7 @@ class TaskServiceClient:
                 payload["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/tasks",
-                json=payload
+                f"{self.base_url}/api/v1/tasks", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -139,10 +138,7 @@ class TaskServiceClient:
             logger.error(f"Error creating task: {e}")
             return None
 
-    async def get_task(
-        self,
-        task_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
         Get task by ID
 
@@ -157,9 +153,7 @@ class TaskServiceClient:
             >>> print(f"Status: {task['status']}")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/tasks/{task_id}"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/tasks/{task_id}")
             response.raise_for_status()
             return response.json()
 
@@ -179,7 +173,7 @@ class TaskServiceClient:
         status: Optional[str] = None,
         scheduled_at: Optional[datetime] = None,
         parameters: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Update task
@@ -226,8 +220,7 @@ class TaskServiceClient:
                 return None
 
             response = await self.client.put(
-                f"{self.base_url}/api/v1/tasks/{task_id}",
-                json=payload
+                f"{self.base_url}/api/v1/tasks/{task_id}", json=payload
             )
             response.raise_for_status()
             return response.json()
@@ -239,10 +232,7 @@ class TaskServiceClient:
             logger.error(f"Error updating task: {e}")
             return None
 
-    async def delete_task(
-        self,
-        task_id: str
-    ) -> bool:
+    async def delete_task(self, task_id: str) -> bool:
         """
         Delete task
 
@@ -274,9 +264,7 @@ class TaskServiceClient:
     # =============================================================================
 
     async def execute_task(
-        self,
-        task_id: str,
-        force: bool = False
+        self, task_id: str, force: bool = False
     ) -> Optional[Dict[str, Any]]:
         """
         Execute task immediately
@@ -298,8 +286,7 @@ class TaskServiceClient:
                 params["force"] = force
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/tasks/{task_id}/execute",
-                params=params
+                f"{self.base_url}/api/v1/tasks/{task_id}/execute", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -312,9 +299,7 @@ class TaskServiceClient:
             return None
 
     async def get_task_executions(
-        self,
-        task_id: str,
-        limit: int = 50
+        self, task_id: str, limit: int = 50
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get task execution history
@@ -335,8 +320,7 @@ class TaskServiceClient:
             params = {"limit": limit}
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/tasks/{task_id}/executions",
-                params=params
+                f"{self.base_url}/api/v1/tasks/{task_id}/executions", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -360,7 +344,7 @@ class TaskServiceClient:
         status: Optional[str] = None,
         priority: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """
         List tasks with filters
@@ -387,10 +371,7 @@ class TaskServiceClient:
             ...     print(f"{task['name']}: {task['status']}")
         """
         try:
-            params = {
-                "limit": limit,
-                "offset": offset
-            }
+            params = {"limit": limit, "offset": offset}
 
             if user_id:
                 params["user_id"] = user_id
@@ -404,8 +385,7 @@ class TaskServiceClient:
                 params["priority"] = priority
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/tasks",
-                params=params
+                f"{self.base_url}/api/v1/tasks", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -434,9 +414,7 @@ class TaskServiceClient:
             ...     print(f"{template['name']}: {template['description']}")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/templates"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/templates")
             response.raise_for_status()
             return response.json()
 
@@ -454,7 +432,7 @@ class TaskServiceClient:
         organization_id: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
         schedule_type: str = "immediate",
-        scheduled_at: Optional[datetime] = None
+        scheduled_at: Optional[datetime] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create task from template
@@ -481,7 +459,7 @@ class TaskServiceClient:
             payload = {
                 "template_id": template_id,
                 "user_id": user_id,
-                "schedule_type": schedule_type
+                "schedule_type": schedule_type,
             }
 
             if organization_id:
@@ -492,14 +470,15 @@ class TaskServiceClient:
                 payload["scheduled_at"] = scheduled_at.isoformat()
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/tasks/from-template",
-                json=payload
+                f"{self.base_url}/api/v1/tasks/from-template", json=payload
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to create task from template: {e.response.status_code}")
+            logger.error(
+                f"Failed to create task from template: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error creating task from template: {e}")
@@ -522,9 +501,7 @@ class TaskServiceClient:
             >>> print(f"Success rate: {analytics['success_rate']}")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/analytics"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/analytics")
             response.raise_for_status()
             return response.json()
 
@@ -577,9 +554,7 @@ class TaskServiceClient:
             >>> print(f"Total tasks: {stats['total_tasks']}")
         """
         try:
-            response = await self.client.get(
-                f"{self.base_url}/api/v1/service/stats"
-            )
+            response = await self.client.get(f"{self.base_url}/api/v1/service/stats")
             response.raise_for_status()
             return response.json()
 

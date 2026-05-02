@@ -71,10 +71,12 @@ class SharingService:
 
         if self._share_repo is None:
             from .sharing_repository import ShareRepository
+
             self._share_repo = ShareRepository(config=self._config)
 
         if self._session_client is None:
             from .clients.session_client import SessionServiceClient
+
             self._session_client = SessionServiceClient()
 
         self._repos_initialized = True
@@ -159,7 +161,9 @@ class SharingService:
                             "owner_id": owner_id,
                             "share_token": share_token,
                             "permissions": request.permissions.value,
-                            "expires_at": expires_at.isoformat() if expires_at else None,
+                            "expires_at": expires_at.isoformat()
+                            if expires_at
+                            else None,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                     )
@@ -208,9 +212,7 @@ class SharingService:
             if not session:
                 raise ShareServiceError("Shared session no longer exists")
 
-            messages = await self.session_client.get_session_messages(
-                share.session_id
-            )
+            messages = await self.session_client.get_session_messages(share.session_id)
 
             # Publish access event
             if self.event_bus:
@@ -320,7 +322,9 @@ class SharingService:
             if not session:
                 raise ShareValidationError(f"Session not found: {session_id}")
             if session.get("user_id") != owner_id:
-                raise SharePermissionError("You can only view shares for your own sessions")
+                raise SharePermissionError(
+                    "You can only view shares for your own sessions"
+                )
 
             shares = await self.share_repo.get_session_shares(session_id, owner_id)
             share_responses = [self._share_to_response(s) for s in shares]

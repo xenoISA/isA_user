@@ -13,7 +13,9 @@ from decimal import Decimal
 import json
 import uuid
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -49,11 +51,11 @@ class ProductRepository:
         # Discover PostgreSQL service
         # Priority: Environment variables → Consul → localhost fallback
         postgres_host, postgres_port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {postgres_host}:{postgres_port}")
@@ -61,8 +63,8 @@ class ProductRepository:
             host=postgres_host,
             port=postgres_port,
             user_id="product_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=1,
+            max_pool_size=2,
         )
         self.schema = "product"
         self.products_table = "products"
@@ -87,7 +89,7 @@ class ProductRepository:
     async def create_product(self, product: Product) -> Optional[Product]:
         """创建产品"""
         try:
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.products_table} (
                     product_id, product_name, product_code, description, category,
                     product_type, base_price, currency, billing_interval,
@@ -102,22 +104,35 @@ class ProductRepository:
                     $22, $23, $24, $25
                 )
                 RETURNING *
-            '''
+            """
 
             now = datetime.now(timezone.utc)
             product_code = product.product_code or f"code_{product.product_id}"
             params = [
-                product.product_id, product.name, product_code,
-                product.description, product.category_id, product.product_type.value,
-                float(product.base_price), product.currency.value, product.billing_interval,
-                product.product_kind.value, product.fulfillment_type.value,
-                product.inventory_policy.value, product.requires_shipping,
-                product.tax_category.value, product.default_sku_id,
+                product.product_id,
+                product.name,
+                product_code,
+                product.description,
+                product.category_id,
+                product.product_type.value,
+                float(product.base_price),
+                product.currency.value,
+                product.billing_interval,
+                product.product_kind.value,
+                product.fulfillment_type.value,
+                product.inventory_policy.value,
+                product.requires_shipping,
+                product.tax_category.value,
+                product.default_sku_id,
                 json.dumps(product.features) if product.features else "[]",
                 json.dumps(product.quota_limits) if product.quota_limits else "{}",
-                product.is_active, product.is_featured, product.display_order,
+                product.is_active,
+                product.is_featured,
+                product.display_order,
                 json.dumps(product.metadata_for_storage()),
-                product.tags, now, now
+                product.tags,
+                now,
+                now,
             ]
 
             async with self.db:
@@ -134,10 +149,10 @@ class ProductRepository:
     async def get_product(self, product_id: str) -> Optional[Product]:
         """获取产品详情"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.products_table}
                 WHERE product_id = $1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[product_id])
@@ -156,7 +171,7 @@ class ProductRepository:
         product_type: Optional[ProductType] = None,
         is_active: Optional[bool] = True,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Product]:
         """获取产品列表"""
         try:
@@ -181,12 +196,12 @@ class ProductRepository:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.products_table}
                 {where_clause}
                 ORDER BY display_order ASC, created_at DESC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
 
             params.extend([limit, offset])
 
@@ -199,7 +214,9 @@ class ProductRepository:
             logger.error(f"Error getting products: {e}")
             return []
 
-    async def update_product(self, product_id: str, updates: Dict[str, Any]) -> Optional[Product]:
+    async def update_product(
+        self, product_id: str, updates: Dict[str, Any]
+    ) -> Optional[Product]:
         """更新产品"""
         try:
             set_clauses = []
@@ -228,12 +245,12 @@ class ProductRepository:
             param_count += 1
             params.append(product_id)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.products_table}
                 SET {", ".join(set_clauses)}
                 WHERE product_id = ${param_count}
                 RETURNING *
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -249,10 +266,10 @@ class ProductRepository:
     async def delete_product(self, product_id: str) -> bool:
         """删除产品"""
         try:
-            query = f'''
+            query = f"""
                 DELETE FROM {self.schema}.{self.products_table}
                 WHERE product_id = $1
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params=[product_id])
@@ -275,15 +292,23 @@ class ProductRepository:
             id=int(row.get("id")) if row.get("id") else None,
             product_id=row.get("product_id"),
             category_id=row.get("category", ""),  # Map category to category_id
-            name=row.get("product_name", ""),      # Map product_name to name
+            name=row.get("product_name", ""),  # Map product_name to name
             description=row.get("description"),
             product_type=ProductType(row.get("product_type")),
             provider=row.get("provider"),
-            product_kind=ProductKind(row.get("product_kind") or ProductKind.DIGITAL.value),
-            fulfillment_type=FulfillmentType(row.get("fulfillment_type") or FulfillmentType.DIGITAL.value),
-            inventory_policy=InventoryPolicy(row.get("inventory_policy") or InventoryPolicy.INFINITE.value),
+            product_kind=ProductKind(
+                row.get("product_kind") or ProductKind.DIGITAL.value
+            ),
+            fulfillment_type=FulfillmentType(
+                row.get("fulfillment_type") or FulfillmentType.DIGITAL.value
+            ),
+            inventory_policy=InventoryPolicy(
+                row.get("inventory_policy") or InventoryPolicy.INFINITE.value
+            ),
             requires_shipping=bool(row.get("requires_shipping", False)),
-            tax_category=TaxCategory(row.get("tax_category") or TaxCategory.DIGITAL_GOODS.value),
+            tax_category=TaxCategory(
+                row.get("tax_category") or TaxCategory.DIGITAL_GOODS.value
+            ),
             default_sku_id=row.get("default_sku_id"),
             product_code=row.get("product_code"),
             base_price=Decimal(str(row.get("base_price", 0.0))),
@@ -301,7 +326,7 @@ class ProductRepository:
             ),
             is_active=row.get("is_active", True),
             created_at=row.get("created_at"),
-            updated_at=row.get("updated_at")
+            updated_at=row.get("updated_at"),
         )
 
     # ==================== Admin Operations ====================
@@ -309,36 +334,53 @@ class ProductRepository:
     async def admin_soft_delete_product(self, product_id: str) -> bool:
         """Soft-delete a product by setting is_active = FALSE"""
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.products_table}
                 SET is_active = FALSE, updated_at = $2
                 WHERE product_id = $1
                 RETURNING product_id
-            '''
+            """
             async with self.db:
-                result = await self.db.query_row(query, params=[product_id, datetime.now(timezone.utc)])
+                result = await self.db.query_row(
+                    query, params=[product_id, datetime.now(timezone.utc)]
+                )
             return result is not None
         except Exception as e:
             logger.error(f"Error soft-deleting product {product_id}: {e}")
             return False
 
-    async def admin_create_pricing(self, product_id: str, pricing_id: str, tier_name: str,
-                                    min_quantity: float, max_quantity: Optional[float],
-                                    unit_price: float, currency: str,
-                                    metadata: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    async def admin_create_pricing(
+        self,
+        product_id: str,
+        pricing_id: str,
+        tier_name: str,
+        min_quantity: float,
+        max_quantity: Optional[float],
+        unit_price: float,
+        currency: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Create a pricing tier for a product"""
         try:
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.pricing_table} (
                     pricing_id, product_id, tier_name, min_quantity, max_quantity,
                     unit_price, currency, metadata, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 RETURNING *
-            '''
+            """
             now = datetime.now(timezone.utc)
             params = [
-                pricing_id, product_id, tier_name, min_quantity, max_quantity,
-                unit_price, currency, json.dumps(metadata or {}), now, now
+                pricing_id,
+                product_id,
+                tier_name,
+                min_quantity,
+                max_quantity,
+                unit_price,
+                currency,
+                json.dumps(metadata or {}),
+                now,
+                now,
             ]
             async with self.db:
                 result = await self.db.query_row(query, params=params)
@@ -350,10 +392,10 @@ class ProductRepository:
     async def admin_get_pricing(self, pricing_id: str) -> Optional[Dict[str, Any]]:
         """Get a pricing tier by ID"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.pricing_table}
                 WHERE pricing_id = $1
-            '''
+            """
             async with self.db:
                 result = await self.db.query_row(query, params=[pricing_id])
             return dict(result) if result else None
@@ -361,7 +403,9 @@ class ProductRepository:
             logger.error(f"Error getting pricing {pricing_id}: {e}")
             return None
 
-    async def admin_update_pricing(self, pricing_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def admin_update_pricing(
+        self, pricing_id: str, updates: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Update a pricing tier"""
         try:
             set_clauses = []
@@ -387,12 +431,12 @@ class ProductRepository:
             param_count += 1
             params.append(pricing_id)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.pricing_table}
                 SET {", ".join(set_clauses)}
                 WHERE pricing_id = ${param_count}
                 RETURNING *
-            '''
+            """
             async with self.db:
                 result = await self.db.query_row(query, params=params)
             return dict(result) if result else None
@@ -402,97 +446,135 @@ class ProductRepository:
 
     # ==================== Cost Definition Operations ====================
 
-    async def get_cost_definitions(self, is_active=None, provider=None, service_type=None):
+    async def get_cost_definitions(
+        self, is_active=None, provider=None, service_type=None
+    ):
         """List cost definitions with optional filters"""
         try:
             conditions, params, pc = [], [], 0
             if is_active is not None:
-                pc += 1; conditions.append(f"is_active = ${pc}"); params.append(is_active)
+                pc += 1
+                conditions.append(f"is_active = ${pc}")
+                params.append(is_active)
             if provider:
-                pc += 1; conditions.append(f"provider = ${pc}"); params.append(provider)
+                pc += 1
+                conditions.append(f"provider = ${pc}")
+                params.append(provider)
             if service_type:
-                pc += 1; conditions.append(f"service_type = ${pc}"); params.append(service_type)
+                pc += 1
+                conditions.append(f"service_type = ${pc}")
+                params.append(service_type)
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-            query = f'SELECT * FROM {self.schema}.cost_definitions {where} ORDER BY service_type, provider, model_name'
+            query = f"SELECT * FROM {self.schema}.cost_definitions {where} ORDER BY service_type, provider, model_name"
             async with self.db:
                 results = await self.db.query(query, params=params)
             return [dict(r) for r in results] if results else []
         except Exception as e:
-            logger.error(f"Error getting cost definitions: {e}"); return []
+            logger.error(f"Error getting cost definitions: {e}")
+            return []
 
     async def get_cost_definition(self, cost_id: str):
         """Get a cost definition by ID"""
         try:
-            query = f'SELECT * FROM {self.schema}.cost_definitions WHERE cost_id = $1'
+            query = f"SELECT * FROM {self.schema}.cost_definitions WHERE cost_id = $1"
             async with self.db:
                 result = await self.db.query_row(query, params=[cost_id])
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Error getting cost definition {cost_id}: {e}"); return None
+            logger.error(f"Error getting cost definition {cost_id}: {e}")
+            return None
 
     async def create_cost_definition(self, data: Dict[str, Any]):
         """Create a new cost definition"""
         try:
-            query = f'''INSERT INTO {self.schema}.cost_definitions (
+            query = f"""INSERT INTO {self.schema}.cost_definitions (
                 cost_id, product_id, service_type, provider, model_name, operation_type,
                 cost_per_unit, unit_type, unit_size, original_cost_usd, margin_percentage,
                 effective_from, effective_until, free_tier_limit, free_tier_period,
                 is_active, description, metadata, created_at, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *'''
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *"""
             now = datetime.now(timezone.utc)
             params = [
-                data["cost_id"], data.get("product_id"), data["service_type"],
-                data.get("provider"), data.get("model_name"), data.get("operation_type"),
-                data["cost_per_unit"], data["unit_type"], data.get("unit_size", 1),
-                data.get("original_cost_usd"), data.get("margin_percentage", 30.0),
-                data.get("effective_from", now), data.get("effective_until"),
-                data.get("free_tier_limit", 0), data.get("free_tier_period", "monthly"),
-                data.get("is_active", True), data.get("description"),
-                json.dumps(data.get("metadata", {})), now, now,
+                data["cost_id"],
+                data.get("product_id"),
+                data["service_type"],
+                data.get("provider"),
+                data.get("model_name"),
+                data.get("operation_type"),
+                data["cost_per_unit"],
+                data["unit_type"],
+                data.get("unit_size", 1),
+                data.get("original_cost_usd"),
+                data.get("margin_percentage", 30.0),
+                data.get("effective_from", now),
+                data.get("effective_until"),
+                data.get("free_tier_limit", 0),
+                data.get("free_tier_period", "monthly"),
+                data.get("is_active", True),
+                data.get("description"),
+                json.dumps(data.get("metadata", {})),
+                now,
+                now,
             ]
             async with self.db:
                 result = await self.db.query_row(query, params=params)
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Error creating cost definition: {e}"); return None
+            logger.error(f"Error creating cost definition: {e}")
+            return None
 
     async def update_cost_definition(self, cost_id: str, updates: Dict[str, Any]):
         """Update a cost definition (metadata/description, not price)"""
         try:
             set_clauses, params, pc = [], [], 0
             for k, v in updates.items():
-                if v is None: continue
-                if k == "metadata": v = json.dumps(v)
-                pc += 1; set_clauses.append(f"{k} = ${pc}"); params.append(v)
-            if not set_clauses: return await self.get_cost_definition(cost_id)
-            pc += 1; set_clauses.append(f"updated_at = ${pc}"); params.append(datetime.now(timezone.utc))
-            pc += 1; params.append(cost_id)
+                if v is None:
+                    continue
+                if k == "metadata":
+                    v = json.dumps(v)
+                pc += 1
+                set_clauses.append(f"{k} = ${pc}")
+                params.append(v)
+            if not set_clauses:
+                return await self.get_cost_definition(cost_id)
+            pc += 1
+            set_clauses.append(f"updated_at = ${pc}")
+            params.append(datetime.now(timezone.utc))
+            pc += 1
+            params.append(cost_id)
             query = f'UPDATE {self.schema}.cost_definitions SET {", ".join(set_clauses)} WHERE cost_id = ${pc} RETURNING *'
             async with self.db:
                 result = await self.db.query_row(query, params=params)
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Error updating cost definition {cost_id}: {e}"); return None
+            logger.error(f"Error updating cost definition {cost_id}: {e}")
+            return None
 
-    async def expire_cost_definition(self, cost_id: str, effective_until: datetime) -> bool:
+    async def expire_cost_definition(
+        self, cost_id: str, effective_until: datetime
+    ) -> bool:
         """Set effective_until on a cost definition"""
         try:
-            query = f'UPDATE {self.schema}.cost_definitions SET effective_until = $1, updated_at = $2 WHERE cost_id = $3 RETURNING cost_id'
+            query = f"UPDATE {self.schema}.cost_definitions SET effective_until = $1, updated_at = $2 WHERE cost_id = $3 RETURNING cost_id"
             async with self.db:
-                result = await self.db.query_row(query, params=[effective_until, datetime.now(timezone.utc), cost_id])
+                result = await self.db.query_row(
+                    query, params=[effective_until, datetime.now(timezone.utc), cost_id]
+                )
             return result is not None
         except Exception as e:
-            logger.error(f"Error expiring cost definition {cost_id}: {e}"); return False
+            logger.error(f"Error expiring cost definition {cost_id}: {e}")
+            return False
 
     async def get_cost_history(self, model_name: str):
         """Get price history for a model"""
         try:
-            query = f'SELECT * FROM {self.schema}.cost_definitions WHERE model_name = $1 ORDER BY effective_from DESC'
+            query = f"SELECT * FROM {self.schema}.cost_definitions WHERE model_name = $1 ORDER BY effective_from DESC"
             async with self.db:
                 results = await self.db.query(query, params=[model_name])
             return [dict(r) for r in results] if results else []
         except Exception as e:
-            logger.error(f"Error getting cost history for {model_name}: {e}"); return []
+            logger.error(f"Error getting cost history for {model_name}: {e}")
+            return []
 
     # ==================== Catalog Alignment ====================
 
@@ -505,31 +587,51 @@ class ProductRepository:
                 products = await self.db.query(pq, params=[])
                 costs = await self.db.query(cq, params=[])
             product_models = {}
-            for p in (products or []):
+            for p in products or []:
                 meta = p.get("metadata") or {}
                 model = meta.get("model") or p.get("product_id")
-                product_models[model] = {"product_id": p["product_id"], "product_name": p.get("product_name")}
-            cost_models = {c["model_name"] for c in (costs or []) if c.get("model_name")}
+                product_models[model] = {
+                    "product_id": p["product_id"],
+                    "product_name": p.get("product_name"),
+                }
+            cost_models = {
+                c["model_name"] for c in (costs or []) if c.get("model_name")
+            }
             return {
-                "aligned": not any(k not in cost_models for k in product_models) and not any(m not in product_models for m in cost_models),
-                "total_products": len(product_models), "total_cost_definitions": len(cost_models),
-                "products_without_cost_definitions": [{"product_id": v["product_id"], "model": k, "action": "Add cost_definition"} for k, v in product_models.items() if k not in cost_models],
-                "cost_definitions_without_products": [{"model_name": m, "action": "Add product entry"} for m in cost_models if m not in product_models],
+                "aligned": not any(k not in cost_models for k in product_models)
+                and not any(m not in product_models for m in cost_models),
+                "total_products": len(product_models),
+                "total_cost_definitions": len(cost_models),
+                "products_without_cost_definitions": [
+                    {
+                        "product_id": v["product_id"],
+                        "model": k,
+                        "action": "Add cost_definition",
+                    }
+                    for k, v in product_models.items()
+                    if k not in cost_models
+                ],
+                "cost_definitions_without_products": [
+                    {"model_name": m, "action": "Add product entry"}
+                    for m in cost_models
+                    if m not in product_models
+                ],
             }
         except Exception as e:
-            logger.error(f"Error checking catalog alignment: {e}"); return {"error": str(e)}
+            logger.error(f"Error checking catalog alignment: {e}")
+            return {"error": str(e)}
 
     # ==================== Category Operations ====================
 
     async def get_categories(self) -> List[ProductCategory]:
         """获取所有产品类别"""
         try:
-            query = f'''
+            query = f"""
                 SELECT DISTINCT category
                 FROM {self.schema}.{self.products_table}
                 WHERE is_active = true
                 ORDER BY category
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=[])
@@ -538,14 +640,16 @@ class ProductRepository:
                 categories = []
                 for idx, row in enumerate(results):
                     category_name = row.get("category")
-                    categories.append(ProductCategory(
-                        category_id=category_name,
-                        name=category_name.replace("_", " ").title(),
-                        description=f"{category_name.replace('_', ' ').title()} products and services",
-                        display_order=idx,
-                        is_active=True,
-                        created_at=datetime.now(timezone.utc)
-                    ))
+                    categories.append(
+                        ProductCategory(
+                            category_id=category_name,
+                            name=category_name.replace("_", " ").title(),
+                            description=f"{category_name.replace('_', ' ').title()} products and services",
+                            display_order=idx,
+                            is_active=True,
+                            created_at=datetime.now(timezone.utc),
+                        )
+                    )
                 return categories
             return []
 
@@ -559,12 +663,12 @@ class ProductRepository:
         self,
         product_id: str,
         user_id: Optional[str] = None,
-        subscription_id: Optional[str] = None
+        subscription_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """获取产品定价信息"""
         try:
             # Query product with pricing info from database
-            query = f'''
+            query = f"""
                 SELECT
                     product_id,
                     product_name as name,
@@ -576,7 +680,7 @@ class ProductRepository:
                     quota_limits
                 FROM {self.schema}.{self.products_table}
                 WHERE product_id = $1 AND is_active = true
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[product_id])
@@ -596,7 +700,7 @@ class ProductRepository:
                 "pricing_type": "usage_based",
                 "tiers": [],
                 "features": result.get("features") or [],
-                "quota_limits": result.get("quota_limits") or {}
+                "quota_limits": result.get("quota_limits") or {},
             }
 
             # Add tiered pricing structure
@@ -606,22 +710,22 @@ class ProductRepository:
                     "min_units": 0,
                     "max_units": 1000,
                     "price_per_unit": base_price,
-                    "currency": pricing["currency"]
+                    "currency": pricing["currency"],
                 },
                 {
                     "tier_name": "Standard",
                     "min_units": 1001,
                     "max_units": 10000,
                     "price_per_unit": round(base_price * 0.9, 4),
-                    "currency": pricing["currency"]
+                    "currency": pricing["currency"],
                 },
                 {
                     "tier_name": "Premium",
                     "min_units": 10001,
                     "max_units": None,
                     "price_per_unit": round(base_price * 0.8, 4),
-                    "currency": pricing["currency"]
-                }
+                    "currency": pricing["currency"],
+                },
             ]
 
             return pricing
@@ -646,7 +750,9 @@ class ProductRepository:
             return [dict(row) for row in results] if results else []
 
         except Exception as e:
-            logger.error(f"Error getting raw product pricing rows for {product_id}: {e}")
+            logger.error(
+                f"Error getting raw product pricing rows for {product_id}: {e}"
+            )
             return []
 
     # ==================== Service Plan Operations ====================
@@ -670,7 +776,7 @@ class ProductRepository:
                 "plan_name": plan_id.replace("-", " ").title(),
                 "plan_tier": tier,
                 "features": [],
-                "price": 0.0
+                "price": 0.0,
             }
         except Exception as e:
             logger.error(f"Error getting service plan: {e}")
@@ -685,12 +791,18 @@ class ProductRepository:
                 result = await self._subscription_client._client.create_subscription(
                     user_id=subscription.user_id,
                     tier_id=subscription.plan_id,
-                    billing_cycle=subscription.billing_cycle.value if hasattr(subscription.billing_cycle, 'value') else subscription.billing_cycle,
+                    billing_cycle=subscription.billing_cycle.value
+                    if hasattr(subscription.billing_cycle, "value")
+                    else subscription.billing_cycle,
                 )
                 if result:
-                    logger.info(f"Created subscription {subscription.subscription_id} via subscription_service")
+                    logger.info(
+                        f"Created subscription {subscription.subscription_id} via subscription_service"
+                    )
                     return subscription
-            logger.warning("subscription_client not available, returning subscription as-is")
+            logger.warning(
+                "subscription_client not available, returning subscription as-is"
+            )
             return subscription
         except Exception as e:
             logger.warning(f"Failed to delegate subscription creation: {e}")
@@ -700,34 +812,44 @@ class ProductRepository:
         """Delegate subscription lookup to subscription_service"""
         try:
             if self._subscription_client:
-                result = await self._subscription_client.get_subscription(subscription_id)
+                result = await self._subscription_client.get_subscription(
+                    subscription_id
+                )
                 if result:
                     return result
             return None
         except Exception as e:
-            logger.warning(f"Failed to get subscription {subscription_id} from subscription_service: {e}")
+            logger.warning(
+                f"Failed to get subscription {subscription_id} from subscription_service: {e}"
+            )
             return None
 
-    async def update_subscription_status(self, subscription_id: str, new_status: str) -> bool:
+    async def update_subscription_status(
+        self, subscription_id: str, new_status: str
+    ) -> bool:
         """Delegate subscription status update to subscription_service"""
         try:
             if self._subscription_client:
-                return await self._subscription_client._client.cancel_subscription(subscription_id)
+                return await self._subscription_client._client.cancel_subscription(
+                    subscription_id
+                )
             logger.warning("subscription_client not available for status update")
             return False
         except Exception as e:
-            logger.warning(f"Failed to update subscription {subscription_id} status: {e}")
+            logger.warning(
+                f"Failed to update subscription {subscription_id} status: {e}"
+            )
             return False
 
     async def get_user_subscriptions(
-        self,
-        user_id: str,
-        status: Optional[str] = None
+        self, user_id: str, status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Delegate user subscription query to subscription_service"""
         try:
             if self._subscription_client:
-                return await self._subscription_client.get_user_subscriptions(user_id, status)
+                return await self._subscription_client.get_user_subscriptions(
+                    user_id, status
+                )
             return []
         except Exception as e:
             logger.warning(f"Failed to get subscriptions for user {user_id}: {e}")
@@ -745,7 +867,7 @@ class ProductRepository:
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         usage_details: Optional[Dict[str, Any]] = None,
-        usage_timestamp: Optional[Any] = None
+        usage_timestamp: Optional[Any] = None,
     ) -> str:
         """Delegate usage recording to billing_service"""
         try:
@@ -760,11 +882,15 @@ class ProductRepository:
                     usage_details=usage_details,
                 )
                 if result:
-                    logger.info(f"Recorded usage via billing_service for user {user_id}, product {product_id}")
+                    logger.info(
+                        f"Recorded usage via billing_service for user {user_id}, product {product_id}"
+                    )
                     return result
             # Fallback: generate local ID (billing_service unavailable)
             fallback_id = f"usage_{uuid.uuid4().hex[:16]}"
-            logger.warning(f"billing_client unavailable, generated fallback usage ID: {fallback_id}")
+            logger.warning(
+                f"billing_client unavailable, generated fallback usage ID: {fallback_id}"
+            )
             return fallback_id
         except Exception as e:
             logger.warning(f"Failed to record usage via billing_service: {e}")
@@ -780,7 +906,7 @@ class ProductRepository:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Delegate usage records query to billing_service"""
         try:
@@ -807,7 +933,7 @@ class ProductRepository:
         organization_id: Optional[str] = None,
         product_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Delegate usage statistics to billing_service"""
         try:
@@ -825,8 +951,8 @@ class ProductRepository:
                 "usage_by_date": {},
                 "period": {
                     "start_date": start_date.isoformat() if start_date else None,
-                    "end_date": end_date.isoformat() if end_date else None
-                }
+                    "end_date": end_date.isoformat() if end_date else None,
+                },
             }
         except Exception as e:
             logger.warning(f"Failed to get usage statistics from billing_service: {e}")

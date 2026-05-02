@@ -57,7 +57,9 @@ class EventPublisher:
             True if published successfully
         """
         if not self.event_bus:
-            logger.warning("Event bus not available, skipping event.created publication")
+            logger.warning(
+                "Event bus not available, skipping event.created publication"
+            )
             return False
 
         try:
@@ -110,7 +112,9 @@ class EventPublisher:
             True if published successfully
         """
         if not self.event_bus:
-            logger.warning("Event bus not available, skipping event.processed publication")
+            logger.warning(
+                "Event bus not available, skipping event.processed publication"
+            )
             return False
 
         try:
@@ -215,7 +219,9 @@ class EventPublisher:
             True if published successfully
         """
         if not self.event_bus:
-            logger.warning("Event bus not available, skipping replay.started publication")
+            logger.warning(
+                "Event bus not available, skipping replay.started publication"
+            )
             return False
 
         try:
@@ -263,7 +269,9 @@ class EventPublisher:
             True if published successfully
         """
         if not self.event_bus:
-            logger.warning("Event bus not available, skipping replay.completed publication")
+            logger.warning(
+                "Event bus not available, skipping replay.completed publication"
+            )
             return False
 
         try:

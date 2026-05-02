@@ -29,17 +29,19 @@ class WorkingMemoryService:
 
         # Initialize Qdrant client (async) - lazy connection
         self.qdrant = AsyncQdrantClient(
-            host=os.getenv('QDRANT_HOST', 'localhost'),
-            port=int(os.getenv('QDRANT_PORT', 6333)),
-            user_id='memory_service'
+            host=os.getenv("QDRANT_HOST", "localhost"),
+            port=int(os.getenv("QDRANT_PORT", 6333)),
+            user_id="memory_service",
         )
         self._collection_initialized = False  # Track if collection is ready
 
-        logger.info(f"Working Memory Service initialized with ISA Model URL: {self.model_url}")
+        logger.info(
+            f"Working Memory Service initialized with ISA Model URL: {self.model_url}"
+        )
 
     def _get_model_url(self) -> str:
         """Get ISA Model service URL via Consul or environment variable"""
-        env_url = os.getenv('ISA_MODEL_URL')
+        env_url = os.getenv("ISA_MODEL_URL")
         if env_url:
             return env_url
         if self.consul_registry:
@@ -57,7 +59,7 @@ class WorkingMemoryService:
         if self._collection_initialized:
             return
 
-        collection_name = 'working_memories'
+        collection_name = "working_memories"
         try:
             async with self.qdrant:
                 info = await self.qdrant.get_collection_info(collection_name)
@@ -65,17 +67,17 @@ class WorkingMemoryService:
                     await self.qdrant.create_collection(
                         collection_name=collection_name,
                         vector_size=1536,
-                        distance='Cosine'
+                        distance="Cosine",
                     )
                     await self.qdrant.create_field_index(
                         collection_name=collection_name,
-                        field_name='user_id',
-                        field_type='keyword'
+                        field_name="user_id",
+                        field_type="keyword",
                     )
                     await self.qdrant.create_field_index(
                         collection_name=collection_name,
-                        field_name='task_id',
-                        field_type='keyword'
+                        field_name="task_id",
+                        field_type="keyword",
                     )
                     logger.info(f"Created Qdrant collection: {collection_name}")
             self._collection_initialized = True
@@ -89,7 +91,7 @@ class WorkingMemoryService:
         task_id: str,
         task_context: Dict[str, Any],
         priority: int = 5,
-        ttl_seconds: int = 3600
+        ttl_seconds: int = 3600,
     ) -> MemoryOperationResult:
         """
         Store working memory for current task
@@ -134,7 +136,7 @@ class WorkingMemoryService:
                 "tags": [],
                 "context": {},
                 "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             # Store to PostgreSQL
@@ -144,18 +146,27 @@ class WorkingMemoryService:
                 # Store embedding to Qdrant - ASYNC
                 try:
                     async with self.qdrant:
-                        await self.qdrant.upsert_points('working_memories', [{
-                            'id': memory_id,
-                            'vector': embedding,
-                            'payload': {
-                                'user_id': user_id,
-                                'task_id': task_id,
-                                'priority': priority,
-                                'expires_at': expires_at.isoformat(),
-                                'created_at': datetime.now(timezone.utc).isoformat()
-                            }
-                        }])
-                    logger.info(f"Stored embedding to Qdrant for working memory {memory_id}")
+                        await self.qdrant.upsert_points(
+                            "working_memories",
+                            [
+                                {
+                                    "id": memory_id,
+                                    "vector": embedding,
+                                    "payload": {
+                                        "user_id": user_id,
+                                        "task_id": task_id,
+                                        "priority": priority,
+                                        "expires_at": expires_at.isoformat(),
+                                        "created_at": datetime.now(
+                                            timezone.utc
+                                        ).isoformat(),
+                                    },
+                                }
+                            ],
+                        )
+                    logger.info(
+                        f"Stored embedding to Qdrant for working memory {memory_id}"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to store embedding to Qdrant: {e}")
 
@@ -164,13 +175,13 @@ class WorkingMemoryService:
                     memory_id=memory_id,
                     operation="store_working_memory",
                     message="Working memory stored successfully",
-                    data=result
+                    data=result,
                 )
             else:
                 return MemoryOperationResult(
                     success=False,
                     operation="store_working_memory",
-                    message="Failed to store working memory"
+                    message="Failed to store working memory",
                 )
 
         except Exception as e:
@@ -178,7 +189,7 @@ class WorkingMemoryService:
             return MemoryOperationResult(
                 success=False,
                 operation="store_working_memory",
-                message=f"Error: {str(e)}"
+                message=f"Error: {str(e)}",
             )
 
     async def _generate_embedding(self, text: str) -> List[float]:
@@ -186,24 +197,19 @@ class WorkingMemoryService:
         try:
             async with AsyncISAModel(base_url=self.model_url) as client:
                 embedding = await client.embeddings.create(
-                    input=text,
-                    model="text-embedding-3-small"
+                    input=text, model="text-embedding-3-small"
                 )
                 return embedding.data[0].embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             return []
 
-    async def get_active_working_memories(
-        self,
-        user_id: str
-    ) -> List[Dict[str, Any]]:
+    async def get_active_working_memories(self, user_id: str) -> List[Dict[str, Any]]:
         """Get active (non-expired) working memories"""
         return await self.repository.get_active_memories(user_id)
 
     async def cleanup_expired_memories(
-        self,
-        user_id: Optional[str] = None
+        self, user_id: Optional[str] = None
     ) -> MemoryOperationResult:
         """Clean up expired working memories"""
         try:
@@ -212,24 +218,21 @@ class WorkingMemoryService:
                 success=True,
                 operation="cleanup",
                 message=f"Cleaned up {count} expired memories",
-                affected_count=count
+                affected_count=count,
             )
         except Exception as e:
             logger.error(f"Error cleaning up expired memories: {e}")
             return MemoryOperationResult(
-                success=False,
-                operation="cleanup",
-                message=f"Error: {str(e)}"
+                success=False, operation="cleanup", message=f"Error: {str(e)}"
             )
 
     async def search_by_task_id(
-        self,
-        user_id: str,
-        task_id: str,
-        include_expired: bool = False
+        self, user_id: str, task_id: str, include_expired: bool = False
     ) -> List[Dict[str, Any]]:
         """Search working memories by task ID"""
-        return await self.repository.search_by_task_id(user_id, task_id, include_expired)
+        return await self.repository.search_by_task_id(
+            user_id, task_id, include_expired
+        )
 
     async def vector_search(
         self,
@@ -266,18 +269,18 @@ class WorkingMemoryService:
                 logger.warning("Failed to generate query embedding for working memory")
                 return []
 
-            logger.info(f"Generated query embedding with {len(query_embedding)} dimensions for working memory search: {query[:50]}...")
+            logger.info(
+                f"Generated query embedding with {len(query_embedding)} dimensions for working memory search: {query[:50]}..."
+            )
 
             # Search Qdrant for similar vectors with user_id filter
             filter_conditions = {
-                "must": [
-                    {"field": "user_id", "match": {"keyword": user_id}}
-                ]
+                "must": [{"field": "user_id", "match": {"keyword": user_id}}]
             }
 
             async with self.qdrant:
                 search_results = await self.qdrant.search_with_filter(
-                    collection_name='working_memories',
+                    collection_name="working_memories",
                     vector=query_embedding,
                     filter_conditions=filter_conditions,
                     limit=limit,
@@ -287,15 +290,25 @@ class WorkingMemoryService:
                 )
 
             if not search_results:
-                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
+                logger.info(
+                    f"No vector search results for user {user_id} with threshold {score_threshold}"
+                )
                 return []
 
             # Get memory IDs and scores from results
-            memory_ids = [str(result['id']) for result in search_results]
-            scores = {str(result['id']): result.get('score', 0.0) for result in search_results}
-            vectors = {str(result['id']): result.get('vector') for result in search_results} if with_vectors else {}
+            memory_ids = [str(result["id"]) for result in search_results]
+            scores = {
+                str(result["id"]): result.get("score", 0.0) for result in search_results
+            }
+            vectors = (
+                {str(result["id"]): result.get("vector") for result in search_results}
+                if with_vectors
+                else {}
+            )
 
-            logger.info(f"Vector search found {len(memory_ids)} working memory matches for user {user_id}")
+            logger.info(
+                f"Vector search found {len(memory_ids)} working memory matches for user {user_id}"
+            )
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)
@@ -303,18 +316,21 @@ class WorkingMemoryService:
             # Filter expired if needed
             if not include_expired:
                 from datetime import datetime, timezone
+
                 now = datetime.now(timezone.utc)
-                memories = [m for m in memories if m.get('expires_at') and m['expires_at'] > now]
+                memories = [
+                    m for m in memories if m.get("expires_at") and m["expires_at"] > now
+                ]
 
             # Add similarity scores (and optionally embeddings) to results
             for memory in memories:
-                memory_id = memory.get('id')
-                memory['similarity_score'] = scores.get(memory_id, 0.0)
+                memory_id = memory.get("id")
+                memory["similarity_score"] = scores.get(memory_id, 0.0)
                 if with_vectors and memory_id in vectors:
-                    memory['embedding'] = vectors[memory_id]
+                    memory["embedding"] = vectors[memory_id]
 
             # Sort by score descending
-            memories.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+            memories.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
 
             return memories
 

@@ -84,9 +84,7 @@ class OrganizationClient:
         except Exception:
             return None
 
-    async def can_user_invite(
-        self, user_id: str, organization_id: str
-    ) -> bool:
+    async def can_user_invite(self, user_id: str, organization_id: str) -> bool:
         """
         Check if user can send invitations for this organization.
 
@@ -110,9 +108,7 @@ class OrganizationClient:
         except Exception:
             return False
 
-    async def is_user_member(
-        self, user_id: str, organization_id: str
-    ) -> bool:
+    async def is_user_member(self, user_id: str, organization_id: str) -> bool:
         """
         Check if user is already a member of the organization.
 
@@ -138,7 +134,7 @@ class OrganizationClient:
         organization_id: str,
         user_id: str,
         role: str = "member",
-        invited_by: Optional[str] = None
+        invited_by: Optional[str] = None,
     ) -> bool:
         """
         Add user to organization after invitation acceptance.
@@ -157,15 +153,13 @@ class OrganizationClient:
                 organization_id=organization_id,
                 user_id=user_id,
                 role=role,
-                metadata={"invited_by": invited_by} if invited_by else None
+                metadata={"invited_by": invited_by} if invited_by else None,
             )
             return result is not None
         except Exception:
             return False
 
-    async def get_organization_member_count(
-        self, organization_id: str
-    ) -> int:
+    async def get_organization_member_count(self, organization_id: str) -> int:
         """
         Get current member count for capacity checks.
 

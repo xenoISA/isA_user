@@ -44,7 +44,10 @@ def create_device_service(
     # Initialize MQTT client if available (lazy loading)
     mqtt_client = None
     try:
-        from core.mqtt_client import DeviceCommandClient  # noqa: F401  # availability probe for lazy loading
+        from core.mqtt_client import (
+            DeviceCommandClient,  # noqa: F401  # availability probe for lazy loading
+        )
+
         # Don't create immediately, will be lazy loaded by service
         mqtt_client = None
     except ImportError:

@@ -3,6 +3,7 @@ Session Service Routes Registry
 Defines all API routes for Consul service registration
 """
 from typing import Dict, Any
+
 # Define all routes
 SERVICE_ROUTES = [
     # Health Check
@@ -10,97 +11,99 @@ SERVICE_ROUTES = [
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Basic health check"
+        "description": "Basic health check",
     },
-        {
-            "path": "/api/v1/sessions/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/sessions/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Detailed health check"
+        "description": "Detailed health check",
     },
     # Session Management
     {
         "path": "/api/v1/sessions",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create new session"
+        "description": "Create new session",
     },
     {
         "path": "/api/v1/sessions/{session_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get session details"
+        "description": "Get session details",
     },
     {
         "path": "/api/v1/sessions/{session_id}",
         "methods": ["PUT"],
         "auth_required": True,
-        "description": "Update session"
+        "description": "Update session",
     },
     {
         "path": "/api/v1/sessions/{session_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Delete session"
+        "description": "Delete session",
     },
     {
         "path": "/api/v1/sessions",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List user sessions (with user_id query parameter)"
+        "description": "List user sessions (with user_id query parameter)",
     },
     # Session Messages
     {
         "path": "/api/v1/sessions/{session_id}/messages",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Add message to session"
+        "description": "Add message to session",
     },
     {
         "path": "/api/v1/sessions/{session_id}/messages",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get session messages"
+        "description": "Get session messages",
     },
     # Session Analytics
     {
         "path": "/api/v1/sessions/{session_id}/summary",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get session summary"
+        "description": "Get session summary",
     },
     {
         "path": "/api/v1/sessions/search",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Full-text search across user sessions and messages"
+        "description": "Full-text search across user sessions and messages",
     },
     {
         "path": "/api/v1/sessions/stats",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get session statistics"
+        "description": "Get session statistics",
     },
     # Session Memory (proxy to memory_service)
     {
         "path": "/api/v1/sessions/{session_id}/memory",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Store session memory (proxy to memory_service)"
+        "description": "Store session memory (proxy to memory_service)",
     },
     {
         "path": "/api/v1/sessions/{session_id}/memory",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get session memory (proxy to memory_service)"
-    }
+        "description": "Get session memory (proxy to memory_service)",
+    },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -134,6 +137,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "session_service",
@@ -146,6 +151,6 @@ SERVICE_METADATA = {
         "conversation_tracking",
         "conversation_search",
         "session_persistence",
-        "event_driven"
-    ]
+        "event_driven",
+    ],
 }

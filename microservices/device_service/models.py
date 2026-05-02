@@ -12,6 +12,7 @@ from enum import Enum
 
 class DeviceType(str, Enum):
     """设备类型"""
+
     SENSOR = "sensor"
     ACTUATOR = "actuator"
     GATEWAY = "gateway"
@@ -27,6 +28,7 @@ class DeviceType(str, Enum):
 
 class DeviceStatus(str, Enum):
     """设备状态"""
+
     PENDING = "pending"  # 待激活
     ACTIVE = "active"  # 在线活跃
     INACTIVE = "inactive"  # 离线
@@ -37,6 +39,7 @@ class DeviceStatus(str, Enum):
 
 class ConnectivityType(str, Enum):
     """连接类型"""
+
     WIFI = "wifi"
     ETHERNET = "ethernet"
     CELLULAR_4G = "4g"
@@ -51,6 +54,7 @@ class ConnectivityType(str, Enum):
 
 class SecurityLevel(str, Enum):
     """安全级别"""
+
     NONE = "none"
     BASIC = "basic"  # 基础认证
     STANDARD = "standard"  # 标准加密
@@ -62,8 +66,10 @@ class SecurityLevel(str, Enum):
 # Request Models
 # ==================
 
+
 class DeviceRegistrationRequest(BaseModel):
     """设备注册请求"""
+
     device_name: str = Field(..., min_length=1, max_length=200)
     device_type: DeviceType
     manufacturer: str = Field(..., min_length=1, max_length=100)
@@ -71,7 +77,9 @@ class DeviceRegistrationRequest(BaseModel):
     serial_number: str = Field(..., min_length=1, max_length=100)
     firmware_version: str = Field(..., min_length=1, max_length=50)
     hardware_version: Optional[str] = Field(None, max_length=50)
-    mac_address: Optional[str] = Field(None, pattern="^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
+    mac_address: Optional[str] = Field(
+        None, pattern="^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$"
+    )
     connectivity_type: ConnectivityType
     security_level: SecurityLevel = SecurityLevel.STANDARD
     location: Optional[Dict[str, Any]] = None  # {latitude, longitude, address, etc.}
@@ -82,6 +90,7 @@ class DeviceRegistrationRequest(BaseModel):
 
 class DeviceUpdateRequest(BaseModel):
     """设备更新请求"""
+
     device_name: Optional[str] = Field(None, min_length=1, max_length=200)
     status: Optional[DeviceStatus] = None
     firmware_version: Optional[str] = Field(None, max_length=50)
@@ -93,6 +102,7 @@ class DeviceUpdateRequest(BaseModel):
 
 class DeviceAuthRequest(BaseModel):
     """设备认证请求"""
+
     device_id: str
     device_secret: str  # 设备密钥（与 auth_service 保持一致）
     certificate: Optional[str] = None  # X.509证书（可选，未来扩展）
@@ -102,6 +112,7 @@ class DeviceAuthRequest(BaseModel):
 
 class DeviceCommandRequest(BaseModel):
     """设备命令请求"""
+
     command: str = Field(..., min_length=1, max_length=100)
     parameters: Optional[Dict[str, Any]] = {}
     timeout: int = Field(30, ge=1, le=300)  # 超时时间（秒）
@@ -111,6 +122,7 @@ class DeviceCommandRequest(BaseModel):
 
 class BulkCommandRequest(BaseModel):
     """批量命令请求"""
+
     device_ids: List[str]
     command_name: str = Field(..., alias="command", min_length=1, max_length=100)
     parameters: Optional[Dict[str, Any]] = Field(default={})
@@ -123,6 +135,7 @@ class BulkCommandRequest(BaseModel):
 
 class DeviceGroupRequest(BaseModel):
     """设备组请求"""
+
     group_name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     parent_group_id: Optional[str] = None  # 父组ID，支持层级
@@ -134,8 +147,10 @@ class DeviceGroupRequest(BaseModel):
 # Response Models
 # ==================
 
+
 class DeviceResponse(BaseModel):
     """设备响应"""
+
     device_id: str
     device_name: str
     device_type: DeviceType
@@ -166,6 +181,7 @@ class DeviceResponse(BaseModel):
 
 class DeviceAuthResponse(BaseModel):
     """设备认证响应"""
+
     device_id: str
     access_token: str
     token_type: str = "Bearer"
@@ -178,6 +194,7 @@ class DeviceAuthResponse(BaseModel):
 
 class DeviceGroupResponse(BaseModel):
     """设备组响应"""
+
     group_id: str
     user_id: str  # Owner of the device group (for authorization & multi-tenancy)
     organization_id: Optional[str]  # Organization ownership (for multi-tenancy)
@@ -193,6 +210,7 @@ class DeviceGroupResponse(BaseModel):
 
 class DeviceStatsResponse(BaseModel):
     """设备统计响应"""
+
     total_devices: int
     active_devices: int
     inactive_devices: int
@@ -207,6 +225,7 @@ class DeviceStatsResponse(BaseModel):
 
 class DeviceHealthResponse(BaseModel):
     """设备健康检查响应"""
+
     device_id: str
     status: DeviceStatus
     health_score: float = Field(..., ge=0, le=100)  # 健康评分 0-100
@@ -225,6 +244,7 @@ class DeviceHealthResponse(BaseModel):
 
 class DeviceListResponse(BaseModel):
     """设备列表响应"""
+
     devices: List[DeviceResponse]
     count: int
     limit: int
@@ -234,8 +254,10 @@ class DeviceListResponse(BaseModel):
 
 # ==================== Smart Frame Models ====================
 
+
 class FrameDisplayMode(str, Enum):
     """智能相框显示模式"""
+
     PHOTO_SLIDESHOW = "photo_slideshow"
     VIDEO_PLAYBACK = "video_playback"
     CLOCK_DISPLAY = "clock_display"
@@ -246,6 +268,7 @@ class FrameDisplayMode(str, Enum):
 
 class FrameOrientation(str, Enum):
     """相框方向"""
+
     LANDSCAPE = "landscape"
     PORTRAIT = "portrait"
     AUTO = "auto"
@@ -253,6 +276,7 @@ class FrameOrientation(str, Enum):
 
 class FrameConfig(BaseModel):
     """智能相框配置"""
+
     device_id: str = Field(..., description="设备ID")
 
     # Display settings
@@ -269,8 +293,7 @@ class FrameConfig(BaseModel):
 
     # Power management
     sleep_schedule: Dict[str, str] = Field(
-        default_factory=lambda: {"start": "23:00", "end": "07:00"},
-        description="休眠时间表"
+        default_factory=lambda: {"start": "23:00", "end": "07:00"}, description="休眠时间表"
     )
     auto_sleep: bool = Field(True, description="自动休眠")
     motion_detection: bool = Field(True, description="动作检测唤醒")
@@ -281,7 +304,9 @@ class FrameConfig(BaseModel):
     wifi_only_sync: bool = Field(True, description="仅Wi-Fi同步")
 
     # Display mode
-    display_mode: FrameDisplayMode = Field(FrameDisplayMode.PHOTO_SLIDESHOW, description="显示模式")
+    display_mode: FrameDisplayMode = Field(
+        FrameDisplayMode.PHOTO_SLIDESHOW, description="显示模式"
+    )
 
     # Location and environment
     location: Optional[Dict[str, float]] = Field(None, description="位置信息")
@@ -290,6 +315,7 @@ class FrameConfig(BaseModel):
 
 class DisplayCommand(BaseModel):
     """显示控制命令"""
+
     command_type: str = Field(..., description="命令类型")
     command_id: str = Field(..., description="命令ID")
     device_id: str = Field(..., description="目标设备ID")
@@ -309,6 +335,7 @@ class DisplayCommand(BaseModel):
 
 class FrameStatus(BaseModel):
     """智能相框状态"""
+
     device_id: str
 
     # Basic status
@@ -345,8 +372,10 @@ class FrameStatus(BaseModel):
 
 # ==================== Smart Frame Request/Response Models ====================
 
+
 class FrameRegistrationRequest(BaseModel):
     """智能相框注册请求"""
+
     device_name: str = Field(..., description="设备名称")
     manufacturer: str = Field("Generic", description="制造商")
     model: str = Field("SmartFrame", description="型号")
@@ -356,10 +385,14 @@ class FrameRegistrationRequest(BaseModel):
     # Frame specific info
     screen_size: str = Field(..., description="屏幕尺寸")
     resolution: str = Field(..., description="分辨率")
-    supported_formats: List[str] = Field(default_factory=lambda: ["jpg", "png", "mp4"], description="支持的文件格式")
+    supported_formats: List[str] = Field(
+        default_factory=lambda: ["jpg", "png", "mp4"], description="支持的文件格式"
+    )
 
     # Network info
-    connectivity_type: ConnectivityType = Field(ConnectivityType.WIFI, description="连接类型")
+    connectivity_type: ConnectivityType = Field(
+        ConnectivityType.WIFI, description="连接类型"
+    )
 
     # Location and organization
     location: Optional[Dict[str, float]] = Field(None, description="位置信息")
@@ -371,6 +404,7 @@ class FrameRegistrationRequest(BaseModel):
 
 class UpdateFrameConfigRequest(BaseModel):
     """更新相框配置请求"""
+
     brightness: Optional[int] = Field(None, ge=0, le=100)
     auto_brightness: Optional[bool] = None
     slideshow_interval: Optional[int] = Field(None, ge=5, le=3600)
@@ -382,7 +416,11 @@ class UpdateFrameConfigRequest(BaseModel):
 
 class FrameCommandRequest(BaseModel):
     """相框命令请求"""
-    command_type: str = Field(..., description="命令类型: display_photo, start_slideshow, stop_slideshow, sync_album, reboot")
+
+    command_type: str = Field(
+        ...,
+        description="命令类型: display_photo, start_slideshow, stop_slideshow, sync_album, reboot",
+    )
     parameters: Dict[str, Any] = Field(default_factory=dict, description="命令参数")
     priority: str = Field("normal", description="优先级")
     timeout_seconds: int = Field(30, description="超时时间")
@@ -390,6 +428,7 @@ class FrameCommandRequest(BaseModel):
 
 class FrameResponse(BaseModel):
     """智能相框响应"""
+
     device_id: str
     device_name: str
     status: DeviceStatus
@@ -407,22 +446,28 @@ class FrameResponse(BaseModel):
 
 class FrameListResponse(BaseModel):
     """智能相框列表响应"""
+
     frames: List[FrameResponse]
     count: int
     limit: int
     offset: int
+
+
 # ============================================================================
 # Device Pairing Models
 # ============================================================================
 
+
 class DevicePairingRequest(BaseModel):
     """Request to pair a device with a user"""
+
     pairing_token: str = Field(..., description="Pairing token from QR code")
     user_id: str = Field(..., description="User ID attempting to pair")
 
 
 class DevicePairingResponse(BaseModel):
     """Response for device pairing"""
+
     success: bool
     device: Optional[Dict[str, Any]] = None
     message: Optional[str] = None

@@ -141,7 +141,11 @@ class ProductClient:
             return None
 
     async def get_product_pricing(
-        self, product_id: str, user_id: str = None, subscription_id: Optional[str] = None, currency: str = "USD"
+        self,
+        product_id: str,
+        user_id: str = None,
+        subscription_id: Optional[str] = None,
+        currency: str = "USD",
     ) -> Optional[Dict[str, Any]]:
         """
         Get pricing information for a specific product
@@ -162,8 +166,7 @@ class ProductClient:
 
             # ProductServiceClient.get_product_pricing only accepts product_id and currency
             result = await self.client.get_product_pricing(
-                product_id=product_id,
-                currency=currency
+                product_id=product_id, currency=currency
             )
 
             return result

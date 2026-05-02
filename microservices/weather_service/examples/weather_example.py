@@ -9,7 +9,11 @@ import sys
 import os
 
 # Add parent directories to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+sys.path.append(
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+)
 
 from microservices.weather_service.client import WeatherServiceClient
 
@@ -68,8 +72,10 @@ async def example_weather_integration():
 
         if forecast:
             print(f"✓ 5-day forecast for {forecast['location']}:")
-            for i, day in enumerate(forecast['forecast'], 1):
-                print(f"  Day {i}: {day['temp_max']}°C / {day['temp_min']}°C - {day['condition']}")
+            for i, day in enumerate(forecast["forecast"], 1):
+                print(
+                    f"  Day {i}: {day['temp_max']}°C / {day['temp_min']}°C - {day['condition']}"
+                )
         else:
             print("✗ Failed to get forecast")
 
@@ -102,12 +108,12 @@ async def example_weather_integration():
             latitude=37.7749,
             longitude=-122.4194,
             is_default=True,
-            nickname="Home"
+            nickname="Home",
         )
 
         if location:
             print(f"✓ Saved location: {location['location']} ({location['nickname']})")
-            location_id = location['id']
+            location_id = location["id"]
         else:
             print("✗ Failed to save location")
             location_id = None
@@ -123,9 +129,9 @@ async def example_weather_integration():
 
         if locations:
             print(f"✓ Found {locations['total']} locations:")
-            for loc in locations['locations']:
-                default_mark = " (default)" if loc.get('is_default') else ""
-                nickname = f" - {loc.get('nickname')}" if loc.get('nickname') else ""
+            for loc in locations["locations"]:
+                default_mark = " (default)" if loc.get("is_default") else ""
+                nickname = f" - {loc.get('nickname')}" if loc.get("nickname") else ""
                 print(f"  • {loc['location']}{nickname}{default_mark}")
 
         print()
@@ -139,9 +145,11 @@ async def example_weather_integration():
 
         if summary:
             print(f"✓ Weather summary for {summary['location']}:")
-            print(f"  Current: {summary['current']['temperature']}°C, {summary['current']['condition']}")
+            print(
+                f"  Current: {summary['current']['temperature']}°C, {summary['current']['condition']}"
+            )
             print("  Forecast:")
-            for i, day in enumerate(summary['forecast'][:3], 1):
+            for i, day in enumerate(summary["forecast"][:3], 1):
                 print(f"    Day {i}: {day['temp_max']}°C / {day['temp_min']}°C")
 
         print()
@@ -154,9 +162,9 @@ async def example_weather_integration():
         alerts = await client.get_weather_alerts("Miami")
 
         if alerts:
-            if alerts['alerts']:
+            if alerts["alerts"]:
                 print(f"⚠️  Found {len(alerts['alerts'])} weather alerts:")
-                for alert in alerts['alerts']:
+                for alert in alerts["alerts"]:
                     print(f"  • {alert['headline']} ({alert['severity']})")
             else:
                 print("✓ No active weather alerts")
@@ -180,8 +188,12 @@ async def example_weather_integration():
         weather2 = await client.get_current_weather("Moscow")
         time2 = time.time() - start
 
-        print(f"✓ First request: {time1:.3f}s (cached: {weather1.get('cached', False)})")
-        print(f"✓ Second request: {time2:.3f}s (cached: {weather2.get('cached', False)})")
+        print(
+            f"✓ First request: {time1:.3f}s (cached: {weather1.get('cached', False)})"
+        )
+        print(
+            f"✓ Second request: {time2:.3f}s (cached: {weather2.get('cached', False)})"
+        )
         print(f"  Speed improvement: {time1/time2:.1f}x faster")
 
         print()
@@ -231,7 +243,7 @@ async def example_device_service_integration():
 
         if forecast:
             print("\n📅 3-day forecast:")
-            for day in forecast['forecast']:
+            for day in forecast["forecast"]:
                 print(f"   {day['date'][:10]}: {day['condition']}, {day['temp_max']}°C")
 
     finally:
@@ -244,7 +256,7 @@ if __name__ == "__main__":
     print("=" * 60 + "\n")
 
     print("⚠️  Note: These examples require OPENWEATHER_API_KEY to be set")
-    print("Set it with: export OPENWEATHER_API_KEY=\"your_api_key_here\"")
+    print('Set it with: export OPENWEATHER_API_KEY="your_api_key_here"')
     print()
 
     # Run examples
@@ -254,4 +266,3 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Examples Complete!")
     print("=" * 60 + "\n")
-

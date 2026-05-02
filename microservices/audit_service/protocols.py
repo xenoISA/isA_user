@@ -8,24 +8,25 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from datetime import datetime
 
 # Import only models (no I/O dependencies)
-from .models import (
-    AuditEvent, SecurityEvent, EventType
-)
+from .models import AuditEvent, SecurityEvent, EventType
 
 
 # Custom exceptions - defined here to avoid importing repository
 class AuditNotFoundError(Exception):
     """Audit event not found error"""
+
     pass
 
 
 class AuditValidationError(Exception):
     """Audit validation error"""
+
     pass
 
 
 class AuditServiceError(Exception):
     """Base exception for audit service errors"""
+
     pass
 
 
@@ -54,7 +55,7 @@ class AuditRepositoryProtocol(Protocol):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[AuditEvent]:
         """Get audit events list"""
         ...
@@ -64,30 +65,25 @@ class AuditRepositoryProtocol(Protocol):
         ...
 
     async def get_user_activities(
-        self,
-        user_id: str,
-        days: int = 30,
-        limit: int = 100
+        self, user_id: str, days: int = 30, limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Get user activities"""
         ...
 
     async def get_user_activity_summary(
-        self,
-        user_id: str,
-        days: int = 30
+        self, user_id: str, days: int = 30
     ) -> Dict[str, Any]:
         """Get user activity summary"""
         ...
 
-    async def create_security_event(self, security_event: SecurityEvent) -> Optional[SecurityEvent]:
+    async def create_security_event(
+        self, security_event: SecurityEvent
+    ) -> Optional[SecurityEvent]:
         """Create security event"""
         ...
 
     async def get_security_events(
-        self,
-        days: int = 7,
-        severity: Optional[str] = None
+        self, days: int = 7, severity: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get security events"""
         ...
@@ -100,7 +96,7 @@ class AuditRepositoryProtocol(Protocol):
         self,
         organization_id: Optional[str] = None,
         start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Get audit statistics"""
         ...

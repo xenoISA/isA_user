@@ -35,11 +35,13 @@ logger = logging.getLogger(__name__)
 
 class CalendarServiceError(Exception):
     """Base exception for service errors"""
+
     pass
 
 
 class CalendarServiceValidationError(CalendarServiceError):
     """Validation error"""
+
     pass
 
 
@@ -74,6 +76,7 @@ class CalendarService:
             try:
                 # Import Event only when needed to avoid import-time I/O
                 from core.nats_client import Event
+
                 self.Event = Event
             except ImportError:
                 self.Event = None
@@ -86,7 +89,9 @@ class CalendarService:
         try:
             # Validate dates
             if request.end_time <= request.start_time:
-                raise CalendarServiceValidationError("End time must be after start time")
+                raise CalendarServiceValidationError(
+                    "End time must be after start time"
+                )
 
             # Prepare event data
             event_data = request.dict()
@@ -113,12 +118,14 @@ class CalendarService:
                                     "title": request.title,
                                     "start_time": request.start_time.isoformat(),
                                     "end_time": request.end_time.isoformat(),
-                                    "timestamp": datetime.utcnow().isoformat()
-                                }
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                },
                             )
                             await self.event_bus.publish_event(nats_event)
                     except Exception as e:
-                        logger.error(f"Failed to publish calendar.event.created event: {e}")
+                        logger.error(
+                            f"Failed to publish calendar.event.created event: {e}"
+                        )
 
             return event
 
@@ -184,7 +191,9 @@ class CalendarService:
             # Validate dates if both provided
             if "start_time" in updates and "end_time" in updates:
                 if updates["end_time"] <= updates["start_time"]:
-                    raise CalendarServiceValidationError("End time must be after start time")
+                    raise CalendarServiceValidationError(
+                        "End time must be after start time"
+                    )
 
             # Update event
             updated = await self.repository.update_event(event_id, updates)
@@ -204,12 +213,14 @@ class CalendarService:
                                     "event_id": event_id,
                                     "user_id": user_id,
                                     "updated_fields": list(updates.keys()),
-                                    "timestamp": datetime.utcnow().isoformat()
-                                }
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                },
                             )
                             await self.event_bus.publish_event(nats_event)
                     except Exception as e:
-                        logger.error(f"Failed to publish calendar.event.updated event: {e}")
+                        logger.error(
+                            f"Failed to publish calendar.event.updated event: {e}"
+                        )
 
             return updated
 
@@ -234,8 +245,8 @@ class CalendarService:
                             data={
                                 "event_id": event_id,
                                 "user_id": user_id,
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
+                                "timestamp": datetime.utcnow().isoformat(),
+                            },
                         )
                         await self.event_bus.publish_event(nats_event)
                 except Exception as e:
@@ -281,7 +292,7 @@ class CalendarService:
                 last_synced=datetime.utcnow(),
                 synced_events=synced_count,
                 status="success",
-                message=f"Successfully synced {synced_count} events"
+                message=f"Successfully synced {synced_count} events",
             )
 
         except Exception as e:
@@ -323,7 +334,9 @@ class CalendarService:
 
     # External calendar sync implementations
 
-    async def _sync_google_calendar(self, user_id: str, credentials: Dict[str, Any]) -> int:
+    async def _sync_google_calendar(
+        self, user_id: str, credentials: Dict[str, Any]
+    ) -> int:
         """同步 Google Calendar"""
         # TODO: Implement Google Calendar API integration
         # Requirements:
@@ -335,7 +348,9 @@ class CalendarService:
         logger.warning("Google Calendar sync not fully implemented yet")
         return 0
 
-    async def _sync_apple_calendar(self, user_id: str, credentials: Dict[str, Any]) -> int:
+    async def _sync_apple_calendar(
+        self, user_id: str, credentials: Dict[str, Any]
+    ) -> int:
         """同步 Apple iCloud Calendar"""
         # TODO: Implement Apple iCloud Calendar integration
         # Use CalDAV protocol
@@ -343,7 +358,9 @@ class CalendarService:
         logger.warning("Apple Calendar sync not fully implemented yet")
         return 0
 
-    async def _sync_outlook_calendar(self, user_id: str, credentials: Dict[str, Any]) -> int:
+    async def _sync_outlook_calendar(
+        self, user_id: str, credentials: Dict[str, Any]
+    ) -> int:
         """同步 Microsoft Outlook Calendar"""
         # TODO: Implement Microsoft Graph API integration
         # Requirements:

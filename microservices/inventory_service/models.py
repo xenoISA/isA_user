@@ -12,12 +12,14 @@ from pydantic import BaseModel, Field
 
 class InventoryPolicy(str, Enum):
     """Inventory policy"""
+
     INFINITE = "infinite"
     FINITE = "finite"
 
 
 class ReservationStatus(str, Enum):
     """Reservation status"""
+
     ACTIVE = "active"
     COMMITTED = "committed"
     RELEASED = "released"
@@ -26,6 +28,7 @@ class ReservationStatus(str, Enum):
 
 class InventoryItem(BaseModel):
     """Stock record for a SKU"""
+
     sku_id: str
     location_id: Optional[str] = None
     inventory_policy: InventoryPolicy = InventoryPolicy.FINITE
@@ -38,6 +41,7 @@ class InventoryItem(BaseModel):
 
 class InventoryReservation(BaseModel):
     """Reservation record for an order"""
+
     reservation_id: str
     order_id: str
     sku_id: str

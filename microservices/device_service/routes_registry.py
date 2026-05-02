@@ -3,6 +3,7 @@ Device Service Routes Registry
 Defines all API routes for Consul service registration
 """
 from typing import Dict, Any
+
 # Define all routes
 SERVICE_ROUTES = [
     # Health Check
@@ -10,141 +11,143 @@ SERVICE_ROUTES = [
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Basic health check"
+        "description": "Basic health check",
     },
-        {
-            "path": "/api/v1/devices/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/devices/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     {
         "path": "/health/detailed",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Detailed health check"
+        "description": "Detailed health check",
     },
     # Device Management
     {
         "path": "/api/v1/devices",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Register new device"
+        "description": "Register new device",
     },
     {
         "path": "/api/v1/devices",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List devices"
+        "description": "List devices",
     },
     {
         "path": "/api/v1/devices/{device_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get device details"
+        "description": "Get device details",
     },
     {
         "path": "/api/v1/devices/{device_id}",
         "methods": ["PUT"],
         "auth_required": True,
-        "description": "Update device"
+        "description": "Update device",
     },
     {
         "path": "/api/v1/devices/{device_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Delete device"
+        "description": "Delete device",
     },
     # Device Authentication & Commands
     {
         "path": "/api/v1/devices/auth",
         "methods": ["POST"],
         "auth_required": False,
-        "description": "Device authentication"
+        "description": "Device authentication",
     },
     {
         "path": "/api/v1/devices/{device_id}/commands",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Send command to device"
+        "description": "Send command to device",
     },
     # Device Groups
     {
         "path": "/api/v1/groups",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create device group"
+        "description": "Create device group",
     },
     {
         "path": "/api/v1/groups/{group_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get device group"
+        "description": "Get device group",
     },
     {
         "path": "/api/v1/groups/{group_id}/devices/{device_id}",
         "methods": ["PUT"],
         "auth_required": True,
-        "description": "Add device to group"
+        "description": "Add device to group",
     },
     # Bulk Operations
     {
         "path": "/api/v1/devices/bulk/register",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Bulk device registration"
+        "description": "Bulk device registration",
     },
     {
         "path": "/api/v1/devices/bulk/commands",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Bulk device commands"
+        "description": "Bulk device commands",
     },
     # Frame Management (Digital Photo Frame)
     {
         "path": "/api/v1/devices/frames",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "List frame devices"
+        "description": "List frame devices",
     },
     {
         "path": "/api/v1/devices/frames/{frame_id}/display",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Display content on frame"
+        "description": "Display content on frame",
     },
     {
         "path": "/api/v1/devices/frames/{frame_id}/sync",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Sync frame with cloud"
+        "description": "Sync frame with cloud",
     },
     {
         "path": "/api/v1/devices/frames/{frame_id}/config",
         "methods": ["PUT"],
         "auth_required": True,
-        "description": "Update frame configuration"
+        "description": "Update frame configuration",
     },
     # Statistics & Debug
     {
         "path": "/api/v1/devices/stats",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get device statistics"
+        "description": "Get device statistics",
     },
     {
         "path": "/api/v1/service/stats",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Get service statistics"
+        "description": "Get service statistics",
     },
     {
         "path": "/api/v1/debug/consul",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Debug Consul registration"
-    }
+        "description": "Debug Consul registration",
+    },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     Generate compact route metadata for Consul
@@ -186,6 +189,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # Service metadata
 SERVICE_METADATA = {
     "service_name": "device_service",
@@ -200,6 +205,6 @@ SERVICE_METADATA = {
         "bulk_operations",
         "frame_management",
         "telemetry_integration",
-        "firmware_updates"
-    ]
+        "firmware_updates",
+    ],
 }

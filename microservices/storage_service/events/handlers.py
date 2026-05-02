@@ -238,12 +238,19 @@ async def handle_user_deleted(event: Event, storage_service, event_bus):
 
         # 3. Clean up user's vector embeddings (if intelligence service available)
         try:
-            if hasattr(storage_service, 'intelligence_service') and storage_service.intelligence_service:
+            if (
+                hasattr(storage_service, "intelligence_service")
+                and storage_service.intelligence_service
+            ):
                 collection_name = f"user_{user_id}_media"
-                await storage_service.intelligence_service.delete_collection(collection_name)
+                await storage_service.intelligence_service.delete_collection(
+                    collection_name
+                )
                 logger.info(f"Deleted vector collection {collection_name}")
         except Exception as e:
-            logger.warning(f"Failed to delete vector collection for user {user_id}: {e}")
+            logger.warning(
+                f"Failed to delete vector collection for user {user_id}: {e}"
+            )
 
         logger.info(f"Successfully handled user.deleted event for user {user_id}")
 

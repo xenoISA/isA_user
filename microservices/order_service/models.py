@@ -13,6 +13,7 @@ from enum import Enum
 
 class OrderStatus(str, Enum):
     """Order status enumeration"""
+
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -23,6 +24,7 @@ class OrderStatus(str, Enum):
 
 class OrderType(str, Enum):
     """Order type enumeration"""
+
     PURCHASE = "purchase"
     SUBSCRIPTION = "subscription"
     CREDIT_PURCHASE = "credit_purchase"
@@ -31,6 +33,7 @@ class OrderType(str, Enum):
 
 class PaymentStatus(str, Enum):
     """Payment status enumeration"""
+
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -40,6 +43,7 @@ class PaymentStatus(str, Enum):
 
 class FulfillmentStatus(str, Enum):
     """Fulfillment status enumeration"""
+
     PENDING = "pending"
     ALLOCATED = "allocated"
     SHIPPED = "shipped"
@@ -49,12 +53,14 @@ class FulfillmentStatus(str, Enum):
 
 class FulfillmentType(str, Enum):
     """Fulfillment type"""
+
     DIGITAL = "digital"
     SHIP = "ship"
 
 
 class Address(BaseModel):
     """Shipping or billing address"""
+
     name: Optional[str] = None
     line1: str
     line2: Optional[str] = None
@@ -68,6 +74,7 @@ class Address(BaseModel):
 
 class OrderLineItem(BaseModel):
     """Order line item"""
+
     product_id: str
     sku_id: Optional[str] = None
     title: Optional[str] = None
@@ -83,8 +90,10 @@ class OrderLineItem(BaseModel):
 
 # Core Order Models
 
+
 class Order(BaseModel):
     """Core order model"""
+
     order_id: str
     user_id: str
     order_type: OrderType
@@ -114,13 +123,17 @@ class Order(BaseModel):
 
 # Request Models
 
+
 class OrderCreateRequest(BaseModel):
     """Create order request"""
+
     user_id: str = Field(..., description="User ID placing the order")
     order_type: OrderType = Field(..., description="Type of order")
     total_amount: Decimal = Field(..., gt=0, description="Total order amount")
     currency: str = Field(default="USD", description="Order currency")
-    payment_intent_id: Optional[str] = Field(None, description="Associated payment intent")
+    payment_intent_id: Optional[str] = Field(
+        None, description="Associated payment intent"
+    )
     subscription_id: Optional[str] = Field(None, description="Associated subscription")
     wallet_id: Optional[str] = Field(None, description="Target wallet for credits")
     items: List[OrderLineItem] = Field(default=[], description="Order items")
@@ -132,17 +145,20 @@ class OrderCreateRequest(BaseModel):
     shipping_address: Optional[Address] = None
     billing_address: Optional[Address] = None
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
-    expires_in_minutes: Optional[int] = Field(default=30, description="Order expiration time")
+    expires_in_minutes: Optional[int] = Field(
+        default=30, description="Order expiration time"
+    )
 
-    @validator('total_amount')
+    @validator("total_amount")
     def validate_amount(cls, v):
         if v <= 0:
-            raise ValueError('Amount must be positive')
+            raise ValueError("Amount must be positive")
         return v
 
 
 class OrderUpdateRequest(BaseModel):
     """Update order request"""
+
     status: Optional[OrderStatus] = None
     payment_status: Optional[PaymentStatus] = None
     payment_intent_id: Optional[str] = None
@@ -155,21 +171,29 @@ class OrderUpdateRequest(BaseModel):
 
 class OrderCancelRequest(BaseModel):
     """Cancel order request"""
+
     reason: Optional[str] = Field(None, description="Cancellation reason")
-    refund_amount: Optional[Decimal] = Field(None, description="Refund amount if applicable")
+    refund_amount: Optional[Decimal] = Field(
+        None, description="Refund amount if applicable"
+    )
 
 
 class OrderCompleteRequest(BaseModel):
     """Complete order request"""
+
     payment_confirmed: bool = Field(..., description="Payment confirmation status")
     transaction_id: Optional[str] = Field(None, description="Transaction reference")
-    credits_added: Optional[Decimal] = Field(None, description="Credits added to wallet")
+    credits_added: Optional[Decimal] = Field(
+        None, description="Credits added to wallet"
+    )
 
 
 # Response Models
 
+
 class OrderResponse(BaseModel):
     """Order response model"""
+
     success: bool
     order: Optional[Order] = None
     message: str
@@ -178,6 +202,7 @@ class OrderResponse(BaseModel):
 
 class OrderListResponse(BaseModel):
     """Order list response"""
+
     orders: List[Order]
     total_count: int
     page: int
@@ -187,6 +212,7 @@ class OrderListResponse(BaseModel):
 
 class OrderSummary(BaseModel):
     """Order summary model"""
+
     order_id: str
     user_id: str
     order_type: OrderType
@@ -198,14 +224,17 @@ class OrderSummary(BaseModel):
 
 class OrderSummaryResponse(BaseModel):
     """Order summary response"""
+
     orders: List[OrderSummary]
     count: int
 
 
 # Filter and Query Models
 
+
 class OrderFilter(BaseModel):
     """Order filtering parameters"""
+
     user_id: Optional[str] = None
     order_type: Optional[OrderType] = None
     status: Optional[OrderStatus] = None
@@ -218,6 +247,7 @@ class OrderFilter(BaseModel):
 
 class OrderSearchParams(BaseModel):
     """Order search parameters"""
+
     query: str = Field(..., description="Search query")
     user_id: Optional[str] = None
     limit: int = Field(default=50, le=100)
@@ -226,8 +256,10 @@ class OrderSearchParams(BaseModel):
 
 # Order Statistics Models
 
+
 class OrderStatistics(BaseModel):
     """Order statistics model"""
+
     total_orders: int
     orders_by_status: Dict[str, int]
     orders_by_type: Dict[str, int]
@@ -241,8 +273,10 @@ class OrderStatistics(BaseModel):
 
 # Service Integration Models
 
+
 class PaymentServiceRequest(BaseModel):
     """Request to payment service"""
+
     amount: Decimal
     currency: str
     description: str
@@ -253,6 +287,7 @@ class PaymentServiceRequest(BaseModel):
 
 class WalletServiceRequest(BaseModel):
     """Request to wallet service"""
+
     user_id: str
     amount: Decimal
     order_id: str
@@ -262,6 +297,7 @@ class WalletServiceRequest(BaseModel):
 
 class OrderServiceStatus(BaseModel):
     """Order service status response"""
+
     service: str = "order_service"
     status: str = "operational"
     port: int = 8210
@@ -273,8 +309,10 @@ class OrderServiceStatus(BaseModel):
 
 # Webhook and Event Models
 
+
 class OrderEvent(BaseModel):
     """Order event model"""
+
     event_type: str
     order_id: str
     user_id: str
@@ -284,6 +322,7 @@ class OrderEvent(BaseModel):
 
 class WebhookPayload(BaseModel):
     """Webhook payload model"""
+
     event: OrderEvent
     signature: Optional[str] = None
     webhook_id: str

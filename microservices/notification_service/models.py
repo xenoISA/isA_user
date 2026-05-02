@@ -14,8 +14,10 @@ from pydantic import BaseModel, Field, EmailStr
 # 枚举类型定义
 # ====================
 
+
 class NotificationType(str, Enum):
     """通知类型"""
+
     EMAIL = "email"
     SMS = "sms"
     IN_APP = "in_app"
@@ -25,6 +27,7 @@ class NotificationType(str, Enum):
 
 class NotificationStatus(str, Enum):
     """通知状态"""
+
     PENDING = "pending"
     SENDING = "sending"
     SENT = "sent"
@@ -36,6 +39,7 @@ class NotificationStatus(str, Enum):
 
 class NotificationPriority(str, Enum):
     """通知优先级"""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -44,6 +48,7 @@ class NotificationPriority(str, Enum):
 
 class TemplateStatus(str, Enum):
     """模板状态"""
+
     DRAFT = "draft"
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -52,6 +57,7 @@ class TemplateStatus(str, Enum):
 
 class RecipientType(str, Enum):
     """接收者类型"""
+
     USER = "user"
     EMAIL = "email"
     PHONE = "phone"
@@ -61,6 +67,7 @@ class RecipientType(str, Enum):
 
 class PushPlatform(str, Enum):
     """推送平台"""
+
     WEB = "web"
     IOS = "ios"
     ANDROID = "android"
@@ -70,8 +77,10 @@ class PushPlatform(str, Enum):
 # 核心数据模型
 # ====================
 
+
 class NotificationTemplate(BaseModel):
     """通知模板模型"""
+
     id: Optional[int] = None
     template_id: str = Field(..., description="模板ID")
     name: str = Field(..., description="模板名称")
@@ -99,6 +108,7 @@ class NotificationTemplate(BaseModel):
 
 class Notification(BaseModel):
     """通知模型"""
+
     id: Optional[int] = None
     notification_id: str = Field(..., description="通知ID")
 
@@ -147,6 +157,7 @@ class Notification(BaseModel):
 
 class InAppNotification(BaseModel):
     """应用内通知模型"""
+
     id: Optional[int] = None
     notification_id: str = Field(..., description="通知ID")
     user_id: str = Field(..., description="用户ID")
@@ -174,6 +185,7 @@ class InAppNotification(BaseModel):
 
 class NotificationBatch(BaseModel):
     """批量通知模型"""
+
     id: Optional[int] = None
     batch_id: str = Field(..., description="批次ID")
     name: Optional[str] = Field(None, description="批次名称")
@@ -205,6 +217,7 @@ class NotificationBatch(BaseModel):
 
 class EmailProvider(BaseModel):
     """邮件提供商配置"""
+
     provider_name: str = Field(..., description="提供商名称")
     api_key: Optional[str] = Field(None, description="API密钥")
     api_endpoint: Optional[str] = Field(None, description="API端点")
@@ -217,6 +230,7 @@ class EmailProvider(BaseModel):
 
 class PushSubscription(BaseModel):
     """推送订阅模型"""
+
     id: Optional[int] = None
     user_id: str = Field(..., description="用户ID")
     device_token: str = Field(..., description="设备令牌/订阅令牌")
@@ -237,8 +251,10 @@ class PushSubscription(BaseModel):
 # 请求/响应模型
 # ====================
 
+
 class SendNotificationRequest(BaseModel):
     """发送通知请求"""
+
     type: NotificationType
     recipient_id: Optional[str] = None
     recipient_email: Optional[EmailStr] = None
@@ -256,6 +272,7 @@ class SendNotificationRequest(BaseModel):
 
 class SendBatchRequest(BaseModel):
     """批量发送请求"""
+
     name: Optional[str] = None
     template_id: str
     type: NotificationType
@@ -267,6 +284,7 @@ class SendBatchRequest(BaseModel):
 
 class CreateTemplateRequest(BaseModel):
     """创建模板请求"""
+
     name: str
     description: Optional[str] = None
     type: NotificationType
@@ -279,6 +297,7 @@ class CreateTemplateRequest(BaseModel):
 
 class UpdateTemplateRequest(BaseModel):
     """更新模板请求"""
+
     name: Optional[str] = None
     description: Optional[str] = None
     subject: Optional[str] = None
@@ -291,11 +310,15 @@ class UpdateTemplateRequest(BaseModel):
 
 class RenderTemplateRequest(BaseModel):
     """Template render request"""
-    variables: Dict[str, Any] = Field(default_factory=dict, description="Variables to substitute in the template")
+
+    variables: Dict[str, Any] = Field(
+        default_factory=dict, description="Variables to substitute in the template"
+    )
 
 
 class RegisterPushSubscriptionRequest(BaseModel):
     """注册推送订阅请求"""
+
     user_id: str
     device_token: str
     platform: PushPlatform
@@ -309,6 +332,7 @@ class RegisterPushSubscriptionRequest(BaseModel):
 
 class NotificationResponse(BaseModel):
     """通知响应"""
+
     notification: Notification
     message: str = Field(default="Notification processed")
     success: bool = Field(default=True)
@@ -316,18 +340,21 @@ class NotificationResponse(BaseModel):
 
 class TemplateResponse(BaseModel):
     """模板响应"""
+
     template: NotificationTemplate
     message: str = Field(default="Template processed")
 
 
 class BatchResponse(BaseModel):
     """批量发送响应"""
+
     batch: NotificationBatch
     message: str = Field(default="Batch created")
 
 
 class NotificationStatsResponse(BaseModel):
     """通知统计响应"""
+
     total_sent: int = 0
     total_delivered: int = 0
     total_failed: int = 0
@@ -341,8 +368,10 @@ class NotificationStatsResponse(BaseModel):
 # 系统模型
 # ====================
 
+
 class HealthResponse(BaseModel):
     """健康检查响应"""
+
     status: str
     service: str
     port: int
@@ -351,6 +380,7 @@ class HealthResponse(BaseModel):
 
 class ServiceInfo(BaseModel):
     """服务信息"""
+
     service: str
     version: str
     description: str

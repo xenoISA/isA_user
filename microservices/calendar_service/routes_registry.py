@@ -3,66 +3,69 @@ Calendar Service Routes Registry
 Defines all API routes for Consul service registration
 """
 from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/calendar/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/calendar/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     # Calendar Events
     {
         "path": "/api/v1/calendar/events",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create calendar events"
+        "description": "List/create calendar events",
     },
     {
         "path": "/api/v1/calendar/events/{event_id}",
         "methods": ["GET", "PUT", "DELETE"],
         "auth_required": True,
-        "description": "Get/update/delete calendar event"
+        "description": "Get/update/delete calendar event",
     },
     # Special Views
     {
         "path": "/api/v1/calendar/upcoming",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get upcoming events"
+        "description": "Get upcoming events",
     },
     {
         "path": "/api/v1/calendar/today",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get today's events"
+        "description": "Get today's events",
     },
     # Calendar Sync
     {
         "path": "/api/v1/calendar/sync",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Sync calendar with external source"
+        "description": "Sync calendar with external source",
     },
     {
         "path": "/api/v1/calendar/sync/status",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get sync status"
+        "description": "Get sync status",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -95,6 +98,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "calendar_service",
@@ -105,6 +110,6 @@ SERVICE_METADATA = {
         "calendar_views",
         "external_sync",
         "upcoming_events",
-        "today_events"
-    ]
+        "today_events",
+    ],
 }

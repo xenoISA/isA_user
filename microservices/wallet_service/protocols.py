@@ -23,39 +23,47 @@ from .models import (
 # Custom Exceptions - defined here to avoid importing repository
 # ============================================================================
 
+
 class WalletNotFoundError(Exception):
     """Wallet not found error"""
+
     pass
 
 
 class InsufficientBalanceError(Exception):
     """Insufficient balance for the requested operation"""
+
     pass
 
 
 class DuplicateWalletError(Exception):
     """User already has a wallet of this type"""
+
     pass
 
 
 class TransactionNotFoundError(Exception):
     """Transaction not found error"""
+
     pass
 
 
 class InvalidTransactionError(Exception):
     """Invalid transaction error"""
+
     pass
 
 
 class WalletFrozenError(Exception):
     """Wallet is frozen and cannot perform operations"""
+
     pass
 
 
 # ============================================================================
 # Repository Protocols
 # ============================================================================
+
 
 @runtime_checkable
 class WalletRepositoryProtocol(Protocol):
@@ -179,6 +187,7 @@ class WalletRepositoryProtocol(Protocol):
 # ============================================================================
 # Client Protocols
 # ============================================================================
+
 
 @runtime_checkable
 class EventBusProtocol(Protocol):

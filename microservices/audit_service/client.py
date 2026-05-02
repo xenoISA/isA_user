@@ -24,7 +24,7 @@ class AuditServiceClient:
             base_url: Audit service base URL, defaults to service discovery
         """
         if base_url:
-            self.base_url = base_url.rstrip('/')
+            self.base_url = base_url.rstrip("/")
         else:
             # Use service discovery
             try:
@@ -66,7 +66,7 @@ class AuditServiceClient:
         description: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Log an audit event
@@ -108,7 +108,7 @@ class AuditServiceClient:
                 "category": category,
                 "action": action,
                 "severity": severity,
-                "status": status
+                "status": status,
             }
 
             if user_id:
@@ -133,8 +133,7 @@ class AuditServiceClient:
                 event_data["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/audit/events",
-                json=event_data
+                f"{self.base_url}/api/v1/audit/events", json=event_data
             )
             response.raise_for_status()
             return response.json()
@@ -147,8 +146,7 @@ class AuditServiceClient:
             return None
 
     async def log_batch_events(
-        self,
-        events: List[Dict[str, Any]]
+        self, events: List[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
         """
         Log multiple audit events in batch
@@ -178,8 +176,7 @@ class AuditServiceClient:
         """
         try:
             response = await self.client.post(
-                f"{self.base_url}/api/v1/audit/events/batch",
-                json={"events": events}
+                f"{self.base_url}/api/v1/audit/events/batch", json={"events": events}
             )
             response.raise_for_status()
             return response.json()
@@ -208,7 +205,7 @@ class AuditServiceClient:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """
         Query audit events with filters
@@ -240,10 +237,7 @@ class AuditServiceClient:
             ...     print(f"{event['timestamp']}: {event['action']}")
         """
         try:
-            query_data = {
-                "limit": limit,
-                "offset": offset
-            }
+            query_data = {"limit": limit, "offset": offset}
 
             if user_id:
                 query_data["user_id"] = user_id
@@ -267,8 +261,7 @@ class AuditServiceClient:
                 query_data["end_time"] = end_time.isoformat()
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/audit/events/query",
-                json=query_data
+                f"{self.base_url}/api/v1/audit/events/query", json=query_data
             )
             response.raise_for_status()
             return response.json()
@@ -285,10 +278,7 @@ class AuditServiceClient:
     # =============================================================================
 
     async def get_user_activities(
-        self,
-        user_id: str,
-        limit: int = 100,
-        offset: int = 0
+        self, user_id: str, limit: int = 100, offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         Get user activity history
@@ -309,7 +299,7 @@ class AuditServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/audit/users/{user_id}/activities",
-                params={"limit": limit, "offset": offset}
+                params={"limit": limit, "offset": offset},
             )
             response.raise_for_status()
             return response.json()
@@ -322,9 +312,7 @@ class AuditServiceClient:
             return None
 
     async def get_user_activity_summary(
-        self,
-        user_id: str,
-        days: int = 30
+        self, user_id: str, days: int = 30
     ) -> Optional[Dict[str, Any]]:
         """
         Get user activity summary
@@ -344,7 +332,7 @@ class AuditServiceClient:
         try:
             response = await self.client.get(
                 f"{self.base_url}/api/v1/audit/users/{user_id}/summary",
-                params={"days": days}
+                params={"days": days},
             )
             response.raise_for_status()
             return response.json()
@@ -367,7 +355,7 @@ class AuditServiceClient:
         description: str,
         user_id: Optional[str] = None,
         resource_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create a security alert
@@ -395,7 +383,7 @@ class AuditServiceClient:
             alert_data = {
                 "alert_type": alert_type,
                 "severity": severity,
-                "description": description
+                "description": description,
             }
 
             if user_id:
@@ -406,8 +394,7 @@ class AuditServiceClient:
                 alert_data["metadata"] = metadata
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/audit/security/alerts",
-                json=alert_data
+                f"{self.base_url}/api/v1/audit/security/alerts", json=alert_data
             )
             response.raise_for_status()
             return response.json()
@@ -420,9 +407,7 @@ class AuditServiceClient:
             return None
 
     async def get_security_events(
-        self,
-        severity: Optional[str] = None,
-        limit: int = 100
+        self, severity: Optional[str] = None, limit: int = 100
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get security events
@@ -443,8 +428,7 @@ class AuditServiceClient:
                 params["severity"] = severity
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/audit/security/events",
-                params=params
+                f"{self.base_url}/api/v1/audit/security/events", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -462,7 +446,7 @@ class AuditServiceClient:
         standard: str,
         start_date: datetime,
         end_date: datetime,
-        organization_id: Optional[str] = None
+        organization_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Generate compliance report
@@ -490,21 +474,22 @@ class AuditServiceClient:
                 "report_type": report_type,
                 "standard": standard,
                 "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat()
+                "end_date": end_date.isoformat(),
             }
 
             if organization_id:
                 report_data["organization_id"] = organization_id
 
             response = await self.client.post(
-                f"{self.base_url}/api/v1/audit/compliance/reports",
-                json=report_data
+                f"{self.base_url}/api/v1/audit/compliance/reports", json=report_data
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to generate compliance report: {e.response.status_code}")
+            logger.error(
+                f"Failed to generate compliance report: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error generating compliance report: {e}")

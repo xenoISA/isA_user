@@ -3,202 +3,205 @@ Media Service Routes Registry
 Defines all API routes for Consul service registration
 """
 from typing import Dict, Any
+
 # 定义所有路由
 SERVICE_ROUTES = [
     {
         "path": "/",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Root health check"
+        "description": "Root health check",
     },
     {
         "path": "/health",
         "methods": ["GET"],
         "auth_required": False,
-        "description": "Service health check"
+        "description": "Service health check",
     },
-        {
-            "path": "/api/v1/media/health",
-            "methods": ["GET"],
-            "auth_required": False,
-            "description": "Service health check (API v1)"
-        },
+    {
+        "path": "/api/v1/media/health",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Service health check (API v1)",
+    },
     # File Upload
     {
         "path": "/api/v1/files/upload",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Upload media file"
+        "description": "Upload media file",
     },
     # Photo Versions
     {
         "path": "/api/v1/photos/versions/save",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Save photo version"
+        "description": "Save photo version",
     },
     {
         "path": "/api/v1/versions",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create photo version"
+        "description": "Create photo version",
     },
     {
         "path": "/api/v1/versions/{version_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get photo version"
+        "description": "Get photo version",
     },
     {
         "path": "/api/v1/photos/{photo_id}/versions",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create photo versions"
+        "description": "List/create photo versions",
     },
     {
         "path": "/api/v1/photos/{photo_id}/versions/{version_id}/switch",
         "methods": ["PUT"],
         "auth_required": True,
-        "description": "Switch active version"
+        "description": "Switch active version",
     },
     {
         "path": "/api/v1/photos/versions/{version_id}",
         "methods": ["DELETE"],
         "auth_required": True,
-        "description": "Delete photo version"
+        "description": "Delete photo version",
     },
     # Metadata
     {
         "path": "/api/v1/metadata/{file_id}",
         "methods": ["GET", "PUT"],
         "auth_required": True,
-        "description": "Get/update photo metadata"
+        "description": "Get/update photo metadata",
     },
     # Playlists
     {
         "path": "/api/v1/playlists",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create playlists"
+        "description": "List/create playlists",
     },
     {
         "path": "/api/v1/playlists/{playlist_id}",
         "methods": ["GET", "PUT", "DELETE"],
         "auth_required": True,
-        "description": "Get/update/delete playlist"
+        "description": "Get/update/delete playlist",
     },
     # Rotation Schedules
     {
         "path": "/api/v1/schedules",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create rotation schedule"
+        "description": "Create rotation schedule",
     },
     {
         "path": "/api/v1/schedules/{schedule_id}",
         "methods": ["GET", "DELETE"],
         "auth_required": True,
-        "description": "Get/delete schedule"
+        "description": "Get/delete schedule",
     },
     {
         "path": "/api/v1/schedules/{schedule_id}/status",
         "methods": ["PATCH"],
         "auth_required": True,
-        "description": "Update schedule status"
+        "description": "Update schedule status",
     },
     {
         "path": "/api/v1/frames/{frame_id}/schedules",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get frame schedules"
+        "description": "Get frame schedules",
     },
     # Photo Cache
     {
         "path": "/api/v1/cache",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create cache entry"
+        "description": "Create cache entry",
     },
     {
         "path": "/api/v1/frames/{frame_id}/cache",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get frame cache"
+        "description": "Get frame cache",
     },
     {
         "path": "/api/v1/cache/{cache_id}/status",
         "methods": ["PATCH"],
         "auth_required": True,
-        "description": "Update cache status"
+        "description": "Update cache status",
     },
     # Gallery API
     {
         "path": "/api/v1/media/gallery/albums",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get gallery albums"
+        "description": "Get gallery albums",
     },
     {
         "path": "/api/v1/media/gallery/playlists",
         "methods": ["GET", "POST"],
         "auth_required": True,
-        "description": "List/create gallery playlists"
+        "description": "List/create gallery playlists",
     },
     {
         "path": "/api/v1/media/gallery/playlists/{playlist_id}",
         "methods": ["GET", "PUT", "DELETE"],
         "auth_required": True,
-        "description": "Get/update/delete gallery playlist"
+        "description": "Get/update/delete gallery playlist",
     },
     {
         "path": "/api/v1/media/gallery/photos/random",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get random photos"
+        "description": "Get random photos",
     },
     {
         "path": "/api/v1/media/gallery/photos/metadata",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Batch get photo metadata"
+        "description": "Batch get photo metadata",
     },
     {
         "path": "/api/v1/media/gallery/cache/preload",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Preload cache"
+        "description": "Preload cache",
     },
     {
         "path": "/api/v1/media/gallery/cache/{frame_id}/stats",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get cache stats"
+        "description": "Get cache stats",
     },
     {
         "path": "/api/v1/media/gallery/cache/{frame_id}/clear",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Clear cache"
+        "description": "Clear cache",
     },
     {
         "path": "/api/v1/media/gallery/schedules",
         "methods": ["POST"],
         "auth_required": True,
-        "description": "Create gallery schedule"
+        "description": "Create gallery schedule",
     },
     {
         "path": "/api/v1/media/gallery/schedules/{frame_id}",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get gallery schedules"
+        "description": "Get gallery schedules",
     },
     {
         "path": "/api/v1/media/gallery/frames/{frame_id}/playlists",
         "methods": ["GET"],
         "auth_required": True,
-        "description": "Get frame playlists"
+        "description": "Get frame playlists",
     },
 ]
+
+
 def get_routes_for_consul() -> Dict[str, Any]:
     """
     为 Consul 生成紧凑的路由元数据
@@ -239,6 +242,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }
+
+
 # 服务元数据
 SERVICE_METADATA = {
     "service_name": "media_service",
@@ -251,6 +256,6 @@ SERVICE_METADATA = {
         "playlist_management",
         "rotation_schedules",
         "photo_cache",
-        "gallery_api"
-    ]
+        "gallery_api",
+    ],
 }

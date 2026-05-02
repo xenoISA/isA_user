@@ -14,8 +14,10 @@ from pydantic import BaseModel, Field
 # 枚举类型定义
 # ====================
 
+
 class ContentType(str, Enum):
     """内容类型枚举"""
+
     TEXT = "text"
     IMAGE = "image"
     AUDIO = "audio"
@@ -27,6 +29,7 @@ class ContentType(str, Enum):
 
 class ComplianceCheckType(str, Enum):
     """合规检查类型"""
+
     CONTENT_MODERATION = "content_moderation"  # 内容审核
     PII_DETECTION = "pii_detection"  # 个人信息检测
     PROMPT_INJECTION = "prompt_injection"  # 提示词注入检测
@@ -40,6 +43,7 @@ class ComplianceCheckType(str, Enum):
 
 class ComplianceStatus(str, Enum):
     """合规状态"""
+
     PASS = "pass"  # 通过
     FAIL = "fail"  # 失败
     WARNING = "warning"  # 警告
@@ -50,6 +54,7 @@ class ComplianceStatus(str, Enum):
 
 class RiskLevel(str, Enum):
     """风险等级"""
+
     NONE = "none"
     LOW = "low"
     MEDIUM = "medium"
@@ -59,6 +64,7 @@ class RiskLevel(str, Enum):
 
 class ModerationCategory(str, Enum):
     """内容审核分类"""
+
     HATE_SPEECH = "hate_speech"
     VIOLENCE = "violence"
     SEXUAL = "sexual"
@@ -72,6 +78,7 @@ class ModerationCategory(str, Enum):
 
 class PIIType(str, Enum):
     """个人信息类型"""
+
     EMAIL = "email"
     PHONE = "phone"
     SSN = "ssn"
@@ -89,8 +96,10 @@ class PIIType(str, Enum):
 # 核心数据模型
 # ====================
 
+
 class ComplianceCheck(BaseModel):
     """合规检查记录"""
+
     id: Optional[int] = None
     check_id: str = Field(..., description="检查唯一标识符")
 
@@ -118,7 +127,9 @@ class ComplianceCheck(BaseModel):
     detected_issues: List[str] = Field(default_factory=list, description="检测到的问题")
 
     # 审核详情
-    moderation_categories: Optional[Dict[str, float]] = Field(None, description="审核类别评分")
+    moderation_categories: Optional[Dict[str, float]] = Field(
+        None, description="审核类别评分"
+    )
     detected_pii: Optional[List[Dict[str, Any]]] = Field(None, description="检测到的PII")
 
     # 处理信息
@@ -144,6 +155,7 @@ class ComplianceCheck(BaseModel):
 
 class CompliancePolicy(BaseModel):
     """合规策略配置"""
+
     id: Optional[int] = None
     policy_id: str = Field(..., description="策略ID")
     policy_name: str = Field(..., description="策略名称")
@@ -177,6 +189,7 @@ class CompliancePolicy(BaseModel):
 
 class ContentModerationResult(BaseModel):
     """内容审核结果"""
+
     check_id: str
     content_type: ContentType
     status: ComplianceStatus
@@ -199,13 +212,14 @@ class ContentModerationResult(BaseModel):
 
 class PIIDetectionResult(BaseModel):
     """PII检测结果"""
+
     check_id: str
     status: ComplianceStatus
 
     # 检测到的PII
     detected_pii: List[Dict[str, Any]] = Field(
         default_factory=list,
-        description="检测到的PII列表，每项包含: type, value(masked), location, confidence"
+        description="检测到的PII列表，每项包含: type, value(masked), location, confidence",
     )
 
     # 统计
@@ -221,6 +235,7 @@ class PIIDetectionResult(BaseModel):
 
 class PromptInjectionResult(BaseModel):
     """提示词注入检测结果"""
+
     check_id: str
     status: ComplianceStatus
     risk_level: RiskLevel
@@ -245,8 +260,10 @@ class PromptInjectionResult(BaseModel):
 # 请求/响应模型
 # ====================
 
+
 class ComplianceCheckRequest(BaseModel):
     """合规检查请求"""
+
     user_id: str = Field(..., description="用户ID")
     organization_id: Optional[str] = None
     session_id: Optional[str] = None
@@ -261,7 +278,7 @@ class ComplianceCheckRequest(BaseModel):
     # 检查配置
     check_types: List[ComplianceCheckType] = Field(
         default_factory=lambda: [ComplianceCheckType.CONTENT_MODERATION],
-        description="要执行的检查类型"
+        description="要执行的检查类型",
     )
     policy_id: Optional[str] = Field(None, description="使用的策略ID")
 
@@ -271,6 +288,7 @@ class ComplianceCheckRequest(BaseModel):
 
 class ComplianceCheckResponse(BaseModel):
     """合规检查响应"""
+
     check_id: str
     status: ComplianceStatus
     risk_level: RiskLevel
@@ -297,6 +315,7 @@ class ComplianceCheckResponse(BaseModel):
 
 class BatchComplianceCheckRequest(BaseModel):
     """批量合规检查请求"""
+
     user_id: str
     organization_id: Optional[str] = None
 
@@ -306,6 +325,7 @@ class BatchComplianceCheckRequest(BaseModel):
 
 class BatchComplianceCheckResponse(BaseModel):
     """批量合规检查响应"""
+
     total_items: int
     passed_items: int
     failed_items: int
@@ -317,6 +337,7 @@ class BatchComplianceCheckResponse(BaseModel):
 
 class ComplianceReportRequest(BaseModel):
     """合规报告请求"""
+
     organization_id: Optional[str] = None
     user_id: Optional[str] = None
 
@@ -337,6 +358,7 @@ class ComplianceReportRequest(BaseModel):
 
 class ComplianceReportResponse(BaseModel):
     """合规报告响应"""
+
     report_id: str
     period: Dict[str, datetime]
 
@@ -367,6 +389,7 @@ class ComplianceReportResponse(BaseModel):
 
 class CompliancePolicyRequest(BaseModel):
     """创建/更新合规策略请求"""
+
     policy_name: str
     organization_id: Optional[str] = None
 
@@ -384,8 +407,10 @@ class CompliancePolicyRequest(BaseModel):
 # 系统模型
 # ====================
 
+
 class ComplianceServiceStatus(BaseModel):
     """合规服务状态"""
+
     service: str = "compliance_service"
     status: str = "operational"
     port: int = 8250
@@ -400,7 +425,7 @@ class ComplianceServiceStatus(BaseModel):
         default_factory=lambda: {
             "openai": False,
             "aws_comprehend": False,
-            "perspective_api": False
+            "perspective_api": False,
         }
     )
 
@@ -409,6 +434,7 @@ class ComplianceServiceStatus(BaseModel):
 
 class ComplianceStats(BaseModel):
     """合规统计"""
+
     total_checks_today: int
     total_checks_7d: int
     total_checks_30d: int
@@ -428,20 +454,27 @@ class ComplianceStats(BaseModel):
 # 导出所有模型
 __all__ = [
     # Enums
-    'ContentType', 'ComplianceCheckType', 'ComplianceStatus', 'RiskLevel',
-    'ModerationCategory', 'PIIType',
-
+    "ContentType",
+    "ComplianceCheckType",
+    "ComplianceStatus",
+    "RiskLevel",
+    "ModerationCategory",
+    "PIIType",
     # Core Models
-    'ComplianceCheck', 'CompliancePolicy', 'ContentModerationResult',
-    'PIIDetectionResult', 'PromptInjectionResult',
-
+    "ComplianceCheck",
+    "CompliancePolicy",
+    "ContentModerationResult",
+    "PIIDetectionResult",
+    "PromptInjectionResult",
     # Request/Response Models
-    'ComplianceCheckRequest', 'ComplianceCheckResponse',
-    'BatchComplianceCheckRequest', 'BatchComplianceCheckResponse',
-    'ComplianceReportRequest', 'ComplianceReportResponse',
-    'CompliancePolicyRequest',
-
+    "ComplianceCheckRequest",
+    "ComplianceCheckResponse",
+    "BatchComplianceCheckRequest",
+    "BatchComplianceCheckResponse",
+    "ComplianceReportRequest",
+    "ComplianceReportResponse",
+    "CompliancePolicyRequest",
     # System Models
-    'ComplianceServiceStatus', 'ComplianceStats'
+    "ComplianceServiceStatus",
+    "ComplianceStats",
 ]
-

@@ -11,13 +11,14 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import (
-    DeviceResponse, DeviceStatus, DeviceGroupResponse, FrameConfig
-)
+from .models import DeviceResponse, DeviceStatus, DeviceGroupResponse, FrameConfig
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +35,11 @@ class DeviceRepository:
         # Discover PostgreSQL service
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -48,7 +49,7 @@ class DeviceRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='device_service',
+            user_id="device_service",
             min_pool_size=1,
             max_pool_size=2,
         )
@@ -68,7 +69,7 @@ class DeviceRepository:
                 logger.info("Device schema ensured")
 
             # Create devices table
-            create_devices_table = '''
+            create_devices_table = """
                 CREATE TABLE IF NOT EXISTS device.devices (
                     device_id VARCHAR(255) PRIMARY KEY,
                     user_id VARCHAR(255) NOT NULL,
@@ -99,7 +100,7 @@ class DeviceRepository:
                     CONSTRAINT valid_status CHECK (status IN ('pending', 'active', 'inactive', 'maintenance', 'error', 'decommissioned')),
                     CONSTRAINT valid_security_level CHECK (security_level IN ('none', 'basic', 'standard', 'high', 'critical'))
                 )
-            '''
+            """
             async with self.db:
                 await self.db.execute(create_devices_table)
                 logger.info("Devices table ensured")
@@ -109,7 +110,9 @@ class DeviceRepository:
 
     # ==================== Device Operations ====================
 
-    async def create_device(self, device_data: Dict[str, Any]) -> Optional[DeviceResponse]:
+    async def create_device(
+        self, device_data: Dict[str, Any]
+    ) -> Optional[DeviceResponse]:
         """Create a new device"""
         try:
             # Prepare location, tags, and metadata as JSON strings for PostgreSQL JSONB/ARRAY types
@@ -159,7 +162,7 @@ class DeviceRepository:
                 0,  # total_telemetry_points
                 0.0,  # uptime_percentage
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -168,12 +171,12 @@ class DeviceRepository:
             if results and len(results) > 0:
                 row = results[0]
                 # Deserialize JSONB fields
-                if 'location' in row and isinstance(row['location'], str):
-                    row['location'] = json.loads(row['location'])
-                if 'metadata' in row and isinstance(row['metadata'], str):
-                    row['metadata'] = json.loads(row['metadata'])
-                if 'uptime_percentage' in row and row['uptime_percentage'] is not None:
-                    row['uptime_percentage'] = float(row['uptime_percentage'])
+                if "location" in row and isinstance(row["location"], str):
+                    row["location"] = json.loads(row["location"])
+                if "metadata" in row and isinstance(row["metadata"], str):
+                    row["metadata"] = json.loads(row["metadata"])
+                if "uptime_percentage" in row and row["uptime_percentage"] is not None:
+                    row["uptime_percentage"] = float(row["uptime_percentage"])
                 return DeviceResponse(**row)
 
             return None
@@ -196,14 +199,17 @@ class DeviceRepository:
 
             if result:
                 # Deserialize JSONB fields from JSON strings to dicts
-                if 'location' in result and isinstance(result['location'], str):
-                    result['location'] = json.loads(result['location'])
-                if 'metadata' in result and isinstance(result['metadata'], str):
-                    result['metadata'] = json.loads(result['metadata'])
+                if "location" in result and isinstance(result["location"], str):
+                    result["location"] = json.loads(result["location"])
+                if "metadata" in result and isinstance(result["metadata"], str):
+                    result["metadata"] = json.loads(result["metadata"])
 
                 # Convert numeric types to float
-                if 'uptime_percentage' in result and result['uptime_percentage'] is not None:
-                    result['uptime_percentage'] = float(result['uptime_percentage'])
+                if (
+                    "uptime_percentage" in result
+                    and result["uptime_percentage"] is not None
+                ):
+                    result["uptime_percentage"] = float(result["uptime_percentage"])
 
                 return DeviceResponse(**result)
             return None
@@ -219,7 +225,7 @@ class DeviceRepository:
         status: Optional[str] = None,
         group_id: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[DeviceResponse]:
         """List devices for a user with optional filters"""
         try:
@@ -257,13 +263,16 @@ class DeviceRepository:
             devices = []
             if results:
                 for row in results:
-                    if 'location' in row and isinstance(row['location'], str):
-                        row['location'] = json.loads(row['location'])
-                    if 'metadata' in row and isinstance(row['metadata'], str):
-                        row['metadata'] = json.loads(row['metadata'])
+                    if "location" in row and isinstance(row["location"], str):
+                        row["location"] = json.loads(row["location"])
+                    if "metadata" in row and isinstance(row["metadata"], str):
+                        row["metadata"] = json.loads(row["metadata"])
                     # Convert numeric types to float
-                    if 'uptime_percentage' in row and row['uptime_percentage'] is not None:
-                        row['uptime_percentage'] = float(row['uptime_percentage'])
+                    if (
+                        "uptime_percentage" in row
+                        and row["uptime_percentage"] is not None
+                    ):
+                        row["uptime_percentage"] = float(row["uptime_percentage"])
                     devices.append(DeviceResponse(**row))
 
             return devices
@@ -272,11 +281,7 @@ class DeviceRepository:
             logger.error(f"Error listing user devices: {e}")
             return []
 
-    async def update_device(
-        self,
-        device_id: str,
-        update_data: Dict[str, Any]
-    ) -> bool:
+    async def update_device(self, device_id: str, update_data: Dict[str, Any]) -> bool:
         """Update device"""
         try:
             # Build SET clause dynamically
@@ -314,16 +319,13 @@ class DeviceRepository:
             raise
 
     async def update_device_status(
-        self,
-        device_id: str,
-        status: DeviceStatus,
-        last_seen: Optional[datetime] = None
+        self, device_id: str, status: DeviceStatus, last_seen: Optional[datetime] = None
     ) -> bool:
         """Update device status and last_seen"""
         try:
             update_data = {
                 "status": status.value if isinstance(status, DeviceStatus) else status,
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now(timezone.utc),
             }
 
             if last_seen:
@@ -340,7 +342,7 @@ class DeviceRepository:
         try:
             update_data = {
                 "status": DeviceStatus.DECOMMISSIONED.value,
-                "decommissioned_at": datetime.now(timezone.utc)
+                "decommissioned_at": datetime.now(timezone.utc),
             }
             return await self.update_device(device_id, update_data)
 
@@ -350,7 +352,9 @@ class DeviceRepository:
 
     # ==================== Device Group Operations ====================
 
-    async def create_device_group(self, group_data: Dict[str, Any]) -> Optional[DeviceGroupResponse]:
+    async def create_device_group(
+        self, group_data: Dict[str, Any]
+    ) -> Optional[DeviceGroupResponse]:
         """Create a device group"""
         try:
             tags = group_data.get("tags", [])
@@ -376,7 +380,7 @@ class DeviceRepository:
                 json.dumps(metadata) if isinstance(metadata, dict) else metadata,
                 0,  # device_count
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -391,7 +395,9 @@ class DeviceRepository:
             logger.error(f"Error creating device group: {e}")
             raise
 
-    async def get_device_group_by_id(self, group_id: str) -> Optional[DeviceGroupResponse]:
+    async def get_device_group_by_id(
+        self, group_id: str
+    ) -> Optional[DeviceGroupResponse]:
         """Get device group by ID"""
         try:
             query = f"""
@@ -413,11 +419,15 @@ class DeviceRepository:
 
     # ==================== Frame Config Operations ====================
 
-    async def create_frame_config(self, device_id: str, config_data: Dict[str, Any]) -> bool:
+    async def create_frame_config(
+        self, device_id: str, config_data: Dict[str, Any]
+    ) -> bool:
         """Create or update frame configuration"""
         try:
             now = datetime.now(timezone.utc)
-            sleep_schedule = config_data.get("sleep_schedule", {"start": "23:00", "end": "07:00"})
+            sleep_schedule = config_data.get(
+                "sleep_schedule", {"start": "23:00", "end": "07:00"}
+            )
             auto_sync_albums = config_data.get("auto_sync_albums", [])
 
             query = f"""
@@ -462,7 +472,9 @@ class DeviceRepository:
                 config_data.get("slideshow_transition", "fade"),
                 config_data.get("shuffle_photos", True),
                 config_data.get("show_metadata", False),
-                json.dumps(sleep_schedule) if isinstance(sleep_schedule, dict) else sleep_schedule,
+                json.dumps(sleep_schedule)
+                if isinstance(sleep_schedule, dict)
+                else sleep_schedule,
                 config_data.get("auto_sleep", True),
                 config_data.get("motion_detection", True),
                 auto_sync_albums if isinstance(auto_sync_albums, list) else [],
@@ -472,7 +484,7 @@ class DeviceRepository:
                 config_data.get("location"),
                 config_data.get("timezone", "UTC"),
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -529,7 +541,7 @@ class DeviceRepository:
                 command_data.get("priority", 1),
                 command_data.get("require_ack", True),
                 "pending",
-                now
+                now,
             ]
 
             async with self.db:
@@ -546,13 +558,11 @@ class DeviceRepository:
         command_id: str,
         status: str,
         result: Optional[Dict] = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
     ) -> bool:
         """Update command execution status"""
         try:
-            update_data = {
-                "status": status
-            }
+            update_data = {"status": status}
 
             if status == "sent":
                 update_data["sent_at"] = datetime.now(timezone.utc)
@@ -562,7 +572,9 @@ class DeviceRepository:
                 update_data["completed_at"] = datetime.now(timezone.utc)
 
             if result:
-                update_data["result"] = json.dumps(result) if isinstance(result, dict) else result
+                update_data["result"] = (
+                    json.dumps(result) if isinstance(result, dict) else result
+                )
 
             if error_message:
                 update_data["error_message"] = error_message

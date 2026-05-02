@@ -12,14 +12,14 @@ import secrets
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import (
-    InvitationStatus, OrganizationRole,
-    InvitationResponse
-)
+from .models import InvitationStatus, OrganizationRole, InvitationResponse
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +35,21 @@ class InvitationRepository:
         # 发现 PostgreSQL 服务
         # 优先级：环境变量 → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="invitation_service", min_pool_size=1, max_pool_size=2)
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="invitation_service",
+            min_pool_size=1,
+            max_pool_size=2,
+        )
 
         self.schema = "invitation"
         self.invitations_table = "organization_invitations"
@@ -51,11 +57,7 @@ class InvitationRepository:
     # ============ Invitation CRUD Operations ============
 
     async def create_invitation(
-        self,
-        organization_id: str,
-        email: str,
-        role: OrganizationRole,
-        invited_by: str
+        self, organization_id: str, email: str, role: OrganizationRole, invited_by: str
     ) -> Optional[InvitationResponse]:
         """创建邀请"""
         try:
@@ -67,13 +69,13 @@ class InvitationRepository:
             expires_at = datetime.now(timezone.utc) + timedelta(days=7)
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.invitations_table} (
                     invitation_id, organization_id, email, role, invited_by,
                     invitation_token, status, expires_at, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 RETURNING *
-            '''
+            """
 
             params = [
                 invitation_id,
@@ -85,7 +87,7 @@ class InvitationRepository:
                 InvitationStatus.PENDING.value,
                 expires_at,
                 now,
-                now
+                now,
             ]
 
             async with self.db:
@@ -99,16 +101,20 @@ class InvitationRepository:
             logger.error(f"Error creating invitation: {e}", exc_info=True)
             return None
 
-    async def get_invitation_by_id(self, invitation_id: str) -> Optional[InvitationResponse]:
+    async def get_invitation_by_id(
+        self, invitation_id: str
+    ) -> Optional[InvitationResponse]:
         """根据ID获取邀请"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.invitations_table}
                 WHERE invitation_id = $1
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [invitation_id], schema=self.schema)
+                results = await self.db.query(
+                    query, [invitation_id], schema=self.schema
+                )
 
             if results and len(results) > 0:
                 return InvitationResponse(**results[0])
@@ -118,16 +124,20 @@ class InvitationRepository:
             logger.error(f"Error getting invitation by id: {e}")
             return None
 
-    async def get_invitation_by_token(self, invitation_token: str) -> Optional[InvitationResponse]:
+    async def get_invitation_by_token(
+        self, invitation_token: str
+    ) -> Optional[InvitationResponse]:
         """根据令牌获取邀请"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.invitations_table}
                 WHERE invitation_token = $1
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [invitation_token], schema=self.schema)
+                results = await self.db.query(
+                    query, [invitation_token], schema=self.schema
+                )
 
             if results and len(results) > 0:
                 return InvitationResponse(**results[0])
@@ -137,7 +147,9 @@ class InvitationRepository:
             logger.error(f"Error getting invitation by token: {e}")
             return None
 
-    async def get_invitation_with_organization_info(self, invitation_token: str) -> Optional[Dict[str, Any]]:
+    async def get_invitation_with_organization_info(
+        self, invitation_token: str
+    ) -> Optional[Dict[str, Any]]:
         """获取邀请及组织信息 - 注意：需要跨服务调用获取组织和用户信息"""
         try:
             # 首先获取邀请信息
@@ -151,7 +163,9 @@ class InvitationRepository:
 
             # TODO: 使用服务发现获取组织和用户信息
             # 当前返回基本邀请信息，组织和用户信息需要通过其他微服务获取
-            logger.warning("Organization and user info require cross-service calls - returning invitation only")
+            logger.warning(
+                "Organization and user info require cross-service calls - returning invitation only"
+            )
 
             return result
 
@@ -160,24 +174,22 @@ class InvitationRepository:
             return None
 
     async def get_pending_invitation_by_email_and_organization(
-        self,
-        email: str,
-        organization_id: str
+        self, email: str, organization_id: str
     ) -> Optional[InvitationResponse]:
         """根据邮箱和组织ID获取待处理邀请"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.invitations_table}
                 WHERE email = $1 AND organization_id = $2 AND status = $3
                 ORDER BY created_at DESC
                 LIMIT 1
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(
                     query,
                     [email, organization_id, InvitationStatus.PENDING.value],
-                    schema=self.schema
+                    schema=self.schema,
                 )
 
             if results and len(results) > 0:
@@ -185,26 +197,27 @@ class InvitationRepository:
             return None
 
         except Exception as e:
-            logger.error(f"Error getting pending invitation by email and organization: {e}")
+            logger.error(
+                f"Error getting pending invitation by email and organization: {e}"
+            )
             return None
 
     async def get_organization_invitations(
-        self,
-        organization_id: str,
-        limit: int = 100,
-        offset: int = 0
+        self, organization_id: str, limit: int = 100, offset: int = 0
     ) -> List[InvitationResponse]:
         """获取组织的邀请列表"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.invitations_table}
                 WHERE organization_id = $1
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
-            '''
+            """
 
             async with self.db:
-                results = await self.db.query(query, [organization_id, limit, offset], schema=self.schema)
+                results = await self.db.query(
+                    query, [organization_id, limit, offset], schema=self.schema
+                )
 
             if results:
                 # 返回基本邀请响应
@@ -216,7 +229,9 @@ class InvitationRepository:
             logger.error(f"Error getting organization invitations: {e}")
             return []
 
-    async def update_invitation(self, invitation_id: str, update_data: Dict[str, Any]) -> bool:
+    async def update_invitation(
+        self, invitation_id: str, update_data: Dict[str, Any]
+    ) -> bool:
         """更新邀请"""
         try:
             # Build SET clause dynamically
@@ -240,11 +255,11 @@ class InvitationRepository:
             param_count += 1
             params.append(invitation_id)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.invitations_table}
                 SET {", ".join(set_clauses)}
                 WHERE invitation_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(query, params, schema=self.schema)
@@ -260,18 +275,18 @@ class InvitationRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.invitations_table}
                 SET status = $1, accepted_at = $2, updated_at = $3
                 WHERE invitation_token = $4 AND status = $5
-            '''
+            """
 
             params = [
                 InvitationStatus.ACCEPTED.value,
                 now,
                 now,
                 invitation_token,
-                InvitationStatus.PENDING.value
+                InvitationStatus.PENDING.value,
             ]
 
             async with self.db:
@@ -286,9 +301,9 @@ class InvitationRepository:
     async def cancel_invitation(self, invitation_id: str) -> bool:
         """取消邀请"""
         try:
-            return await self.update_invitation(invitation_id, {
-                'status': InvitationStatus.CANCELLED.value
-            })
+            return await self.update_invitation(
+                invitation_id, {"status": InvitationStatus.CANCELLED.value}
+            )
 
         except Exception as e:
             logger.error(f"Error cancelling invitation: {e}")
@@ -299,17 +314,17 @@ class InvitationRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.invitations_table}
                 SET status = $1, updated_at = $2
                 WHERE status = $3 AND expires_at < $4
-            '''
+            """
 
             params = [
                 InvitationStatus.EXPIRED.value,
                 now,
                 InvitationStatus.PENDING.value,
-                now
+                now,
             ]
 
             async with self.db:
@@ -324,13 +339,15 @@ class InvitationRepository:
     async def delete_invitation(self, invitation_id: str) -> bool:
         """删除邀请"""
         try:
-            query = f'''
+            query = f"""
                 DELETE FROM {self.schema}.{self.invitations_table}
                 WHERE invitation_id = $1
-            '''
+            """
 
             async with self.db:
-                count = await self.db.execute(query, [invitation_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [invitation_id], schema=self.schema
+                )
 
             return count is not None and count > 0
 
@@ -340,7 +357,9 @@ class InvitationRepository:
 
     # ============ Statistics ============
 
-    async def get_invitation_stats(self, organization_id: Optional[str] = None) -> Dict[str, int]:
+    async def get_invitation_stats(
+        self, organization_id: Optional[str] = None
+    ) -> Dict[str, int]:
         """获取邀请统计"""
         try:
             conditions = []
@@ -354,17 +373,23 @@ class InvitationRepository:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            query = f'''
+            query = f"""
                 SELECT status, COUNT(*) as count
                 FROM {self.schema}.{self.invitations_table}
                 {where_clause}
                 GROUP BY status
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
 
-            stats = {"total": 0, "pending": 0, "accepted": 0, "expired": 0, "cancelled": 0}
+            stats = {
+                "total": 0,
+                "pending": 0,
+                "accepted": 0,
+                "expired": 0,
+                "cancelled": 0,
+            }
 
             for row in results:
                 status = row.get("status")
@@ -377,7 +402,13 @@ class InvitationRepository:
 
         except Exception as e:
             logger.error(f"Error getting invitation stats: {e}")
-            return {"total": 0, "pending": 0, "accepted": 0, "expired": 0, "cancelled": 0}
+            return {
+                "total": 0,
+                "pending": 0,
+                "accepted": 0,
+                "expired": 0,
+                "cancelled": 0,
+            }
 
     # ============ Event Handler Methods ============
 
@@ -392,21 +423,27 @@ class InvitationRepository:
             int: Number of invitations cancelled
         """
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.invitations_table}
                 SET status = $1, updated_at = CURRENT_TIMESTAMP
                 WHERE organization_id = $2
                 AND status = $3
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(
                     query,
-                    [InvitationStatus.CANCELLED.value, organization_id, InvitationStatus.PENDING.value],
-                    schema=self.schema
+                    [
+                        InvitationStatus.CANCELLED.value,
+                        organization_id,
+                        InvitationStatus.PENDING.value,
+                    ],
+                    schema=self.schema,
                 )
 
-            logger.info(f"Cancelled {count} invitations for organization {organization_id}")
+            logger.info(
+                f"Cancelled {count} invitations for organization {organization_id}"
+            )
             return count if count else 0
 
         except Exception as e:
@@ -424,18 +461,22 @@ class InvitationRepository:
             int: Number of invitations cancelled
         """
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.invitations_table}
                 SET status = $1, updated_at = CURRENT_TIMESTAMP
                 WHERE invited_by = $2
                 AND status = $3
-            '''
+            """
 
             async with self.db:
                 count = await self.db.execute(
                     query,
-                    [InvitationStatus.CANCELLED.value, user_id, InvitationStatus.PENDING.value],
-                    schema=self.schema
+                    [
+                        InvitationStatus.CANCELLED.value,
+                        user_id,
+                        InvitationStatus.PENDING.value,
+                    ],
+                    schema=self.schema,
                 )
 
             logger.info(f"Cancelled {count} invitations sent by user {user_id}")

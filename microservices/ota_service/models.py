@@ -12,6 +12,7 @@ from enum import Enum
 
 class UpdateType(str, Enum):
     """更新类型"""
+
     FIRMWARE = "firmware"  # 固件更新 (FOTA)
     SOFTWARE = "software"  # 软件更新 (SOTA)
     APPLICATION = "application"  # 应用更新 (AOTA)
@@ -22,6 +23,7 @@ class UpdateType(str, Enum):
 
 class UpdateStatus(str, Enum):
     """更新状态"""
+
     CREATED = "created"
     SCHEDULED = "scheduled"
     IN_PROGRESS = "in_progress"
@@ -37,6 +39,7 @@ class UpdateStatus(str, Enum):
 
 class DeploymentStrategy(str, Enum):
     """部署策略"""
+
     IMMEDIATE = "immediate"  # 立即部署
     SCHEDULED = "scheduled"  # 定时部署
     STAGED = "staged"  # 分阶段部署
@@ -46,6 +49,7 @@ class DeploymentStrategy(str, Enum):
 
 class Priority(str, Enum):
     """优先级"""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -55,6 +59,7 @@ class Priority(str, Enum):
 
 class RollbackTrigger(str, Enum):
     """回滚触发条件"""
+
     MANUAL = "manual"
     FAILURE_RATE = "failure_rate"
     HEALTH_CHECK = "health_check"
@@ -66,8 +71,10 @@ class RollbackTrigger(str, Enum):
 # Request Models
 # ==================
 
+
 class FirmwareUploadRequest(BaseModel):
     """固件上传请求"""
+
     name: str = Field(..., min_length=1, max_length=200)
     version: str = Field(..., min_length=1, max_length=50)
     description: Optional[str] = Field(None, max_length=1000)
@@ -87,6 +94,7 @@ class FirmwareUploadRequest(BaseModel):
 
 class UpdateCampaignRequest(BaseModel):
     """更新活动请求"""
+
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=1000)
     firmware_id: str
@@ -123,6 +131,7 @@ class DeviceUpdateRequest(BaseModel):
 
     Note: device_id is in the URL path, not required in request body
     """
+
     firmware_id: str
     priority: Priority = Priority.NORMAL
     force_update: bool = False  # 强制更新，跳过版本检查
@@ -135,6 +144,7 @@ class DeviceUpdateRequest(BaseModel):
 
 class UpdateApprovalRequest(BaseModel):
     """更新审批请求"""
+
     campaign_id: str
     approved: bool
     approval_comment: Optional[str] = Field(None, max_length=500)
@@ -145,8 +155,10 @@ class UpdateApprovalRequest(BaseModel):
 # Response Models
 # ==================
 
+
 class FirmwareResponse(BaseModel):
     """固件响应"""
+
     firmware_id: str
     name: str
     version: str
@@ -173,6 +185,7 @@ class FirmwareResponse(BaseModel):
 
 class UpdateCampaignResponse(BaseModel):
     """更新活动响应"""
+
     campaign_id: str
     name: str
     description: Optional[str]
@@ -224,6 +237,7 @@ class UpdateCampaignResponse(BaseModel):
 
 class DeviceUpdateResponse(BaseModel):
     """设备更新响应"""
+
     update_id: str
     device_id: str
     campaign_id: Optional[str]
@@ -266,6 +280,7 @@ class DeviceUpdateResponse(BaseModel):
 
 class UpdateStatsResponse(BaseModel):
     """更新统计响应"""
+
     total_campaigns: int
     active_campaigns: int
     completed_campaigns: int
@@ -293,6 +308,7 @@ class UpdateStatsResponse(BaseModel):
 
 class UpdateHistoryResponse(BaseModel):
     """更新历史响应"""
+
     device_id: str
     updates: List[DeviceUpdateResponse]
     total_updates: int
@@ -304,6 +320,7 @@ class UpdateHistoryResponse(BaseModel):
 
 class RollbackResponse(BaseModel):
     """回滚响应"""
+
     rollback_id: str
     campaign_id: str
     device_id: Optional[str]  # None表示整个活动回滚
@@ -320,6 +337,7 @@ class RollbackResponse(BaseModel):
 
 class UpdateHealthResponse(BaseModel):
     """更新健康检查响应"""
+
     service_status: str
     active_campaigns: int
     active_updates: int
