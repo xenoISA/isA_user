@@ -6,16 +6,8 @@ from dataclasses import dataclass
 import logging
 from typing import Any, Dict, Mapping, Optional, Tuple
 
-from core.rate_limit_backend import (
-    FallbackRateLimitBackend as _FallbackRateLimitBackend,
-    build_sliding_window_counter,
-)
-from core.rate_limiter import (
-    InMemoryBackend,
-    RateLimitConfig,
-    RedisBackend,
-    SlidingWindowCounter,
-)
+from core.rate_limit_backend import build_sliding_window_counter
+from core.rate_limiter import RateLimitConfig, SlidingWindowCounter
 
 logger = logging.getLogger(__name__)
 
