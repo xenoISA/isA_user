@@ -7,7 +7,7 @@ Used for sending vault-related notifications to users.
 
 import os
 import sys
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 # Add parent directories to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -17,8 +17,7 @@ import asyncio
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import DeviceRepositoryProtocol
 from .models import (
-    DeviceStatus, DeviceType, SecurityLevel,
-    DeviceResponse, DeviceAuthResponse, DeviceStatsResponse,
+    DeviceStatus, DeviceResponse, DeviceAuthResponse, DeviceStatsResponse,
     DeviceHealthResponse, DeviceGroupResponse
 )
 # Import event bus components

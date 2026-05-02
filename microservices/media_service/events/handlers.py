@@ -4,7 +4,6 @@ Media Service Event Handlers
 Handles event-driven cleanup and synchronization for media resources
 """
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any, Dict
 

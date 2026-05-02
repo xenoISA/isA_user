@@ -6,6 +6,7 @@ Invitation Service Event Models
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional, Dict, Any
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -36,9 +37,6 @@ class InvitationStreamConfig:
     SUBJECTS = ["invitation.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "invitation"
-
-from typing import Optional, Dict, Any
-from datetime import datetime
 
 
 class InvitationSentEvent(BaseModel):

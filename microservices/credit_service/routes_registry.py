@@ -3,7 +3,7 @@ Credit Service Routes Registry
 Defines all API routes for Consul service registration.
 Pattern: CDD System Contract - Service Registration Pattern
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
 # Define all routes based on system_contract.md
 SERVICE_ROUTES = [
     # Health and Service Info

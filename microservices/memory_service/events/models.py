@@ -6,6 +6,7 @@ Pydantic models for all events published by Memory Service
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional, Dict, Any, List
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -41,9 +42,6 @@ class MemoryStreamConfig:
     SUBJECTS = ["memory.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "memory"
-
-from typing import Optional, Dict, Any, List
-from datetime import datetime
 
 
 class MemoryCreatedEvent(BaseModel):

@@ -129,7 +129,7 @@ class OrganizationServiceClient:
         """
         try:
             response = await self.client.get(
-                f"/api/v1/users/organizations",
+                "/api/v1/users/organizations",
                 headers={"X-User-ID": user_id}  # Pass user context
             )
 

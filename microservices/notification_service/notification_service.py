@@ -25,17 +25,14 @@ from .models import (
     CreateTemplateRequest, UpdateTemplateRequest,
     NotificationResponse, TemplateResponse, BatchResponse,
     NotificationStatus, NotificationType, TemplateStatus,
-    NotificationPriority, NotificationStatsResponse,
+    NotificationStatsResponse,
     RecipientType, PushSubscription, PushPlatform,
     RegisterPushSubscriptionRequest
 )
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
-    from .notification_repository import NotificationRepository
-    from .events.publishers import NotificationEventPublishers
-    from .clients import AccountServiceClient, OrganizationServiceClient
+    pass
 
 
 logger = logging.getLogger(__name__)

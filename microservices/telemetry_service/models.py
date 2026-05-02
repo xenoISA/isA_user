@@ -4,7 +4,7 @@ Telemetry Service - Data Models
 遥测服务数据模型，包含设备数据采集、监控、警报等
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from enum import Enum

@@ -11,7 +11,6 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
-import uuid
 
 
 class ExtendedJSONEncoder(json.JSONEncoder):
@@ -41,8 +40,6 @@ from .models import (
     CampaignExecution,
     CampaignMessage,
     CampaignMetricsSummary,
-    CampaignConversion,
-    CampaignUnsubscribe,
     TriggerHistoryRecord,
     CampaignStatus,
     CampaignType,
@@ -55,8 +52,6 @@ from .models import (
     ThrottleConfig,
     ABTestConfig,
     ConversionConfig,
-    AttributionModel,
-    # Channel content types
     EmailChannelContent,
     SMSChannelContent,
     WhatsAppChannelContent,

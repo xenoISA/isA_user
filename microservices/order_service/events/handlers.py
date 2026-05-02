@@ -48,7 +48,7 @@ async def handle_payment_completed(event_data: Dict[str, Any], order_service, ev
         amount = event_data.get("amount")
 
         if not payment_intent_id:
-            logger.warning(f"payment.completed event missing payment_intent_id")
+            logger.warning("payment.completed event missing payment_intent_id")
             return
 
         # Find order by payment_intent_id
@@ -116,7 +116,7 @@ async def handle_payment_failed(event_data: Dict[str, Any], order_service, event
         payment_intent_id = event_data.get("payment_intent_id")
 
         if not payment_intent_id:
-            logger.warning(f"payment.failed event missing payment_intent_id")
+            logger.warning("payment.failed event missing payment_intent_id")
             return
 
         # Find order by payment_intent_id
@@ -266,7 +266,7 @@ async def handle_wallet_credits_added(event_data: Dict[str, Any], order_service,
         logger.info(f"Wallet credits added for user {user_id}, amount: {amount}")
 
         # Find pending wallet/credit orders for this user
-        from ..models import OrderStatus, OrderType
+        from ..models import OrderType
 
         pending_orders = await order_service.repository.get_pending_orders_by_user(
             user_id=user_id,
@@ -324,7 +324,7 @@ async def handle_subscription_created(event_data: Dict[str, Any], order_service,
         logger.info(f"Subscription created: {subscription_id} for user {user_id}, plan: {plan_id}")
 
         # Create subscription order record for tracking
-        from ..models import OrderCreateRequest, OrderType, OrderStatus
+        from ..models import OrderCreateRequest, OrderType
 
         order_request = OrderCreateRequest(
             user_id=user_id,

@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from decimal import Decimal
 
 
 # =============================================================================

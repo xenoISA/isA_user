@@ -5,7 +5,7 @@ Family Sharing Models
 支持订阅、设备、存储、钱包等资源的家庭共享
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal

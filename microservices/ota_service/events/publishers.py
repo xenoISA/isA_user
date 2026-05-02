@@ -5,7 +5,7 @@ Centralized functions for publishing events from OTA Service
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional
 from datetime import datetime, timezone
 
 from core.nats_client import Event

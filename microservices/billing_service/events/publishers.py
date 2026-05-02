@@ -15,13 +15,12 @@ Migration path:
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Union
+from typing import Optional
 
 # Event bus from core
-from core.nats_client import Event, NATSEventBus, get_event_bus
+from core.nats_client import Event, NATSEventBus
 
 from .models import (
-    BillingCalculatedEventData,
     BillingErrorEventData,
     BillingEventType,
     UnitType,

@@ -29,7 +29,7 @@ Usage:
 import asyncio
 import logging
 import signal
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, List, Tuple
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request

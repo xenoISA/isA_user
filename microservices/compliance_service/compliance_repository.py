@@ -16,7 +16,7 @@ from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     ComplianceCheck, CompliancePolicy, ComplianceStatus,
-    RiskLevel, ComplianceCheckType, ContentType
+    RiskLevel
 )
 
 logger = logging.getLogger(__name__)
@@ -360,7 +360,7 @@ class ComplianceRepository:
             from datetime import timedelta
             start_date = datetime.now(timezone.utc) - timedelta(days=days)
 
-            conditions = [f"checked_at >= $1"]
+            conditions = ["checked_at >= $1"]
             params = [start_date]
             param_count = 1
 

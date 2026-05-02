@@ -5,7 +5,7 @@ Handles all wallet and transaction database operations using PostgresClient
 """
 
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 import logging
@@ -340,12 +340,12 @@ class WalletRepository:
             to_wallet = await self.get_wallet(to_wallet_id)
 
             if not from_wallet or not to_wallet:
-                logger.error(f"Transfer failed: wallet not found")
+                logger.error("Transfer failed: wallet not found")
                 return None
 
             # Check sufficient balance
             if from_wallet.balance < amount:
-                logger.error(f"Transfer failed: insufficient balance")
+                logger.error("Transfer failed: insufficient balance")
                 return None
 
             # Withdraw from source wallet

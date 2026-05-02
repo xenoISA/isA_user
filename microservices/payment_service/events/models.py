@@ -4,8 +4,11 @@ Payment Service Event Models
 Pydantic models for events published by payment service
 """
 
-from pydantic import BaseModel, Field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, Optional
+
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -35,10 +38,6 @@ class PaymentStreamConfig:
     SUBJECTS = ["payment.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "payment"
-
-from typing import Optional, Dict, Any
-from datetime import datetime
-from decimal import Decimal
 
 
 class PaymentCompletedEvent(BaseModel):

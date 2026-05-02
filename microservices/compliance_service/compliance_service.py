@@ -18,7 +18,7 @@ from .models import (
     ComplianceCheck, ComplianceCheckRequest, ComplianceCheckResponse,
     ContentModerationResult, PIIDetectionResult, PromptInjectionResult,
     ComplianceCheckType, ComplianceStatus, RiskLevel, ContentType,
-    ModerationCategory, PIIType, CompliancePolicy
+    PIIType, CompliancePolicy
 )
 from .events.publishers import (
     publish_compliance_check_performed,

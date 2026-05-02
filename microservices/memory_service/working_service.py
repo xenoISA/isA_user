@@ -12,7 +12,7 @@ import os
 from isa_model.inference_client import AsyncISAModel
 from isa_common import AsyncQdrantClient
 
-from .models import WorkingMemory, MemoryOperationResult
+from .models import MemoryOperationResult
 from .working_repository import WorkingMemoryRepository
 
 logger = logging.getLogger(__name__)

@@ -10,7 +10,7 @@ Uses dependency injection for testability:
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 import uuid
 
@@ -22,7 +22,7 @@ from .family_sharing_models import (
     SharingResourceResponse, MemberSharingPermissionResponse,
     SharedResourceDetailResponse, MemberSharedResourcesResponse,
     SharingUsageStatsResponse,
-    SharingResourceType, SharingPermissionLevel, SharingStatus
+    SharingPermissionLevel, SharingStatus
 )
 # Import event bus components
 from core.nats_client import Event
@@ -129,7 +129,7 @@ class FamilySharingService:
 
             if not sharing:
                 raise FamilySharingServiceError(
-                    f"Failed to create sharing resource in database"
+                    "Failed to create sharing resource in database"
                 )
 
             # 如果指定了共享成员，创建成员权限

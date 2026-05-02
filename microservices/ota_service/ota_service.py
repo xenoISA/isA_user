@@ -6,8 +6,7 @@ OTA更新服务业务逻辑，处理固件管理和设备更新
 
 import hashlib
 import secrets
-import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 import logging
 import os
@@ -17,7 +16,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from .models import (
-    UpdateType, UpdateStatus, DeploymentStrategy, Priority,
+    UpdateStatus, DeploymentStrategy, Priority,
     FirmwareResponse, UpdateCampaignResponse, DeviceUpdateResponse,
     UpdateStatsResponse, RollbackResponse
 )
@@ -109,7 +108,7 @@ class OTAService:
                         file_url = storage_result["download_url"]
                         logger.info(f"Firmware binary uploaded to storage: {file_url}")
                     else:
-                        logger.warning(f"Failed to upload to storage service, using local URL")
+                        logger.warning("Failed to upload to storage service, using local URL")
                 except Exception as storage_error:
                     logger.warning(f"Storage service error: {storage_error}, continuing with local storage")
             else:
@@ -387,7 +386,7 @@ class OTAService:
                 except Exception as e:
                     logger.error(f"Device Service validation failed: {e}")
                     # If Device Service is unavailable, proceed but log warning
-                    logger.warning(f"Proceeding with update without device validation (Device Service unavailable)")
+                    logger.warning("Proceeding with update without device validation (Device Service unavailable)")
             else:
                 logger.warning("Device client not initialized, skipping device validation")
 

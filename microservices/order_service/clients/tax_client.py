@@ -5,7 +5,6 @@ Tax Service Client for Order Service
 import httpx
 import logging
 from typing import Optional, Dict, Any, List
-from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 

@@ -70,7 +70,6 @@ class OrganizationEventHandler:
 
             # Get all organizations where user is a member
             try:
-                from .organization_repository import OrganizationRepository
 
                 # Remove user from all organization memberships
                 # Note: This is a simplified approach. In production, you might want to:

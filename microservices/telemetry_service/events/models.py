@@ -6,6 +6,7 @@ Pydantic models for all events published by Telemetry Service
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -36,9 +37,6 @@ class TelemetryStreamConfig:
     SUBJECTS = ["telemetry.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "telemetry"
-
-from typing import Optional, Dict, Any
-from datetime import datetime
 
 
 class TelemetryDataReceivedEvent(BaseModel):

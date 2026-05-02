@@ -16,8 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    DeviceResponse, DeviceStatus, DeviceType, ConnectivityType, SecurityLevel,
-    DeviceGroupResponse, FrameConfig, DeviceAuthResponse
+    DeviceResponse, DeviceStatus, DeviceGroupResponse, FrameConfig
 )
 
 logger = logging.getLogger(__name__)

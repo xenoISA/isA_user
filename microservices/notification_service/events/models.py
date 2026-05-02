@@ -6,6 +6,7 @@ Defines Pydantic models for events published and consumed by notification_servic
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -36,9 +37,6 @@ class NotificationStreamConfig:
     SUBJECTS = ["notification.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "notification"
-
-from typing import Optional, Dict, Any
-from datetime import datetime
 
 
 # ====================

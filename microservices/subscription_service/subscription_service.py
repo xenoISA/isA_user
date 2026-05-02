@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import TYPE_CHECKING, Optional, Dict, Any, List
+from typing import TYPE_CHECKING, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
@@ -31,19 +31,18 @@ from .models import (
     UserSubscription, SubscriptionHistory,
     BillingAccountType, SubscriptionStatus, BillingCycle, SubscriptionAction, InitiatedBy,
     CreateSubscriptionRequest, CreateSubscriptionResponse,
-    UpdateSubscriptionRequest, CancelSubscriptionRequest, CancelSubscriptionResponse,
+    CancelSubscriptionRequest, CancelSubscriptionResponse,
     ConsumeCreditsRequest, ConsumeCreditsResponse, CreditBalanceResponse,
     ReserveCreditsRequest, ReserveCreditsResponse,
     ReconcileReservationRequest, ReconcileReservationResponse,
     ReleaseReservationRequest, ReleaseReservationResponse,
     ReservationStatus,
-    SubscriptionResponse, SubscriptionListResponse, SubscriptionHistoryResponse,
-    SubscriptionStatsResponse
+    SubscriptionResponse, SubscriptionListResponse, SubscriptionHistoryResponse
 )
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
+    pass
     
 
 logger = logging.getLogger(__name__)
@@ -310,7 +309,7 @@ class SubscriptionService:
 
             return CreateSubscriptionResponse(
                 success=True,
-                message=f"Subscription created successfully",
+                message="Subscription created successfully",
                 subscription=created,
                 credits_allocated=credits_allocated,
                 next_billing_date=created.next_billing_date

@@ -5,8 +5,7 @@ Provides authenticated communication with the Gateway service
 import httpx
 import os
 import socket
-import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)

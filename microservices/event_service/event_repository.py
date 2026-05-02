@@ -7,9 +7,8 @@ Data access layer for event management using PostgresClient.
 import os
 import sys
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any, Tuple
-import uuid
+from datetime import datetime, timezone
+from typing import List, Optional, Dict, Tuple
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 

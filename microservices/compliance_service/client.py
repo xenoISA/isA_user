@@ -8,7 +8,6 @@ Provides easy-to-use methods for content compliance checking.
 import logging
 import httpx
 from typing import Optional, Dict, Any, List
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 

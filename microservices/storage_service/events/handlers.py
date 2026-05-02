@@ -5,7 +5,6 @@ Storage Service - Event Handlers
 """
 
 import logging
-from datetime import datetime
 
 from core.nats_client import Event
 
@@ -137,7 +136,7 @@ async def handle_file_indexing_request(
                             )
                         except Exception:
                             logger.warning(
-                                f"Failed to convert ai_metadata from protobuf, setting to empty dict"
+                                "Failed to convert ai_metadata from protobuf, setting to empty dict"
                             )
                             ai_metadata_extracted = {}
                     if not ai_metadata_extracted:

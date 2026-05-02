@@ -150,7 +150,6 @@ async def publish_credit_expired(
 
         # Using a custom subject since credit.expired isn't in EventType enum
         # We'll publish with CREDITS_CONSUMED type but different subject
-        from core.nats_client import Event as NATSEvent
 
         await event_bus.publish(
             "credit.expired",

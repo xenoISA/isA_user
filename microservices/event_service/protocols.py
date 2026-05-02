@@ -4,7 +4,7 @@ Event Service Protocols (Interfaces)
 Protocol definitions for dependency injection.
 NO import-time I/O dependencies.
 """
-from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, List, Optional, Protocol, Tuple, runtime_checkable
 from datetime import datetime
 
 from .models import (

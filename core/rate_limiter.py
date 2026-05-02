@@ -6,8 +6,8 @@ Sliding window counter with pluggable backends (in-memory, Redis).
 
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware

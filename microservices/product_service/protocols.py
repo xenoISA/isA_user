@@ -6,19 +6,13 @@ NO import-time I/O dependencies - safe to import anywhere.
 """
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from datetime import datetime
-from decimal import Decimal
 
 # Import only models (no I/O dependencies)
 from .models import (
     Product,
     ProductCategory,
-    PricingModel,
-    ServicePlan,
     UserSubscription,
-    ProductUsageRecord,
     ProductType,
-    SubscriptionStatus,
-    BillingCycle,
 )
 
 

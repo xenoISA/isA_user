@@ -19,7 +19,7 @@ sys.path.append(
 from core.config_manager import ConfigManager
 from isa_common import AsyncPostgresClient
 
-from .models import Album, AlbumPhoto, AlbumSyncStatus, SyncStatus
+from .models import Album, AlbumPhoto, AlbumSyncStatus
 
 logger = logging.getLogger(__name__)
 

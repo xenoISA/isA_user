@@ -9,8 +9,7 @@ import logging
 from typing import Dict, Any, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..auth_service import AuthenticationService
-    from ..device_auth_service import DeviceAuthService
+    pass
 
 logger = logging.getLogger(__name__)
 

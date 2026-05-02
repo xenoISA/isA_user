@@ -9,7 +9,6 @@ import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
-import json
 
 # Database client setup  
 import sys
@@ -18,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import Session, SessionMessage, SearchHit
+from .models import Session, SessionMessage
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,7 @@ from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
     InvitationStatus, OrganizationRole,
-    InvitationResponse, InvitationDetailResponse
+    InvitationResponse
 )
 
 logger = logging.getLogger(__name__)

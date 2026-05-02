@@ -5,9 +5,7 @@ Handles events from other services to maintain authorization data consistency
 """
 
 import logging
-import json
 from typing import Dict, Callable
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +56,6 @@ class AuthorizationEventHandlers:
             logger.info(f"Handling user.deleted event for user: {user_id}")
 
             # Get all user permissions
-            from ..models import ResourceType
             permissions = await self.repository.list_user_permissions(user_id)
 
             # Revoke all permissions

@@ -6,6 +6,7 @@ Pydantic models for all events published by OTA Service
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -40,9 +41,6 @@ class OtaStreamConfig:
     SUBJECTS = ["ota.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "ota"
-
-from typing import Optional, Dict, Any, List
-from datetime import datetime
 
 
 class FirmwareUploadedEvent(BaseModel):

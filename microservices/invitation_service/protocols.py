@@ -3,8 +3,7 @@ Invitation Service Protocols - DI Interfaces
 
 All dependencies defined as Protocol classes for testability.
 """
-from typing import Protocol, runtime_checkable, Optional, Dict, Any, List, Tuple
-from datetime import datetime
+from typing import Protocol, runtime_checkable, Optional, Dict, Any, List
 
 
 @runtime_checkable

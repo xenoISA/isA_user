@@ -6,7 +6,6 @@ Migrated from events.py and following wallet_service pattern.
 """
 
 import logging
-import json
 from typing import Dict, Any, Set, TYPE_CHECKING
 from datetime import datetime, timezone
 

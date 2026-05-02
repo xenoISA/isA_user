@@ -4,9 +4,8 @@ Notification Service Repository Layer
 数据访问层，负责与数据库交互
 """
 
-import os
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import logging
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct, ListValue

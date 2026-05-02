@@ -7,15 +7,11 @@ Wallet Event Handlers
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
 
 from core.nats_client import Event
 
 from ..models import ConsumeRequest
 from .models import (
-    BillingCalculatedEventData,
-    TokensDeductedEventData,
-    TokensInsufficientEventData,
     parse_billing_calculated_event,
 )
 from .publishers import publish_tokens_deducted, publish_tokens_insufficient

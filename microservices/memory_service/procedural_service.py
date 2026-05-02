@@ -13,7 +13,7 @@ import os
 from isa_model.inference_client import AsyncISAModel
 from isa_common import AsyncQdrantClient
 
-from .models import ProceduralMemory, MemoryOperationResult
+from .models import MemoryOperationResult
 from .procedural_repository import ProceduralMemoryRepository
 
 logger = logging.getLogger(__name__)

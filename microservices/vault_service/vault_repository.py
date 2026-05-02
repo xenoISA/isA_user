@@ -600,7 +600,7 @@ class VaultRepository:
     async def get_vault_stats(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Get vault statistics"""
         try:
-            where_clause = f"WHERE user_id = $1" if user_id else ""
+            where_clause = "WHERE user_id = $1" if user_id else ""
             params = [user_id] if user_id else []
 
             query = f'''

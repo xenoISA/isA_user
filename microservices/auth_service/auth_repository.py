@@ -6,8 +6,8 @@ Handles database operations for user authentication, sessions, and provider mapp
 """
 
 import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional
+from datetime import datetime, timezone
 import sys
 import os
 

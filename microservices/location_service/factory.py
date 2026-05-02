@@ -3,7 +3,6 @@ Location Service Factory
 
 Factory functions for creating service instances with real dependencies.
 """
-from typing import Optional
 
 from .location_service import LocationService
 

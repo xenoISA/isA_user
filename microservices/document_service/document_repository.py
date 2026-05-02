@@ -23,7 +23,6 @@ from core.config_manager import ConfigManager
 
 from .models import (
     AccessLevel,
-    ChunkingStrategy,
     DocumentStatus,
     DocumentType,
     KnowledgeDocument,

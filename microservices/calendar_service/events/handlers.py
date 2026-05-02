@@ -110,7 +110,7 @@ class CalendarEventHandlers:
             logger.info(f"Syncing task {task_id} to calendar for user {user_id}")
 
             # Create calendar event from task
-            from datetime import datetime, timedelta
+            from datetime import datetime
 
             event_data_for_calendar = {
                 "title": f"Task: {name}",

@@ -4,13 +4,12 @@
 """
 
 import json
-import asyncio
 import aiofiles
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, AsyncGenerator, Any
 from pathlib import Path
 from dataclasses import dataclass, asdict
-from collections import defaultdict, Counter
+from collections import Counter
 import re
 import logging
 from enum import Enum

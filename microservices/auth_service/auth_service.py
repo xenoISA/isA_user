@@ -25,12 +25,6 @@ from .protocols import (
     JWTManagerProtocol,
     EventBusProtocol,
     AuthRepositoryProtocol,
-    AuthenticationError,
-    InvalidTokenError,
-    RegistrationError,
-    VerificationError,
-    InvalidCredentialsError,
-    AccountDisabledError,
 )
 from .models import AuthProvider
 

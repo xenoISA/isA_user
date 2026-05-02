@@ -5,11 +5,9 @@ Event Service Implementation
 """
 
 import asyncio
-import json
 import logging
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any, Callable
-import uuid
+from datetime import datetime
+from typing import List, Optional, Dict, Any
 
 from .models import (
     Event, EventStream, EventSource, EventCategory, EventStatus,

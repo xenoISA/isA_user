@@ -26,7 +26,6 @@ from .protocols import (
 )
 from .models import (
     AccessLevel,
-    ChunkingStrategy,
     DocumentCreateRequest,
     DocumentPermissionHistory,
     DocumentPermissionResponse,
@@ -36,14 +35,12 @@ from .models import (
     DocumentStatus,
     DocumentType,
     DocumentUpdateRequest,
-    DocumentVersionResponse,
     KnowledgeDocument,
     RAGQueryRequest,
     RAGQueryResponse,
     SearchResultItem,
     SemanticSearchRequest,
     SemanticSearchResponse,
-    UpdateStrategy,
 )
 
 # Type checking imports (not executed at runtime)

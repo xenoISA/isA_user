@@ -8,7 +8,6 @@ import httpx
 from core.config_manager import ConfigManager
 import logging
 from typing import Optional, List, Dict, Any
-from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 

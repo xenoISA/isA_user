@@ -5,7 +5,6 @@ These interfaces define contracts for dependency injection.
 NO import-time I/O dependencies - safe to import anywhere.
 """
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
-from datetime import datetime
 
 
 class MemoryServiceError(Exception):

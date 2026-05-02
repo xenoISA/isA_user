@@ -7,7 +7,6 @@ Service registration is handled by Consul agent sidecar (not programmatically).
 
 import consul
 import logging
-import asyncio
 import socket
 import json
 from typing import Optional, List, Dict, Any

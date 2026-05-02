@@ -6,9 +6,8 @@ Configuration Validator
 
 import json
 import socket
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Tuple
 from pathlib import Path
-import subprocess
 import logging
 
 logger = logging.getLogger(__name__)

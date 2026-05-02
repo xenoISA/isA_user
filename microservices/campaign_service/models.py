@@ -65,7 +65,7 @@ from tests.contracts.campaign.data_contract import (
 )
 
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, List
 from datetime import datetime
 
 

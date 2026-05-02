@@ -72,7 +72,7 @@ class EventPublisher:
             )
 
             await self.event_bus.publish(
-                subject=f"events.service.event.created",
+                subject="events.service.event.created",
                 data=event.model_dump(),
                 headers={
                     "event_id": event_id,
@@ -123,7 +123,7 @@ class EventPublisher:
             )
 
             await self.event_bus.publish(
-                subject=f"events.service.event.processed",
+                subject="events.service.event.processed",
                 data=event.model_dump(),
                 headers={
                     "event_id": event_id,
@@ -177,7 +177,7 @@ class EventPublisher:
             )
 
             await self.event_bus.publish(
-                subject=f"events.service.event.failed",
+                subject="events.service.event.failed",
                 data=event.model_dump(),
                 headers={
                     "event_id": event_id,
@@ -228,7 +228,7 @@ class EventPublisher:
             )
 
             await self.event_bus.publish(
-                subject=f"events.service.replay.started",
+                subject="events.service.replay.started",
                 data=event.model_dump(),
                 headers={
                     "replay_id": replay_id,
@@ -275,7 +275,7 @@ class EventPublisher:
             )
 
             await self.event_bus.publish(
-                subject=f"events.service.replay.completed",
+                subject="events.service.replay.completed",
                 data=event.model_dump(),
                 headers={
                     "replay_id": replay_id,

@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from .payment_repository import PaymentRepository
 from .models import (
     SubscriptionPlan, Subscription, Payment, Invoice, Refund,
-    PaymentMethodInfo, PaymentStatus, SubscriptionStatus,
+    PaymentStatus, SubscriptionStatus,
     SubscriptionTier, BillingCycle, RefundStatus, InvoiceStatus,
     CreatePaymentIntentRequest, CreateSubscriptionRequest,
     UpdateSubscriptionRequest, CancelSubscriptionRequest,
@@ -827,7 +827,7 @@ class PaymentService:
         # 确定退款金额
         refund_amount = request.amount or payment.amount
         if refund_amount > payment.amount:
-            raise ValueError(f"Refund amount exceeds payment amount")
+            raise ValueError("Refund amount exceeds payment amount")
         
         refund_id = f"re_{payment.payment_id}_{datetime.utcnow().timestamp()}"
         

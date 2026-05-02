@@ -7,7 +7,7 @@ Used for retrieving and storing session memories.
 
 import os
 import sys
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 # Add parent directories to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -5,8 +5,7 @@ Example of how a microservice integrates with blockchain functionality
 through the API Gateway.
 """
 
-from fastapi import HTTPException, Depends
-from typing import Optional
+from fastapi import HTTPException
 import logging
 from decimal import Decimal
 import sys
@@ -14,7 +13,7 @@ import os
 
 # Add parent directory to path to import core modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from core.blockchain_client import BlockchainClient, InsufficientBalanceError, TransactionFailedError
+from core.blockchain_client import BlockchainClient, InsufficientBalanceError
 from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)

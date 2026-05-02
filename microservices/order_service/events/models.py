@@ -4,8 +4,11 @@ Order Service Event Models
 Pydantic models for events published by order service
 """
 
-from pydantic import BaseModel, Field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -36,10 +39,6 @@ class OrderStreamConfig:
     SUBJECTS = ["order.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "order"
-
-from typing import Optional, Dict, Any, List
-from datetime import datetime
-from decimal import Decimal
 
 
 class OrderCreatedEvent(BaseModel):

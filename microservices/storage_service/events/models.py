@@ -4,7 +4,6 @@ Storage Service - Event Data Models
 定义所有事件相关的数据模型（Pydantic models）
 """
 
-from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 

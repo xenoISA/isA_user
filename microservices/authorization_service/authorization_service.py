@@ -10,30 +10,21 @@ This service uses dependency injection for all external dependencies:
 """
 
 import logging
-import asyncio
 from typing import TYPE_CHECKING, Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 import uuid
 
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import (
     AuthorizationRepositoryProtocol,
     EventBusProtocol,
-    AuthorizationException,
-    PermissionNotFoundException,
-    UserNotFoundException,
-    OrganizationNotFoundException,
-    InvalidPermissionError,
 )
 from .models import (
-    ResourcePermission, UserPermissionRecord, OrganizationPermission,
-    ResourceType, AccessLevel, PermissionSource, SubscriptionTier,
+    ResourcePermission, UserPermissionRecord, ResourceType, AccessLevel, PermissionSource, SubscriptionTier,
     ResourceAccessRequest, ResourceAccessResponse,
     GrantPermissionRequest, RevokePermissionRequest,
     UserPermissionSummary, BulkPermissionRequest,
-    BatchOperationResult, BatchOperationSummary,
-    PermissionAuditLog, AuthorizationError,
-    AssignRoleRequest,
+    BatchOperationResult, PermissionAuditLog, AssignRoleRequest,
 )
 from .role_validator import (
     can_assign_role,
@@ -343,9 +334,9 @@ class AuthorizationService:
                         }
                     )
                 else:
-                    logger.info(f"DENYING access - insufficient access level")
+                    logger.info("DENYING access - insufficient access level")
             else:
-                logger.info(f"DENYING access - insufficient subscription tier")
+                logger.info("DENYING access - insufficient subscription tier")
             
             return ResourceAccessResponse(
                 has_access=False,

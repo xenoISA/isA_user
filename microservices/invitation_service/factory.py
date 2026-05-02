@@ -17,7 +17,6 @@ from .invitation_repository import InvitationRepository
 from .protocols import (
     InvitationRepositoryProtocol,
     EventBusProtocol,
-    OrganizationClientProtocol,
 )
 
 

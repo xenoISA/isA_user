@@ -4,8 +4,11 @@ Product Service Event Models
 Pydantic models for events published by product service
 """
 
-from pydantic import BaseModel, Field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, Optional
+
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -35,9 +38,6 @@ class ProductStreamConfig:
     SUBJECTS = ["product.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "product"
-
-from typing import Optional, Dict, Any
-from datetime import datetime
 
 
 class SubscriptionCreatedEvent(BaseModel):

@@ -5,7 +5,6 @@ Task Repository
 """
 
 import logging
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -23,7 +22,6 @@ from .models import (
     TaskResponse,
     TaskStatus,
     TaskTemplateResponse,
-    TaskType,
 )
 
 logger = logging.getLogger(__name__)

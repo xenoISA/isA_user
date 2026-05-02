@@ -84,7 +84,7 @@ class ResilientLokiHandler(logging.Handler):
 
         try:
             self.loki_handler.emit(record)
-        except Exception as e:
+        except Exception:
             self.failed = True
             # Silently fail - don't crash the application
             pass

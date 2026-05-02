@@ -11,7 +11,6 @@ High-level service for crypto payments that:
 import logging
 import os
 from typing import Optional, Dict, Any, List
-from decimal import Decimal
 from datetime import datetime
 
 from .crypto_providers import (
@@ -26,8 +25,6 @@ from .crypto_providers import (
     CryptoWebhookEvent,
     CryptoRefundRequest,
     CryptoRefund,
-    Chain,
-    Token,
     CHAIN_CONFIG,
     TOKEN_CONFIG,
 )

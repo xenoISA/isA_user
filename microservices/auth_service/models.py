@@ -6,10 +6,9 @@ Handles user identities, sessions, and authentication-related entities.
 """
 
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr
 from datetime import datetime
 from enum import Enum
-import json
 
 
 class AuthProvider(str, Enum):

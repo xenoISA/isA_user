@@ -8,7 +8,6 @@ Uses dependency injection for testability:
 """
 
 import logging
-import asyncio
 import uuid
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
@@ -25,7 +24,7 @@ from .models import (
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
+    pass
 
 logger = logging.getLogger(__name__)
 

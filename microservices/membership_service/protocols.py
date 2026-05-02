@@ -5,8 +5,6 @@ Defines interfaces for dependency injection and testing.
 Following the protocol-based architecture pattern.
 """
 
-from datetime import datetime
-from decimal import Decimal
 from typing import Any, Dict, List, Optional, Protocol
 
 from .models import (

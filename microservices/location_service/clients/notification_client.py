@@ -7,7 +7,7 @@ Used for sending location-related notifications to users.
 
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 # Add parent directories to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))

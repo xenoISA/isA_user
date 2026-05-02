@@ -39,7 +39,7 @@ from .models import (
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ class AccountService:
             logger.info(f"Account ensured: {request.user_id}, created: {was_created}")
             return account_response, was_created
 
-        except DuplicateEntryError as e:
+        except DuplicateEntryError:
             raise AccountValidationError(
                 f"Account with email already exists: {request.email}"
             )

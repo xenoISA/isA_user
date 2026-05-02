@@ -9,7 +9,7 @@ import logging
 from typing import Optional, Dict, Any
 from abc import ABC
 
-from core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
+from core.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ class BaseServiceClient(ABC):
             else:
                 self._circuit_breaker.record_success()
             return response
-        except (httpx.ConnectError, httpx.TimeoutException) as e:
+        except (httpx.ConnectError, httpx.TimeoutException):
             self._circuit_breaker.record_failure()
             raise
 

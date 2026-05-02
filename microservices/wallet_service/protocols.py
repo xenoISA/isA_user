@@ -13,10 +13,8 @@ from .models import (
     WalletBalance,
     WalletTransaction,
     WalletCreate,
-    WalletUpdate,
     TransactionFilter,
     WalletStatistics,
-    TransactionType,
     WalletType,
 )
 

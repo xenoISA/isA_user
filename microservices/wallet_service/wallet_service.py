@@ -8,20 +8,17 @@ Uses dependency injection for testability:
 - Event publishers are lazily loaded
 """
 
-from typing import TYPE_CHECKING, Optional, List, Dict, Any, Tuple
-from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Optional, List, Dict, Any
+from datetime import datetime, timezone
 from decimal import Decimal
 import logging
-import uuid
 
 from core.nats_client import Event
 
 from .models import (
-    WalletBalance, WalletTransaction, WalletCreate, WalletUpdate,
-    DepositRequest, WithdrawRequest, ConsumeRequest, TransferRequest,
+    WalletBalance, WalletTransaction, WalletCreate, DepositRequest, WithdrawRequest, ConsumeRequest, TransferRequest,
     RefundRequest, BlockchainSyncRequest, TransactionFilter,
-    WalletStatistics, WalletResponse, TransactionType, WalletType,
-    BlockchainNetwork, BlockchainIntegration
+    WalletStatistics, WalletResponse, TransactionType, WalletType
 )
 
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
@@ -29,14 +26,10 @@ from .protocols import (
     WalletRepositoryProtocol,
     EventBusProtocol,
     AccountClientProtocol,
-    WalletNotFoundError,
-    InsufficientBalanceError,
-    DuplicateWalletError,
 )
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
     from core.nats_client import Event
 
 logger = logging.getLogger(__name__)

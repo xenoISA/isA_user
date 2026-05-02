@@ -9,15 +9,12 @@ Uses dependency injection for testability.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import (
     CalendarEventRepositoryProtocol,
-    CalendarEventNotFoundError,
-    DuplicateEventError,
-    InvalidDateRangeError,
 )
 from .models import (
     EventCreateRequest,
@@ -25,14 +22,13 @@ from .models import (
     EventQueryRequest,
     EventResponse,
     EventUpdateRequest,
-    RecurrenceType,
     SyncProvider,
     SyncStatusResponse,
 )
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
+    pass
 
 logger = logging.getLogger(__name__)
 

@@ -140,7 +140,7 @@ async def example_weather_integration():
         if summary:
             print(f"✓ Weather summary for {summary['location']}:")
             print(f"  Current: {summary['current']['temperature']}°C, {summary['current']['condition']}")
-            print(f"  Forecast:")
+            print("  Forecast:")
             for i, day in enumerate(summary['forecast'][:3], 1):
                 print(f"    Day {i}: {day['temp_max']}°C / {day['temp_min']}°C")
         
@@ -220,7 +220,7 @@ async def example_device_service_integration():
         current = await weather.get_current_weather(device_location)
         
         if current:
-            print(f"📱 Display weather on device:")
+            print("📱 Display weather on device:")
             print(f"   Location: {current['location']}")
             print(f"   Temperature: {current['temperature']}°C")
             print(f"   Condition: {current['condition']}")
@@ -230,7 +230,7 @@ async def example_device_service_integration():
         forecast = await weather.get_forecast(device_location, days=3)
         
         if forecast:
-            print(f"\n📅 3-day forecast:")
+            print("\n📅 3-day forecast:")
             for day in forecast['forecast']:
                 print(f"   {day['date'][:10]}: {day['condition']}, {day['temp_max']}°C")
         

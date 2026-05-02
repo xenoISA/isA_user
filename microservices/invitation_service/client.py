@@ -7,7 +7,7 @@ Client library for other microservices to interact with invitation service
 import httpx
 from core.service_discovery import get_service_discovery
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 

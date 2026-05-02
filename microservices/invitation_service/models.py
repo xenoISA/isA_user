@@ -5,7 +5,7 @@ Invitation Service Models
 """
 
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 from datetime import datetime
 from enum import Enum
 

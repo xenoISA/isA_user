@@ -6,6 +6,7 @@ Compliance Service Event Models
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import List, Dict, Any, Optional
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -35,9 +36,6 @@ class ComplianceStreamConfig:
     SUBJECTS = ["compliance.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "compliance"
-
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 
 class ComplianceCheckPerformedEvent(BaseModel):

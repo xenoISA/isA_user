@@ -19,7 +19,7 @@ from core.config_manager import ConfigManager
 
 from isa_common import AsyncPostgresClient
 
-from .models import CalendarEvent, EventCategory, EventResponse, RecurrenceType
+from .models import EventCategory, EventResponse, RecurrenceType
 
 logger = logging.getLogger(__name__)
 

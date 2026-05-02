@@ -45,11 +45,6 @@ if TYPE_CHECKING:
     )
 
 # Re-export exceptions from protocols for backwards compatibility
-from .protocols import (
-    VaultServiceError,
-    VaultAccessDeniedError,
-    VaultNotFoundError,
-)
 
 logger = logging.getLogger(__name__)
 

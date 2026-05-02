@@ -24,20 +24,19 @@ from .protocols import (
     AlbumRepositoryProtocol,
     AlbumNotFoundError,
     AlbumValidationError,
-    AlbumPermissionError,
     AlbumServiceError,
 )
 from .models import (
     AlbumCreateRequest, AlbumUpdateRequest, AlbumAddPhotosRequest,
     AlbumRemovePhotosRequest, AlbumSyncRequest, AlbumResponse,
     AlbumSummaryResponse, AlbumPhotoResponse, AlbumSyncStatusResponse,
-    AlbumListResponse, Album, AlbumPhoto, SyncStatus
+    AlbumListResponse, Album, SyncStatus
 )
 from core.nats_client import Event
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
+    pass
 
 logger = logging.getLogger(__name__)
 

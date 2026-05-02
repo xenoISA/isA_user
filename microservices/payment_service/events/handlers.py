@@ -6,7 +6,6 @@ Handlers for events from other services
 
 import logging
 from typing import Dict, Any
-from datetime import datetime
 from decimal import Decimal
 
 from ..models import CreatePaymentIntentRequest, Currency

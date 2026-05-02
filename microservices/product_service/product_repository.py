@@ -20,7 +20,6 @@ from core.config_manager import ConfigManager
 from .models import (
     Product,
     ProductBillingProfile,
-    PricingModel,
     ProductType,
     ProductKind,
     FulfillmentType,

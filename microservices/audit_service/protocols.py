@@ -9,7 +9,7 @@ from datetime import datetime
 
 # Import only models (no I/O dependencies)
 from .models import (
-    AuditEvent, SecurityEvent, EventType, EventSeverity
+    AuditEvent, SecurityEvent, EventType
 )
 
 

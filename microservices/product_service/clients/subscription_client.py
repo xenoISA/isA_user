@@ -7,7 +7,7 @@ Used for checking subscription status for product access.
 
 import os
 import sys
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 # Add parent directories to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))

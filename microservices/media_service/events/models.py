@@ -6,6 +6,7 @@ Defines Pydantic models for events published and consumed by media_service
 
 from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Optional, List, Dict, Any
 
 # =============================================================================
 # Event Type Definitions (Service-Specific)
@@ -38,9 +39,6 @@ class MediaStreamConfig:
     SUBJECTS = ["media.>"]
     MAX_MESSAGES = 100000
     CONSUMER_PREFIX = "media"
-
-from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 
 # ====================

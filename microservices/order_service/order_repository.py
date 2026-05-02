@@ -17,8 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    Order, OrderStatus, OrderType, PaymentStatus,
-    OrderFilter, OrderStatistics
+    Order, OrderStatus, OrderType, PaymentStatus
 )
 
 logger = logging.getLogger(__name__)

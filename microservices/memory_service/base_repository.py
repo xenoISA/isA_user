@@ -64,7 +64,6 @@ class BaseMemoryRepository:
         Recursively clean protobuf objects from values
         Converts any remaining protobuf objects to Python native types
         """
-        import json
 
         # Check if it's a protobuf message/descriptor object
         if hasattr(value, 'DESCRIPTOR') or type(value).__module__.startswith('google.protobuf') or type(value).__module__.startswith('google._upb'):

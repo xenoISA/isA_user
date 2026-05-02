@@ -9,7 +9,6 @@ Data access layer for OTA service - handles database operations for:
 """
 
 import logging
-import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from google.protobuf.json_format import MessageToDict
@@ -18,9 +17,7 @@ from google.protobuf.struct_pb2 import Struct, ListValue
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    FirmwareResponse, UpdateCampaignResponse, DeviceUpdateResponse,
-    RollbackResponse, UpdateStatsResponse,
-    UpdateStatus, DeploymentStrategy, Priority, RollbackTrigger
+    UpdateStatus
 )
 
 logger = logging.getLogger(__name__)

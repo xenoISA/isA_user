@@ -28,9 +28,8 @@ Usage in a microservice main.py:
 
 import inspect
 import logging
-import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List
 
 from fastapi.responses import JSONResponse
 

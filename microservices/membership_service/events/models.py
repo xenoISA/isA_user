@@ -6,7 +6,6 @@ Event data models for membership_service.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 

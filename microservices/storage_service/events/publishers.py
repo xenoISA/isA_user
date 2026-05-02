@@ -69,7 +69,7 @@ class StorageEventPublisher:
             if result:
                 logger.info(f"✅ Published FILE_UPLOADED event for file {file_id}")
             else:
-                logger.error(f"❌ Failed to publish FILE_UPLOADED event")
+                logger.error("❌ Failed to publish FILE_UPLOADED event")
             return result
 
         except Exception as e:
@@ -121,7 +121,7 @@ class StorageEventPublisher:
                     f"✅ Published FILE_UPLOADED_WITH_AI event for file {file_id}"
                 )
             else:
-                logger.error(f"❌ Failed to publish FILE_UPLOADED_WITH_AI event")
+                logger.error("❌ Failed to publish FILE_UPLOADED_WITH_AI event")
             return result
 
         except Exception as e:

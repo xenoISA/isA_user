@@ -13,7 +13,7 @@ Implements all 50 business rules from logic_contract.md:
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from .protocols import (
     CreditRepositoryProtocol,

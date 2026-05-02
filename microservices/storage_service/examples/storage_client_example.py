@@ -229,7 +229,7 @@ async def example_1_basic_file_operations():
             print("\n3. Generating presigned URL...")
             presigned_url = await client.get_presigned_url(file_id, expires_in=1800)
             if presigned_url:
-                print(f"   ✓ Presigned URL generated (expires in 30 minutes)")
+                print("   ✓ Presigned URL generated (expires in 30 minutes)")
                 print(f"     URL: {presigned_url[:60]}...")
 
             print("\n4. Downloading file...")
@@ -240,7 +240,7 @@ async def example_1_basic_file_operations():
             print("\n5. Deleting file...")
             deleted = await client.delete_file(file_id, "user_123")
             if deleted:
-                print(f"   ✓ File deleted successfully")
+                print("   ✓ File deleted successfully")
 
 
 async def example_2_firmware_storage():
@@ -285,9 +285,9 @@ async def example_2_firmware_storage():
             )
 
             if download_url:
-                print(f"   ✓ Download URL generated for OTA update")
+                print("   ✓ Download URL generated for OTA update")
                 print(f"     URL: {download_url[:80]}...")
-                print(f"     Expires in: 1 hour")
+                print("     Expires in: 1 hour")
 
             print("\n3. Verifying file integrity...")
             file_info = await client.get_file_info(firmware_id)

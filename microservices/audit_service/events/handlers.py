@@ -5,10 +5,9 @@ Audit Service Event Handlers
 """
 
 import logging
-from typing import Optional
 from ..models import (
     AuditEventCreateRequest, EventSeverity,
-    EventStatus, AuditCategory, EventType
+    AuditCategory, EventType
 )
 
 logger = logging.getLogger(__name__)

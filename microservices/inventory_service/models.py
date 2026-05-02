@@ -5,7 +5,6 @@ Supports real-time stock for physical SKUs and infinite stock for digital items.
 """
 
 from datetime import datetime
-from decimal import Decimal
 from enum import Enum
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field

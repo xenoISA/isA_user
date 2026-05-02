@@ -6,7 +6,7 @@ Handles incoming events from other services.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from .models import (
     CampaignSubscribedEventType,

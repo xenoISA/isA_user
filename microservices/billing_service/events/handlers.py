@@ -22,11 +22,10 @@ from core.nats_client import Event
 from core.nats_client import EventEnvelope
 
 from ..models import RecordUsageRequest, ServiceType
-from .models import BillingSubscribedEventType, UnitType, UsageEventData, parse_usage_event
+from .models import parse_usage_event
 from .publishers import (
     publish_billing_calculated,
     publish_billing_error,
-    publish_usage_recorded,
 )
 
 logger = logging.getLogger(__name__)

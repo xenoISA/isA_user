@@ -2,7 +2,7 @@
 Telemetry Service Routes Registry
 Defines all API routes for Consul service registration
 """
-from typing import List, Dict, Any
+from typing import Dict, Any
 # Define all routes
 SERVICE_ROUTES = [
     # Health checks

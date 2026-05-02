@@ -72,9 +72,9 @@ class FamilySharingRepository:
                 # 尝试查询看是否已存在
                 existing = await self.get_sharing(sharing_data['sharing_id'])
                 if existing:
-                    logger.info(f"Record already exists, returning it")
+                    logger.info("Record already exists, returning it")
                     return existing
-                logger.error(f"Insert failed and record not found")
+                logger.error("Insert failed and record not found")
                 return None
 
             # 查询创建的记录

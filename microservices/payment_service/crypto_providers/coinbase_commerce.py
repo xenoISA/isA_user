@@ -19,7 +19,7 @@ import uuid
 import logging
 import os
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 from .base import CryptoPaymentProvider

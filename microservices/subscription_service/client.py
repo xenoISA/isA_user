@@ -6,8 +6,7 @@ Client library for other microservices to interact with subscription service.
 
 import httpx
 import logging
-from typing import Optional, Dict, Any, List
-from decimal import Decimal
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 

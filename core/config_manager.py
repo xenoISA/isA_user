@@ -564,13 +564,13 @@ class ConfigManager:
         print(f"Log Level: {config.log_level}")
 
         # Consul
-        print(f"\n[Consul Service Discovery]")
+        print("\n[Consul Service Discovery]")
         print(f"  Enabled: {config.consul_enabled}")
         print(f"  Host: {config.consul_host}:{config.consul_port}")
 
         # Database
         if config.database_url or config.supabase_url:
-            print(f"\n[Database]")
+            print("\n[Database]")
             if config.database_url:
                 print(f"  Database URL: {'***' if not show_secrets else config.database_url[:50]}...")
             if config.supabase_url:
@@ -579,7 +579,7 @@ class ConfigManager:
 
         # NATS
         if config.nats_enabled or config.nats_url:
-            print(f"\n[NATS Event Streaming]")
+            print("\n[NATS Event Streaming]")
             print(f"  Enabled: {config.nats_enabled}")
             if config.nats_url:
                 print(f"  URL: {config.nats_url}")
@@ -591,7 +591,7 @@ class ConfigManager:
 
         # MinIO
         if config.minio_enabled or config.minio_endpoint:
-            print(f"\n[MinIO Object Storage]")
+            print("\n[MinIO Object Storage]")
             print(f"  Enabled: {config.minio_enabled}")
             if config.minio_endpoint:
                 print(f"  Endpoint: {config.minio_endpoint}")
@@ -601,7 +601,7 @@ class ConfigManager:
 
         # S3
         if config.s3_enabled or config.s3_bucket_name:
-            print(f"\n[AWS S3 Storage]")
+            print("\n[AWS S3 Storage]")
             print(f"  Enabled: {config.s3_enabled}")
             if config.s3_bucket_name:
                 print(f"  Bucket: {config.s3_bucket_name}")
@@ -610,13 +610,13 @@ class ConfigManager:
 
         # Gateway
         if config.gateway_enabled or config.gateway_url:
-            print(f"\n[API Gateway]")
+            print("\n[API Gateway]")
             print(f"  Enabled: {config.gateway_enabled}")
             if config.gateway_url:
                 print(f"  URL: {config.gateway_url}")
 
         if config.extra_config:
-            print(f"\n[Extra Configurations]")
+            print("\n[Extra Configurations]")
             for key, value in sorted(config.extra_config.items()):
                 if not show_secrets and any(s in key.lower() for s in ["secret", "key", "password", "token"]):
                     print(f"  {key}: ***")

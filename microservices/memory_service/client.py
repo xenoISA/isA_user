@@ -7,11 +7,10 @@ Supports all memory types: factual, procedural, episodic, semantic, working, ses
 
 import httpx
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 from .models import (
     MemoryType, MemoryOperationResult,
-    MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams
+    MemoryCreateRequest, MemoryUpdateRequest
 )
 
 

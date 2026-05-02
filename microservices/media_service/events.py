@@ -5,7 +5,6 @@ Handles event-driven cleanup and synchronization for media resources
 """
 
 import logging
-import json
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:

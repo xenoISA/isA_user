@@ -463,7 +463,7 @@ class CreditRepository:
                 params.append(filters["status"])
 
             if filters.get("active_only"):
-                conditions.append(f"(amount - consumed_amount - expired_amount) > 0")
+                conditions.append("(amount - consumed_amount - expired_amount) > 0")
 
             where_clause = " AND ".join(conditions)
 

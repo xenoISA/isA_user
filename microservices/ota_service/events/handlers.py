@@ -12,7 +12,6 @@ from typing import Dict, Any
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
-from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
 

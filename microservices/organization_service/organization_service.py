@@ -9,15 +9,12 @@ Uses dependency injection for testability:
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Optional
 from datetime import datetime, timezone
 
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import (
     OrganizationRepositoryProtocol,
-    OrganizationNotFoundError as ProtocolNotFoundError,
-    OrganizationAccessDeniedError as ProtocolAccessDeniedError,
-    OrganizationValidationError as ProtocolValidationError,
 )
 from .models import (
     OrganizationCreateRequest, OrganizationUpdateRequest,
@@ -39,7 +36,7 @@ from core.nats_client import Event
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
+    pass
 
 logger = logging.getLogger(__name__)
 

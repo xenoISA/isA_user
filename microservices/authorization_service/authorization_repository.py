@@ -8,7 +8,6 @@ Uses service clients for cross-service communication.
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
-import json
 import sys
 import os
 
@@ -19,9 +18,7 @@ from google.protobuf.json_format import MessageToDict
 from core.config_manager import ConfigManager
 from .models import (
     ResourcePermission, UserPermissionRecord, OrganizationPermission,
-    ResourceType, AccessLevel, PermissionSource, SubscriptionTier,
-    UserPermissionSummary, ResourceAccessSummary, OrganizationPermissionSummary,
-    PermissionAuditLog, ExternalServiceUser, ExternalServiceOrganization
+    ResourceType, AccessLevel, UserPermissionSummary, PermissionAuditLog, ExternalServiceUser, ExternalServiceOrganization
 )
 
 # Import service clients for cross-service communication
@@ -309,7 +306,7 @@ class AuthorizationRepository:
                 return UserPermissionRecord(**record_data)
             return None
 
-        except Exception as e:
+        except Exception:
             logger.debug(f"User permission not found: {user_id} - {resource_type}:{resource_name}")
             return None
 
@@ -447,7 +444,7 @@ class AuthorizationRepository:
                 )
             return None
 
-        except Exception as e:
+        except Exception:
             logger.debug(f"Organization permission not found: {organization_id} - {resource_type}:{resource_name}")
             return None
 

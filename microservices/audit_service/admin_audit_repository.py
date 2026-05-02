@@ -6,8 +6,7 @@ Data access layer for the admin_audit_log table.
 
 import json
 import logging
-import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from isa_common import AsyncPostgresClient

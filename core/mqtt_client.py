@@ -6,7 +6,6 @@ Provides async-first IoT messaging with topic patterns for device commands,
 sensor readings, and system events.
 """
 
-import json
 import logging
 import secrets
 from datetime import datetime

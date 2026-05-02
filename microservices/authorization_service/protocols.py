@@ -12,7 +12,6 @@ from .models import (
     UserPermissionRecord,
     OrganizationPermission,
     ResourceType,
-    AccessLevel,
     UserPermissionSummary,
     PermissionAuditLog,
     ExternalServiceUser,

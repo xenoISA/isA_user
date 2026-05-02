@@ -6,7 +6,6 @@ Handlers for events from other services - Uses PostgreSQL repository
 
 import logging
 from typing import Dict, Any
-from datetime import datetime, timedelta, timezone
 
 from .publishers import (
     publish_stock_reserved,

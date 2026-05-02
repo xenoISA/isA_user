@@ -16,29 +16,19 @@ from decimal import Decimal
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import (
     OrderRepositoryProtocol,
-    OrderNotFoundError,
     OrderValidationError,
     OrderServiceError,
-    EventBusProtocol,
 )
 from .models import (
     OrderCreateRequest, OrderUpdateRequest, OrderCancelRequest,
     OrderCompleteRequest, OrderResponse, OrderListResponse,
-    OrderSummaryResponse, OrderStatistics, OrderFilter,
-    OrderSearchParams, Order, OrderStatus, OrderType, PaymentStatus,
-    PaymentServiceRequest, WalletServiceRequest
+    OrderStatistics, OrderFilter,
+    OrderSearchParams, Order, OrderStatus, OrderType, PaymentServiceRequest, WalletServiceRequest
 )
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from core.config_manager import ConfigManager
-    from .clients import (
-        PaymentClient,
-        WalletClient,
-        AccountClient,
-        StorageClient,
-        BillingClient
-    )
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +143,7 @@ class OrderService:
                         logger.info(f"User {request.user_id} validated via Account Service for order creation")
             except Exception as e:
                 logger.warning(f"Failed to validate user via Account Service: {e}")
-                logger.info(f"Proceeding with order creation despite Account Service validation failure")
+                logger.info("Proceeding with order creation despite Account Service validation failure")
 
             # Calculate expiration time
             expires_at = None

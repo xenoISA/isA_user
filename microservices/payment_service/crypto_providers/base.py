@@ -6,7 +6,7 @@ Implement this interface to add new providers (Coinbase Commerce, Circle, MoonPa
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, List
 from decimal import Decimal
 import logging
 
@@ -333,7 +333,6 @@ class MockCryptoProvider(CryptoPaymentProvider):
         request: CryptoRefundRequest
     ) -> Optional[CryptoRefund]:
         import uuid
-        from datetime import datetime
 
         payment = self._payments.get(request.payment_id)
         if not payment:

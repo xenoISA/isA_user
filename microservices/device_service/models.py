@@ -4,7 +4,7 @@ Device Management Service - Data Models
 设备管理服务数据模型，包含设备注册、认证、生命周期管理等
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from enum import Enum

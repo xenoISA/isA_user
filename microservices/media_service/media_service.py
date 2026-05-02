@@ -23,7 +23,6 @@ from .models import (
     PhotoVersion,
     PhotoVersionCreateRequest,
     PhotoVersionResponse,
-    PhotoVersionType,
     Playlist,
     PlaylistCreateRequest,
     PlaylistResponse,

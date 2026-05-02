@@ -17,20 +17,12 @@ from datetime import datetime, timedelta, timezone
 # Import only models (no I/O dependencies)
 from .models import (
     MemoryType, MemoryModel, MemoryOperationResult,
-    FactualMemory, ProceduralMemory, EpisodicMemory,
-    SemanticMemory, WorkingMemory, SessionMemory,
     MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams
 )
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
-    from .factual_service import FactualMemoryService
-    from .procedural_service import ProceduralMemoryService
-    from .episodic_service import EpisodicMemoryService
-    from .semantic_service import SemanticMemoryService
-    from .working_service import WorkingMemoryService
-    from .session_service import SessionMemoryService
-    from .association_service import AssociationService
+    pass
 
 logger = logging.getLogger(__name__)
 

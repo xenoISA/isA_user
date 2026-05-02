@@ -4,7 +4,7 @@ OTA Service - Data Models
 OTA更新服务数据模型，包含固件管理、更新任务、部署策略等
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from enum import Enum
