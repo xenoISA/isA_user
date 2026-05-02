@@ -948,6 +948,7 @@ class AuthorizationService:
         # user-visible success path; the denial paths above are log-only.
         if self.event_bus:
             try:
+                from core.nats_client import Event
                 from core.role_events import (
                     ROLE_ASSIGNED,
                     build_role_assigned_event,

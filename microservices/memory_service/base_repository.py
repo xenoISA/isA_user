@@ -78,9 +78,9 @@ class BaseMemoryRepository:
                     # Try MessageToDict or return empty dict
                     try:
                         return MessageToDict(value)
-                    except:
+                    except Exception:
                         return {}
-            except:
+            except Exception:
                 logger.warning(f"Could not convert protobuf object of type {type(value)}, returning empty dict")
                 return {}
 

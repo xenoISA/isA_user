@@ -128,7 +128,7 @@ class ComplianceMiddleware(BaseHTTPMiddleware):
             import json
             try:
                 data = json.loads(body.decode())
-            except:
+            except Exception:
                 data = {}
             
             # 提取需要检查的内容

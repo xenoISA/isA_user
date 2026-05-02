@@ -221,7 +221,7 @@ class ConfigValidator:
                 s.settimeout(1)
                 result = s.connect_ex(('localhost', port))
                 return "running" if result == 0 else "stopped"
-        except:
+        except Exception:
             return "unknown"
     
     def print_validation_report(self):

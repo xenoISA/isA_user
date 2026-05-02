@@ -126,7 +126,7 @@ class EpisodicMemoryService:
                     if episode.get('episode_date'):
                         try:
                             episode_date = datetime.fromisoformat(episode['episode_date'])
-                        except:
+                        except Exception:
                             episode_date = None
 
                     # PostgreSQL data (no embedding)

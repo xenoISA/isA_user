@@ -252,7 +252,7 @@ class AuthenticationService:
                 # Default to custom JWT
                 return AuthProvider.ISA_USER.value
 
-        except:
+        except Exception:
             return AuthProvider.ISA_USER.value
 
     # ============================================

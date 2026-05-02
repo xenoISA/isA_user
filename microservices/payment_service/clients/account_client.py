@@ -159,5 +159,5 @@ class AccountClient:
             base_url = self._get_base_url()
             response = await self.client.get(f"{base_url}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False

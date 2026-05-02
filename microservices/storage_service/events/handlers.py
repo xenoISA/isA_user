@@ -135,7 +135,7 @@ async def handle_file_indexing_request(
                             ai_metadata_extracted = MessageToDict(
                                 ai_metadata_extracted, preserving_proto_field_name=True
                             )
-                        except:
+                        except Exception:
                             logger.warning(
                                 f"Failed to convert ai_metadata from protobuf, setting to empty dict"
                             )

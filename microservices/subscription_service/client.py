@@ -470,7 +470,7 @@ class SubscriptionServiceClient:
         try:
             response = await self.client.get(f"{self._get_base_url()}/health")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
 

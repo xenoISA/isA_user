@@ -332,7 +332,7 @@ class StorageRepository:
                                     permissions_array.append(item.string_value)
                                 else:
                                     permissions_array.append(str(item))
-                        except:
+                        except Exception:
                             permissions_array = []
 
                     result['permissions'] = {
@@ -411,7 +411,7 @@ class StorageRepository:
                                     permissions_array.append(item.string_value)
                                 else:
                                     permissions_array.append(str(item))
-                        except:
+                        except Exception:
                             permissions_array = []
 
                     row['permissions'] = {

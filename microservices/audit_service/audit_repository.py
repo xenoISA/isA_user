@@ -78,7 +78,7 @@ class AuditRepository:
                 if expected_type == 'dict' and not isinstance(parsed, dict):
                     return None
                 return parsed
-            except:
+            except Exception:
                 return [] if expected_type == 'list' else None
 
         try:
@@ -89,7 +89,7 @@ class AuditRepository:
                 return result if expected_type == 'dict' else None
             elif hasattr(value, '__iter__'):
                 return list(value) if expected_type == 'list' else None
-        except:
+        except Exception:
             pass
 
         return [] if expected_type == 'list' else None
