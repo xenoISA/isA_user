@@ -12,12 +12,13 @@ import uuid
 
 class MemoryType(str, Enum):
     """Memory types based on cognitive science"""
-    FACTUAL = "factual"           # Facts and declarative knowledge
-    PROCEDURAL = "procedural"     # How-to knowledge and skills
-    EPISODIC = "episodic"         # Personal experiences and events
-    SEMANTIC = "semantic"         # Concepts and general knowledge
-    WORKING = "working"           # Temporary working memory
-    SESSION = "session"           # Current session context
+
+    FACTUAL = "factual"  # Facts and declarative knowledge
+    PROCEDURAL = "procedural"  # How-to knowledge and skills
+    EPISODIC = "episodic"  # Personal experiences and events
+    SEMANTIC = "semantic"  # Concepts and general knowledge
+    WORKING = "working"  # Temporary working memory
+    SESSION = "session"  # Current session context
 
 
 class MemoryModel(BaseModel):
@@ -27,11 +28,15 @@ class MemoryModel(BaseModel):
     user_id: str = Field(..., description="User identifier")
     memory_type: MemoryType = Field(..., description="Type of memory")
     content: str = Field(..., description="Memory content")
-    embedding: Optional[List[float]] = Field(None, description="Vector embedding of content")
+    embedding: Optional[List[float]] = Field(
+        None, description="Vector embedding of content"
+    )
 
     # Cognitive attributes
     importance_score: float = Field(0.5, ge=0.0, le=1.0, description="Importance level")
-    confidence: float = Field(0.8, ge=0.0, le=1.0, description="Confidence in memory accuracy")
+    confidence: float = Field(
+        0.8, ge=0.0, le=1.0, description="Confidence in memory accuracy"
+    )
     access_count: int = Field(0, ge=0, description="Number of times accessed")
 
     # Temporal attributes
@@ -40,12 +45,14 @@ class MemoryModel(BaseModel):
     last_accessed_at: Optional[datetime] = None
 
     # Context and metadata
-    context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional context")
+    context: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="Additional context"
+    )
     tags: List[str] = Field(default_factory=list, description="Memory tags")
 
     model_config = ConfigDict(
         use_enum_values=True,
-        json_encoders={datetime: lambda v: v.isoformat() if v else None}
+        json_encoders={datetime: lambda v: v.isoformat() if v else None},
     )
 
 
@@ -55,24 +62,30 @@ class FactualMemory(MemoryModel):
     memory_type: Literal[MemoryType.FACTUAL] = Field(MemoryType.FACTUAL)
 
     # Fact structure (subject-predicate-object)
-    fact_type: str = Field(..., description="Type of fact (person, place, concept, etc.)")
+    fact_type: str = Field(
+        ..., description="Type of fact (person, place, concept, etc.)"
+    )
     subject: str = Field(..., description="What the fact is about")
     predicate: str = Field(..., description="Relationship or attribute")
     object_value: str = Field(..., description="Value or related entity")
 
     # Factual memory specific attributes
-    fact_context: Optional[str] = Field(None, description="Additional context for the fact")
+    fact_context: Optional[str] = Field(
+        None, description="Additional context for the fact"
+    )
     source: Optional[str] = Field(None, description="Source of the fact")
     verification_status: str = Field("unverified", description="Verification status")
-    related_facts: List[str] = Field(default_factory=list, description="Related fact IDs")
+    related_facts: List[str] = Field(
+        default_factory=list, description="Related fact IDs"
+    )
 
-    @field_validator('content', mode='before')
+    @field_validator("content", mode="before")
     @classmethod
     def generate_content(cls, v, info):
         """Auto-generate content from fact structure"""
         if not v and info.data:
             data = info.data
-            if all(k in data for k in ['subject', 'predicate', 'object_value']):
+            if all(k in data for k in ["subject", "predicate", "object_value"]):
                 return f"{data['subject']} {data['predicate']} {data['object_value']}"
         return v
 
@@ -85,11 +98,15 @@ class ProceduralMemory(MemoryModel):
     # Procedure structure
     skill_type: str = Field(..., description="Type of skill or procedure")
     steps: List[Dict[str, Any]] = Field(..., description="Procedure steps")
-    prerequisites: List[str] = Field(default_factory=list, description="Required prior knowledge")
+    prerequisites: List[str] = Field(
+        default_factory=list, description="Required prior knowledge"
+    )
 
     # Procedural memory specific attributes
     difficulty_level: str = Field("medium", description="Difficulty level")
-    success_rate: float = Field(0.0, ge=0.0, le=1.0, description="Success rate when applied")
+    success_rate: float = Field(
+        0.0, ge=0.0, le=1.0, description="Success rate when applied"
+    )
     domain: str = Field(..., description="Domain or category of procedure")
 
 
@@ -104,9 +121,13 @@ class EpisodicMemory(MemoryModel):
     participants: List[str] = Field(default_factory=list, description="People involved")
 
     # Episodic memory specific attributes
-    emotional_valence: float = Field(0.0, ge=-1.0, le=1.0, description="Emotional tone (-1 negative, 1 positive)")
+    emotional_valence: float = Field(
+        0.0, ge=-1.0, le=1.0, description="Emotional tone (-1 negative, 1 positive)"
+    )
     vividness: float = Field(0.5, ge=0.0, le=1.0, description="How vivid the memory is")
-    episode_date: Optional[datetime] = Field(None, description="When the episode occurred")
+    episode_date: Optional[datetime] = Field(
+        None, description="When the episode occurred"
+    )
 
 
 class SemanticMemory(MemoryModel):
@@ -117,11 +138,15 @@ class SemanticMemory(MemoryModel):
     # Concept structure
     concept_type: str = Field(..., description="Type of concept")
     definition: str = Field(..., description="Concept definition")
-    properties: Dict[str, Any] = Field(default_factory=dict, description="Concept properties")
+    properties: Dict[str, Any] = Field(
+        default_factory=dict, description="Concept properties"
+    )
 
     # Semantic memory specific attributes
     abstraction_level: str = Field("medium", description="Level of abstraction")
-    related_concepts: List[str] = Field(default_factory=list, description="Related concept IDs")
+    related_concepts: List[str] = Field(
+        default_factory=list, description="Related concept IDs"
+    )
     category: str = Field(..., description="Concept category")
 
 
@@ -139,17 +164,18 @@ class WorkingMemory(MemoryModel):
     priority: int = Field(1, ge=1, le=10, description="Priority level")
     expires_at: Optional[datetime] = Field(None, description="When this memory expires")
 
-    @field_validator('expires_at', mode='before')
+    @field_validator("expires_at", mode="before")
     @classmethod
     def set_expiry(cls, v, info):
         """Auto-set expiry based on TTL"""
         if not v and info.data:
             data = info.data
-            if 'ttl_seconds' in data and 'created_at' in data:
+            if "ttl_seconds" in data and "created_at" in data:
                 from datetime import timedelta
-                created_at = data.get('created_at')
+
+                created_at = data.get("created_at")
                 if created_at:
-                    return created_at + timedelta(seconds=data['ttl_seconds'])
+                    return created_at + timedelta(seconds=data["ttl_seconds"])
         return v
 
 
@@ -161,7 +187,9 @@ class SessionMemory(MemoryModel):
     # Session structure
     session_id: str = Field(..., description="Session identifier")
     interaction_sequence: int = Field(..., description="Sequence number in session")
-    conversation_state: Dict[str, Any] = Field(default_factory=dict, description="Current conversation state")
+    conversation_state: Dict[str, Any] = Field(
+        default_factory=dict, description="Current conversation state"
+    )
 
     # Session memory specific attributes
     session_type: str = Field("chat", description="Type of session")
@@ -172,12 +200,16 @@ class MemorySearchQuery(BaseModel):
     """Model for memory search queries"""
 
     query: str = Field(..., description="Search query text")
-    memory_types: Optional[List[MemoryType]] = Field(None, description="Memory types to search")
+    memory_types: Optional[List[MemoryType]] = Field(
+        None, description="Memory types to search"
+    )
     user_id: Optional[str] = Field(None, description="User to search for")
 
     # Search parameters
     top_k: int = Field(10, ge=1, le=100, description="Number of results to return")
-    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0, description="Minimum similarity score")
+    similarity_threshold: float = Field(
+        0.7, ge=0.0, le=1.0, description="Minimum similarity score"
+    )
 
     # Filters
     importance_min: Optional[float] = Field(None, ge=0.0, le=1.0)
@@ -191,11 +223,15 @@ class MemorySearchResult(BaseModel):
     """Model for memory search results"""
 
     memory: MemoryModel = Field(..., description="Retrieved memory")
-    similarity_score: float = Field(..., ge=0.0, le=1.0, description="Similarity to query")
+    similarity_score: float = Field(
+        ..., ge=0.0, le=1.0, description="Similarity to query"
+    )
     rank: int = Field(..., ge=1, description="Result rank")
 
     # Additional context
-    matched_content: Optional[str] = Field(None, description="Specific content that matched")
+    matched_content: Optional[str] = Field(
+        None, description="Specific content that matched"
+    )
     explanation: Optional[str] = Field(None, description="Why this result was selected")
 
 
@@ -227,7 +263,10 @@ class MemoryOperationResult(BaseModel):
 # Request/Response models for service operations
 class MemoryCreateRequest(BaseModel):
     """Request model for creating memory"""
-    model_config = {"extra": "allow"}  # Allow extra fields for memory-type-specific attributes
+
+    model_config = {
+        "extra": "allow"
+    }  # Allow extra fields for memory-type-specific attributes
 
     user_id: str
     memory_type: MemoryType
@@ -247,6 +286,7 @@ class MemoryCreateRequest(BaseModel):
 
 class MemoryUpdateRequest(BaseModel):
     """Request model for updating memory"""
+
     content: Optional[str] = None
     importance_score: Optional[float] = None
     confidence: Optional[float] = None
@@ -256,6 +296,7 @@ class MemoryUpdateRequest(BaseModel):
 
 class MemoryListParams(BaseModel):
     """Parameters for listing memories"""
+
     user_id: str
     memory_type: Optional[MemoryType] = None
     limit: int = Field(50, ge=1, le=100)
@@ -266,10 +307,17 @@ class MemoryListParams(BaseModel):
 
 class DecayRequest(BaseModel):
     """Request model for running a memory decay cycle"""
-    user_id: Optional[str] = Field(None, description="User ID to decay (None for global)")
+
+    user_id: Optional[str] = Field(
+        None, description="User ID to decay (None for global)"
+    )
     half_life_days: int = Field(30, ge=1, description="Days for importance to halve")
-    floor_threshold: float = Field(0.1, ge=0.0, le=1.0, description="Below this, importance is set to 0")
-    protected_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Memories at or above this are never decayed")
+    floor_threshold: float = Field(
+        0.1, ge=0.0, le=1.0, description="Below this, importance is set to 0"
+    )
+    protected_threshold: float = Field(
+        0.8, ge=0.0, le=1.0, description="Memories at or above this are never decayed"
+    )
 
     @model_validator(mode="after")
     def floor_below_protected(self) -> "DecayRequest":
@@ -283,6 +331,7 @@ class DecayRequest(BaseModel):
 
 class DecayResponse(BaseModel):
     """Response model for a decay cycle"""
+
     success: bool
     total_processed: int = 0
     decayed_count: int = 0
@@ -294,15 +343,25 @@ class DecayResponse(BaseModel):
 
 class ConsolidationRequest(BaseModel):
     """Request model for triggering memory consolidation"""
-    user_id: Optional[str] = Field(None, description="User ID to consolidate (None for all)")
-    min_access_count: int = Field(5, ge=1, description="Minimum access count for candidates")
+
+    user_id: Optional[str] = Field(
+        None, description="User ID to consolidate (None for all)"
+    )
+    min_access_count: int = Field(
+        5, ge=1, description="Minimum access count for candidates"
+    )
     min_age_days: int = Field(7, ge=1, description="Minimum age in days for candidates")
-    max_cluster_size: int = Field(10, ge=1, le=50, description="Maximum memories per cluster")
-    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0, description="Embedding similarity threshold for clustering")
+    max_cluster_size: int = Field(
+        10, ge=1, le=50, description="Maximum memories per cluster"
+    )
+    similarity_threshold: float = Field(
+        0.7, ge=0.0, le=1.0, description="Embedding similarity threshold for clustering"
+    )
 
 
 class ConsolidationResponse(BaseModel):
     """Response model for memory consolidation"""
+
     success: bool
     consolidated_count: int = 0
     new_semantic_ids: List[str] = Field(default_factory=list)
@@ -312,26 +371,35 @@ class ConsolidationResponse(BaseModel):
 
 class HybridSearchResult(BaseModel):
     """A single result from hybrid search (vector + graph)."""
+
     memory_id: str = Field(..., description="Unique memory identifier")
     content: str = Field("", description="Memory content")
     memory_type: str = Field("", description="Memory type (factual, episodic, etc.)")
     final_score: float = Field(..., ge=0.0, description="Combined weighted score")
-    source: Literal["vector", "graph", "both"] = Field(..., description="Which retrieval method found this result")
+    source: Literal["vector", "graph", "both"] = Field(
+        ..., description="Which retrieval method found this result"
+    )
 
 
 class HybridSearchResponse(BaseModel):
     """Response model for the hybrid search endpoint."""
+
     query: str = Field(..., description="Original search query")
     user_id: str = Field(..., description="User who performed the search")
     vector_weight: float = Field(..., description="Weight applied to vector results")
     graph_weight: float = Field(..., description="Weight applied to graph results")
-    results: List[HybridSearchResult] = Field(default_factory=list, description="Merged results")
+    results: List[HybridSearchResult] = Field(
+        default_factory=list, description="Merged results"
+    )
     total_count: int = Field(0, description="Total number of results")
-    graph_available: bool = Field(True, description="Whether graph service was reachable")
+    graph_available: bool = Field(
+        True, description="Whether graph service was reachable"
+    )
 
 
 class MemoryServiceStatus(BaseModel):
     """Memory service status"""
+
     service: str = "memory_service"
     status: str
     version: str = "1.0.0"
@@ -340,50 +408,94 @@ class MemoryServiceStatus(BaseModel):
     timestamp: datetime
 
 
+class MemoryServiceStats(BaseModel):
+    """Aggregated stats for a user's memory store.
+
+    Surfaced by ``GET /api/v1/memories/stats?user_id=...`` and consumed by
+    the Agent SDK's ``MemoryStack.getStats()`` (xenoISA/isA_Agent_SDK#736)
+    plus downstream UI panels.
+    """
+
+    user_id: str = Field(..., description="User the stats are scoped to")
+    total_memories: int = Field(0, description="Total memories across all types")
+    by_type: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-memory-type counts (factual, episodic, semantic, procedural, working, session)",
+    )
+    consolidation_queue_depth: int = Field(
+        0,
+        description="Items waiting for episodic→semantic consolidation",
+    )
+    last_extraction_at: Optional[datetime] = Field(
+        None,
+        description="Timestamp of the most recent memory extraction; null when the user has no memories",
+    )
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 # ==================== Graph Models ====================
+
 
 class GraphEntity(BaseModel):
     """An entity node in the knowledge graph."""
+
     id: str = Field(..., description="Entity ID")
     name: str = Field(..., description="Entity name")
     type: str = Field(..., description="Entity type (e.g. technology, person)")
-    properties: Dict[str, Any] = Field(default_factory=dict, description="Entity properties")
+    properties: Dict[str, Any] = Field(
+        default_factory=dict, description="Entity properties"
+    )
 
 
 class GraphNeighbor(BaseModel):
     """A neighbor entity with its relationship."""
+
     id: str = Field(..., description="Neighbor entity ID")
     name: str = Field(..., description="Neighbor entity name")
     type: str = Field(..., description="Neighbor entity type")
     relationship: str = Field(..., description="Relationship type to the source entity")
     depth: int = Field(1, ge=1, description="Hop distance from source entity")
-    properties: Dict[str, Any] = Field(default_factory=dict, description="Entity properties")
+    properties: Dict[str, Any] = Field(
+        default_factory=dict, description="Entity properties"
+    )
 
 
 class GraphSearchRequest(BaseModel):
     """Request model for graph entity search."""
+
     query: str = Field(..., description="Search query text")
     user_id: str = Field(..., description="User ID to scope results")
     limit: int = Field(10, ge=1, le=100, description="Maximum number of results")
     max_depth: int = Field(2, ge=1, le=5, description="Maximum traversal depth")
-    entity_types: Optional[List[str]] = Field(None, description="Filter by entity types")
+    entity_types: Optional[List[str]] = Field(
+        None, description="Filter by entity types"
+    )
 
 
 class GraphSearchResponse(BaseModel):
     """Response model for graph entity search."""
-    entities: List[GraphEntity] = Field(default_factory=list, description="Matching entities")
+
+    entities: List[GraphEntity] = Field(
+        default_factory=list, description="Matching entities"
+    )
     total: int = Field(0, ge=0, description="Total number of matches")
 
 
 class GraphNeighborsRequest(BaseModel):
     """Request model for graph neighbor lookup."""
+
     entity_id: str = Field(..., description="Source entity ID")
     depth: int = Field(2, ge=1, le=5, description="Maximum traversal depth")
     user_id: Optional[str] = Field(None, description="Optional user ID for scoping")
-    relationship_types: Optional[List[str]] = Field(None, description="Filter by relationship types")
+    relationship_types: Optional[List[str]] = Field(
+        None, description="Filter by relationship types"
+    )
 
 
 class GraphNeighborsResponse(BaseModel):
     """Response model for graph neighbor lookup."""
-    neighbors: List[GraphNeighbor] = Field(default_factory=list, description="Neighbor entities")
+
+    neighbors: List[GraphNeighbor] = Field(
+        default_factory=list, description="Neighbor entities"
+    )
     entity_id: str = Field(..., description="Source entity ID")
