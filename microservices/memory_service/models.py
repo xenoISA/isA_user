@@ -340,6 +340,30 @@ class MemoryServiceStatus(BaseModel):
     timestamp: datetime
 
 
+class MemoryServiceStats(BaseModel):
+    """Aggregated stats for a user's memory store.
+
+    Surfaced by ``GET /api/v1/memories/stats?user_id=...`` and consumed by
+    the Agent SDK's ``MemoryStack.getStats()`` (xenoISA/isA_Agent_SDK#736)
+    plus downstream UI panels.
+    """
+    user_id: str = Field(..., description="User the stats are scoped to")
+    total_memories: int = Field(0, description="Total memories across all types")
+    by_type: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-memory-type counts (factual, episodic, semantic, procedural, working, session)",
+    )
+    consolidation_queue_depth: int = Field(
+        0,
+        description="Items waiting for episodic→semantic consolidation",
+    )
+    last_extraction_at: Optional[datetime] = Field(
+        None,
+        description="Timestamp of the most recent memory extraction; null when the user has no memories",
+    )
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 # ==================== Graph Models ====================
 
 class GraphEntity(BaseModel):

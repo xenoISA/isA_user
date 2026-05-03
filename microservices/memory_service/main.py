@@ -40,7 +40,8 @@ from isa_common.consul_client import ConsulRegistry
 from .models import (
     MemoryType, MemoryOperationResult,
     MemoryCreateRequest, MemoryUpdateRequest, MemoryListParams,
-    MemoryServiceStatus, DecayRequest, DecayResponse,
+    MemoryServiceStatus, MemoryServiceStats,
+    DecayRequest, DecayResponse,
     ConsolidationRequest, ConsolidationResponse,
     GraphSearchResponse, GraphNeighborsResponse,
     HybridSearchResponse
@@ -695,6 +696,61 @@ async def list_memories(
         return {"memories": result, "count": len(result)}
     except Exception as e:
         logger.error(f"Error listing memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/memories/stats", response_model=MemoryServiceStats)
+async def memory_stats(user_id: str = Query(...)):
+    """Aggregate stats for a user's memory store.
+
+    Returns total count, per-type breakdown, consolidation queue depth, and
+    the timestamp of the most recent extraction. Used by the Agent SDK
+    ``MemoryStack.getStats()`` (xenoISA/isA_Agent_SDK#736) and the upstream
+    Mate ``/v1/memory/knowledge`` surface (xenoISA/isA_Mate#439).
+
+    Empty user → 200 with all-zero counts (NOT 404).
+    """
+    try:
+        by_type: Dict[str, int] = {}
+        last_extraction: Optional[datetime] = None
+
+        for memory_type in MemoryType:
+            params = MemoryListParams(
+                user_id=user_id,
+                memory_type=memory_type,
+                limit=100,
+                offset=0,
+            )
+            items = await memory_service.list_memories(params)
+            count = len(items)
+            if count:
+                by_type[memory_type.value] = count
+                for item in items:
+                    created = item.get("created_at")
+                    if isinstance(created, datetime):
+                        if last_extraction is None or created > last_extraction:
+                            last_extraction = created
+
+        # Consolidation queue depth — best-effort: skip if the consolidation
+        # service hasn't been wired up yet. The acceptance criteria allow
+        # zero when not available.
+        consolidation_queue_depth = 0
+        try:
+            consol = getattr(memory_service, "consolidation_service", None)
+            if consol is not None and hasattr(consol, "queue_depth"):
+                consolidation_queue_depth = await consol.queue_depth(user_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Consolidation queue depth unavailable: %s", exc)
+
+        return MemoryServiceStats(
+            user_id=user_id,
+            total_memories=sum(by_type.values()),
+            by_type=by_type,
+            consolidation_queue_depth=consolidation_queue_depth,
+            last_extraction_at=last_extraction,
+        )
+    except Exception as e:
+        logger.error("Error computing memory stats: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
