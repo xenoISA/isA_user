@@ -360,3 +360,40 @@ async def test_build_redis_cache_lazy_url_construction(monkeypatch):
 def test_namespace_required():
     with pytest.raises(ValueError):
         RedisCache("", client=_make_fake())
+
+
+# ----------------------------------------------------------------------
+# core.health integration
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_health_probe_reports_healthy_when_alive():
+    from core.health import HealthCheck
+
+    cache = RedisCache("policy", client=_make_fake())
+    health = HealthCheck(service_name="test_svc")
+    health.add_redis_cache(lambda: cache)
+
+    response = await health.check()
+    body = json.loads(response.body)
+    assert body["status"] == "healthy"
+    assert body["dependencies"]["redis_cache"]["status"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_health_probe_reports_degraded_when_disabled():
+    """Cache without a configured client should yield ``degraded``."""
+    from core.health import HealthCheck
+
+    cache = build_redis_cache("policy", service_name="ghost_service")
+    # Force the disabled state regardless of env.
+    cache._available = False
+    health = HealthCheck(service_name="test_svc")
+    health.add_redis_cache(lambda: cache)
+
+    response = await health.check()
+    body = json.loads(response.body)
+    # Critical=False -> failure -> degraded, not unhealthy.
+    assert body["status"] == "degraded"
+    assert response.status_code == 200

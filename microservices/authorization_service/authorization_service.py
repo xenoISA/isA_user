@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Optional, List, Dict, Any
 from datetime import datetime
 import uuid
 
+from core.redis_cache import RedisCache, build_redis_cache
+
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import (
     AuthorizationRepositoryProtocol,
@@ -50,6 +52,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Issue #347: Permission cache TTL — 10 minutes. Auth checks are hot-path
+# reads; caching trades a little staleness on revocation for a large
+# read-amplification reduction across replicas. Writes invalidate
+# explicitly, so the only stale window is the gap between a grant/revoke
+# in one replica and the cache eviction reaching the others (instant
+# under Redis, since DEL is shared).
+PERMISSION_CACHE_TTL_SECONDS = 600
+
+
+def _access_response_dumps(resp: ResourceAccessResponse) -> bytes:
+    return resp.model_dump_json().encode()
+
+
+def _access_response_loads(raw: bytes) -> ResourceAccessResponse:
+    return ResourceAccessResponse.model_validate_json(raw)
+
 
 class AuthorizationService:
     """Core authorization service with business logic - using dependency injection"""
@@ -59,6 +77,7 @@ class AuthorizationService:
         repository: Optional[AuthorizationRepositoryProtocol] = None,
         event_bus: Optional[EventBusProtocol] = None,
         config: Optional["ConfigManager"] = None,
+        permission_cache: Optional[RedisCache] = None,
     ):
         """
         Initialize authorization service with injected dependencies.
@@ -67,9 +86,20 @@ class AuthorizationService:
             repository: Authorization repository (inject mock for testing)
             event_bus: Event bus for publishing events (optional)
             config: Configuration manager (optional, for backwards compatibility)
+            permission_cache: Optional Redis cache override for tests (issue #347)
         """
         self.repository = repository  # Will be set by factory if None
         self.event_bus = event_bus
+
+        # Issue #347: Redis-backed permission cache. The cache stores the
+        # final ResourceAccessResponse keyed by (user, resource, level)
+        # so the auth-path latency drops to a single GET on hot reads.
+        # Writes (grant / revoke) invalidate the affected user.
+        self._permission_cache: RedisCache = permission_cache or build_redis_cache(
+            "authorization:permission",
+            service_name="authorization_service",
+            default_ttl=PERMISSION_CACHE_TTL_SECONDS,
+        )
 
         # Subscription tier hierarchy for access control
         self.subscription_hierarchy = {
@@ -96,7 +126,41 @@ class AuthorizationService:
         self, request: ResourceAccessRequest
     ) -> ResourceAccessResponse:
         """
-        Check if user has access to a specific resource
+        Check if user has access to a specific resource (Redis-cached).
+
+        Issue #347: cache hit short-circuits the full decision tree.
+        On miss, the resolved response is cached for ``PERMISSION_CACHE_TTL_SECONDS``.
+        Writes (grant / revoke) invalidate the affected user via
+        :meth:`invalidate_permission_cache`.
+        """
+        cache_key = self._permission_cache_key(request)
+        if cache_key is not None:
+            cached = await self._permission_cache.get(
+                cache_key, loads=_access_response_loads
+            )
+            if cached is not None:
+                return cached
+
+        response = await self._check_resource_access_uncached(request)
+
+        # Only cache decisions where the cache key is well-defined and
+        # the response itself isn't an error fallback (those have
+        # ``metadata['error']``). Caching transient errors would lock in
+        # a 500-state for ten minutes.
+        if cache_key is not None and not (
+            response.metadata and "error" in response.metadata
+        ):
+            await self._permission_cache.set(
+                cache_key, response, dumps=_access_response_dumps
+            )
+
+        return response
+
+    async def _check_resource_access_uncached(
+        self, request: ResourceAccessRequest
+    ) -> ResourceAccessResponse:
+        """
+        Resolve the access decision without consulting the cache.
 
         Priority order:
         1. Admin-granted permissions (highest priority)
@@ -494,6 +558,11 @@ class AuthorizationService:
             result = await self.repository.grant_user_permission(permission)
 
             if result:
+                # Issue #347: invalidate the user's cached permission
+                # responses so other replicas see the grant immediately
+                # rather than after the 10-minute TTL.
+                await self.invalidate_permission_cache(user_id=request.user_id)
+
                 # Log the action
                 await self._log_permission_action(
                     user_id=request.user_id,
@@ -588,6 +657,11 @@ class AuthorizationService:
             )
 
             if result:
+                # Issue #347: invalidate cached permission responses for
+                # this user so subsequent checks across all replicas
+                # see the revocation immediately.
+                await self.invalidate_permission_cache(user_id=request.user_id)
+
                 # Log the action
                 await self._log_permission_action(
                     user_id=request.user_id,
@@ -1153,6 +1227,56 @@ class AuthorizationService:
     # ====================
     # Helper Methods
     # ====================
+
+    # ---- Permission cache helpers (issue #347) ----
+
+    def _permission_cache_key(
+        self, request: ResourceAccessRequest
+    ) -> Optional[str]:
+        """Build a stable cache key for a permission check.
+
+        Returns ``None`` for requests we explicitly do not cache (e.g.
+        when the request is missing identifying fields). The key
+        deliberately starts with ``user:<user_id>:`` so
+        :meth:`invalidate_permission_cache` can purge a single user's
+        entries with a SCAN-based pattern delete.
+        """
+        if not request.user_id or not request.resource_name:
+            return None
+        org = request.organization_id or "_"
+        rtype = (
+            request.resource_type.value
+            if hasattr(request.resource_type, "value")
+            else str(request.resource_type)
+        )
+        rlevel = (
+            request.required_access_level.value
+            if hasattr(request.required_access_level, "value")
+            else str(request.required_access_level)
+        )
+        return (
+            f"user:{request.user_id}:org:{org}:res:{rtype}:{request.resource_name}:lvl:{rlevel}"
+        )
+
+    async def invalidate_permission_cache(
+        self,
+        *,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Drop cached permission responses for ``user_id``.
+
+        Called after grant / revoke writes — uses targeted SCAN-based
+        delete so we never FLUSHDB.
+
+        With ``user_id=None`` the call is a no-op (we never silently
+        purge the whole cache; an admin can call ``delete_pattern("*")``
+        directly if they really need that).
+        """
+        if not user_id:
+            return
+        await self._permission_cache.delete_pattern(f"user:{user_id}:*")
+
+    # ---- Existing helpers ----
 
     def _subscription_tier_sufficient(
         self, user_tier: SubscriptionTier, required_tier: SubscriptionTier

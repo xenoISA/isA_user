@@ -85,6 +85,16 @@ class HealthCheck:
         """Register an MQTT dependency probe."""
         self._probes.append(_Probe("mqtt", _probe_mqtt, get_client, critical))
 
+    def add_redis_cache(self, get_cache: Callable, critical: bool = False):
+        """Register a core.redis_cache.RedisCache dependency probe.
+
+        Issue #347: caches are non-critical — services fall back to the
+        DB on Redis outage, so failure should report ``degraded``
+        rather than ``unhealthy``. ``critical`` defaults to False
+        to enforce that contract.
+        """
+        self._probes.append(_Probe("redis_cache", _probe_redis_cache, get_cache, critical))
+
     def add_custom(
         self, name: str, probe_fn: Callable, get_client: Callable, critical: bool = False
     ):
@@ -269,6 +279,28 @@ async def _probe_mqtt(client) -> bool:
             result = await result
         return bool(result)
     return client is not None
+
+
+async def _probe_redis_cache(cache) -> bool:
+    """Probe ``core.redis_cache.RedisCache`` via its ping() helper.
+
+    Returns False on any error so the parent /health endpoint can
+    report ``degraded`` for the non-critical cache dependency.
+    """
+    if cache is None:
+        return False
+    # The cache may be configured-but-disabled (no REDIS_URL); treat
+    # that as unhealthy from a probe perspective so dashboards surface
+    # the misconfiguration, but the caller's ``critical=False`` keeps
+    # this from tipping the overall service into ``unhealthy``.
+    if hasattr(cache, "available") and not cache.available:
+        return False
+    if hasattr(cache, "ping"):
+        result = cache.ping()
+        if inspect.isawaitable(result):
+            result = await result
+        return bool(result)
+    return False
 
 
 __all__ = ["HealthCheck"]
