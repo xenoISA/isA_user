@@ -1,0 +1,28 @@
+apiVersion: v2
+name: isa-user-migrations
+description: |
+  Pre-deploy migration chart for the isA_user platform. Renders an Alembic
+  migration Kubernetes Job that gates rolling deploys of the service charts.
+
+  Apply this chart BEFORE rolling out service updates. The Job runs
+  `scripts/migrate.sh upgrade all` against the configured Postgres instance
+  using the same image as the services. CI (.github/workflows/deploy.yml)
+  installs/upgrades this release with `--wait` so Helm blocks on the
+  pre-upgrade hook before any service rollout begins.
+
+  This chart is intentionally minimal — it does NOT render Deployments,
+  Services, or HPAs. Those live in the shared `isa-service` chart at
+  `isA_Cloud/deployments/charts/isa-service`.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - migrations
+  - alembic
+  - pre-deploy
+  - hpa-readiness
+home: https://github.com/xenoISA/isA_user
+sources:
+  - https://github.com/xenoISA/isA_user
+maintainers:
+  - name: isa-platform

@@ -161,10 +161,60 @@ jobs:
         with:
           version: 'v1.28.0'
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.14.0'
+
       - name: Configure kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > ~/.kube/config
+
+      # ---------------------------------------------------------------------
+      # Pre-deploy Alembic migration gate (issue #349)
+      # ---------------------------------------------------------------------
+      # Helm fires deployment/helm/templates/migration-job.yaml as a
+      # `pre-install,pre-upgrade` hook. With `--wait`, this command blocks
+      # until the Job reports `Complete`. A failed Job aborts the upgrade
+      # and surfaces a non-zero exit, which fails the workflow loudly.
+      # Existing service replicas (managed by the separate isa-service
+      # chart) keep serving traffic since their Deployments are NOT
+      # touched until this gate passes.
+      # ---------------------------------------------------------------------
+      - name: Pre-deploy schema migration gate
+        run: |
+          NAMESPACE=$(python core/deployment_targets.py --namespace staging)
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          echo "Running Alembic migration Job before service rollout..."
+          helm upgrade --install isa-user-migrations ./deployment/helm \
+            -f ./deployment/helm/values-staging.yaml \
+            --set "migrationJob.image.registry=${{ env.REGISTRY }}" \
+            --set "migrationJob.image.repository=${{ env.IMAGE_PREFIX }}/base" \
+            --set "migrationJob.image.tag=${VERSION}" \
+            --namespace "$NAMESPACE" \
+            --create-namespace \
+            --wait \
+            --timeout 15m
+
+      - name: Capture migration Job logs
+        if: always()
+        run: |
+          NAMESPACE=$(python core/deployment_targets.py --namespace staging)
+          echo "::group::Migration Job logs"
+          # Most recent migration Job (sorted by creation timestamp)
+          JOB=$(kubectl get jobs -n "$NAMESPACE" \
+            -l app.kubernetes.io/name=isa-user-migrations \
+            --sort-by=.metadata.creationTimestamp \
+            -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)
+          if [ -n "$JOB" ]; then
+            echo "Logs for job/$JOB:"
+            kubectl logs -n "$NAMESPACE" "job/$JOB" --tail=500 || true
+          else
+            echo "No migration Job found in namespace $NAMESPACE."
+          fi
+          echo "::endgroup::"
 
       - name: Deploy Services
         run: |
@@ -239,10 +289,56 @@ jobs:
         with:
           version: 'v1.28.0'
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.14.0'
+
       - name: Configure kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
+
+      # ---------------------------------------------------------------------
+      # Pre-deploy Alembic migration gate (issue #349)
+      # ---------------------------------------------------------------------
+      # See deploy-staging step for context. In production we use a
+      # generous --timeout (20m) to accommodate larger datasets, but we
+      # still keep `backoffLimit: 0` and `activeDeadlineSeconds: 600` on
+      # the Job itself so a stuck migration cannot silently hang forever.
+      # ---------------------------------------------------------------------
+      - name: Pre-deploy schema migration gate
+        run: |
+          NAMESPACE=$(python core/deployment_targets.py --namespace production)
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          echo "Running Alembic migration Job before service rollout..."
+          helm upgrade --install isa-user-migrations ./deployment/helm \
+            -f ./deployment/helm/values-production.yaml \
+            --set "migrationJob.image.registry=${{ env.REGISTRY }}" \
+            --set "migrationJob.image.repository=${{ env.IMAGE_PREFIX }}/base" \
+            --set "migrationJob.image.tag=${VERSION}" \
+            --namespace "$NAMESPACE" \
+            --create-namespace \
+            --wait \
+            --timeout 20m
+
+      - name: Capture migration Job logs
+        if: always()
+        run: |
+          NAMESPACE=$(python core/deployment_targets.py --namespace production)
+          echo "::group::Migration Job logs"
+          JOB=$(kubectl get jobs -n "$NAMESPACE" \
+            -l app.kubernetes.io/name=isa-user-migrations \
+            --sort-by=.metadata.creationTimestamp \
+            -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)
+          if [ -n "$JOB" ]; then
+            echo "Logs for job/$JOB:"
+            kubectl logs -n "$NAMESPACE" "job/$JOB" --tail=500 || true
+          else
+            echo "No migration Job found in namespace $NAMESPACE."
+          fi
+          echo "::endgroup::"
 
       - name: Blue-Green Deployment
         run: |
