@@ -490,7 +490,10 @@ class AuthenticationService:
         normalized = email.strip().lower()
         user = await self.auth_repository.get_user_by_email(normalized)
         if not user:
-            return {"success": False, "error": f"User {normalized} not found in auth.users"}
+            return {
+                "success": False,
+                "error": f"User {normalized} not found in auth.users",
+            }
 
         token_metadata = {"dev_bypass": True, "name": user.get("name")}
         token_metadata.update(metadata or {})
@@ -660,9 +663,9 @@ class AuthenticationService:
                                 "provider": "isa_user",
                             },
                             metadata={
-                                "permissions": ",".join(permissions)
-                                if permissions
-                                else "",
+                                "permissions": (
+                                    ",".join(permissions) if permissions else ""
+                                ),
                                 "has_organization": str(organization_id is not None),
                             },
                         )
@@ -679,9 +682,9 @@ class AuthenticationService:
                                 "provider": "isa_user",
                             },
                             "metadata": {
-                                "permissions": ",".join(permissions)
-                                if permissions
-                                else "",
+                                "permissions": (
+                                    ",".join(permissions) if permissions else ""
+                                ),
                                 "has_organization": str(organization_id is not None),
                             },
                         }

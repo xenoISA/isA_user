@@ -47,6 +47,7 @@ from .device_auth_service import DeviceAuthService
 from .oauth_client_repository import OAuthClientRepository
 from .authorization_code_repository import AuthorizationCodeRepository
 from .authorization_code_service import AuthorizationCodeService
+from .schemas import OAuthClientCreateRequest
 
 # Import route registry for Consul metadata
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
@@ -137,27 +138,6 @@ class RefreshTokenRequest(BaseModel):
     """Refresh token request"""
 
     refresh_token: str = Field(..., description="Refresh token")
-
-
-class OAuthClientCreateRequest(BaseModel):
-    """OAuth client creation request"""
-
-    client_name: str = Field(..., description="Human-readable client name")
-    organization_id: Optional[str] = Field(None, description="Owning organization ID")
-    allowed_scopes: List[str] = Field(
-        default=["mcp:tools:execute"],
-        description="Allowed OAuth scopes for this client",
-    )
-    token_ttl_seconds: int = Field(
-        3600, ge=300, le=86400, description="Access token TTL in seconds"
-    )
-    client_type: str = Field("confidential", description="OAuth client type")
-    redirect_uris: List[str] = Field(
-        default_factory=list, description="Allowed authorization-code redirect URIs"
-    )
-    require_pkce: bool = Field(
-        True, description="Whether authorization-code requests must use PKCE"
-    )
 
 
 class ApiKeyCreateRequest(BaseModel):

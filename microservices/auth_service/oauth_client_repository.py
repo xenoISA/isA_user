@@ -27,11 +27,11 @@ class OAuthClientRepository:
             config = ConfigManager("auth_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port} for OAuth clients")
@@ -41,7 +41,7 @@ class OAuthClientRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='auth-service',
+            user_id="auth-service",
             min_pool_size=1,
             max_pool_size=2,
         )
@@ -207,7 +207,9 @@ class OAuthClientRepository:
             "last_used_at": row.get("last_used_at"),
         }
 
-    async def list_clients(self, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def list_clients(
+        self, organization_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         await self._ensure_table()
 
         if organization_id:
@@ -256,7 +258,9 @@ class OAuthClientRepository:
 
         return clients
 
-    async def verify_client_credentials(self, client_id: str, client_secret: str) -> Optional[Dict[str, Any]]:
+    async def verify_client_credentials(
+        self, client_id: str, client_secret: str
+    ) -> Optional[Dict[str, Any]]:
         await self._ensure_table()
 
         query = f"""

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from microservices.auth_service.auth_service import AuthenticationService
-from microservices.auth_service.main import OAuthClientCreateRequest
+from microservices.auth_service.schemas import OAuthClientCreateRequest
 
 pytestmark = pytest.mark.unit
 
