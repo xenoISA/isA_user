@@ -475,6 +475,38 @@ class AuthenticationService:
     # Token Generation
     # ============================================
 
+    async def dev_bypass_login(
+        self,
+        email: str,
+        expires_in: int = 86400,
+        organization_id: Optional[str] = None,
+        permissions: Optional[list] = None,
+        metadata: Optional[dict] = None,
+    ) -> Dict[str, Any]:
+        """Mint a dev access token for a seeded user without password."""
+        if not self.auth_repository:
+            return {"success": False, "error": "Auth repository unavailable"}
+
+        normalized = email.strip().lower()
+        user = await self.auth_repository.get_user_by_email(normalized)
+        if not user:
+            return {
+                "success": False,
+                "error": f"User {normalized} not found in auth.users",
+            }
+
+        token_metadata = {"dev_bypass": True, "name": user.get("name")}
+        token_metadata.update(metadata or {})
+
+        return await self.generate_dev_token(
+            user_id=user["user_id"],
+            email=user["email"],
+            expires_in=expires_in,
+            organization_id=organization_id or user.get("organization_id"),
+            permissions=permissions,
+            metadata=token_metadata,
+        )
+
     async def generate_dev_token(
         self,
         user_id: str,
@@ -631,9 +663,9 @@ class AuthenticationService:
                                 "provider": "isa_user",
                             },
                             metadata={
-                                "permissions": ",".join(permissions)
-                                if permissions
-                                else "",
+                                "permissions": (
+                                    ",".join(permissions) if permissions else ""
+                                ),
                                 "has_organization": str(organization_id is not None),
                             },
                         )
@@ -650,9 +682,9 @@ class AuthenticationService:
                                 "provider": "isa_user",
                             },
                             "metadata": {
-                                "permissions": ",".join(permissions)
-                                if permissions
-                                else "",
+                                "permissions": (
+                                    ",".join(permissions) if permissions else ""
+                                ),
                                 "has_organization": str(organization_id is not None),
                             },
                         }

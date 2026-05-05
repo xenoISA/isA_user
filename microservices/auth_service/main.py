@@ -47,6 +47,7 @@ from .device_auth_service import DeviceAuthService
 from .oauth_client_repository import OAuthClientRepository
 from .authorization_code_repository import AuthorizationCodeRepository
 from .authorization_code_service import AuthorizationCodeService
+from .schemas import OAuthClientCreateRequest
 
 # Import route registry for Consul metadata
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
@@ -116,6 +117,13 @@ class DevTokenRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
 
 
+class DevBypassRequest(BaseModel):
+    """Dev-mode passwordless login request."""
+
+    email: str = Field(..., description="Seeded user email")
+    expires_in: int = Field(86400, description="Token TTL in seconds")
+
+
 class TokenPairRequest(BaseModel):
     """Token pair generation request (access + refresh)"""
 
@@ -130,20 +138,6 @@ class RefreshTokenRequest(BaseModel):
     """Refresh token request"""
 
     refresh_token: str = Field(..., description="Refresh token")
-
-
-class OAuthClientCreateRequest(BaseModel):
-    """OAuth client creation request"""
-
-    client_name: str = Field(..., description="Human-readable client name")
-    organization_id: Optional[str] = Field(None, description="Owning organization ID")
-    allowed_scopes: List[str] = Field(
-        default=["mcp:tools:execute"],
-        description="Allowed OAuth scopes for this client",
-    )
-    token_ttl_seconds: int = Field(
-        3600, ge=300, le=86400, description="Access token TTL in seconds"
-    )
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -891,6 +885,9 @@ async def create_oauth_client(
         organization_id=request.organization_id or caller.get("organization_id"),
         allowed_scopes=request.allowed_scopes,
         token_ttl_seconds=request.token_ttl_seconds,
+        client_type=request.client_type,
+        redirect_uris=request.redirect_uris,
+        require_pkce=request.require_pkce,
         created_by=caller.get("user_id"),
     )
     return {
@@ -901,6 +898,9 @@ async def create_oauth_client(
         "organization_id": result["organization_id"],
         "allowed_scopes": result["allowed_scopes"],
         "token_ttl_seconds": result["token_ttl_seconds"],
+        "client_type": result["client_type"],
+        "redirect_uris": result["redirect_uris"],
+        "require_pkce": result["require_pkce"],
         "created_at": result["created_at"],
     }
 
@@ -1255,6 +1255,63 @@ async def generate_dev_token(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Token generation failed",
         )
+
+
+@app.post("/api/v1/auth/dev-bypass")
+async def dev_bypass_login(
+    request: DevBypassRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+):
+    """Issue a dev access token for a seeded user without password."""
+    if os.getenv("AUTH_DEV_BYPASS_ENABLED", "").lower() != "true":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    allowlist = {
+        e.strip().lower()
+        for e in os.getenv("AUTH_DEV_BYPASS_USERS", "").split(",")
+        if e.strip()
+    }
+    normalized = request.email.strip().lower()
+    if normalized not in allowlist:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Email {normalized} not in dev-bypass allowlist",
+        )
+
+    admin_allowlist = {
+        e.strip().lower()
+        for e in os.getenv("AUTH_DEV_BYPASS_ADMINS", "").split(",")
+        if e.strip()
+    }
+    is_dev_admin = normalized in admin_allowlist
+    result = await auth_service.dev_bypass_login(
+        email=normalized,
+        expires_in=request.expires_in,
+        permissions=["auth.admin"] if is_dev_admin else [],
+        metadata={"dev_admin": is_dev_admin},
+    )
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Dev bypass failed"),
+        )
+
+    logger.warning(
+        "auth.dev_bypass_login email=%s user_id=%s dev_admin=%s",
+        normalized,
+        result.get("user_id"),
+        is_dev_admin,
+    )
+    return {
+        "success": True,
+        "token": result["token"],
+        "expires_in": result["expires_in"],
+        "token_type": result.get("token_type", "Bearer"),
+        "user_id": result["user_id"],
+        "email": result["email"],
+        "provider": "dev_bypass",
+        "permissions": ["auth.admin"] if is_dev_admin else [],
+    }
 
 
 @app.post("/api/v1/auth/token-pair")
