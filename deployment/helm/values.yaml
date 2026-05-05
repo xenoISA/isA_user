@@ -34,6 +34,15 @@ service:
 consul:
   enabled: true
 
+# Database pool sizing defaults (epic #345 / story #346).
+# Per-pod Postgres pool size scales with replica count:
+#   max_pool_size = max(5, poolBase + (POD_REPLICA_COUNT - 1) * poolGrowth)
+# Override per env via values-{staging,production}.yaml. Each environment
+# also injects POD_REPLICA_COUNT, DB_POOL_BASE, DB_POOL_GROWTH env vars.
+database:
+  poolBase: 5
+  poolGrowth: 3
+
 # =============================================================================
 # Pre-deploy Migration Job (issue #349, epic #345)
 # =============================================================================
