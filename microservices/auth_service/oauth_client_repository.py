@@ -63,6 +63,10 @@ class OAuthClientRepository:
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                 allowed_scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
                 token_ttl_seconds INTEGER NOT NULL DEFAULT 3600,
+                client_type VARCHAR(20) DEFAULT 'confidential',
+                redirect_uris JSONB NOT NULL DEFAULT '[]'::jsonb,
+                require_pkce BOOLEAN NOT NULL DEFAULT TRUE,
+                metadata_document_url TEXT,
                 created_by TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -71,9 +75,17 @@ class OAuthClientRepository:
         """
         index_org_sql = f"CREATE INDEX IF NOT EXISTS idx_{self.table}_org ON {self.schema}.{self.table}(organization_id)"
         index_active_sql = f"CREATE INDEX IF NOT EXISTS idx_{self.table}_active ON {self.schema}.{self.table}(is_active)"
+        alter_sql = [
+            f"ALTER TABLE {self.schema}.{self.table} ADD COLUMN IF NOT EXISTS client_type VARCHAR(20) DEFAULT 'confidential'",
+            f"ALTER TABLE {self.schema}.{self.table} ADD COLUMN IF NOT EXISTS redirect_uris JSONB NOT NULL DEFAULT '[]'::jsonb",
+            f"ALTER TABLE {self.schema}.{self.table} ADD COLUMN IF NOT EXISTS require_pkce BOOLEAN NOT NULL DEFAULT TRUE",
+            f"ALTER TABLE {self.schema}.{self.table} ADD COLUMN IF NOT EXISTS metadata_document_url TEXT",
+        ]
 
         async with self.db:
             await self.db.execute(create_sql)
+            for statement in alter_sql:
+                await self.db.execute(statement)
             await self.db.execute(index_org_sql)
             await self.db.execute(index_active_sql)
 
@@ -105,6 +117,10 @@ class OAuthClientRepository:
         organization_id: Optional[str],
         allowed_scopes: List[str],
         token_ttl_seconds: int = 3600,
+        client_type: str = "confidential",
+        redirect_uris: Optional[List[str]] = None,
+        require_pkce: bool = True,
+        metadata_document_url: Optional[str] = None,
         created_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         await self._ensure_table()
@@ -117,9 +133,12 @@ class OAuthClientRepository:
         query = f"""
             INSERT INTO {self.schema}.{self.table}
             (client_id, client_secret_hash, client_name, organization_id, allowed_scopes,
-             token_ttl_seconds, created_by, is_active, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, TRUE, $8, $8)
+             token_ttl_seconds, client_type, redirect_uris, require_pkce,
+             metadata_document_url, created_by, is_active, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9, $10, $11, TRUE, $12, $12)
         """
+        clamped_ttl = max(300, min(token_ttl_seconds, 86400))
+        effective_redirect_uris = redirect_uris or []
 
         async with self.db:
             await self.db.execute(
@@ -130,7 +149,11 @@ class OAuthClientRepository:
                     client_name,
                     organization_id,
                     allowed_scopes,
-                    max(300, min(token_ttl_seconds, 86400)),
+                    clamped_ttl,
+                    client_type,
+                    effective_redirect_uris,
+                    require_pkce,
+                    metadata_document_url,
                     created_by,
                     now,
                 ],
@@ -142,7 +165,11 @@ class OAuthClientRepository:
             "client_name": client_name,
             "organization_id": organization_id,
             "allowed_scopes": allowed_scopes,
-            "token_ttl_seconds": max(300, min(token_ttl_seconds, 86400)),
+            "token_ttl_seconds": clamped_ttl,
+            "client_type": client_type,
+            "redirect_uris": effective_redirect_uris,
+            "require_pkce": require_pkce,
+            "metadata_document_url": metadata_document_url,
             "created_at": now,
         }
 
@@ -151,7 +178,8 @@ class OAuthClientRepository:
 
         query = f"""
             SELECT client_id, client_name, organization_id, is_active, allowed_scopes,
-                   token_ttl_seconds, created_by, created_at, updated_at, last_used_at
+                   token_ttl_seconds, client_type, redirect_uris, require_pkce,
+                   metadata_document_url, created_by, created_at, updated_at, last_used_at
             FROM {self.schema}.{self.table}
             WHERE client_id = $1
         """
@@ -169,6 +197,10 @@ class OAuthClientRepository:
             "is_active": row.get("is_active", False),
             "allowed_scopes": row.get("allowed_scopes") or [],
             "token_ttl_seconds": row.get("token_ttl_seconds", 3600),
+            "client_type": row.get("client_type") or "confidential",
+            "redirect_uris": row.get("redirect_uris") or [],
+            "require_pkce": row.get("require_pkce", True),
+            "metadata_document_url": row.get("metadata_document_url"),
             "created_by": row.get("created_by"),
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
@@ -181,7 +213,8 @@ class OAuthClientRepository:
         if organization_id:
             query = f"""
                 SELECT client_id, client_name, organization_id, is_active, allowed_scopes,
-                       token_ttl_seconds, created_by, created_at, updated_at, last_used_at
+                       token_ttl_seconds, client_type, redirect_uris, require_pkce,
+                       metadata_document_url, created_by, created_at, updated_at, last_used_at
                 FROM {self.schema}.{self.table}
                 WHERE organization_id = $1
                 ORDER BY created_at DESC
@@ -190,7 +223,8 @@ class OAuthClientRepository:
         else:
             query = f"""
                 SELECT client_id, client_name, organization_id, is_active, allowed_scopes,
-                       token_ttl_seconds, created_by, created_at, updated_at, last_used_at
+                       token_ttl_seconds, client_type, redirect_uris, require_pkce,
+                       metadata_document_url, created_by, created_at, updated_at, last_used_at
                 FROM {self.schema}.{self.table}
                 ORDER BY created_at DESC
             """
@@ -209,6 +243,10 @@ class OAuthClientRepository:
                     "is_active": row.get("is_active", False),
                     "allowed_scopes": row.get("allowed_scopes") or [],
                     "token_ttl_seconds": row.get("token_ttl_seconds", 3600),
+                    "client_type": row.get("client_type") or "confidential",
+                    "redirect_uris": row.get("redirect_uris") or [],
+                    "require_pkce": row.get("require_pkce", True),
+                    "metadata_document_url": row.get("metadata_document_url"),
                     "created_by": row.get("created_by"),
                     "created_at": row.get("created_at"),
                     "updated_at": row.get("updated_at"),
@@ -223,7 +261,8 @@ class OAuthClientRepository:
 
         query = f"""
             SELECT client_id, client_secret_hash, client_name, organization_id,
-                   is_active, allowed_scopes, token_ttl_seconds
+                   is_active, allowed_scopes, token_ttl_seconds, client_type,
+                   redirect_uris, require_pkce, metadata_document_url
             FROM {self.schema}.{self.table}
             WHERE client_id = $1
         """
@@ -252,6 +291,10 @@ class OAuthClientRepository:
             "organization_id": row.get("organization_id"),
             "allowed_scopes": row.get("allowed_scopes") or [],
             "token_ttl_seconds": row.get("token_ttl_seconds", 3600),
+            "client_type": row.get("client_type") or "confidential",
+            "redirect_uris": row.get("redirect_uris") or [],
+            "require_pkce": row.get("require_pkce", True),
+            "metadata_document_url": row.get("metadata_document_url"),
         }
 
     async def rotate_client_secret(self, client_id: str) -> Optional[Dict[str, Any]]:
