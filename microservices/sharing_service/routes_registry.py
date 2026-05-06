@@ -21,6 +21,12 @@ SERVICE_ROUTES = [
     },
     # Share Management
     {
+        "path": "/api/v1/sessions/{session_id}/share",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Create share link for a session (compatibility alias)",
+    },
+    {
         "path": "/api/v1/sessions/{session_id}/shares",
         "methods": ["POST"],
         "auth_required": True,
@@ -34,12 +40,24 @@ SERVICE_ROUTES = [
     },
     # Public share access (token IS the auth)
     {
+        "path": "/api/v1/shared/{token}",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "Access shared session via token (compatibility alias)",
+    },
+    {
         "path": "/api/v1/shares/{token}",
         "methods": ["GET"],
         "auth_required": False,
         "description": "Access shared session via token",
     },
     # Share revocation
+    {
+        "path": "/api/v1/sessions/{session_id}/share",
+        "methods": ["DELETE"],
+        "auth_required": True,
+        "description": "Revoke a session share link",
+    },
     {
         "path": "/api/v1/shares/{token}",
         "methods": ["DELETE"],

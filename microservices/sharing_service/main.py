@@ -192,6 +192,7 @@ async def health_check():
 # ============================================================================
 
 
+@app.post("/api/v1/sessions/{session_id}/share", response_model=ShareResponse)
 @app.post("/api/v1/sessions/{session_id}/shares", response_model=ShareResponse)
 async def create_share(
     session_id: str,
@@ -236,6 +237,7 @@ async def list_session_shares(
 # ============================================================================
 
 
+@app.get("/api/v1/shared/{token}", response_model=SharedSessionResponse)
 @app.get("/api/v1/shares/{token}", response_model=SharedSessionResponse)
 async def access_share(
     token: str,
@@ -268,6 +270,27 @@ async def revoke_share(
     """Revoke a share link (owner only)"""
     try:
         await sharing_service.revoke_share(token, user_id)
+        return {"message": "Share link revoked successfully"}
+    except ShareNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except SharePermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ShareServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.delete("/api/v1/sessions/{session_id}/share")
+async def revoke_session_share(
+    session_id: str,
+    share_token: str = Query(..., description="Share token to revoke"),
+    user_id: str = Query(..., description="Owner user ID (auth-scoped)"),
+    sharing_service: SharingService = Depends(get_sharing_service),
+):
+    """Revoke a session share link (owner only)"""
+    try:
+        await sharing_service.revoke_session_share(session_id, share_token, user_id)
         return {"message": "Share link revoked successfully"}
     except ShareNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

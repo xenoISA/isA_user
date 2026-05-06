@@ -8,6 +8,7 @@ Using AsyncPostgresClient for database operations.
 import logging
 import os
 import sys
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -79,6 +80,12 @@ class ShareRepository:
                 "owner_id": share_data["owner_id"],
                 "share_token": share_data["share_token"],
                 "permissions": share_data.get("permissions", "view_only"),
+                "session_snapshot": json.dumps(share_data.get("session_snapshot"))
+                if share_data.get("session_snapshot") is not None
+                else None,
+                "messages_snapshot": json.dumps(share_data.get("messages_snapshot"))
+                if share_data.get("messages_snapshot") is not None
+                else None,
                 "expires_at": share_data.get("expires_at"),
                 "access_count": 0,
                 "created_at": now,
@@ -109,7 +116,7 @@ class ShareRepository:
                 )
 
             if result:
-                return Share.model_validate(result)
+                return Share.model_validate(self._parse_snapshot_fields(dict(result)))
             return None
 
         except Exception as e:
@@ -124,7 +131,7 @@ class ShareRepository:
                 result = await self.db.query_row(query, [share_id], schema=self.schema)
 
             if result:
-                return Share.model_validate(result)
+                return Share.model_validate(self._parse_snapshot_fields(dict(result)))
             return None
 
         except Exception as e:
@@ -146,7 +153,10 @@ class ShareRepository:
 
             if not rows:
                 return []
-            return [Share.model_validate(row) for row in rows]
+            return [
+                Share.model_validate(self._parse_snapshot_fields(dict(row)))
+                for row in rows
+            ]
 
         except Exception as e:
             logger.error(f"Error getting session shares: {e}")
@@ -182,3 +192,14 @@ class ShareRepository:
         except Exception as e:
             logger.error(f"Error incrementing access count: {e}")
             return False
+
+    def _parse_snapshot_fields(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse JSONB snapshot fields returned as strings by some clients."""
+        for field in ("session_snapshot", "messages_snapshot"):
+            value = row.get(field)
+            if isinstance(value, str):
+                try:
+                    row[field] = json.loads(value)
+                except json.JSONDecodeError:
+                    row[field] = None
+        return row

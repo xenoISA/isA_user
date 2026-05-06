@@ -30,6 +30,12 @@ class Share(BaseModel):
     owner_id: str = Field(..., description="User who created the share")
     share_token: str = Field(..., description="URL-safe token for access")
     permissions: str = Field(default=SharePermission.VIEW_ONLY, description="Permission level")
+    session_snapshot: Optional[Dict[str, Any]] = Field(
+        None, description="Immutable session metadata captured when the share is created"
+    )
+    messages_snapshot: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Immutable message transcript captured when the share is created"
+    )
     expires_at: Optional[datetime] = Field(None, description="Expiry timestamp (null = never)")
     access_count: int = Field(default=0, description="Number of times accessed")
     created_at: Optional[datetime] = None
@@ -55,6 +61,10 @@ class ShareCreateRequest(BaseModel):
         ge=1,
         le=8760,  # max 1 year
         description="Hours until link expires (null = never)",
+    )
+    share_until_message_id: Optional[str] = Field(
+        None,
+        description="Optional message ID; snapshot includes messages through this message",
     )
 
 

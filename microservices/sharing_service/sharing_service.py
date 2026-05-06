@@ -8,12 +8,13 @@ Uses dependency injection for testability:
 - Event publishers are lazily loaded
 """
 
+import copy
 import logging
 import os
 import secrets
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from .models import (
     Share,
@@ -123,6 +124,15 @@ class SharingService:
             if session.get("user_id") != owner_id:
                 raise SharePermissionError("You can only share your own sessions")
 
+            messages = await self.session_client.get_session_messages(session_id)
+            messages_snapshot = self._build_messages_snapshot(
+                messages, request.share_until_message_id
+            )
+            session_snapshot = self._build_session_snapshot(
+                session,
+                message_count=len(messages_snapshot),
+            )
+
             # Generate token: 128 bits entropy → 22-char URL-safe base64
             share_token = secrets.token_urlsafe(16)
 
@@ -138,6 +148,8 @@ class SharingService:
                 "owner_id": owner_id,
                 "share_token": share_token,
                 "permissions": request.permissions.value,
+                "session_snapshot": session_snapshot,
+                "messages_snapshot": messages_snapshot,
                 "expires_at": expires_at,
             }
 
@@ -207,12 +219,14 @@ class SharingService:
             # Increment access count
             await self.share_repo.increment_access_count(share.id)
 
-            # Fetch session data from session service
-            session = await self.session_client.get_session(share.session_id)
-            if not session:
-                raise ShareServiceError("Shared session no longer exists")
-
-            messages = await self.session_client.get_session_messages(share.session_id)
+            session = share.session_snapshot
+            messages = share.messages_snapshot
+            if session is None or messages is None:
+                # Backward compatibility for share records created before snapshots.
+                session = await self.session_client.get_session(share.session_id)
+                if not session:
+                    raise ShareServiceError("Shared session no longer exists")
+                messages = await self.session_client.get_session_messages(share.session_id)
 
             # Publish access event
             if self.event_bus:
@@ -237,7 +251,7 @@ class SharingService:
                 session_summary=session.get("session_summary", ""),
                 permissions=share.permissions,
                 messages=messages,
-                message_count=len(messages),
+                message_count=session.get("message_count") or len(messages),
                 created_at=session.get("created_at"),
                 last_activity=session.get("last_activity"),
             )
@@ -303,6 +317,56 @@ class SharingService:
             logger.error(f"Error revoking share: {e}", exc_info=True)
             raise ShareServiceError(f"Failed to revoke share: {str(e)}")
 
+    async def revoke_session_share(
+        self,
+        session_id: str,
+        share_token: str,
+        owner_id: str,
+    ) -> bool:
+        """
+        Revoke a share link for a specific session (owner only).
+
+        This backs the session-scoped compatibility route documented by #261.
+        """
+        try:
+            share = await self.share_repo.get_by_token(share_token)
+            if not share or share.session_id != session_id:
+                raise ShareNotFoundError("Share link not found")
+
+            if share.owner_id != owner_id:
+                raise SharePermissionError("Only the share owner can revoke it")
+
+            success = await self.share_repo.delete_by_token(share_token)
+            if not success:
+                raise ShareServiceError("Failed to revoke share")
+
+            logger.info(f"Share revoked: {share.id} by {owner_id}")
+
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="share.revoked",
+                        source="sharing_service",
+                        data={
+                            "share_id": share.id,
+                            "session_id": share.session_id,
+                            "owner_id": owner_id,
+                            "share_token": share_token,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish share.revoked event: {e}")
+
+            return True
+
+        except (ShareNotFoundError, SharePermissionError):
+            raise
+        except Exception as e:
+            logger.error(f"Error revoking session share: {e}", exc_info=True)
+            raise ShareServiceError(f"Failed to revoke share: {str(e)}")
+
     async def list_session_shares(
         self, session_id: str, owner_id: str
     ) -> ShareListResponse:
@@ -357,3 +421,42 @@ class SharingService:
             access_count=share.access_count,
             created_at=share.created_at,
         )
+
+    def _build_session_snapshot(
+        self,
+        session: Dict[str, Any],
+        message_count: int,
+    ) -> Dict[str, Any]:
+        """Capture stable session metadata for public share rendering."""
+        snapshot = copy.deepcopy(session)
+        snapshot["message_count"] = message_count
+        return self._json_safe(snapshot)
+
+    def _build_messages_snapshot(
+        self,
+        messages: List[Dict[str, Any]],
+        share_until_message_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Capture an immutable transcript, optionally ending at a specific message."""
+        snapshot = copy.deepcopy(messages)
+        if not share_until_message_id:
+            return self._json_safe(snapshot)
+
+        for index, message in enumerate(snapshot):
+            message_id = message.get("id") or message.get("message_id")
+            if message_id == share_until_message_id:
+                return self._json_safe(snapshot[: index + 1])
+
+        raise ShareValidationError(
+            f"share_until_message_id not found in session: {share_until_message_id}"
+        )
+
+    def _json_safe(self, value):
+        """Convert snapshot data to JSONB-safe primitives."""
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, list):
+            return [self._json_safe(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self._json_safe(item) for key, item in value.items()}
+        return value
