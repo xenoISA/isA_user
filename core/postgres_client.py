@@ -52,7 +52,36 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from isa_common import AsyncPostgresClient
-from isa_common.metrics import create_gauge
+
+try:
+    from isa_common.metrics import create_gauge  # type: ignore[attr-defined]
+except (
+    ImportError
+):  # pragma: no cover — falls back when isa_common doesn't ship metrics
+
+    class _NoopGauge:
+        """No-op stand-in for prometheus gauges when isa_common.metrics is absent.
+
+        Mirrors ``Gauge.labels(...).set(...)``/``inc()``/``dec()`` so call sites
+        keep working in test/dev environments using the slim isa_common build.
+        Production (which ships ``isa_common.metrics``) gets real metrics.
+        """
+
+        def labels(self, *_args: Any, **_kwargs: Any) -> "_NoopGauge":
+            return self
+
+        def set(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def inc(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def dec(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    def create_gauge(*_args: Any, **_kwargs: Any) -> _NoopGauge:
+        return _NoopGauge()
+
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +320,9 @@ class PostgresClientWrapper:
         self.username = username or os.getenv("POSTGRES_USER", "postgres")
         self.password = password or os.getenv("POSTGRES_PASSWORD", "")
         self.user_id = user_id or service_name
-        self.organization_id = organization_id or os.getenv("ORGANIZATION_ID", "default-org")
+        self.organization_id = organization_id or os.getenv(
+            "ORGANIZATION_ID", "default-org"
+        )
 
         # Pool sizing scales with replica count via Downward API (epic #345/#346).
         self._min_pool_size, self._max_pool_size = _resolve_pool_sizes(
@@ -358,14 +389,18 @@ class PostgresClientWrapper:
         self.sample_metrics()
         return result
 
-    async def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+    async def query(
+        self, sql: str, params: Optional[List[Any]] = None
+    ) -> List[Dict[str, Any]]:
         """Execute query and return results"""
         try:
             return await self._client.query(sql, params)
         finally:
             self.sample_metrics()
 
-    async def query_row(self, sql: str, params: Optional[List[Any]] = None) -> Optional[Dict[str, Any]]:
+    async def query_row(
+        self, sql: str, params: Optional[List[Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """Execute query and return single row"""
         try:
             return await self._client.query_row(sql, params)
