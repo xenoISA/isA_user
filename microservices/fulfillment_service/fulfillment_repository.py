@@ -12,7 +12,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 class ShipmentNotFoundException(Exception):
     """Shipment not found exception"""
+
     pass
 
 
@@ -53,15 +56,21 @@ class FulfillmentRepository:
             config = ConfigManager("fulfillment_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="fulfillment_service", min_pool_size=_pg_min_pool(), max_pool_size=_pg_max_pool())
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="fulfillment_service",
+            min_pool_size=_pg_min_pool(),
+            max_pool_size=_pg_max_pool(),
+        )
 
         self.schema = "fulfillment"
         self.shipments_table = "shipments"
@@ -77,7 +86,7 @@ class FulfillmentRepository:
         carrier: Optional[str] = None,
         tracking_number: Optional[str] = None,
         status: str = "created",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a new shipment record"""
         try:
@@ -94,14 +103,12 @@ class FulfillmentRepository:
                 "tracking_number": tracking_number,
                 "status": status,
                 "created_at": now,
-                "metadata": metadata or {}
+                "metadata": metadata or {},
             }
 
             async with self.db:
                 await self.db.insert_into(
-                    self.shipments_table,
-                    [shipment_data],
-                    schema=self.schema
+                    self.shipments_table, [shipment_data], schema=self.schema
                 )
 
             return await self.get_shipment(shipment_id)
@@ -116,7 +123,9 @@ class FulfillmentRepository:
             query = f'SELECT * FROM "{self.schema}".{self.shipments_table} WHERE shipment_id = $1'
 
             async with self.db:
-                result = await self.db.query_row(query, [shipment_id], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [shipment_id], schema=self.schema
+                )
 
             return self._normalize_shipment(result) if result else None
 
@@ -138,13 +147,17 @@ class FulfillmentRepository:
             logger.error(f"Failed to get shipment for order {order_id}: {e}")
             raise
 
-    async def get_shipment_by_tracking(self, tracking_number: str) -> Optional[Dict[str, Any]]:
+    async def get_shipment_by_tracking(
+        self, tracking_number: str
+    ) -> Optional[Dict[str, Any]]:
         """Get shipment by tracking number"""
         try:
             query = f'SELECT * FROM "{self.schema}".{self.shipments_table} WHERE tracking_number = $1'
 
             async with self.db:
-                result = await self.db.query_row(query, [tracking_number], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [tracking_number], schema=self.schema
+                )
 
             return self._normalize_shipment(result) if result else None
 
@@ -160,7 +173,7 @@ class FulfillmentRepository:
         tracking_number: Optional[str] = None,
         label_url: Optional[str] = None,
         estimated_delivery: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Update shipment"""
         try:
@@ -218,11 +231,11 @@ class FulfillmentRepository:
             param_count += 1
             params.append(shipment_id)
 
-            query = f'''
+            query = f"""
                 UPDATE "{self.schema}".{self.shipments_table}
                 SET {", ".join(updates)}
                 WHERE shipment_id = ${param_count}
-            '''
+            """
 
             async with self.db:
                 await self.db.execute(query, params, schema=self.schema)
@@ -238,7 +251,7 @@ class FulfillmentRepository:
         shipment_id: str,
         carrier: str,
         tracking_number: str,
-        label_url: Optional[str] = None
+        label_url: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Create shipping label for a shipment"""
         return await self.update_shipment(
@@ -246,22 +259,20 @@ class FulfillmentRepository:
             status="label_purchased",
             carrier=carrier,
             tracking_number=tracking_number,
-            label_url=label_url
+            label_url=label_url,
         )
 
     async def cancel_shipment(
-        self,
-        shipment_id: str,
-        reason: Optional[str] = None
+        self, shipment_id: str, reason: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Cancel a shipment"""
         try:
             now = datetime.now(timezone.utc)
-            query = f'''
+            query = f"""
                 UPDATE "{self.schema}".{self.shipments_table}
                 SET status = $1, canceled_at = $2, cancellation_reason = $3
                 WHERE shipment_id = $4
-            '''
+            """
 
             params = ["failed", now, reason or "manual_cancellation", shipment_id]
 
@@ -280,7 +291,7 @@ class FulfillmentRepository:
         offset: int = 0,
         order_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List shipments with filtering"""
         try:
@@ -304,12 +315,12 @@ class FulfillmentRepository:
                 params.append(status)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
-            query = f'''
+            query = f"""
                 SELECT * FROM "{self.schema}".{self.shipments_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -329,16 +340,19 @@ class FulfillmentRepository:
         items = data.get("items", [])
         if isinstance(items, str):
             import json
+
             items = json.loads(items)
 
         shipping_address = data.get("shipping_address")
         if isinstance(shipping_address, str):
             import json
+
             shipping_address = json.loads(shipping_address)
 
         metadata = data.get("metadata", {})
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
 
         return {
@@ -359,5 +373,5 @@ class FulfillmentRepository:
             "delivered_at": data.get("delivered_at"),
             "canceled_at": data.get("canceled_at"),
             "cancellation_reason": data.get("cancellation_reason"),
-            "metadata": metadata
+            "metadata": metadata,
         }

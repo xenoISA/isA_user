@@ -37,21 +37,23 @@ class AuthorizationCodeRepository:
             config = ConfigManager("auth_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
-        logger.info(f"Connecting to PostgreSQL at {host}:{port} for authorization codes")
+        logger.info(
+            f"Connecting to PostgreSQL at {host}:{port} for authorization codes"
+        )
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='auth-service',
+            user_id="auth-service",
             min_pool_size=_pg_min_pool(),
             max_pool_size=_pg_max_pool(),
         )

@@ -16,7 +16,10 @@ import json
 import uuid
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -58,11 +61,11 @@ class AccountRepository:
             config = ConfigManager("account_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -72,7 +75,7 @@ class AccountRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='account_service',
+            user_id="account_service",
             min_pool_size=_pg_min_pool(),
             max_pool_size=_pg_max_pool(),
         )
@@ -81,26 +84,26 @@ class AccountRepository:
 
     def _convert_proto_jsonb(self, jsonb_raw):
         """Convert proto JSONB to Python dict"""
-        if hasattr(jsonb_raw, 'fields'):
+        if hasattr(jsonb_raw, "fields"):
             return MessageToDict(jsonb_raw)
         return jsonb_raw if jsonb_raw else {}
 
     def _row_to_user(self, row: Dict[str, Any]) -> User:
         """Convert database row to User model"""
-        preferences = row.get('preferences', {})
-        if hasattr(preferences, 'fields'):
+        preferences = row.get("preferences", {})
+        if hasattr(preferences, "fields"):
             preferences = MessageToDict(preferences)
         elif not preferences:
             preferences = {}
 
         # Parse admin_roles (JSONB column, may be None, list, or string)
-        admin_roles = row.get('admin_roles')
+        admin_roles = row.get("admin_roles")
         if isinstance(admin_roles, str):
             try:
                 admin_roles = json.loads(admin_roles)
             except (json.JSONDecodeError, TypeError):
                 admin_roles = None
-        elif hasattr(admin_roles, 'fields'):
+        elif hasattr(admin_roles, "fields"):
             admin_roles = MessageToDict(admin_roles)
 
         return User(
@@ -111,7 +114,7 @@ class AccountRepository:
             admin_roles=admin_roles if admin_roles else None,
             preferences=preferences,
             created_at=row.get("created_at"),
-            updated_at=row.get("updated_at")
+            updated_at=row.get("updated_at"),
         )
 
     async def get_account_by_id(self, user_id: str) -> Optional[User]:
@@ -120,7 +123,7 @@ class AccountRepository:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.users_table} WHERE user_id = $1 AND is_active = TRUE",
-                    params=[user_id]
+                    params=[user_id],
                 )
 
             if result:
@@ -137,7 +140,7 @@ class AccountRepository:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.users_table} WHERE user_id = $1",
-                    params=[user_id]
+                    params=[user_id],
                 )
 
             if result:
@@ -154,7 +157,7 @@ class AccountRepository:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT * FROM {self.schema}.{self.users_table} WHERE email = $1 AND is_active = TRUE",
-                    params=[email]
+                    params=[email],
                 )
 
             if result:
@@ -165,12 +168,7 @@ class AccountRepository:
             logger.error(f"Failed to get account by email {email}: {e}")
             return None
 
-    async def ensure_account_exists(
-        self,
-        user_id: str,
-        email: str,
-        name: str
-    ) -> User:
+    async def ensure_account_exists(self, user_id: str, email: str, name: str) -> User:
         """
         Ensure user account exists, create if not found
 
@@ -184,14 +182,16 @@ class AccountRepository:
 
             email_user = await self.get_account_by_email(email)
             if email_user:
-                raise DuplicateEntryException(f"Email {email} already exists for different user")
+                raise DuplicateEntryException(
+                    f"Email {email} already exists for different user"
+                )
 
             async with self.db:
                 await self.db.execute(
                     f"""INSERT INTO {self.schema}.{self.users_table}
                         (user_id, email, name, is_active, preferences)
                         VALUES ($1, $2, $3, $4, $5)""",
-                    params=[user_id, email, name, True, {}]
+                    params=[user_id, email, name, True, {}],
                 )
 
             logger.info(f"New account created: {user_id}")
@@ -207,7 +207,9 @@ class AccountRepository:
             logger.error(f"Error ensuring account exists: {e}")
             raise
 
-    async def update_account_profile(self, user_id: str, update_data: Dict[str, Any]) -> Optional[User]:
+    async def update_account_profile(
+        self, user_id: str, update_data: Dict[str, Any]
+    ) -> Optional[User]:
         """Update account profile information"""
         try:
             existing_account = await self.get_account_by_id(user_id)
@@ -215,8 +217,12 @@ class AccountRepository:
                 raise UserNotFoundException(f"Account not found: {user_id}")
 
             # Only allow updating identity fields, not subscription
-            allowed_fields = ['name', 'email']
-            filtered_update = {k: v for k, v in update_data.items() if k in allowed_fields and v is not None}
+            allowed_fields = ["name", "email"]
+            filtered_update = {
+                k: v
+                for k, v in update_data.items()
+                if k in allowed_fields and v is not None
+            }
 
             if not filtered_update:
                 return existing_account
@@ -236,7 +242,7 @@ class AccountRepository:
             async with self.db:
                 await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET {set_clause} WHERE user_id = ${len(values)}",
-                    params=values
+                    params=values,
                 )
 
             return await self.get_account_by_id(user_id)
@@ -253,7 +259,7 @@ class AccountRepository:
             async with self.db:
                 await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET is_active = TRUE, updated_at = $1 WHERE user_id = $2",
-                    params=[now, user_id]
+                    params=[now, user_id],
                 )
 
             return True
@@ -270,7 +276,7 @@ class AccountRepository:
             async with self.db:
                 await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET is_active = FALSE, updated_at = $1 WHERE user_id = $2",
-                    params=[now, user_id]
+                    params=[now, user_id],
                 )
 
             return True
@@ -279,14 +285,16 @@ class AccountRepository:
             logger.error(f"Failed to deactivate account {user_id}: {e}")
             return False
 
-    async def update_account_preferences(self, user_id: str, preferences: Dict[str, Any]) -> bool:
+    async def update_account_preferences(
+        self, user_id: str, preferences: Dict[str, Any]
+    ) -> bool:
         """Update account preferences"""
         try:
             existing_account = await self.get_account_by_id(user_id)
             if not existing_account:
                 return False
 
-            current_prefs = getattr(existing_account, 'preferences', {})
+            current_prefs = getattr(existing_account, "preferences", {})
             updated_prefs = {**current_prefs, **preferences}
 
             now = datetime.now(tz=timezone.utc)
@@ -294,7 +302,7 @@ class AccountRepository:
             async with self.db:
                 await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET preferences = $1, updated_at = $2 WHERE user_id = $3",
-                    params=[updated_prefs, now, user_id]
+                    params=[updated_prefs, now, user_id],
                 )
 
             return True
@@ -308,12 +316,14 @@ class AccountRepository:
         account = await self.get_account_by_id(user_id)
         if not account:
             raise UserNotFoundError(f"Account not found: {user_id}")
-        prefs = getattr(account, 'preferences', {}) or {}
-        return prefs.get('custom_instructions', '')
+        prefs = getattr(account, "preferences", {}) or {}
+        return prefs.get("custom_instructions", "")
 
     async def set_custom_instructions(self, user_id: str, instructions: str) -> bool:
         """Set user's custom instructions in preferences (#260)"""
-        return await self.update_account_preferences(user_id, {'custom_instructions': instructions})
+        return await self.update_account_preferences(
+            user_id, {"custom_instructions": instructions}
+        )
 
     async def delete_account(self, user_id: str) -> bool:
         """Delete account (soft delete by deactivating)"""
@@ -324,7 +334,7 @@ class AccountRepository:
         limit: int = 50,
         offset: int = 0,
         is_active: Optional[bool] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
     ) -> List[User]:
         """List accounts with pagination (no subscription filter)"""
         try:
@@ -338,7 +348,9 @@ class AccountRepository:
                 param_count += 1
 
             if search is not None:
-                conditions.append(f"(name ILIKE ${param_count} OR email ILIKE ${param_count})")
+                conditions.append(
+                    f"(name ILIKE ${param_count} OR email ILIKE ${param_count})"
+                )
                 params.append(f"%{search}%")
                 param_count += 1
 
@@ -400,23 +412,35 @@ class AccountRepository:
             async with self.db:
                 # Run all stats queries concurrently for better performance
                 results = await asyncio.gather(
-                    self.db.query_row(f"SELECT COUNT(*) as total FROM {self.schema}.{self.users_table}"),
-                    self.db.query_row(f"SELECT COUNT(*) as active FROM {self.schema}.{self.users_table} WHERE is_active = TRUE"),
-                    self.db.query_row(f"SELECT COUNT(*) as count FROM {self.schema}.{self.users_table} WHERE created_at >= NOW() - INTERVAL '7 days'"),
-                    self.db.query_row(f"SELECT COUNT(*) as count FROM {self.schema}.{self.users_table} WHERE created_at >= NOW() - INTERVAL '30 days'"),
+                    self.db.query_row(
+                        f"SELECT COUNT(*) as total FROM {self.schema}.{self.users_table}"
+                    ),
+                    self.db.query_row(
+                        f"SELECT COUNT(*) as active FROM {self.schema}.{self.users_table} WHERE is_active = TRUE"
+                    ),
+                    self.db.query_row(
+                        f"SELECT COUNT(*) as count FROM {self.schema}.{self.users_table} WHERE created_at >= NOW() - INTERVAL '7 days'"
+                    ),
+                    self.db.query_row(
+                        f"SELECT COUNT(*) as count FROM {self.schema}.{self.users_table} WHERE created_at >= NOW() - INTERVAL '30 days'"
+                    ),
                 )
 
             total_row, active_row, recent_7d_row, recent_30d_row = results
-            total_accounts = total_row['total'] if total_row else 0
-            active_accounts = active_row['active'] if active_row else 0
+            total_accounts = total_row["total"] if total_row else 0
+            active_accounts = active_row["active"] if active_row else 0
             inactive_accounts = total_accounts - active_accounts
 
             return {
                 "total_accounts": total_accounts,
                 "active_accounts": active_accounts,
                 "inactive_accounts": inactive_accounts,
-                "recent_registrations_7d": recent_7d_row['count'] if recent_7d_row else 0,
-                "recent_registrations_30d": recent_30d_row['count'] if recent_30d_row else 0
+                "recent_registrations_7d": recent_7d_row["count"]
+                if recent_7d_row
+                else 0,
+                "recent_registrations_30d": recent_30d_row["count"]
+                if recent_30d_row
+                else 0,
             }
 
         except Exception as e:
@@ -426,7 +450,7 @@ class AccountRepository:
                 "active_accounts": 0,
                 "inactive_accounts": 0,
                 "recent_registrations_7d": 0,
-                "recent_registrations_30d": 0
+                "recent_registrations_30d": 0,
             }
 
     async def get_accounts_by_ids(self, user_ids: List[str]) -> List[User]:
@@ -455,7 +479,9 @@ class AccountRepository:
             logger.error(f"Failed to get accounts by IDs: {e}")
             return []
 
-    async def update_admin_roles(self, user_id: str, admin_roles: Optional[List[str]]) -> Optional[User]:
+    async def update_admin_roles(
+        self, user_id: str, admin_roles: Optional[List[str]]
+    ) -> Optional[User]:
         """Update admin roles for a user account (JSONB column)"""
         try:
             existing = await self.get_account_by_id_include_inactive(user_id)
@@ -469,7 +495,7 @@ class AccountRepository:
             async with self.db:
                 await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET admin_roles = $1, updated_at = $2 WHERE user_id = $3",
-                    params=[roles_json, now, user_id]
+                    params=[roles_json, now, user_id],
                 )
 
             return await self.get_account_by_id_include_inactive(user_id)
@@ -499,7 +525,7 @@ class AccountRepository:
                 async with self.db:
                     status_row = await self.db.query_row(
                         f"SELECT status, reason FROM {self.schema}.admin_account_status WHERE user_id = $1",
-                        params=[user_id]
+                        params=[user_id],
                     )
                 if status_row:
                     account_status = status_row.get("status", "active")
@@ -514,17 +540,19 @@ class AccountRepository:
                 async with self.db:
                     note_rows = await self.db.query(
                         f"SELECT * FROM {self.schema}.admin_notes WHERE user_id = $1 ORDER BY created_at DESC",
-                        params=[user_id]
+                        params=[user_id],
                     )
                 if note_rows:
                     for row in note_rows:
-                        notes.append(AdminNote(
-                            note_id=row["note_id"],
-                            user_id=row["user_id"],
-                            author_id=row["author_id"],
-                            note=row["note"],
-                            created_at=row["created_at"],
-                        ))
+                        notes.append(
+                            AdminNote(
+                                note_id=row["note_id"],
+                                user_id=row["user_id"],
+                                author_id=row["author_id"],
+                                note=row["note"],
+                                created_at=row["created_at"],
+                            )
+                        )
             except Exception:
                 # Table may not exist yet; return empty notes
                 pass
@@ -566,7 +594,7 @@ class AccountRepository:
             async with self.db:
                 await self.db.execute(
                     f"UPDATE {self.schema}.{self.users_table} SET is_active = $1, updated_at = $2 WHERE user_id = $3",
-                    params=[is_active, now, user_id]
+                    params=[is_active, now, user_id],
                 )
 
             # Upsert into admin_account_status
@@ -576,11 +604,13 @@ class AccountRepository:
                         f"""INSERT INTO {self.schema}.admin_account_status (user_id, status, reason, updated_at)
                             VALUES ($1, $2, $3, $4)
                             ON CONFLICT (user_id) DO UPDATE SET status = $2, reason = $3, updated_at = $4""",
-                        params=[user_id, status, reason, now]
+                        params=[user_id, status, reason, now],
                     )
             except Exception as e:
                 # Table may not exist; log and continue (is_active was still updated)
-                logger.warning(f"Could not upsert admin_account_status for {user_id}: {e}")
+                logger.warning(
+                    f"Could not upsert admin_account_status for {user_id}: {e}"
+                )
 
             logger.info(f"Account status updated: {user_id} -> {status}")
             return True
@@ -607,7 +637,7 @@ class AccountRepository:
                 await self.db.execute(
                     f"""INSERT INTO {self.schema}.admin_notes (note_id, user_id, author_id, note, created_at)
                         VALUES ($1, $2, $3, $4, $5)""",
-                    params=[note_id, user_id, author_id, note, now]
+                    params=[note_id, user_id, author_id, note, now],
                 )
 
             return AdminNote(
@@ -641,7 +671,9 @@ class AccountRepository:
                 param_count += 1
 
             if search is not None:
-                conditions.append(f"(name ILIKE ${param_count} OR email ILIKE ${param_count})")
+                conditions.append(
+                    f"(name ILIKE ${param_count} OR email ILIKE ${param_count})"
+                )
                 params.append(f"%{search}%")
                 param_count += 1
 

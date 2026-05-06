@@ -12,7 +12,9 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 class ReservationNotFoundException(Exception):
     """Reservation not found exception"""
+
     pass
 
 
@@ -54,15 +57,21 @@ class InventoryRepository:
             config = ConfigManager("inventory_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
-        self.db = AsyncPostgresClient(host=host, port=port, user_id="inventory_service", min_pool_size=_pg_min_pool(), max_pool_size=_pg_max_pool())
+        self.db = AsyncPostgresClient(
+            host=host,
+            port=port,
+            user_id="inventory_service",
+            min_pool_size=_pg_min_pool(),
+            max_pool_size=_pg_max_pool(),
+        )
 
         self.schema = "inventory"
         self.reservations_table = "reservations"
@@ -76,7 +85,7 @@ class InventoryRepository:
         user_id: str,
         items: List[Dict[str, Any]],
         expires_in_minutes: int = 30,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a new inventory reservation"""
         try:
@@ -92,14 +101,12 @@ class InventoryRepository:
                 "status": "active",
                 "expires_at": expires_at,
                 "created_at": now,
-                "metadata": metadata or {}
+                "metadata": metadata or {},
             }
 
             async with self.db:
                 await self.db.insert_into(
-                    self.reservations_table,
-                    [reservation_data],
-                    schema=self.schema
+                    self.reservations_table, [reservation_data], schema=self.schema
                 )
 
             return await self.get_reservation(reservation_id)
@@ -114,7 +121,9 @@ class InventoryRepository:
             query = f'SELECT * FROM "{self.schema}".{self.reservations_table} WHERE reservation_id = $1'
 
             async with self.db:
-                result = await self.db.query_row(query, [reservation_id], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [reservation_id], schema=self.schema
+                )
 
             return self._normalize_reservation(result) if result else None
 
@@ -122,7 +131,9 @@ class InventoryRepository:
             logger.error(f"Failed to get reservation {reservation_id}: {e}")
             raise
 
-    async def get_reservation_by_order(self, order_id: str, status: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def get_reservation_by_order(
+        self, order_id: str, status: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """Get reservation by order ID"""
         try:
             if status:
@@ -141,7 +152,9 @@ class InventoryRepository:
             logger.error(f"Failed to get reservation for order {order_id}: {e}")
             raise
 
-    async def get_active_reservation_for_order(self, order_id: str) -> Optional[Dict[str, Any]]:
+    async def get_active_reservation_for_order(
+        self, order_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Get active reservation for an order"""
         return await self.get_reservation_by_order(order_id, status="active")
 
@@ -149,14 +162,16 @@ class InventoryRepository:
         """Commit a reservation (after payment)"""
         try:
             now = datetime.now(timezone.utc)
-            query = f'''
+            query = f"""
                 UPDATE "{self.schema}".{self.reservations_table}
                 SET status = $1, committed_at = $2
                 WHERE reservation_id = $3 AND status = 'active'
-            '''
+            """
 
             async with self.db:
-                await self.db.execute(query, ["committed", now, reservation_id], schema=self.schema)
+                await self.db.execute(
+                    query, ["committed", now, reservation_id], schema=self.schema
+                )
 
             return await self.get_reservation(reservation_id)
 
@@ -164,18 +179,22 @@ class InventoryRepository:
             logger.error(f"Failed to commit reservation {reservation_id}: {e}")
             raise
 
-    async def release_reservation(self, reservation_id: str) -> Optional[Dict[str, Any]]:
+    async def release_reservation(
+        self, reservation_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Release a reservation (order canceled)"""
         try:
             now = datetime.now(timezone.utc)
-            query = f'''
+            query = f"""
                 UPDATE "{self.schema}".{self.reservations_table}
                 SET status = $1, released_at = $2
                 WHERE reservation_id = $3 AND status = 'active'
-            '''
+            """
 
             async with self.db:
-                await self.db.execute(query, ["released", now, reservation_id], schema=self.schema)
+                await self.db.execute(
+                    query, ["released", now, reservation_id], schema=self.schema
+                )
 
             return await self.get_reservation(reservation_id)
 
@@ -189,7 +208,7 @@ class InventoryRepository:
         offset: int = 0,
         order_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List reservations with filtering"""
         try:
@@ -213,12 +232,12 @@ class InventoryRepository:
                 params.append(status)
 
             where_clause = " AND ".join(conditions) if conditions else "TRUE"
-            query = f'''
+            query = f"""
                 SELECT * FROM "{self.schema}".{self.reservations_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit} OFFSET {offset}
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params, schema=self.schema)
@@ -238,11 +257,13 @@ class InventoryRepository:
         items = data.get("items", [])
         if isinstance(items, str):
             import json
+
             items = json.loads(items)
 
         metadata = data.get("metadata", {})
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
 
         return {
@@ -256,5 +277,5 @@ class InventoryRepository:
             "updated_at": data.get("updated_at"),
             "committed_at": data.get("committed_at"),
             "released_at": data.get("released_at"),
-            "metadata": metadata
+            "metadata": metadata,
         }

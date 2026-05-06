@@ -247,9 +247,7 @@ class TestOrderRepositoryListOrdersCall:
         assert "min_pool_size" not in params
         assert "max_pool_size" not in params
         # And there's no **kwargs catch-all that would silently absorb them.
-        assert not any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
-        )
+        assert not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
 
     @pytest.mark.asyncio
     async def test_get_user_orders_invokes_list_orders_with_safe_kwargs(

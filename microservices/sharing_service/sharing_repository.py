@@ -12,7 +12,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from core.config_manager import ConfigManager
 from isa_common import AsyncPostgresClient
@@ -102,7 +104,9 @@ class ShareRepository:
         try:
             query = f"SELECT * FROM {self.schema}.{self.table} WHERE share_token = $1"
             async with self.db:
-                result = await self.db.query_row(query, [share_token], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [share_token], schema=self.schema
+                )
 
             if result:
                 return Share.model_validate(result)
@@ -127,9 +131,7 @@ class ShareRepository:
             logger.error(f"Error getting share by id: {e}")
             return None
 
-    async def get_session_shares(
-        self, session_id: str, owner_id: str
-    ) -> List[Share]:
+    async def get_session_shares(self, session_id: str, owner_id: str) -> List[Share]:
         """Get all active (non-expired) shares for a session owned by a user"""
         try:
             query = f"""
@@ -138,7 +140,9 @@ class ShareRepository:
                 ORDER BY created_at DESC
             """
             async with self.db:
-                rows = await self.db.query(query, [session_id, owner_id], schema=self.schema)
+                rows = await self.db.query(
+                    query, [session_id, owner_id], schema=self.schema
+                )
 
             if not rows:
                 return []
@@ -170,7 +174,9 @@ class ShareRepository:
                 WHERE id = $2
             """
             async with self.db:
-                count = await self.db.execute(query, [now, share_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [now, share_id], schema=self.schema
+                )
             return count is not None and count > 0
 
         except Exception as e:
