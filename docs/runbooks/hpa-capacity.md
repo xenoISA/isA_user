@@ -52,10 +52,13 @@ alongside the values change.
 
 ## Per-Service Breakdown
 
-Tiers come from `deployment/local-dev.sh`. "Untiered" services are present
-on disk (and possibly in `config/ports.yaml`) but not assigned to any
-`TIER*_SERVICES` list in `local-dev.sh` — they need to be classified (TODO).
-See [Untiered / Missing-from-Helm services](#untiered--missing-from-helm-services)
+Tiers come from `deployment/local-dev.sh` (3 + 8 + 5 + 19 = **35 tiered
+services**). "Untiered" services are present on disk (and possibly in
+`config/ports.yaml`) but not assigned to any `TIER*_SERVICES` list in
+`local-dev.sh` — they need to be classified (TODO). The two untiered
+services today are `sharing_service` and `project_service`, bringing the
+total inventory to **35 tiered + 2 untiered = 37**. See
+[Untiered / Missing-from-Helm services](#untiered--missing-from-helm-services)
 for the canonical inventory drift table.
 
 Bottleneck column is a coarse first-cut hypothesis based on service shape;
@@ -74,45 +77,47 @@ needs validation in staging.
 |  9 | event_service         | 2    | user-event           | 8230 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | NATS subs               |
 | 10 | audit_service         | 2    | user-audit           | 8205 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool (write-heavy)   |
 | 11 | notification_service  | 2    | user-notification    | 8206 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | External APIs, NATS subs |
-| 12 | project_service       | 2    | user-project         | 8260 | 2 / 10*     | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi*           | TODO       | DB pool                 |
-| 13 | billing_service       | 3    | user-billing         | 8216 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool (usage events), NATS subs |
-| 14 | subscription_service  | 3    | user-subscription    | 8228 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 15 | product_service       | 3    | user-product         | 8215 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 16 | telemetry_service     | 3    | user-telemetry       | 8225 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool (write-heavy ingest) |
-| 17 | vault_service         | 3    | user-vault           | 8214 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | CPU (encrypt/decrypt)   |
-| 18 | payment_service       | 4    | user-payment         | 8207 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | External (Stripe), DB pool |
-| 19 | order_service         | 4    | user-order           | 8210 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 20 | task_service          | 4    | user-task            | 8211 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | NATS subs               |
-| 21 | calendar_service      | 4    | user-calendar        | 8217 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 22 | weather_service       | 4    | user-weather         | 8218 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | External API, Redis cache |
-| 23 | album_service         | 4    | user-album           | 8219 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 24 | device_service        | 4    | user-device          | 8220 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool, MQTT           |
-| 25 | ota_service           | 4    | user-ota             | 8221 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | MinIO, DB pool          |
-| 26 | media_service         | 4    | user-media           | 8222 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | Memory (transcoding), MinIO |
-| 27 | location_service      | 4    | user-location        | 8224 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 28 | compliance_service    | 4    | user-compliance      | 8226 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 29 | document_service      | 4    | user-document        | 8227 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | MinIO, DB pool          |
-| 30 | credit_service        | 4    | user-credit          | 8229 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 31 | invitation_service    | 4    | user-invitation      | 8213 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 32 | membership_service    | 4    | user-membership      | 8250 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 33 | campaign_service      | 4    | user-campaign        | 8251 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 34 | inventory_service     | 4    | user-inventory       | 8252 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool (reservations)  |
-| 35 | tax_service           | 4    | user-tax             | 8253 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | External API, DB pool   |
-| 36 | fulfillment_service   | 4    | user-fulfillment     | 8254 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
-| 37 | sharing_service       | untiered | user-sharing     | 8255 | 2 / 10*     | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi*           | TODO       | DB pool                 |
-
-\* `project_service` is tiered (Tier 2) in `deployment/local-dev.sh` and listed
-in `config/ports.yaml` (port `8260`, k8s `user-project`), but **is not yet in
-`deployment/helm/values-production.yaml`** — so the HPA/resource defaults
-above are not actually applied in production today. Treat the row as
-default-if-deployed; close the gap by adding `project_service` to
-`values-production.yaml`.
+| 12 | billing_service       | 3    | user-billing         | 8216 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool (usage events), NATS subs |
+| 13 | subscription_service  | 3    | user-subscription    | 8228 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 14 | product_service       | 3    | user-product         | 8215 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 15 | telemetry_service     | 3    | user-telemetry       | 8225 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool (write-heavy ingest) |
+| 16 | vault_service         | 3    | user-vault           | 8214 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | CPU (encrypt/decrypt)   |
+| 17 | payment_service       | 4    | user-payment         | 8207 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | External (Stripe), DB pool |
+| 18 | order_service         | 4    | user-order           | 8210 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 19 | task_service          | 4    | user-task            | 8211 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | NATS subs               |
+| 20 | calendar_service      | 4    | user-calendar        | 8217 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 21 | weather_service       | 4    | user-weather         | 8218 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | External API, Redis cache |
+| 22 | album_service         | 4    | user-album           | 8219 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 23 | device_service        | 4    | user-device          | 8220 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool, MQTT           |
+| 24 | ota_service           | 4    | user-ota             | 8221 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | MinIO, DB pool          |
+| 25 | media_service         | 4    | user-media           | 8222 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | Memory (transcoding), MinIO |
+| 26 | location_service      | 4    | user-location        | 8224 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 27 | compliance_service    | 4    | user-compliance      | 8226 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 28 | document_service      | 4    | user-document        | 8227 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | MinIO, DB pool          |
+| 29 | credit_service        | 4    | user-credit          | 8229 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 30 | invitation_service    | 4    | user-invitation      | 8213 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 31 | membership_service    | 4    | user-membership      | 8250 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 32 | campaign_service      | 4    | user-campaign        | 8251 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 33 | inventory_service     | 4    | user-inventory       | 8252 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool (reservations)  |
+| 34 | tax_service           | 4    | user-tax             | 8253 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | External API, DB pool   |
+| 35 | fulfillment_service   | 4    | user-fulfillment     | 8254 | 2 / 10      | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi            | TODO       | DB pool                 |
+| 36 | sharing_service       | untiered | user-sharing     | 8255 | 2 / 10*     | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi*           | TODO       | DB pool                 |
+| 37 | project_service       | untiered | user-project     | 8260 | 2 / 10*     | 1 → 2                | 2 → 4                          | 10 → 20                         | 512Mi → 1Gi*           | TODO       | DB pool                 |
 
 \* `sharing_service` is listed in `config/ports.yaml` (port `8255`, k8s
 `user-sharing`) but **is not in any tier in `deployment/local-dev.sh`** and
 **is not in `deployment/helm/values-production.yaml`** — so it is not part of
 the standard rollout today. The row above shows the default-if-deployed
 values.
+
+\* `project_service` exists on disk (`microservices/project_service/`, port
+`8260` hard-coded in its `main.py`) but **is not in `config/ports.yaml`**,
+**is not in any tier in `deployment/local-dev.sh`**, and **is not in
+`deployment/helm/values-production.yaml`** — so it is not part of the
+standard rollout today. The row above shows the default-if-deployed values
+and assumes the same `user-project` k8s name and port `8260` would be used
+once it is registered. A tiering decision (probably Tier 2 based on its
+dependencies) is still needed.
 
 ## Postgres Connection Budget
 
@@ -125,10 +130,12 @@ values.
 The `services_in_helm = 35` figure is the count of services actually deployed
 via Helm today (entries under `services:` in
 `deployment/helm/values-production.yaml`). The 140 / 700 connection counts
-below describe **only those 35 services**. `project_service` and
-`sharing_service` exist on disk and in `config/ports.yaml` but are not yet
-added to `values-production.yaml`; they would push the totals to 148 / 740 if
-deployed under the same defaults — see the second block below.
+below describe **only those 35 services**. The two untiered services exist
+on disk but are not in `values-production.yaml`: `sharing_service` is in
+`config/ports.yaml` but missing from `local-dev.sh`, and `project_service`
+is missing from `config/ports.yaml`, `local-dev.sh`, and Helm. If both were
+deployed under the same defaults, the totals would rise to 148 / 740 — see
+the second block below.
 
 ```
 connections_per_pod      = PG_MAX_POOL_SIZE = 2
@@ -298,14 +305,18 @@ total_durable_consumers ≈ 100
 
 | Service           | On disk | In `ports.yaml` | In `local-dev.sh` tier | In `values-production.yaml` |
 | ----------------- | ------- | --------------- | ---------------------- | ---------------------------- |
-| `project_service` | yes     | yes (8260)      | Tier 2                 | **no**                       |
 | `sharing_service` | yes     | yes (8255)      | **no**                 | **no**                       |
+| `project_service` | yes     | **no**          | **no**                 | **no**                       |
 
-- `project_service` is fully classified everywhere except Helm — the only
-  remaining gap is adding it to `deployment/helm/values-production.yaml` so
-  the production rollout actually deploys it.
-- `sharing_service` still needs both a tier assignment in
-  `deployment/local-dev.sh` and an entry in `values-production.yaml`.
+- `sharing_service` is in `config/ports.yaml` but still needs a tier assignment
+  in `deployment/local-dev.sh` and an entry in
+  `deployment/helm/values-production.yaml`.
+- `project_service` is the more orphaned of the two: it exists as a
+  microservice directory (with port `8260` hard-coded in
+  `microservices/project_service/main.py:3,64`) but is missing from
+  `config/ports.yaml`, all `TIER*_SERVICES` lists in `deployment/local-dev.sh`,
+  and `deployment/helm/values-production.yaml`. It needs to be registered in
+  all three (likely Tier 2 based on its dependencies).
 
 Both are follow-ups on top of this doc.
 
@@ -317,8 +328,11 @@ Both are follow-ups on top of this doc.
 - [ ] Measure p95 memory per service in staging; right-size `requests.memory`.
 - [ ] Decide per-service `HPA.maxReplicas` — uniform `10` is unlikely to be
       the right ceiling for both auth_service and inventory_service.
-- [ ] Add `project_service` to `deployment/helm/values-production.yaml` (already
-      tiered as Tier 2 in `local-dev.sh` and listed in `config/ports.yaml`).
-- [ ] Triage `sharing_service` (assign a tier in `local-dev.sh` and add to
-      `values-production.yaml`).
+- [ ] Register `project_service` in the inventory: add it to
+      `config/ports.yaml`, assign it a tier in `deployment/local-dev.sh`
+      (probably Tier 2 based on its dependencies), and add it to
+      `deployment/helm/values-production.yaml`.
+- [ ] Triage `sharing_service`: it is already in `config/ports.yaml` but
+      still needs a tier in `deployment/local-dev.sh` and an entry in
+      `deployment/helm/values-production.yaml`.
 - [ ] Enumerate actual durable NATS consumer count and per-stream ack limits.
