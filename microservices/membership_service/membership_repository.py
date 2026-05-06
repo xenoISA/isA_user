@@ -131,6 +131,13 @@ class MembershipRepository:
 
         Idempotent — if Redis is down or the DB lookup fails, falls back
         to a known-good default tier set so the service still boots.
+
+        Issue #347 follow-up (PR #357 review item #8): when the DB load
+        fails on startup we used to prime defaults with the standard
+        TTL, which masked DB outages for the full TTL window. We now
+        cache defaults with a much shorter TTL so the next read after
+        the DB recovers re-fetches the real tiers within ~60s instead
+        of waiting for the standard TTL to expire.
         """
         try:
             tiers = await self.get_all_tiers()
@@ -140,11 +147,18 @@ class MembershipRepository:
                 )
             logger.info(f"Loaded {len(tiers)} tiers into cache")
         except Exception as e:
-            logger.warning(f"Failed to load tier cache: {e}")
+            logger.warning(
+                f"Failed to load tier cache from DB: {e}; "
+                "priming defaults with short TTL so next read re-checks the DB"
+            )
             # Best-effort: prime defaults so reads have something to
             # serve even if the DB is briefly unavailable on bootstrap.
+            # Use a short TTL (60s) so we re-attempt quickly once the DB
+            # recovers rather than serving defaults for the full TTL.
             for code, tier in _DEFAULT_TIERS.items():
-                await self._tier_cache.set(code, tier, dumps=_tier_dumps)
+                await self._tier_cache.set(
+                    code, tier, ttl=60, dumps=_tier_dumps
+                )
 
     # ====================
     # Membership CRUD
@@ -525,8 +539,10 @@ class MembershipRepository:
         if tier_code is not None:
             await self._tier_cache.delete(tier_code)
             return
-        # No specific tier — purge the namespace.
-        await self._tier_cache.delete_pattern("*")
+        # No specific tier — purge the namespace. This is the bulk-reload
+        # path; tolerate cache outages (raise_on_error=False) because the
+        # next read falls back to the DB anyway.
+        await self._tier_cache.delete_pattern("*", raise_on_error=False)
 
     async def get_all_tiers(self) -> List[Tier]:
         """Get all tier definitions"""

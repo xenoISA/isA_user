@@ -838,20 +838,69 @@ class ComplianceService:
         *,
         policy_id: Optional[str] = None,
         organization_id: Optional[str] = None,
+        purge_all_orgs: bool = False,
     ) -> None:
         """Drop cached policy entries after a write.
 
         Issue #347 acceptance criterion — explicit DEL on writes (no
         full FLUSHDB). Callers should invoke this whenever a policy is
         created, updated, or deactivated.
+
+        Issue #347 follow-up (PR #357 review): when called with only
+        ``policy_id`` (the common path from update/delete handlers),
+        we now look the policy's ``organization_id`` up in the DB and
+        invalidate both the per-policy key AND the per-org active list.
+        Without this, the org's ``org:<x>:active`` entry stays for the
+        full TTL and the policy continues to apply on every replica
+        until it expires.
+
+        :param policy_id: When provided, drop ``id:<policy_id>`` AND
+            (after a DB lookup) the policy's owning org's active list.
+        :param organization_id: When provided, drop the org's active
+            list. Combined with ``policy_id`` this skips the DB lookup.
+        :param purge_all_orgs: When True, also walk every
+            ``org:*:active`` key via SCAN. Reserved for global policy
+            edits (e.g. retiring a platform-wide rule); never used by
+            the routine update path.
         """
+        # Step 1 — when the caller knows the org, that's authoritative.
+        target_org: Optional[str] = organization_id
+
+        # Step 2 — if we only got a policy_id, look the org up so we can
+        # invalidate the corresponding active list. Tolerate a DB miss
+        # (the policy may already be deleted) by falling back to the
+        # global bucket invalidation.
+        if policy_id and organization_id is None:
+            try:
+                policy = await self.repository.get_policy_by_id(policy_id)
+            except Exception as exc:
+                policy = None
+                logger.warning(
+                    "invalidate_policy_cache: failed to look up policy %s "
+                    "for org-list invalidation: %s",
+                    policy_id,
+                    exc,
+                )
+            if policy is not None:
+                target_org = policy.organization_id
+
+        # Step 3 — drop the per-policy key.
         if policy_id:
             await self._policy_cache.delete(f"id:{policy_id}")
-        # Active-policy lists are keyed by org; invalidate both the
-        # specific org and the "global" bucket to be safe.
-        if organization_id is not None:
-            await self._policy_cache.delete(f"org:{organization_id}:active")
+
+        # Step 4 — drop the per-org active list (and the global bucket
+        # which represents org_id IS NULL policies).
+        if target_org is not None:
+            await self._policy_cache.delete(f"org:{target_org}:active")
         await self._policy_cache.delete("org:global:active")
+
+        # Step 5 — only purge every org's active list when the caller
+        # explicitly opts in (e.g. retiring a platform-wide policy).
+        # raise_on_error=False because this is a best-effort fan-out.
+        if purge_all_orgs:
+            await self._policy_cache.delete_pattern(
+                "org:*:active", raise_on_error=False
+            )
 
     def _hash_content(self, content: str) -> str:
         """生成内容哈希"""

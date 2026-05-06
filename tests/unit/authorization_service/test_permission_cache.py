@@ -23,10 +23,8 @@ from microservices.authorization_service.models import (
     GrantPermissionRequest,
     PermissionSource,
     ResourceAccessRequest,
-    ResourceAccessResponse,
     ResourceType,
     RevokePermissionRequest,
-    SubscriptionTier,
     UserPermissionRecord,
 )
 
@@ -323,3 +321,211 @@ async def test_cache_key_returns_none_for_blank_request():
         required_access_level=AccessLevel.READ_ONLY,
     )
     assert svc._permission_cache_key(req) is None
+
+
+# ----------------------------------------------------------------------
+# Issue #347 follow-up — cache key captures every decision-affecting
+# field of ResourceAccessRequest (PR #357 review item #1).
+# ----------------------------------------------------------------------
+
+
+async def test_cache_key_differs_when_subscription_tier_in_context_differs():
+    """Two requests differing only in their context.subscription_tier
+    MUST produce different cache keys — otherwise an upgrade from FREE
+    to PRO won't be observed until the cache TTL expires.
+    """
+    cache = _fake_cache()
+    svc = _build_service(cache)
+
+    req_free = ResourceAccessRequest(
+        user_id="usr-1",
+        resource_type=ResourceType.MCP_TOOL,
+        resource_name="weather_api",
+        required_access_level=AccessLevel.READ_ONLY,
+        context={"subscription_tier": "free"},
+    )
+    req_pro = ResourceAccessRequest(
+        user_id="usr-1",
+        resource_type=ResourceType.MCP_TOOL,
+        resource_name="weather_api",
+        required_access_level=AccessLevel.READ_ONLY,
+        context={"subscription_tier": "pro"},
+    )
+
+    key_free = svc._permission_cache_key(req_free)
+    key_pro = svc._permission_cache_key(req_pro)
+    assert key_free is not None and key_pro is not None
+    assert key_free != key_pro
+
+
+async def test_cache_key_differs_when_organization_id_differs():
+    """Cross-org membership affects the decision; the key must reflect it."""
+    cache = _fake_cache()
+    svc = _build_service(cache)
+
+    base_kwargs = dict(
+        user_id="usr-1",
+        resource_type=ResourceType.MCP_TOOL,
+        resource_name="weather_api",
+        required_access_level=AccessLevel.READ_ONLY,
+    )
+    key_a = svc._permission_cache_key(
+        ResourceAccessRequest(organization_id="org-a", **base_kwargs)
+    )
+    key_b = svc._permission_cache_key(
+        ResourceAccessRequest(organization_id="org-b", **base_kwargs)
+    )
+    assert key_a != key_b
+
+
+async def test_cache_key_stable_across_dict_ordering_in_context():
+    """Semantically identical context (same keys/values) must hash equal."""
+    cache = _fake_cache()
+    svc = _build_service(cache)
+
+    req_a = ResourceAccessRequest(
+        user_id="usr-1",
+        resource_type=ResourceType.MCP_TOOL,
+        resource_name="weather_api",
+        required_access_level=AccessLevel.READ_ONLY,
+        context={"a": 1, "b": 2, "c": 3},
+    )
+    req_b = ResourceAccessRequest(
+        user_id="usr-1",
+        resource_type=ResourceType.MCP_TOOL,
+        resource_name="weather_api",
+        required_access_level=AccessLevel.READ_ONLY,
+        # Same keys, different insertion order.
+        context={"c": 3, "a": 1, "b": 2},
+    )
+    assert svc._permission_cache_key(req_a) == svc._permission_cache_key(req_b)
+
+
+async def test_cache_key_starts_with_user_prefix_for_invalidation():
+    """The user-prefixed shape is required by SCAN-based invalidation."""
+    cache = _fake_cache()
+    svc = _build_service(cache)
+
+    req = ResourceAccessRequest(
+        user_id="usr-42",
+        resource_type=ResourceType.MCP_TOOL,
+        resource_name="weather_api",
+        required_access_level=AccessLevel.READ_ONLY,
+    )
+    key = svc._permission_cache_key(req)
+    assert key is not None
+    assert key.startswith("user:usr-42:"), (
+        f"key {key!r} must start with 'user:<id>:' so "
+        "delete_pattern('user:<id>:*') still works"
+    )
+
+
+# ----------------------------------------------------------------------
+# Issue #347 follow-up — revoke fails closed when invalidation cannot be
+# confirmed (PR #357 review item #3).
+# ----------------------------------------------------------------------
+
+
+class _ScanFailClient:
+    """Cache double whose SCAN raises after a successful initial set."""
+
+    def __init__(self):
+        self.deleted = []
+        self._store: dict = {}
+
+    async def get(self, key):
+        return self._store.get(key)
+
+    async def set(self, key, value, ex=None):
+        self._store[key] = value
+        return True
+
+    async def delete(self, *keys):
+        for k in keys:
+            self._store.pop(k, None)
+            self.deleted.append(k)
+        return len(keys)
+
+    def scan_iter(self, *, match=None):
+        async def _gen():
+            raise ConnectionError("scan blew up")
+            yield  # pragma: no cover
+
+        return _gen()
+
+    async def ping(self):
+        return True
+
+
+async def test_revoke_returns_false_when_cache_invalidation_fails():
+    """If SCAN fails during invalidation, revoke must surface failure
+    so the caller retries — leaving the DB delete done and the cache
+    silently stale would let other replicas serve the granted state for
+    up to the full TTL.
+    """
+    from core.redis_cache import RedisCache
+
+    cache = RedisCache("authorization:permission", client=_ScanFailClient())
+    repo = _build_repo_mock(permission=_make_admin_permission())
+    svc = _build_service(cache, repo)
+
+    ok = await svc.revoke_resource_permission(
+        RevokePermissionRequest(
+            user_id="usr-1",
+            resource_type=ResourceType.MCP_TOOL,
+            resource_name="weather_api",
+            revoked_by_user_id="admin",
+        )
+    )
+    assert ok is False
+    # The DB revoke still ran (we don't have 2PC); we surface the cache
+    # failure so a retry is mandatory.
+    assert repo.revoke_user_permission.await_count == 1
+    # The audit log records the failure with an explanatory message.
+    # log_permission_action receives PermissionAuditLog objects whose
+    # ``success=False`` flag indicates the failure was recorded.
+    failure_logged = any(
+        getattr(call.args[0], "success", True) is False
+        for call in repo.log_permission_action.await_args_list
+    )
+    assert failure_logged
+
+
+# ----------------------------------------------------------------------
+# Issue #347 follow-up — deny TTL is shorter than allow TTL (review #5)
+# ----------------------------------------------------------------------
+
+
+async def test_deny_decisions_use_shorter_ttl_than_allow():
+    """A cached deny must expire much faster than a cached allow so an
+    operator-corrected grant becomes visible quickly.
+    """
+    from microservices.authorization_service.authorization_service import (
+        PERMISSION_CACHE_TTL_SECONDS,
+        PERMISSION_DENY_CACHE_TTL_SECONDS,
+    )
+
+    assert PERMISSION_DENY_CACHE_TTL_SECONDS < PERMISSION_CACHE_TTL_SECONDS
+
+    # End-to-end: a denied request leaves an entry whose TTL <= deny TTL.
+    cache = _fake_cache()
+    repo = _build_repo_mock(permission=None)  # no permission record -> denial
+    svc = _build_service(cache, repo)
+
+    deny_req = ResourceAccessRequest(
+        user_id="usr-1",
+        resource_type=ResourceType.MCP_TOOL,
+        # Made-up resource — no resource_permission record either, so
+        # the service emits a "no resource permission found" denial.
+        resource_name="restricted_tool_xyz",
+        required_access_level=AccessLevel.READ_ONLY,
+    )
+    resp = await svc.check_resource_access(deny_req)
+    assert resp.has_access is False
+
+    # Inspect the underlying TTL on the cached entry.
+    full_key = cache._full_key(svc._permission_cache_key(deny_req))
+    ttl = await cache._client.ttl(full_key)
+    assert 0 < ttl <= PERMISSION_DENY_CACHE_TTL_SECONDS, (
+        f"deny TTL {ttl} should be at most {PERMISSION_DENY_CACHE_TTL_SECONDS}"
+    )

@@ -33,14 +33,17 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import time
 from typing import Any, Awaitable, Callable, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "CacheInvalidationError",
     "RedisCache",
     "build_redis_cache",
     "resolve_cache_redis_url",
@@ -48,6 +51,17 @@ __all__ = [
     "CACHE_MISSES",
     "CACHE_ERRORS",
 ]
+
+
+class CacheInvalidationError(RuntimeError):
+    """Raised when a cache invalidation operation cannot be confirmed.
+
+    Issue #347 follow-up: ``delete_pattern`` previously swallowed SCAN/DEL
+    failures silently, which is dangerous for security-critical
+    invalidations (e.g. ``revoke_resource_permission``). The cache layer
+    now raises this typed error so callers can fail-closed on revokes
+    instead of "succeeding" while stale grants linger across replicas.
+    """
 
 
 # ----------------------------------------------------------------------
@@ -143,6 +157,10 @@ class RedisCache:
     optional URL (for production, where the client is built lazily).
     """
 
+    # Default cooldown before the half-open probe is allowed (seconds).
+    # Exposed as a class attr so tests can monkeypatch it to 0 if needed.
+    DEFAULT_RECOVERY_COOLDOWN_SECONDS: float = 30.0
+
     def __init__(
         self,
         namespace: str,
@@ -150,6 +168,7 @@ class RedisCache:
         *,
         default_ttl: int = 300,
         url: Optional[str] = None,
+        recovery_cooldown_seconds: Optional[float] = None,
     ):
         if not namespace:
             raise ValueError("RedisCache requires a non-empty namespace")
@@ -163,6 +182,17 @@ class RedisCache:
         # Latch that flips on the first failure so callers don't pay the
         # latency of a broken Redis on every miss.
         self._healthy: bool = self._available
+        # Half-open circuit-breaker state (issue #347 follow-up): once the
+        # latch trips we record ``_unhealthy_since`` and, after the cooldown
+        # elapses, allow exactly one probe attempt to flip the latch back
+        # to True without paying the per-call latency cost on every read.
+        self._recovery_cooldown: float = (
+            recovery_cooldown_seconds
+            if recovery_cooldown_seconds is not None
+            else self.DEFAULT_RECOVERY_COOLDOWN_SECONDS
+        )
+        self._unhealthy_since: Optional[float] = None
+        self._recovery_lock: asyncio.Lock = asyncio.Lock()
 
     # -- Connection management -----------------------------------------
 
@@ -189,6 +219,76 @@ class RedisCache:
             self._healthy = False
             CACHE_ERRORS.labels(cache=self.namespace, operation="connect").inc()
             return None
+
+    # -- Health / recovery helpers ------------------------------------
+
+    def _mark_unhealthy(self) -> None:
+        """Record the latch trip and remember when it happened.
+
+        Called from every operation that observes a Redis exception. The
+        timestamp lets :meth:`_should_attempt_recovery` open the circuit
+        for exactly one probe after the cooldown elapses.
+        """
+        now = time.monotonic()
+        self._healthy = False
+        if self._unhealthy_since is None:
+            self._unhealthy_since = now
+
+    def _should_attempt_recovery(self) -> bool:
+        """Return True if enough time has passed to allow a single probe."""
+        if self._healthy:
+            return False
+        if self._unhealthy_since is None:
+            # Defensive — if the latch is False but we never recorded a
+            # trip, treat the next call as a probe so we don't deadlatch.
+            return True
+        return (
+            time.monotonic() - self._unhealthy_since
+        ) >= self._recovery_cooldown
+
+    async def _attempt_recovery(self, client: Any) -> bool:
+        """Attempt a single PING probe under the recovery lock.
+
+        Returns True if Redis is reachable again. Only one coroutine per
+        process probes at a time — the rest see ``_healthy=False`` and
+        keep short-circuiting until the probe completes.
+        """
+        if self._healthy:
+            return True
+        # ``asyncio.Lock`` ensures only one probe is in-flight; concurrent
+        # readers fall back through the miss path below.
+        if self._recovery_lock.locked():
+            return False
+        async with self._recovery_lock:
+            # Re-check inside the lock — another coroutine may have just
+            # flipped us back to healthy.
+            if self._healthy:
+                return True
+            try:
+                pong = await client.ping()
+            except Exception as exc:
+                # Reset the timer so we wait another full cooldown before
+                # re-probing rather than spinning on every miss.
+                self._unhealthy_since = time.monotonic()
+                logger.debug(
+                    "redis_cache(%s): recovery probe failed: %s",
+                    self.namespace,
+                    exc,
+                )
+                CACHE_ERRORS.labels(
+                    cache=self.namespace, operation="recovery"
+                ).inc()
+                return False
+            if not pong:
+                self._unhealthy_since = time.monotonic()
+                return False
+            self._healthy = True
+            self._unhealthy_since = None
+            logger.info(
+                "redis_cache(%s): recovered after probe",
+                self.namespace,
+            )
+            return True
 
     @property
     def healthy(self) -> bool:
@@ -246,14 +346,24 @@ class RedisCache:
         ``model_validate_json``).
         """
         client = await self._ensure_client()
-        if client is None or not self._healthy:
+        if client is None:
             CACHE_MISSES.labels(cache=self.namespace).inc()
             return None
+        # Half-open recovery (issue #347 follow-up): if the latch is
+        # tripped, only attempt a probe after the cooldown has elapsed.
+        if not self._healthy:
+            if not self._should_attempt_recovery():
+                CACHE_MISSES.labels(cache=self.namespace).inc()
+                return None
+            recovered = await self._attempt_recovery(client)
+            if not recovered:
+                CACHE_MISSES.labels(cache=self.namespace).inc()
+                return None
         full_key = self._full_key(key)
         try:
             raw = await client.get(full_key)
         except Exception as exc:
-            self._healthy = False
+            self._mark_unhealthy()
             logger.warning(
                 "redis_cache(%s): GET failed for %r: %s",
                 self.namespace,
@@ -320,9 +430,14 @@ class RedisCache:
         ex = ttl if ttl is not None else self.default_ttl
         try:
             await client.set(full_key, payload, ex=ex)
+            # Successful write while the latch was open is itself a recovery
+            # signal — flip back to healthy so subsequent reads return.
+            if not self._healthy:
+                self._healthy = True
+                self._unhealthy_since = None
             return True
         except Exception as exc:
-            self._healthy = False
+            self._mark_unhealthy()
             logger.warning(
                 "redis_cache(%s): SET failed for %r: %s",
                 self.namespace,
@@ -342,7 +457,7 @@ class RedisCache:
             await client.delete(full_key)
             return True
         except Exception as exc:
-            self._healthy = False
+            self._mark_unhealthy()
             logger.warning(
                 "redis_cache(%s): DEL failed for %r: %s",
                 self.namespace,
@@ -352,42 +467,66 @@ class RedisCache:
             CACHE_ERRORS.labels(cache=self.namespace, operation="delete").inc()
             return False
 
-    async def delete_pattern(self, pattern: str) -> int:
+    async def delete_pattern(self, pattern: str, *, raise_on_error: bool = True) -> int:
         """Delete every key matching ``pattern`` (within the namespace).
 
         Uses ``SCAN`` instead of ``KEYS`` to stay non-blocking on large
         keyspaces.
 
-        Returns the number of keys deleted (0 on any failure).
+        Issue #347 follow-up: when SCAN/DEL fails or the cache is
+        unconfigured, callers MUST be able to distinguish "successfully
+        invalidated 0 keys" from "Redis blip, cannot confirm
+        invalidation". Security-critical paths
+        (e.g. ``revoke_resource_permission``) need the failure signal so
+        they can fail-closed on the revoke instead of "succeeding" while
+        replicas keep serving the granted state.
+
+        :param pattern: Pattern relative to the namespace (e.g.
+            ``user:<id>:*``).
+        :param raise_on_error: If True (default) raise
+            :class:`CacheInvalidationError` when SCAN or DEL fails. Set
+            to False for best-effort cleanups that already tolerate
+            stale entries.
+        :returns: Number of keys deleted on success.
+        :raises CacheInvalidationError: When the cache is unavailable
+            and ``raise_on_error`` is True, or when SCAN/DEL throws.
         """
         client = await self._ensure_client()
         if client is None:
+            if raise_on_error:
+                raise CacheInvalidationError(
+                    f"redis_cache({self.namespace}): cache unavailable; "
+                    f"cannot invalidate pattern {pattern!r}"
+                )
             return 0
         full_pattern = self._full_key(pattern)
         deleted = 0
         try:
             # redis.asyncio supports scan_iter as an async generator.
             async for raw_key in client.scan_iter(match=full_pattern):
-                try:
-                    await client.delete(raw_key)
-                    deleted += 1
-                except Exception as exc:
-                    logger.debug(
-                        "redis_cache(%s): scan-delete failed for %r: %s",
-                        self.namespace,
-                        raw_key,
-                        exc,
-                    )
+                # Per-key DEL failures are part of the same operation —
+                # surface them too so the caller doesn't think the
+                # invalidation succeeded when half the keys were left
+                # behind.
+                await client.delete(raw_key)
+                deleted += 1
             return deleted
         except Exception as exc:
-            self._healthy = False
+            self._mark_unhealthy()
             logger.warning(
-                "redis_cache(%s): SCAN failed for pattern %r: %s",
+                "redis_cache(%s): SCAN/DEL failed for pattern %r after %d "
+                "deletes: %s",
                 self.namespace,
                 full_pattern,
+                deleted,
                 exc,
             )
             CACHE_ERRORS.labels(cache=self.namespace, operation="scan").inc()
+            if raise_on_error:
+                raise CacheInvalidationError(
+                    f"redis_cache({self.namespace}): SCAN/DEL failed for "
+                    f"pattern {pattern!r}: {exc}"
+                ) from exc
             return deleted
 
     # -- Health check helper -------------------------------------------
@@ -396,17 +535,22 @@ class RedisCache:
         """Return True if Redis is reachable.
 
         Used by ``core.health`` to drive the per-service ``redis_cache`` probe.
-        Failure flips the latch so subsequent reads short-circuit.
+        Failure flips the latch so subsequent reads short-circuit; success
+        clears the unhealthy timestamp so half-open recovery is reset.
         """
         client = await self._ensure_client()
         if client is None:
             return False
         try:
             pong = await client.ping()
-            self._healthy = bool(pong)
-            return self._healthy
+            if pong:
+                self._healthy = True
+                self._unhealthy_since = None
+                return True
+            self._mark_unhealthy()
+            return False
         except Exception as exc:
-            self._healthy = False
+            self._mark_unhealthy()
             logger.debug("redis_cache(%s): ping failed: %s", self.namespace, exc)
             CACHE_ERRORS.labels(cache=self.namespace, operation="ping").inc()
             return False

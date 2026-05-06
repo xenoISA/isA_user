@@ -9,12 +9,14 @@ This service uses dependency injection for all external dependencies:
 - Event bus is injected (optional)
 """
 
+import hashlib
+import json
 import logging
 from typing import TYPE_CHECKING, Optional, List, Dict, Any
 from datetime import datetime
 import uuid
 
-from core.redis_cache import RedisCache, build_redis_cache
+from core.redis_cache import CacheInvalidationError, RedisCache, build_redis_cache
 
 # Import protocols (no I/O dependencies) - NOT the concrete repository!
 from .protocols import (
@@ -59,6 +61,13 @@ logger = logging.getLogger(__name__)
 # in one replica and the cache eviction reaching the others (instant
 # under Redis, since DEL is shared).
 PERMISSION_CACHE_TTL_SECONDS = 600
+
+# Issue #347 follow-up (PR #357 review item #5): cache deny decisions
+# with a SHORTER TTL than allow decisions. The asymmetry matches the
+# blast radius — a stale "allow" leaks privilege; a stale "deny" merely
+# annoys the user for up to a minute. Granting access ignores cache
+# entirely (we re-resolve), so the deny TTL is purely a UX knob.
+PERMISSION_DENY_CACHE_TTL_SECONDS = 60
 
 
 def _access_response_dumps(resp: ResourceAccessResponse) -> bytes:
@@ -150,8 +159,16 @@ class AuthorizationService:
         if cache_key is not None and not (
             response.metadata and "error" in response.metadata
         ):
+            # Issue #347 follow-up: asymmetric TTLs — short for denies
+            # (so a corrected grant becomes visible quickly) and long
+            # for allows (so we still get the read-amplification win).
+            ttl = (
+                PERMISSION_CACHE_TTL_SECONDS
+                if response.has_access
+                else PERMISSION_DENY_CACHE_TTL_SECONDS
+            )
             await self._permission_cache.set(
-                cache_key, response, dumps=_access_response_dumps
+                cache_key, response, ttl=ttl, dumps=_access_response_dumps
             )
 
         return response
@@ -558,10 +575,24 @@ class AuthorizationService:
             result = await self.repository.grant_user_permission(permission)
 
             if result:
-                # Issue #347: invalidate the user's cached permission
-                # responses so other replicas see the grant immediately
-                # rather than after the 10-minute TTL.
-                await self.invalidate_permission_cache(user_id=request.user_id)
+                # Issue #347 follow-up: invalidate the user's cached
+                # permission responses so other replicas see the grant
+                # immediately rather than after the 10-minute TTL. Cache
+                # failures here are less dangerous than on revoke (a
+                # cached deny will at most delay access by the TTL), so
+                # we log loudly but still return success — the DB write
+                # is the source of truth.
+                try:
+                    await self.invalidate_permission_cache(
+                        user_id=request.user_id
+                    )
+                except CacheInvalidationError as cache_exc:
+                    logger.error(
+                        "Cache invalidation failed after grant for user %s; "
+                        "stale denies may persist until TTL expiry: %s",
+                        request.user_id,
+                        cache_exc,
+                    )
 
                 # Log the action
                 await self._log_permission_action(
@@ -657,10 +688,39 @@ class AuthorizationService:
             )
 
             if result:
-                # Issue #347: invalidate cached permission responses for
-                # this user so subsequent checks across all replicas
-                # see the revocation immediately.
-                await self.invalidate_permission_cache(user_id=request.user_id)
+                # Issue #347 follow-up: invalidate cached permission
+                # responses for this user so subsequent checks across all
+                # replicas see the revocation immediately. If the cache
+                # is unreachable we fail-CLOSED on the revoke: surface a
+                # failure to the caller so the operator retries instead
+                # of trusting a "succeeded" response while replicas keep
+                # serving the granted state for up to 10 minutes. This
+                # is the security correctness hole called out in PR #357.
+                try:
+                    await self.invalidate_permission_cache(
+                        user_id=request.user_id
+                    )
+                except CacheInvalidationError as cache_exc:
+                    logger.error(
+                        "Cache invalidation failed after revoke for user "
+                        "%s; reporting revoke as failed so caller retries: %s",
+                        request.user_id,
+                        cache_exc,
+                    )
+                    await self._log_permission_action(
+                        user_id=request.user_id,
+                        resource_type=request.resource_type,
+                        resource_name=request.resource_name,
+                        action="revoke",
+                        performed_by_user_id=request.revoked_by_user_id,
+                        reason=request.reason,
+                        success=False,
+                        error_message=(
+                            "cache invalidation failed; revoke must be "
+                            "retried to ensure replicas evict stale grant"
+                        ),
+                    )
+                    return False
 
                 # Log the action
                 await self._log_permission_action(
@@ -1240,23 +1300,50 @@ class AuthorizationService:
         deliberately starts with ``user:<user_id>:`` so
         :meth:`invalidate_permission_cache` can purge a single user's
         entries with a SCAN-based pattern delete.
+
+        Issue #347 follow-up (PR #357 review item #1): the key must
+        capture every field of :class:`ResourceAccessRequest` that can
+        affect the access decision in
+        :meth:`_check_resource_access_uncached`. Earlier versions
+        encoded only ``user / org / resource_type / resource_name /
+        required_access_level``; the ``context`` dict and any future
+        decision-affecting field were silently shared across cache
+        entries. We now hash the full canonical JSON representation of
+        the request and append it to the prefix so:
+
+        * Two requests differing in any field (subscription tier,
+          context, etc.) produce different cache keys.
+        * The ``user:<id>:`` prefix is preserved so per-user
+          invalidation via SCAN still works.
         """
         if not request.user_id or not request.resource_name:
             return None
-        org = request.organization_id or "_"
         rtype = (
             request.resource_type.value
             if hasattr(request.resource_type, "value")
             else str(request.resource_type)
         )
-        rlevel = (
-            request.required_access_level.value
-            if hasattr(request.required_access_level, "value")
-            else str(request.required_access_level)
-        )
-        return (
-            f"user:{request.user_id}:org:{org}:res:{rtype}:{request.resource_name}:lvl:{rlevel}"
-        )
+        rname = request.resource_name
+
+        # Capture every field of the request. ``mode='json'`` resolves
+        # enums/datetimes to JSON-friendly primitives; ``sort_keys``
+        # canonicalises dict ordering inside ``context`` so semantically
+        # identical requests hash to the same key.
+        try:
+            payload = request.model_dump(mode="json")
+        except Exception:
+            # Defensive — fall back to a manual snapshot if Pydantic
+            # serialisation hiccups. Better to skip caching than to
+            # collide.
+            return None
+        canonical = json.dumps(payload, sort_keys=True, default=str)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+        # Keep the user-prefixed shape (required by ``delete_pattern``)
+        # but include the resource for human readability and the digest
+        # for completeness. The digest covers org / level / context /
+        # any future decision-affecting field automatically.
+        return f"user:{request.user_id}:res:{rtype}:{rname}:h:{digest}"
 
     async def invalidate_permission_cache(
         self,
@@ -1271,6 +1358,11 @@ class AuthorizationService:
         With ``user_id=None`` the call is a no-op (we never silently
         purge the whole cache; an admin can call ``delete_pattern("*")``
         directly if they really need that).
+
+        Raises :class:`core.redis_cache.CacheInvalidationError` if the
+        SCAN/DEL fails — callers (notably ``revoke_resource_permission``)
+        rely on this to fail-closed when cache invalidation cannot be
+        confirmed.
         """
         if not user_id:
             return

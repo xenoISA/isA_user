@@ -17,7 +17,12 @@ import fakeredis.aioredis
 import pytest
 
 from core import redis_cache as cache_mod
-from core.redis_cache import RedisCache, build_redis_cache, resolve_cache_redis_url
+from core.redis_cache import (
+    CacheInvalidationError,
+    RedisCache,
+    build_redis_cache,
+    resolve_cache_redis_url,
+)
 
 
 pytestmark = [pytest.mark.unit]
@@ -397,3 +402,188 @@ async def test_health_probe_reports_degraded_when_disabled():
     # Critical=False -> failure -> degraded, not unhealthy.
     assert body["status"] == "degraded"
     assert response.status_code == 200
+
+
+# ----------------------------------------------------------------------
+# Issue #347 follow-up — delete_pattern surfaces failures (PR #357 #3)
+# ----------------------------------------------------------------------
+
+
+class _ScanFailClient:
+    """Async redis double whose ``scan_iter`` raises on first iteration."""
+
+    def __init__(self):
+        self.delete_calls = 0
+
+    def scan_iter(self, *, match=None):
+        async def _gen():
+            raise ConnectionError("scan blew up")
+            yield  # pragma: no cover - unreachable; makes this an async gen
+
+        return _gen()
+
+    async def delete(self, *_):
+        self.delete_calls += 1
+        return 1
+
+    async def get(self, *_):
+        return None
+
+    async def set(self, *_, **__):
+        return True
+
+    async def ping(self):
+        return True
+
+
+@pytest.mark.asyncio
+async def test_delete_pattern_raises_when_scan_fails():
+    """SCAN failure must surface as ``CacheInvalidationError`` so callers
+    can fail-closed on revoke (issue #347 follow-up, PR #357 review #3).
+    """
+    cache = RedisCache("perm", client=_ScanFailClient())
+    with pytest.raises(CacheInvalidationError):
+        await cache.delete_pattern("user:42:*")
+
+
+@pytest.mark.asyncio
+async def test_delete_pattern_swallows_when_raise_on_error_false():
+    """Best-effort callers can opt out of the typed error."""
+    cache = RedisCache("perm", client=_ScanFailClient())
+    # Must not raise; returns 0 because scan_iter blew up before yielding.
+    assert await cache.delete_pattern("user:42:*", raise_on_error=False) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_pattern_raises_when_cache_unavailable():
+    """An unconfigured cache must not silently 'succeed' invalidation."""
+    cache = RedisCache("perm", client=None, url=None)
+    cache._available = False
+    cache._healthy = False
+    with pytest.raises(CacheInvalidationError):
+        await cache.delete_pattern("user:42:*")
+
+
+# ----------------------------------------------------------------------
+# Issue #347 follow-up — half-open latch recovery (PR #357 review #4)
+# ----------------------------------------------------------------------
+
+
+class _RecoveringClient:
+    """Async redis double that fails N times then succeeds.
+
+    Lets us drive the half-open probe path without sleeping in tests.
+    """
+
+    def __init__(self, fail_count: int = 1):
+        self._remaining_failures = fail_count
+        self.get_calls = 0
+        self.ping_calls = 0
+        self.set_calls = 0
+        self._store: dict = {}
+
+    async def get(self, key):
+        self.get_calls += 1
+        if self._remaining_failures > 0:
+            self._remaining_failures -= 1
+            raise ConnectionError("blip")
+        return self._store.get(key)
+
+    async def set(self, key, value, ex=None):
+        self.set_calls += 1
+        self._store[key] = value
+        return True
+
+    async def delete(self, *keys):
+        for k in keys:
+            self._store.pop(k, None)
+        return len(keys)
+
+    async def ping(self):
+        self.ping_calls += 1
+        if self._remaining_failures > 0:
+            self._remaining_failures -= 1
+            raise ConnectionError("blip")
+        return True
+
+
+@pytest.mark.asyncio
+async def test_latch_recovers_after_cooldown():
+    """Once cooldown elapses, a successful PING flips ``healthy`` back."""
+    flaky = _RecoveringClient(fail_count=1)
+    cache = RedisCache("perm", client=flaky, recovery_cooldown_seconds=0.0)
+
+    # First read trips the latch.
+    assert await cache.get("k") is None
+    assert cache.healthy is False
+
+    # Cooldown is 0s -> the next read attempts the recovery probe and
+    # finds Redis healthy. After recovery the second call exercises the
+    # actual GET path (no remaining failures), proving we re-entered
+    # the live read path.
+    await flaky.set("perm:k", b'{"v":1}')
+    got = await cache.get("k")
+    assert got == {"v": 1}
+    assert cache.healthy is True
+
+
+@pytest.mark.asyncio
+async def test_latch_does_not_recover_before_cooldown():
+    """Within the cooldown window no probe is issued."""
+    flaky = _RecoveringClient(fail_count=1)
+    # Cooldown larger than any test would take.
+    cache = RedisCache("perm", client=flaky, recovery_cooldown_seconds=60.0)
+
+    # Trip the latch.
+    assert await cache.get("k") is None
+    assert cache.healthy is False
+    initial_pings = flaky.ping_calls
+
+    # Subsequent reads short-circuit; ping_calls must NOT increase.
+    for _ in range(3):
+        assert await cache.get("k") is None
+    assert flaky.ping_calls == initial_pings
+
+
+@pytest.mark.asyncio
+async def test_latch_recovery_only_one_concurrent_probe():
+    """Concurrent reads after cooldown must not all probe — exactly one wins."""
+    flaky = _RecoveringClient(fail_count=1)
+    cache = RedisCache("perm", client=flaky, recovery_cooldown_seconds=0.0)
+
+    # Trip the latch.
+    assert await cache.get("k") is None
+    assert cache.healthy is False
+    pings_before = flaky.ping_calls
+
+    # Fire many concurrent reads — only one should probe.
+    results = await asyncio.gather(*[cache.get("k") for _ in range(10)])
+    assert all(r is None for r in results)  # nothing in store yet
+    # At most one probe issued among the concurrent callers.
+    assert (flaky.ping_calls - pings_before) <= 1
+
+
+# ----------------------------------------------------------------------
+# Issue #347 follow-up — env-var prefix stability (PR #357 review #7)
+# ----------------------------------------------------------------------
+
+
+def test_service_env_prefix_strips_service_suffix():
+    """The env-var prefix is documented; lock the contract under test."""
+    assert (
+        cache_mod._service_env_prefix("authorization_service")
+        == "AUTHORIZATION"
+    )
+    assert cache_mod._service_env_prefix("compliance_service") == "COMPLIANCE"
+    assert cache_mod._service_env_prefix("membership_service") == "MEMBERSHIP"
+
+
+def test_authorization_resolves_authorization_cache_redis_url(monkeypatch):
+    """The authorization service must read AUTHORIZATION_CACHE_REDIS_URL."""
+    monkeypatch.setenv("AUTHORIZATION_CACHE_REDIS_URL", "redis://az:6379/0")
+    monkeypatch.delenv("CACHE_REDIS_URL", raising=False)
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    assert (
+        resolve_cache_redis_url(service_name="authorization_service")
+        == "redis://az:6379/0"
+    )
