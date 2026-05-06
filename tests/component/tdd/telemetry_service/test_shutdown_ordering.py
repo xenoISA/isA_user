@@ -18,10 +18,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-# Stub `isa_common.observability` BEFORE importing telemetry_service.main, since
-# main → core/metrics.py imports it at module-load time and CI's installed
-# `isa_common` does not ship the observability submodule.
+# Stub isa_common submodules BEFORE importing telemetry_service.main, since
+# main → core/metrics.py and core/postgres_client.py import them at module-load
+# time and CI's installed `isa_common` does not ship the observability/metrics
+# submodules. The metrics shim mimics prometheus Gauge.labels(...).set/inc/dec.
 sys.modules.setdefault("isa_common.observability", MagicMock())
+
+_metrics_stub = MagicMock()
+
+
+def _create_gauge_stub(*_args: Any, **_kwargs: Any) -> MagicMock:
+    gauge = MagicMock()
+    gauge.labels.return_value = gauge
+    return gauge
+
+
+_metrics_stub.create_gauge = _create_gauge_stub
+sys.modules.setdefault("isa_common.metrics", _metrics_stub)
 
 
 pytestmark = [pytest.mark.component, pytest.mark.asyncio]
