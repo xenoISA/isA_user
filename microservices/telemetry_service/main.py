@@ -195,10 +195,31 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # Shutdown — ORDERING INVARIANT (do not change without thinking):
+    #
+    #   1. initiate_shutdown        — middleware starts rejecting new HTTP work
+    #   2. microservice.shutdown()  — DEREGISTERS from Consul. This MUST happen
+    #                                 before draining websockets so that any
+    #                                 client reconnecting via Consul SRV
+    #                                 immediately misses this dying pod and
+    #                                 lands on a healthy replica. Draining
+    #                                 first creates a window where freshly
+    #                                 reconnecting clients can still resolve
+    #                                 this pod via stale SRV cache and bounce
+    #                                 right back onto the dying instance.
+    #   3. drain_realtime_websockets — close live sockets with 1001 + retry-after
+    #   4. wait_for_drain           — finish in-flight HTTP requests
     shutdown_manager.initiate_shutdown()
-    await shutdown_manager.wait_for_drain()
     await microservice.shutdown()
+    try:
+        if microservice.service is not None:
+            await microservice.service.drain_realtime_websockets(
+                retry_after_seconds=WS_RETRY_AFTER_SECONDS,
+                close_code=1001,
+            )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning(f"WebSocket drain failed during shutdown: {exc}")
+    await shutdown_manager.wait_for_drain()
 
 
 # Create FastAPI application
@@ -1119,9 +1140,28 @@ async def unsubscribe_real_time_data(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# How long clients should wait before reconnecting after a graceful drain.
+# Communicated to clients via the close reason and the `Retry-After` hint
+# returned in the initial `subscription.connected` frame.
+WS_RETRY_AFTER_SECONDS = 5
+
+# Cookie / header name used for ingress-level sticky-session affinity.
+# Clients echo this value back on reconnect so the load balancer can route
+# the resumed connection to the same replica when one is healthy.
+WS_SESSION_HEADER = "X-Telemetry-Session"
+WS_SESSION_COOKIE = "telemetry_session"
+
+
 @app.websocket("/ws/telemetry/{subscription_id}")
 async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str):
-    """WebSocket遥测数据流"""
+    """WebSocket遥测数据流.
+
+    On accept, the server emits an `X-Telemetry-Session` value (via the
+    initial JSON frame and a `Set-Cookie` header in the upgrade response)
+    that the client should echo on reconnect for sticky-session affinity.
+    The frame also includes the current resume cursor so a reconnect to a
+    different replica can pick up where the previous connection left off.
+    """
     websocket_id = None
     try:
         connect_token = websocket.query_params.get("token", "")
@@ -1129,10 +1169,27 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
             subscription_id, connect_token
         )
         websocket_id = session["websocket_id"]
-        await websocket.accept()
+        session_id = session.get("session_id") or ""
+        # Set sticky-session cookie on the WebSocket upgrade response. Most
+        # ingress controllers (NGINX, Traefik, APISIX) honour cookies set on
+        # the upgrade response for subsequent affinity decisions.
+        cookie_header = (
+            f"{WS_SESSION_COOKIE}={session_id}; Path=/; HttpOnly; SameSite=Lax"
+        )
+        await websocket.accept(
+            headers=[
+                (b"set-cookie", cookie_header.encode("utf-8")),
+                (WS_SESSION_HEADER.lower().encode("ascii"), session_id.encode("utf-8")),
+            ]
+        )
         await microservice.service.register_realtime_websocket(
             subscription_id, websocket_id, websocket
         )
+        # Include the rotated connect token (and its expiry) so the resilient
+        # client can use it on its next reconnect. The new token is already
+        # persisted in the durable subscription metadata by
+        # `prepare_realtime_websocket`, so emitting it here does not violate
+        # the persist-before-send invariant.
         await websocket.send_json(
             {
                 "type": "subscription.connected",
@@ -1140,6 +1197,11 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
                 "websocket_id": websocket_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "connection_expires_at": session.get("connection_expires_at"),
+                "session_id": session_id,
+                "cursor": session.get("cursor"),
+                "retry_after": WS_RETRY_AFTER_SECONDS,
+                "connect_token": session.get("connect_token"),
+                "connect_token_expires_at": session.get("connect_token_expires_at"),
             }
         )
 
