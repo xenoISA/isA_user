@@ -43,7 +43,6 @@ import shutil
 import subprocess
 import sys
 import time
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -290,6 +289,7 @@ def _run_in_cluster_load(
     concurrency: int,
     rps_per_worker: float,
     path: str,
+    name_suffix: str = "",
 ) -> Dict[str, int]:
     """Run a load generator *inside* the cluster and return its counters.
 
@@ -303,8 +303,12 @@ def _run_in_cluster_load(
     The generator is itself a tiny Python script materialized via a
     ConfigMap so we don't need a custom image. It writes a JSON
     ``counters`` blob to stdout on exit; we parse it back and return.
+
+    ``name_suffix`` lets the caller run multiple loadgens in the same
+    test (e.g., scale-up + drain) without colliding on the pod name.
     """
-    job_name = "auth-stub-loadgen"
+    base_name = "auth-stub-loadgen"
+    job_name = f"{base_name}-{name_suffix}" if name_suffix else base_name
     # Render a generator script + Pod spec inline. Using a ConfigMap +
     # Pod (rather than a Job) keeps the contract simple: we wait for
     # Pod completion, scrape its logs, then delete it.
@@ -449,70 +453,6 @@ print("LOADGEN_RESULT=" + json.dumps(counters))
 
 
 # ---------------------------------------------------------------------------
-# Load generator
-# ---------------------------------------------------------------------------
-
-
-@asynccontextmanager
-async def _http_client(base_url: str, timeout: float) -> "httpx.AsyncClient":
-    async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
-        yield client
-
-
-async def _drive_load(
-    base_url: str,
-    *,
-    duration_seconds: float,
-    concurrency: int,
-    rps_per_worker: float,
-    request_timeout: float,
-    path: str = "/work",
-) -> Dict[str, int]:
-    """Issue an open-loop load run and return aggregate counters.
-
-    Returns a dict with ``total``, ``ok`` (2xx), ``server_error`` (5xx),
-    ``client_error`` (4xx), and ``transport_error`` (connect/read/
-    timeout). The test asserts on ``server_error`` strictly (real
-    backend failures) and on ``transport_error`` during graceful drain
-    (the criterion that matters for #354).
-
-    ``transport_error`` during the *scale-up* phase is *not* a backend
-    failure — it usually means kubectl port-forward dropped a connection
-    during pod churn, or the kind kube-proxy briefly held a stale
-    endpoint. Those are tolerated against ``max_error_rate``.
-    """
-    counters = {
-        "total": 0,
-        "ok": 0,
-        "server_error": 0,
-        "client_error": 0,
-        "transport_error": 0,
-    }
-    deadline = time.monotonic() + duration_seconds
-
-    async def worker():
-        sleep_between = 1.0 / max(0.1, rps_per_worker)
-        async with _http_client(base_url, timeout=request_timeout) as client:
-            while time.monotonic() < deadline:
-                try:
-                    resp = await client.get(path)
-                    counters["total"] += 1
-                    if 200 <= resp.status_code < 300:
-                        counters["ok"] += 1
-                    elif 400 <= resp.status_code < 500:
-                        counters["client_error"] += 1
-                    elif resp.status_code >= 500:
-                        counters["server_error"] += 1
-                except (httpx.TransportError, asyncio.TimeoutError):
-                    counters["total"] += 1
-                    counters["transport_error"] += 1
-                await asyncio.sleep(sleep_between)
-
-    await asyncio.gather(*[worker() for _ in range(concurrency)])
-    return counters
-
-
-# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -634,8 +574,59 @@ async def test_hpa_scale_up_and_drain(cluster_workload, load_profile):
 
     # ---- 4. Graceful drain on scale-down -------------------------------
     # Manually scale to 1 to exercise graceful_shutdown.py — the surplus
-    # replicas should drain in-flight requests instead of returning 5xx.
+    # replicas should drain in-flight requests instead of returning 5xx
+    # OR transport errors. Drive the burst from an *in-cluster* loadgen
+    # Pod (not the local port-forward) for two reasons:
+    #
+    #   1. ``kubectl port-forward svc/X`` latches onto one pod at start
+    #      time. If that pod gets scaled down, every request in flight
+    #      tears down at once — the test harness mistakes that for a
+    #      drain failure (this is what produced the 72.92% transport
+    #      error rate that originally failed CI on this PR; see PR #375
+    #      review).
+    #   2. Production traffic flows through kube-proxy / Service DNS,
+    #      so that's the path #354's "no dropped requests" invariant
+    #      actually applies to. The in-cluster generator hits
+    #      ``http://auth-stub:8201/work`` which kube-proxy round-robins
+    #      to whichever endpoint is currently Ready — i.e., the surviving
+    #      replica once the EndpointSlice controller drops the
+    #      terminating pods.
     sd = profile["scale_down"]
+
+    # Delete the HPA before manually scaling — otherwise its 5-min
+    # ``scaleDown.stabilizationWindowSeconds`` will scale us back up
+    # before we can observe drain. The HPA was the system under test
+    # for the scale-*up* phase; the scale-*down* phase tests
+    # ``graceful_shutdown.py``, which doesn't care about the HPA.
+    _kubectl(
+        "delete",
+        "hpa",
+        DEPLOYMENT,
+        "-n",
+        NAMESPACE,
+        "--ignore-not-found",
+    )
+
+    # Kick off the drain-burst loadgen *concurrently* with the scale-down
+    # so the burst overlaps the actual termination window. We start it
+    # first (in a background thread) and then issue ``kubectl scale``
+    # ~5s in so the first few requests succeed against the full replica
+    # set before the surplus pods enter Terminating.
+    drain_duration = float(sd.get("drain_duration_seconds", 30.0))
+    drain_burst_task = asyncio.create_task(
+        asyncio.to_thread(
+            _run_in_cluster_load,
+            duration_seconds=drain_duration,
+            concurrency=sd["final_burst_concurrency"],
+            rps_per_worker=sd["final_burst_requests"] / drain_duration,
+            path="/work",
+            name_suffix="drain",
+        )
+    )
+    # Let the loadgen pod start and send its first batch before triggering
+    # the scale-down — without this the entire drain burst can complete
+    # while the loadgen pod is still Pending.
+    await asyncio.sleep(5.0)
     _kubectl(
         "scale",
         "deployment",
@@ -644,35 +635,43 @@ async def test_hpa_scale_up_and_drain(cluster_workload, load_profile):
         NAMESPACE,
         "--replicas=1",
     )
+    drain_counters = await drain_burst_task
 
-    drain_counters = await _drive_load(
-        base_url,
-        duration_seconds=20.0,  # cover the 30s terminationGracePeriod
-        concurrency=sd["final_burst_concurrency"],
-        rps_per_worker=sd["final_burst_requests"] / 20.0,
-        request_timeout=5.0,
-        path="/health",
-    )
-
-    # During termination, the graceful_shutdown middleware returns 503 on
-    # *new* requests but allows existing ones to complete. We accept 503s
-    # here (they prove the drain logic fired). Transport errors get a
-    # small budget too — kubectl port-forward latches onto one pod, so
-    # when scale-down terminates that pod the local port-forward closes
-    # its forwarded TCP connections (this is the *test harness* dropping
-    # connections, not the app cutting off in-flight requests). The
-    # assertion that really matters for #354 is the zero-5xx invariant
-    # below: any 5xx during drain would mean the app crashed mid-request.
+    # The contract from #354 is "no dropped requests during graceful
+    # drain". With the corrected stub (preStop sleep, /ready flip on
+    # SIGTERM, in-flight tracking before close) and in-cluster traffic
+    # routing, the only legitimate sources of error are:
+    #
+    #   * tiny burst between ``deletionTimestamp`` set and the
+    #     EndpointSlice update reaching kube-proxy — bounded by the
+    #     preStop sleep in the manifest
+    #   * the 200ms or so between a connection picking up a stale
+    #     iptables rule and noticing the connection-refused
+    #
+    # Anything beyond ~5% says either the preStop window is too short
+    # or the stub is hard-killing in-flight requests. The original 10%
+    # budget was a workaround for the port-forward limitation we just
+    # eliminated; tighten it and let CI catch real regressions.
     drain_total = max(1, drain_counters["total"])
     drain_transport_rate = drain_counters["transport_error"] / drain_total
-    assert drain_transport_rate <= 0.10, (
-        f"transport error rate {drain_transport_rate:.2%} too high during "
-        f"drain — port-forward churn alone shouldn't exceed 10%: "
-        f"{drain_counters}"
+    assert drain_transport_rate <= 0.05, (
+        f"transport error rate {drain_transport_rate:.2%} during graceful "
+        f"drain exceeds 5% — readiness gate or preStop window may be "
+        f"misconfigured: {drain_counters}"
     )
     assert drain_counters["server_error"] == 0, (
-        f"5xx during drain means app crashed mid-request, not graceful: "
+        f"5xx during drain means the stub returned an error mid-request "
+        f"(app crashed or rejected in-flight work, not graceful): "
         f"{drain_counters}"
+    )
+    # Sanity: a pure-failure drain (the symptom of the original bug) has
+    # ``ok == 0``. Demand at least 80% successful replies — the surviving
+    # replica plus the in-flight-drained terminating ones should easily
+    # cover the drain burst.
+    drain_ok_rate = drain_counters["ok"] / drain_total
+    assert drain_ok_rate >= 0.80, (
+        f"only {drain_ok_rate:.2%} of drain requests succeeded — that's "
+        f"a fail, not a drain: {drain_counters}"
     )
 
     # And we should converge back to 1 ready replica.

@@ -64,9 +64,20 @@ assertions:
 # Scale-down assertions (graceful drain)
 scale_down:
   # After load stops, we manually scale the deployment back to 1 to
-  # exercise ``core/graceful_shutdown.py``. We then issue a final burst
-  # of requests during the termination window and assert *zero*
-  # transport errors — that's the criterion that really matters for
-  # #354 (no in-flight requests cut off mid-drain).
-  final_burst_requests: 50
+  # exercise ``core/graceful_shutdown.py``. We then issue a steady
+  # trickle of requests during the termination window and assert
+  # *zero* transport errors and *zero* 5xx — that's the criterion
+  # that really matters for #354 (no in-flight requests cut off
+  # mid-drain).
+  #
+  # Sizing: total requests must be light enough that the HPA does
+  # NOT scale up again during the drain (otherwise we never converge
+  # back to 1 replica). 70 requests over 70s = 1 RPS aggregate, well
+  # under the HPA's 50% CPU target on a single replica.
+  final_burst_requests: 70
   final_burst_concurrency: 4
+  # Total wall-clock duration of the drain burst. Must be longer than
+  # ``terminationGracePeriodSeconds`` in the manifest (60s) plus the
+  # preStop sleep so we're still hitting the Service when the surplus
+  # pods finish terminating and the Endpoint slice settles to 1.
+  drain_duration_seconds: 70

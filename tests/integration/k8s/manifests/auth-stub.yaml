@@ -40,13 +40,32 @@ data:
   app.py: |
     """Inline stub modeled after microservices/auth_service/main.py.
 
-    Implements just enough surface area to verify HPA scale-up:
-      GET /health -> 200 with computed Postgres pool size for the pod
-      GET /work   -> 200 after burning ~50ms of CPU (drives HPA up)
+    Implements just enough surface area to verify HPA scale-up + graceful
+    drain. Mirrors the contract of ``core/graceful_shutdown.py`` so the
+    test exercises the same SIGTERM-handling shape as production:
+
+      GET /health -> 200 with computed Postgres pool size (always; matches
+                     production middleware's _HEALTH_PATHS allowlist that
+                     keeps /health responsive during shutdown)
+      GET /ready  -> 200 normally, 503 once SIGTERM lands (controls the
+                     readinessProbe and therefore Service endpoint
+                     inclusion — kube-proxy stops routing within seconds)
+      GET /work   -> 200 normally; 503 once SIGTERM lands AND grace
+                     window expires (drains in-flight requests like the
+                     production _ShutdownMiddleware)
+
+    Why two endpoints? In production, ``core/graceful_shutdown.py``
+    keeps ``/health`` answering 200 throughout shutdown (so the platform
+    can tell the process is alive) but flips Consul/readiness so traffic
+    stops being routed. The stub previously conflated the two on
+    ``/health`` and made the whole pod look unhealthy during drain —
+    masking real drain bugs and producing flaky transport-error spikes
+    when port-forward latched onto a terminating pod (see #354 review).
     """
     import json
     import os
     import time
+    import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     # Mirror of core.postgres_client.compute_pool_size — duplicated here
@@ -63,7 +82,24 @@ data:
 
     POD_NAME = os.environ.get("POD_NAME", "unknown")
     PORT = int(os.environ.get("SERVICE_PORT", "8201"))
+    # Window between "readiness flips to NotReady" and "stop accepting new
+    # work". Mirrors graceful_shutdown.GracefulShutdown.grace_period: the
+    # production manager waits up to ~30s for in-flight to drain, so we
+    # use 25s here to leave headroom under terminationGracePeriodSeconds.
+    DRAIN_GRACE_SECONDS = float(os.environ.get("DRAIN_GRACE_SECONDS", "25"))
     SHUTTING_DOWN = False
+    SHUTDOWN_AT = 0.0  # monotonic timestamp when SIGTERM landed
+    IN_FLIGHT = 0
+    IN_FLIGHT_LOCK = threading.Lock()
+
+    def _drain_window_open():
+        """True while we should still accept /work — within the grace
+        period AND there are in-flight requests we don't want to abandon.
+        Once the window closes, /work returns 503 (mirrors the production
+        _ShutdownMiddleware rejecting new non-/health requests)."""
+        if not SHUTTING_DOWN:
+            return True
+        return (time.monotonic() - SHUTDOWN_AT) < DRAIN_GRACE_SECONDS
 
     class Handler(BaseHTTPRequestHandler):
         # Force HTTP/1.1 so httpx keep-alive works — without this the
@@ -72,7 +108,7 @@ data:
         # the load profile.
         protocol_version = "HTTP/1.1"
 
-        # Quiet the default access log — kubelet hits /health every few
+        # Quiet the default access log — kubelet hits probes every few
         # seconds and this fills the runner's pod log buffer.
         def log_message(self, *_):
             return
@@ -83,45 +119,101 @@ data:
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            # Force connection close on shutdown replies so clients
+            # recycle their pool against the next pod (kube-proxy will
+            # have already shifted endpoints by the time they reconnect).
+            if SHUTTING_DOWN:
+                self.send_header("Connection", "close")
             self.end_headers()
             if body:
                 self.wfile.write(body)
 
         def do_GET(self):
-            if SHUTTING_DOWN:
-                # Mirror core/graceful_shutdown.py: once SIGTERM lands we
-                # return 503 so the Service drops us from endpoints
-                # without killing in-flight requests.
-                self._reply(503, b'{"shutting_down":true}')
-                return
+            global IN_FLIGHT
             if self.path == "/health":
+                # Always 200 — matches production graceful_shutdown
+                # _HEALTH_PATHS allowlist. This is the *liveness* signal:
+                # the process is alive and serving, even mid-drain.
                 body = json.dumps({
                     "ok": True,
                     "pool": compute_pool_size(),
                     "pod": POD_NAME,
+                    "shutting_down": SHUTTING_DOWN,
                 }).encode()
                 self._reply(200, body)
-            elif self.path == "/work":
-                # Burn ~50ms of CPU so a sustained load actually trips
-                # the HPA's CPU threshold on a kind node.
-                deadline = time.time() + 0.05
-                x = 0
-                while time.time() < deadline:
-                    x = (x * 1103515245 + 12345) & 0x7FFFFFFF
-                self._reply(200, b'{"ok":true}')
-            else:
-                self._reply(404, b'{"error":"not found"}')
+                return
+            if self.path == "/ready":
+                # Readiness flips to 503 the moment SIGTERM lands. The
+                # readinessProbe picks this up within `periodSeconds`,
+                # kubelet marks the Pod NotReady, the Service controller
+                # removes the Pod from Endpoints, and kube-proxy stops
+                # routing new work — *before* we cut off /work.
+                if SHUTTING_DOWN:
+                    self._reply(
+                        503,
+                        b'{"ready":false,"shutting_down":true}',
+                    )
+                    return
+                self._reply(200, b'{"ready":true}')
+                return
+            if self.path == "/work":
+                if not _drain_window_open():
+                    # Grace window expired with new work still arriving
+                    # — reject so the load gen records a 5xx if drain
+                    # logic genuinely failed. Should not happen in the
+                    # happy path because readiness flipped well before.
+                    self._reply(503, b'{"draining":true}')
+                    return
+                with IN_FLIGHT_LOCK:
+                    IN_FLIGHT += 1
+                try:
+                    # Burn ~50ms of CPU so a sustained load actually
+                    # trips the HPA's CPU threshold on a kind node.
+                    deadline = time.time() + 0.05
+                    x = 0
+                    while time.time() < deadline:
+                        x = (x * 1103515245 + 12345) & 0x7FFFFFFF
+                    self._reply(200, b'{"ok":true}')
+                finally:
+                    with IN_FLIGHT_LOCK:
+                        IN_FLIGHT -= 1
+                return
+            self._reply(404, b'{"error":"not found"}')
 
     def _install_term_handler(server):
         import signal
         def handler(_signum, _frame):
-            global SHUTTING_DOWN
+            global SHUTTING_DOWN, SHUTDOWN_AT
+            if SHUTTING_DOWN:
+                return
             SHUTTING_DOWN = True
-            # Give existing connections ~5s to drain, then shut the server.
+            SHUTDOWN_AT = time.monotonic()
+            print(
+                f"auth-stub SIGTERM received pod={POD_NAME} "
+                f"in_flight={IN_FLIGHT} grace={DRAIN_GRACE_SECONDS}s",
+                flush=True,
+            )
+
+            # Drain loop: wait for in-flight to reach 0 OR grace expires,
+            # then close the listening socket so no further connections
+            # are accepted. Existing keep-alive sockets continue serving
+            # whatever's in flight via ThreadingHTTPServer's threads.
             def stop():
-                time.sleep(5.0)
+                deadline = time.monotonic() + DRAIN_GRACE_SECONDS
+                while time.monotonic() < deadline:
+                    with IN_FLIGHT_LOCK:
+                        if IN_FLIGHT == 0:
+                            break
+                    time.sleep(0.1)
+                # Final settle so any reply currently being written
+                # finishes before we close the listening socket.
+                time.sleep(0.5)
+                print(
+                    f"auth-stub draining complete pod={POD_NAME} "
+                    f"final_in_flight={IN_FLIGHT}",
+                    flush=True,
+                )
                 server.shutdown()
-            import threading
             threading.Thread(target=stop, daemon=True).start()
         signal.signal(signal.SIGTERM, handler)
         signal.signal(signal.SIGINT, handler)
@@ -154,9 +246,17 @@ spec:
       labels:
         app: auth-stub
     spec:
-      # Match the production chart's drain window so the test exercises a
-      # realistic graceful_shutdown timeline.
-      terminationGracePeriodSeconds: 30
+      # Generous drain window. Budget:
+      #   * preStop sleep    ~10s  (lets kube-proxy drop us from endpoints
+      #                              before the SIGTERM-driven drain begins)
+      #   * graceful_shutdown ~25s (DRAIN_GRACE_SECONDS in app.py — wait
+      #                              for in-flight to finish, then close
+      #                              the listening socket)
+      #   * safety margin    ~10s  (slow CPU on a kind node + reply write)
+      # Total ~45s, so we set 60s. Production charts use 30s but they
+      # don't have a 50ms-per-request CPU burner mixed with port-forward
+      # latency on top.
+      terminationGracePeriodSeconds: 60
       containers:
       - name: auth-stub
         image: python:3.11-slim
@@ -180,6 +280,11 @@ spec:
           value: "2"
         - name: DB_POOL_GROWTH
           value: "1"
+        # Per-pod drain grace. Must be < terminationGracePeriodSeconds
+        # minus the preStop sleep so the kubelet doesn't SIGKILL while
+        # the stub is still draining.
+        - name: DRAIN_GRACE_SECONDS
+          value: "25"
         resources:
           requests:
             # Tiny enough to fit ~5 replicas on a single kind node, large
@@ -190,13 +295,32 @@ spec:
           limits:
             cpu: "200m"
             memory: "128Mi"
+        # Canonical Kubernetes "shutdown without dropping requests"
+        # pattern: a preStop sleep that runs *before* SIGTERM so the
+        # Service controller has time to remove this Pod from the
+        # endpoints set. Without this, the SIGTERM and the endpoint
+        # propagation race — kube-proxy may keep routing new traffic
+        # to a pod that already started draining, producing the spurious
+        # 5xx / transport-error spikes that originally tripped the
+        # transport_error<=10% drain budget on this test.
+        # See: https://learnk8s.io/graceful-shutdown
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 10"]
         readinessProbe:
+          # /ready flips to 503 the moment SIGTERM lands, so kubelet
+          # marks the Pod NotReady within one probe cycle and the
+          # Service controller drops it from endpoints. /health stays
+          # 200 throughout — that's what production graceful_shutdown
+          # does, and it lets the load gen distinguish "process alive
+          # but draining" from "process dead".
           httpGet:
-            path: /health
+            path: /ready
             port: http
           initialDelaySeconds: 1
           periodSeconds: 2
-          failureThreshold: 3
+          failureThreshold: 2
         livenessProbe:
           httpGet:
             path: /health
