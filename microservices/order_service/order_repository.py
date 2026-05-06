@@ -338,8 +338,6 @@ class OrderRepository:
             limit=limit,
             offset=offset,
             user_id=user_id,
-            min_pool_size=_pg_min_pool(),
-            max_pool_size=_pg_max_pool(),
         )
 
     async def search_orders(
