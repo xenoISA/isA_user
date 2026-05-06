@@ -11,10 +11,17 @@ before WebSocket drain.
 
 from __future__ import annotations
 
+import sys
 from typing import Any, List
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+# Stub `isa_common.observability` BEFORE importing telemetry_service.main, since
+# main → core/metrics.py imports it at module-load time and CI's installed
+# `isa_common` does not ship the observability submodule.
+sys.modules.setdefault("isa_common.observability", MagicMock())
 
 
 pytestmark = [pytest.mark.component, pytest.mark.asyncio]
