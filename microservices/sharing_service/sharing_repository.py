@@ -12,12 +12,28 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from core.config_manager import ConfigManager
 from isa_common import AsyncPostgresClient
 
 from .models import Share
+
+
+from core.postgres_client import compute_pool_size as _pg_compute_pool
+
+
+def _pg_max_pool() -> int:
+    """Per-pod Postgres max pool size; scales with replica count (epic #345/#346)."""
+    return _pg_compute_pool()
+
+
+def _pg_min_pool() -> int:
+    """Per-pod Postgres min pool size; small constant to avoid pinning idle connections."""
+    return 2 if _pg_max_pool() >= 4 else 1
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +61,8 @@ class ShareRepository:
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
             user_id="sharing_service",
-            min_pool_size=1,
-            max_pool_size=2,
+            min_pool_size=_pg_min_pool(),
+            max_pool_size=_pg_max_pool(),
         )
         self.schema = "sharing"
         self.table = "shares"
@@ -88,7 +104,9 @@ class ShareRepository:
         try:
             query = f"SELECT * FROM {self.schema}.{self.table} WHERE share_token = $1"
             async with self.db:
-                result = await self.db.query_row(query, [share_token], schema=self.schema)
+                result = await self.db.query_row(
+                    query, [share_token], schema=self.schema
+                )
 
             if result:
                 return Share.model_validate(result)
@@ -113,9 +131,7 @@ class ShareRepository:
             logger.error(f"Error getting share by id: {e}")
             return None
 
-    async def get_session_shares(
-        self, session_id: str, owner_id: str
-    ) -> List[Share]:
+    async def get_session_shares(self, session_id: str, owner_id: str) -> List[Share]:
         """Get all active (non-expired) shares for a session owned by a user"""
         try:
             query = f"""
@@ -124,7 +140,9 @@ class ShareRepository:
                 ORDER BY created_at DESC
             """
             async with self.db:
-                rows = await self.db.query(query, [session_id, owner_id], schema=self.schema)
+                rows = await self.db.query(
+                    query, [session_id, owner_id], schema=self.schema
+                )
 
             if not rows:
                 return []
@@ -156,7 +174,9 @@ class ShareRepository:
                 WHERE id = $2
             """
             async with self.db:
-                count = await self.db.execute(query, [now, share_id], schema=self.schema)
+                count = await self.db.execute(
+                    query, [now, share_id], schema=self.schema
+                )
             return count is not None and count > 0
 
         except Exception as e:

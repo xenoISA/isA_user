@@ -12,6 +12,20 @@ from typing import Any, Dict, List, Optional
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 
+
+from core.postgres_client import compute_pool_size as _pg_compute_pool
+
+
+def _pg_max_pool() -> int:
+    """Per-pod Postgres max pool size; scales with replica count (epic #345/#346)."""
+    return _pg_compute_pool()
+
+
+def _pg_min_pool() -> int:
+    """Per-pod Postgres min pool size; small constant to avoid pinning idle connections."""
+    return 2 if _pg_max_pool() >= 4 else 1
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,23 +37,25 @@ class AuthorizationCodeRepository:
             config = ConfigManager("auth_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
-        logger.info(f"Connecting to PostgreSQL at {host}:{port} for authorization codes")
+        logger.info(
+            f"Connecting to PostgreSQL at {host}:{port} for authorization codes"
+        )
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='auth-service',
-            min_pool_size=1,
-            max_pool_size=2,
+            user_id="auth-service",
+            min_pool_size=_pg_min_pool(),
+            max_pool_size=_pg_max_pool(),
         )
         self.schema = "auth"
         self.table = "oauth_authorization_codes"

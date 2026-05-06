@@ -13,15 +13,38 @@ from decimal import Decimal
 import json
 import uuid
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
 from .models import (
-    BillingRecord, BillingEvent, UsageAggregation, BillingQuota,
-    BillingStatus, BillingMethod, EventType, ServiceType, Currency,
+    BillingRecord,
+    BillingEvent,
+    UsageAggregation,
+    BillingQuota,
+    BillingStatus,
+    BillingMethod,
+    EventType,
+    ServiceType,
+    Currency,
     BillingAccountType,
 )
+
+
+from core.postgres_client import compute_pool_size as _pg_compute_pool
+
+
+def _pg_max_pool() -> int:
+    """Per-pod Postgres max pool size; scales with replica count (epic #345/#346)."""
+    return _pg_compute_pool()
+
+
+def _pg_min_pool() -> int:
+    """Per-pod Postgres min pool size; small constant to avoid pinning idle connections."""
+    return 2 if _pg_max_pool() >= 4 else 1
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +60,11 @@ class BillingRepository:
         # Discover PostgreSQL service
         # Priority: environment variable → Consul → localhost fallback
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -49,8 +72,8 @@ class BillingRepository:
             host=host,
             port=port,
             user_id="billing_service",
-        min_pool_size=1,
-        max_pool_size=2,
+            min_pool_size=_pg_min_pool(),
+            max_pool_size=_pg_max_pool(),
         )
         self.schema = "billing"
         self.billing_records_table = "billing_records"
@@ -128,13 +151,15 @@ class BillingRepository:
     # 计费记录管理
     # ====================
 
-    async def create_billing_record(self, billing_record: BillingRecord) -> BillingRecord:
+    async def create_billing_record(
+        self, billing_record: BillingRecord
+    ) -> BillingRecord:
         """创建计费记录"""
         try:
             billing_id = billing_record.billing_id or f"bill_{uuid.uuid4().hex[:12]}"
             now = datetime.now(timezone.utc)
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.billing_records_table} (
                     billing_id, user_id, actor_user_id, billing_account_type, billing_account_id,
                     organization_id, agent_id, subscription_id, usage_record_id,
@@ -147,7 +172,7 @@ class BillingRepository:
                           $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
                           $24, $25)
                 RETURNING *
-            '''
+            """
 
             params = [
                 billing_id,
@@ -174,7 +199,9 @@ class BillingRepository:
                 billing_record.wallet_transaction_id,
                 billing_record.payment_transaction_id,
                 billing_record.failure_reason,
-                json.dumps(billing_record.billing_metadata) if billing_record.billing_metadata else "{}",
+                json.dumps(billing_record.billing_metadata)
+                if billing_record.billing_metadata
+                else "{}",
                 billing_record.billing_period_start,
                 billing_record.billing_period_end,
                 now,
@@ -196,10 +223,10 @@ class BillingRepository:
     async def get_billing_record(self, billing_id: str) -> Optional[BillingRecord]:
         """获取计费记录"""
         try:
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.billing_records_table}
                 WHERE billing_id = $1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=[billing_id])
@@ -224,7 +251,7 @@ class BillingRepository:
     ) -> Optional[BillingRecord]:
         """更新计费记录状态"""
         try:
-            query = f'''
+            query = f"""
                 UPDATE {self.schema}.{self.billing_records_table}
                 SET billing_status = $1,
                     failure_reason = $2,
@@ -235,7 +262,7 @@ class BillingRepository:
                     updated_at = $7
                 WHERE billing_id = $8
                 RETURNING *
-            '''
+            """
 
             params = [
                 status.value,
@@ -272,7 +299,7 @@ class BillingRepository:
         status: Optional[BillingStatus] = None,
         service_type: Optional[ServiceType] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[BillingRecord]:
         """获取用户的计费记录"""
         try:
@@ -327,19 +354,21 @@ class BillingRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.billing_records_table}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
 
             params.extend([limit, offset])
 
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            return [self._row_to_billing_record(row) for row in results] if results else []
+            return (
+                [self._row_to_billing_record(row) for row in results] if results else []
+            )
 
         except Exception as e:
             logger.error(f"Error getting user billing records: {e}")
@@ -353,7 +382,7 @@ class BillingRepository:
         status: Optional[BillingStatus] = None,
         service_type: Optional[ServiceType] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[BillingRecord]:
         """General billing records query with optional filters"""
         try:
@@ -388,19 +417,21 @@ class BillingRepository:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.billing_records_table}
                 {where_clause}
                 ORDER BY created_at DESC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
 
             params.extend([limit, offset])
 
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            return [self._row_to_billing_record(row) for row in results] if results else []
+            return (
+                [self._row_to_billing_record(row) for row in results] if results else []
+            )
 
         except Exception as e:
             logger.error(f"Error getting billing records: {e}")
@@ -447,10 +478,10 @@ class BillingRepository:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            query = f'''
+            query = f"""
                 SELECT COUNT(*) as total FROM {self.schema}.{self.billing_records_table}
                 {where_clause}
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=params)
@@ -489,16 +520,18 @@ class BillingRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.billing_quotas_table}
                 WHERE {where_clause}
                 ORDER BY service_type
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            return [self._row_to_billing_quota(row) for row in results] if results else []
+            return (
+                [self._row_to_billing_quota(row) for row in results] if results else []
+            )
 
         except Exception as e:
             logger.error(f"Error getting user quotas: {e}")
@@ -513,14 +546,14 @@ class BillingRepository:
         try:
             event_id = billing_event.event_id or f"evt_{uuid.uuid4().hex[:12]}"
 
-            query = f'''
+            query = f"""
                 INSERT INTO {self.schema}.{self.billing_events_table} (
                     event_id, event_type, billing_id, user_id, actor_user_id,
                     billing_account_type, billing_account_id, organization_id,
                     agent_id, event_data, service_type, amount, event_timestamp, created_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 RETURNING *
-            '''
+            """
 
             params = [
                 event_id,
@@ -536,11 +569,15 @@ class BillingRepository:
                 billing_event.billing_account_id,
                 billing_event.organization_id,
                 billing_event.agent_id,
-                json.dumps(billing_event.event_data) if billing_event.event_data else "{}",
-                billing_event.service_type.value if billing_event.service_type else None,
+                json.dumps(billing_event.event_data)
+                if billing_event.event_data
+                else "{}",
+                billing_event.service_type.value
+                if billing_event.service_type
+                else None,
                 float(billing_event.amount) if billing_event.amount else None,
                 billing_event.event_timestamp or datetime.now(timezone.utc),
-                datetime.now(timezone.utc)
+                datetime.now(timezone.utc),
             ]
 
             async with self.db:
@@ -610,13 +647,21 @@ class BillingRepository:
                 """
                 reclaimed = await self.db.query_row(
                     reclaim_query,
-                    params=[claim_key, source_event_id, processor_id, now, stale_cutoff],
+                    params=[
+                        claim_key,
+                        source_event_id,
+                        processor_id,
+                        now,
+                        stale_cutoff,
+                    ],
                 )
 
             return bool(reclaimed)
 
         except Exception as e:
-            logger.error("Error claiming billing event processing: %s", e, exc_info=True)
+            logger.error(
+                "Error claiming billing event processing: %s", e, exc_info=True
+            )
             raise
 
     async def mark_event_processing_completed(
@@ -638,10 +683,14 @@ class BillingRepository:
 
             completed_at = datetime.now(timezone.utc)
             async with self.db:
-                await self.db.execute(query, params=[claim_key, source_event_id, completed_at])
+                await self.db.execute(
+                    query, params=[claim_key, source_event_id, completed_at]
+                )
 
         except Exception as e:
-            logger.error("Error marking billing event processing completed: %s", e, exc_info=True)
+            logger.error(
+                "Error marking billing event processing completed: %s", e, exc_info=True
+            )
             raise
 
     async def mark_event_processing_failed(
@@ -666,11 +715,18 @@ class BillingRepository:
             async with self.db:
                 await self.db.execute(
                     query,
-                    params=[claim_key, source_event_id, error_message[:2000], failed_at],
+                    params=[
+                        claim_key,
+                        source_event_id,
+                        error_message[:2000],
+                        failed_at,
+                    ],
                 )
 
         except Exception as e:
-            logger.error("Error marking billing event processing failed: %s", e, exc_info=True)
+            logger.error(
+                "Error marking billing event processing failed: %s", e, exc_info=True
+            )
             raise
 
     # ====================
@@ -690,11 +746,13 @@ class BillingRepository:
         period_start: Optional[datetime] = None,
         period_end: Optional[datetime] = None,
         period_type: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> List[UsageAggregation]:
         """获取使用量聚合数据"""
         try:
-            normalized_period_type, granularity = self._normalize_period_type(period_type)
+            normalized_period_type, granularity = self._normalize_period_type(
+                period_type
+            )
             conditions = []
             params = []
             param_count = 0
@@ -751,7 +809,7 @@ class BillingRepository:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            query = f'''
+            query = f"""
                 SELECT
                     date_trunc('{granularity}', created_at) AS period_start,
                     service_type,
@@ -763,7 +821,7 @@ class BillingRepository:
                 {where_clause}
                 GROUP BY 1, service_type, product_id
                 ORDER BY period_start DESC, service_type, product_id
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
@@ -1121,7 +1179,7 @@ class BillingRepository:
         organization_id: Optional[str] = None,
         subscription_id: Optional[str] = None,
         service_type: Optional[ServiceType] = None,
-        product_id: Optional[str] = None
+        product_id: Optional[str] = None,
     ) -> Optional[BillingQuota]:
         """获取计费配额"""
         try:
@@ -1166,11 +1224,11 @@ class BillingRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.billing_quotas_table}
                 WHERE {where_clause}
                 LIMIT 1
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=params)
@@ -1201,16 +1259,18 @@ class BillingRepository:
 
             where_clause = " AND ".join(conditions)
 
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.billing_quotas_table}
                 WHERE {where_clause}
                 ORDER BY service_type
-            '''
+            """
 
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            return [self._row_to_billing_quota(row) for row in results] if results else []
+            return (
+                [self._row_to_billing_quota(row) for row in results] if results else []
+            )
 
         except Exception as e:
             logger.error(f"Error getting user quotas: {e}")
@@ -1290,30 +1350,32 @@ class BillingRepository:
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
             # Count total
-            count_query = f'''
+            count_query = f"""
                 SELECT COUNT(*) as total
                 FROM {self.schema}.{self.billing_records_table}
                 {where_clause}
-            '''
+            """
 
             async with self.db:
                 count_result = await self.db.query_row(count_query, params=params)
             total = count_result.get("total", 0) if count_result else 0
 
             # Fetch records
-            query = f'''
+            query = f"""
                 SELECT * FROM {self.schema}.{self.billing_records_table}
                 {where_clause}
                 ORDER BY created_at DESC
                 LIMIT ${param_count + 1} OFFSET ${param_count + 2}
-            '''
+            """
 
             params.extend([limit, offset])
 
             async with self.db:
                 results = await self.db.query(query, params=params)
 
-            records = [self._row_to_billing_record(row) for row in results] if results else []
+            records = (
+                [self._row_to_billing_record(row) for row in results] if results else []
+            )
             return records, total
 
         except Exception as e:
@@ -1329,17 +1391,19 @@ class BillingRepository:
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """获取计费统计"""
-        return await self.get_billing_stats(user_id, organization_id, start_date, end_date)
+        return await self.get_billing_stats(
+            user_id, organization_id, start_date, end_date
+        )
 
     async def get_billing_stats(
         self,
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """获取计费统计数据"""
         try:
@@ -1369,7 +1433,7 @@ class BillingRepository:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            query = f'''
+            query = f"""
                 SELECT
                     COUNT(*) as total_records,
                     COUNT(CASE WHEN billing_status = 'completed' THEN 1 END) as completed_count,
@@ -1379,7 +1443,7 @@ class BillingRepository:
                     COALESCE(SUM(CASE WHEN billing_status = 'completed' THEN total_amount ELSE 0 END), 0) as completed_amount
                 FROM {self.schema}.{self.billing_records_table}
                 {where_clause}
-            '''
+            """
 
             async with self.db:
                 result = await self.db.query_row(query, params=params)
@@ -1394,8 +1458,10 @@ class BillingRepository:
                     "revenue_by_service": {},
                     "revenue_by_method": {},
                     "active_users": 0,
-                    "period_start": start_date if start_date else datetime.now() - timedelta(days=30),
-                    "period_end": end_date if end_date else datetime.now()
+                    "period_start": start_date
+                    if start_date
+                    else datetime.now() - timedelta(days=30),
+                    "period_end": end_date if end_date else datetime.now(),
                 }
 
             return {
@@ -1407,8 +1473,10 @@ class BillingRepository:
                 "revenue_by_service": {},
                 "revenue_by_method": {},
                 "active_users": 0,
-                "period_start": start_date if start_date else datetime.now() - timedelta(days=30),
-                "period_end": end_date if end_date else datetime.now()
+                "period_start": start_date
+                if start_date
+                else datetime.now() - timedelta(days=30),
+                "period_end": end_date if end_date else datetime.now(),
             }
 
         except Exception as e:
@@ -1419,7 +1487,7 @@ class BillingRepository:
                 "failed_count": 0,
                 "pending_count": 0,
                 "total_amount": 0.0,
-                "completed_amount": 0.0
+                "completed_amount": 0.0,
             }
 
     # ====================
@@ -1454,11 +1522,13 @@ class BillingRepository:
             wallet_transaction_id=row.get("wallet_transaction_id"),
             payment_transaction_id=row.get("payment_transaction_id"),
             failure_reason=row.get("failure_reason"),
-            billing_metadata=row.get("billing_metadata", {}) if isinstance(row.get("billing_metadata"), dict) else json.loads(row.get("billing_metadata", "{}")),
+            billing_metadata=row.get("billing_metadata", {})
+            if isinstance(row.get("billing_metadata"), dict)
+            else json.loads(row.get("billing_metadata", "{}")),
             billing_period_start=row.get("billing_period_start"),
             billing_period_end=row.get("billing_period_end"),
             created_at=row.get("created_at"),
-            updated_at=row.get("updated_at")
+            updated_at=row.get("updated_at"),
         )
 
     def _row_to_billing_event(self, row: Dict[str, Any]) -> BillingEvent:
@@ -1468,7 +1538,9 @@ class BillingRepository:
             event_id=row.get("event_id"),
             event_type=EventType(row.get("event_type")),
             event_source="billing_service",  # Default source
-            billing_record_id=row.get("billing_id"),  # billing_id maps to billing_record_id in model
+            billing_record_id=row.get(
+                "billing_id"
+            ),  # billing_id maps to billing_record_id in model
             user_id=row.get("user_id"),
             actor_user_id=row.get("actor_user_id") or row.get("user_id"),
             billing_account_type=(
@@ -1479,12 +1551,18 @@ class BillingRepository:
             billing_account_id=row.get("billing_account_id"),
             organization_id=row.get("organization_id"),
             agent_id=row.get("agent_id"),
-            service_type=ServiceType(row.get("service_type")) if row.get("service_type") else None,
-            event_data=row.get("event_data", {}) if isinstance(row.get("event_data"), dict) else json.loads(row.get("event_data", "{}")),
-            amount=Decimal(str(row.get("amount"))) if row.get("amount") is not None else None,
+            service_type=ServiceType(row.get("service_type"))
+            if row.get("service_type")
+            else None,
+            event_data=row.get("event_data", {})
+            if isinstance(row.get("event_data"), dict)
+            else json.loads(row.get("event_data", "{}")),
+            amount=Decimal(str(row.get("amount")))
+            if row.get("amount") is not None
+            else None,
             currency=None,  # Not stored in billing schema
             event_timestamp=row.get("event_timestamp"),
-            created_at=row.get("created_at")
+            created_at=row.get("created_at"),
         )
 
     def _row_to_billing_quota(self, row: Dict[str, Any]) -> BillingQuota:
@@ -1501,9 +1579,11 @@ class BillingRepository:
             period_start=row.get("period_start"),
             period_end=row.get("period_end"),
             reset_frequency=row.get("reset_frequency"),
-            metadata=row.get("metadata", {}) if isinstance(row.get("metadata"), dict) else json.loads(row.get("metadata", "{}")),
+            metadata=row.get("metadata", {})
+            if isinstance(row.get("metadata"), dict)
+            else json.loads(row.get("metadata", "{}")),
             created_at=row.get("created_at"),
-            updated_at=row.get("updated_at")
+            updated_at=row.get("updated_at"),
         )
 
     def _normalize_period_type(self, period_type: Optional[str]) -> Tuple[str, str]:

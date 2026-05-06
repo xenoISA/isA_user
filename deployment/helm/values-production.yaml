@@ -38,6 +38,26 @@ autoscaling:
   targetCPUUtilization: 70
   targetMemoryUtilization: 80
 
+# ---------------------------------------------------------------------------
+# Database pool sizing (epic #345 / story #346)
+# ---------------------------------------------------------------------------
+# Defaults for the replica-aware Postgres pool sizing formula in
+# core/postgres_client.py:
+#
+#     max_pool_size = max(5, poolBase + (POD_REPLICA_COUNT - 1) * poolGrowth)
+#
+# These values feed the corresponding env vars (DB_POOL_BASE, DB_POOL_GROWTH,
+# POD_REPLICA_COUNT) below — keep them in sync if you adjust either side.
+# Note: POD_REPLICA_COUNT is static per-deploy (K8s Downward API can't
+# expose live HPA replica count to pods). Re-roll the deployment to pick
+# up an updated count.
+database:
+  # Conservative defaults for cross-service connection budget; see
+  # core/postgres_client.py module docstring and the tracking issue
+  # referenced in PR #358 for the capacity-bump plan.
+  poolBase: 2
+  poolGrowth: 1
+
 health:
   path: /health
   initialDelaySeconds: 60
@@ -131,6 +151,23 @@ env:
       secretKeyRef:
         name: user-secrets
         key: postgres-password
+
+  # --- DB pool sizing (epic #345 / story #346) ---
+  # core/postgres_client.py reads these to scale each pod's Postgres pool
+  # with replica count: max_pool_size = max(5, base + (replicas-1) * growth).
+  #
+  # POD_REPLICA_COUNT mirrors `replicas` above. K8s Downward API does not
+  # expose Deployment.spec.replicas at pod-level, so we inject the desired
+  # count statically. This reflects desired replicas at deploy time, not
+  # the live HPA count — a reasonable proxy (see story #346 acceptance).
+  # Pods picked up by HPA scale-out keep the deploy-time value until the
+  # next rollout.
+  - name: POD_REPLICA_COUNT
+    value: "2"
+  - name: DB_POOL_BASE
+    value: "2"
+  - name: DB_POOL_GROWTH
+    value: "1"
 
   # --- Redis (native - 6379) ---
   - name: REDIS_HOST

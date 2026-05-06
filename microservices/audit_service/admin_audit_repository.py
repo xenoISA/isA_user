@@ -14,6 +14,20 @@ from core.config_manager import ConfigManager
 
 from .admin_audit_models import AdminAuditLogEntry
 
+
+from core.postgres_client import compute_pool_size as _pg_compute_pool
+
+
+def _pg_max_pool() -> int:
+    """Per-pod Postgres max pool size; scales with replica count (epic #345/#346)."""
+    return _pg_compute_pool()
+
+
+def _pg_min_pool() -> int:
+    """Per-pod Postgres min pool size; small constant to avoid pinning idle connections."""
+    return 2 if _pg_max_pool() >= 4 else 1
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,8 +50,8 @@ class AdminAuditRepository:
             host=host,
             port=port,
             user_id="audit_service",
-            min_pool_size=1,
-            max_pool_size=2,
+            min_pool_size=_pg_min_pool(),
+            max_pool_size=_pg_max_pool(),
         )
         self.schema = "audit"
         self.table = "admin_audit_log"

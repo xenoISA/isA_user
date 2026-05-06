@@ -15,10 +15,26 @@ from datetime import datetime, timezone
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
+
+
+from core.postgres_client import compute_pool_size as _pg_compute_pool
+
+
+def _pg_max_pool() -> int:
+    """Per-pod Postgres max pool size; scales with replica count (epic #345/#346)."""
+    return _pg_compute_pool()
+
+
+def _pg_min_pool() -> int:
+    """Per-pod Postgres min pool size; small constant to avoid pinning idle connections."""
+    return 2 if _pg_max_pool() >= 4 else 1
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +42,20 @@ logger = logging.getLogger(__name__)
 class ApiKeyRepository:
     """API key repository - async data access layer"""
 
-    def __init__(self, organization_service_client=None, config: Optional[ConfigManager] = None):
+    def __init__(
+        self, organization_service_client=None, config: Optional[ConfigManager] = None
+    ):
         self.organization_service_client = organization_service_client
 
         if config is None:
             config = ConfigManager("auth_service")
 
         host, port = config.discover_service(
-            service_name='postgres_service',
-            default_host='localhost',
+            service_name="postgres_service",
+            default_host="localhost",
             default_port=5432,
-            env_host_key='POSTGRES_HOST',
-            env_port_key='POSTGRES_PORT'
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
         )
 
         logger.info(f"Connecting to PostgreSQL at {host}:{port}")
@@ -47,9 +65,9 @@ class ApiKeyRepository:
             database=os.getenv("POSTGRES_DB", "isa_platform"),
             username=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
-            user_id='auth-service',
-            min_pool_size=1,
-            max_pool_size=2,
+            user_id="auth-service",
+            min_pool_size=_pg_min_pool(),
+            max_pool_size=_pg_max_pool(),
         )
         self.schema = "auth"
         self.organizations_table = "organizations"
@@ -67,9 +85,11 @@ class ApiKeyRepository:
         """Parse API keys from database - handles proto and JSON formats"""
         from google.protobuf.json_format import MessageToDict
 
-        if hasattr(api_keys_raw, 'values'):
-            return [MessageToDict(val.struct_value) if hasattr(val, 'struct_value') else val
-                    for val in api_keys_raw.values]
+        if hasattr(api_keys_raw, "values"):
+            return [
+                MessageToDict(val.struct_value) if hasattr(val, "struct_value") else val
+                for val in api_keys_raw.values
+            ]
         elif isinstance(api_keys_raw, str):
             return json.loads(api_keys_raw)
         elif isinstance(api_keys_raw, list):
@@ -77,8 +97,14 @@ class ApiKeyRepository:
         else:
             return []
 
-    async def create_api_key(self, organization_id: str, name: str, permissions: List[str] = None,
-                             expires_at: Optional[datetime] = None, created_by: str = None) -> Dict[str, Any]:
+    async def create_api_key(
+        self,
+        organization_id: str,
+        name: str,
+        permissions: List[str] = None,
+        expires_at: Optional[datetime] = None,
+        created_by: str = None,
+    ) -> Dict[str, Any]:
         """Create a new API key for an organization"""
         try:
             api_key = self._generate_api_key("isa")
@@ -94,7 +120,7 @@ class ApiKeyRepository:
                 "created_by": created_by,
                 "expires_at": expires_at.isoformat() if expires_at else None,
                 "is_active": True,
-                "last_used": None
+                "last_used": None,
             }
 
             # Verify organization exists via organization_service (soft check)
@@ -102,19 +128,22 @@ class ApiKeyRepository:
             if self.organization_service_client:
                 try:
                     org = await self.organization_service_client.get_organization(
-                        organization_id=organization_id,
-                        user_id=created_by or "system"
+                        organization_id=organization_id, user_id=created_by or "system"
                     )
                     if not org:
-                        logger.info(f"Organization '{organization_id}' not found — treating as personal account")
+                        logger.info(
+                            f"Organization '{organization_id}' not found — treating as personal account"
+                        )
                 except Exception as e:
-                    logger.info(f"Could not verify organization '{organization_id}': {e}")
+                    logger.info(
+                        f"Could not verify organization '{organization_id}': {e}"
+                    )
 
             # Get current API keys from organization
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT api_keys FROM {self.schema}.{self.organizations_table} WHERE organization_id = $1",
-                    params=[organization_id]
+                    params=[organization_id],
                 )
 
             # If organization doesn't exist in auth schema yet, create it
@@ -122,21 +151,21 @@ class ApiKeyRepository:
                 async with self.db:
                     await self.db.execute(
                         f"INSERT INTO {self.schema}.{self.organizations_table} (organization_id, name, api_keys) VALUES ($1, $2, $3) ON CONFLICT (organization_id) DO NOTHING",
-                        params=[organization_id, organization_id, json.dumps([])]
+                        params=[organization_id, organization_id, json.dumps([])],
                     )
                     result = await self.db.query_row(
                         f"SELECT api_keys FROM {self.schema}.{self.organizations_table} WHERE organization_id = $1",
-                        params=[organization_id]
+                        params=[organization_id],
                     )
 
-            current_keys = self._parse_api_keys(result.get('api_keys', []))
+            current_keys = self._parse_api_keys(result.get("api_keys", []))
             current_keys.append(key_data)
 
             # Update organization with new API keys list
             async with self.db:
                 count = await self.db.execute(
                     f"UPDATE {self.schema}.{self.organizations_table} SET api_keys = $1, updated_at = $2 WHERE organization_id = $3",
-                    params=[current_keys, now, organization_id]
+                    params=[current_keys, now, organization_id],
                 )
 
             if count == 0:
@@ -159,19 +188,21 @@ class ApiKeyRepository:
             async with self.db:
                 rows = await self.db.query(
                     f"SELECT organization_id, api_keys FROM {self.schema}.{self.organizations_table}",
-                    params=[]
+                    params=[],
                 )
 
             if not rows:
                 return {"valid": False, "error": "Invalid API key"}
 
             for row in rows:
-                api_keys = self._parse_api_keys(row.get('api_keys', []))
+                api_keys = self._parse_api_keys(row.get("api_keys", []))
 
                 for key_data in api_keys:
-                    if key_data.get('key_hash') == key_hash and key_data.get('is_active', False):
+                    if key_data.get("key_hash") == key_hash and key_data.get(
+                        "is_active", False
+                    ):
                         # Check expiration
-                        expires_at = key_data.get('expires_at')
+                        expires_at = key_data.get("expires_at")
                         if expires_at:
                             if isinstance(expires_at, str):
                                 expiry_time = datetime.fromisoformat(expires_at)
@@ -187,22 +218,22 @@ class ApiKeyRepository:
                                 return {"valid": False, "error": "API key has expired"}
 
                         # Update last used timestamp
-                        key_data['last_used'] = datetime.now(timezone.utc).isoformat()
+                        key_data["last_used"] = datetime.now(timezone.utc).isoformat()
 
                         async with self.db:
                             await self.db.execute(
                                 f"UPDATE {self.schema}.{self.organizations_table} SET api_keys = $1 WHERE organization_id = $2",
-                                params=[api_keys, row['organization_id']]
+                                params=[api_keys, row["organization_id"]],
                             )
 
                         return {
                             "valid": True,
-                            "organization_id": row['organization_id'],
-                            "key_id": key_data.get('key_id'),
-                            "name": key_data.get('name'),
-                            "permissions": key_data.get('permissions', []),
-                            "created_at": key_data.get('created_at'),
-                            "last_used": key_data.get('last_used')
+                            "organization_id": row["organization_id"],
+                            "key_id": key_data.get("key_id"),
+                            "name": key_data.get("name"),
+                            "permissions": key_data.get("permissions", []),
+                            "created_at": key_data.get("created_at"),
+                            "last_used": key_data.get("last_used"),
                         }
 
             return {"valid": False, "error": "Invalid API key"}
@@ -211,34 +242,38 @@ class ApiKeyRepository:
             logger.error(f"Error validating API key: {str(e)}")
             return {"valid": False, "error": f"Failed to validate API key: {str(e)}"}
 
-    async def get_organization_api_keys(self, organization_id: str) -> List[Dict[str, Any]]:
+    async def get_organization_api_keys(
+        self, organization_id: str
+    ) -> List[Dict[str, Any]]:
         """Get all API keys for an organization (without plain key values)"""
         try:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT api_keys FROM {self.schema}.{self.organizations_table} WHERE organization_id = $1",
-                    params=[organization_id]
+                    params=[organization_id],
                 )
 
             if not result:
                 # No record yet — return empty list (personal accounts may not have a record)
                 return []
 
-            api_keys = self._parse_api_keys(result.get('api_keys', []))
+            api_keys = self._parse_api_keys(result.get("api_keys", []))
 
             # Remove sensitive data from response
             cleaned_keys = []
             for key_data in api_keys:
                 cleaned_key = {
-                    "key_id": key_data.get('key_id'),
-                    "name": key_data.get('name'),
-                    "permissions": key_data.get('permissions', []),
-                    "created_at": key_data.get('created_at'),
-                    "created_by": key_data.get('created_by'),
-                    "expires_at": key_data.get('expires_at'),
-                    "is_active": key_data.get('is_active', False),
-                    "last_used": key_data.get('last_used'),
-                    "key_preview": f"isa_...{key_data.get('key_hash', '')[-8:]}" if key_data.get('key_hash') else None
+                    "key_id": key_data.get("key_id"),
+                    "name": key_data.get("name"),
+                    "permissions": key_data.get("permissions", []),
+                    "created_at": key_data.get("created_at"),
+                    "created_by": key_data.get("created_by"),
+                    "expires_at": key_data.get("expires_at"),
+                    "is_active": key_data.get("is_active", False),
+                    "last_used": key_data.get("last_used"),
+                    "key_preview": f"isa_...{key_data.get('key_hash', '')[-8:]}"
+                    if key_data.get("key_hash")
+                    else None,
                 }
                 cleaned_keys.append(cleaned_key)
 
@@ -254,19 +289,21 @@ class ApiKeyRepository:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT api_keys FROM {self.schema}.{self.organizations_table} WHERE organization_id = $1",
-                    params=[organization_id]
+                    params=[organization_id],
                 )
 
             if not result:
-                raise ValueError(f"Organization '{organization_id}' not found in database.")
+                raise ValueError(
+                    f"Organization '{organization_id}' not found in database."
+                )
 
-            api_keys = self._parse_api_keys(result.get('api_keys', []))
+            api_keys = self._parse_api_keys(result.get("api_keys", []))
 
             key_found = False
             for key_data in api_keys:
-                if key_data.get('key_id') == key_id:
-                    key_data['is_active'] = False
-                    key_data['revoked_at'] = datetime.now(timezone.utc).isoformat()
+                if key_data.get("key_id") == key_id:
+                    key_data["is_active"] = False
+                    key_data["revoked_at"] = datetime.now(timezone.utc).isoformat()
                     key_found = True
                     break
 
@@ -277,7 +314,7 @@ class ApiKeyRepository:
             async with self.db:
                 await self.db.execute(
                     f"UPDATE {self.schema}.{self.organizations_table} SET api_keys = $1, updated_at = $2 WHERE organization_id = $3",
-                    params=[api_keys, now, organization_id]
+                    params=[api_keys, now, organization_id],
                 )
 
             return True
@@ -292,16 +329,18 @@ class ApiKeyRepository:
             async with self.db:
                 result = await self.db.query_row(
                     f"SELECT api_keys FROM {self.schema}.{self.organizations_table} WHERE organization_id = $1",
-                    params=[organization_id]
+                    params=[organization_id],
                 )
 
             if not result:
-                raise ValueError(f"Organization '{organization_id}' not found in database.")
+                raise ValueError(
+                    f"Organization '{organization_id}' not found in database."
+                )
 
-            api_keys = self._parse_api_keys(result.get('api_keys', []))
+            api_keys = self._parse_api_keys(result.get("api_keys", []))
 
             original_count = len(api_keys)
-            api_keys = [key for key in api_keys if key.get('key_id') != key_id]
+            api_keys = [key for key in api_keys if key.get("key_id") != key_id]
 
             if len(api_keys) == original_count:
                 raise ValueError(f"API key not found: {key_id}")
@@ -310,7 +349,7 @@ class ApiKeyRepository:
             async with self.db:
                 await self.db.execute(
                     f"UPDATE {self.schema}.{self.organizations_table} SET api_keys = $1, updated_at = $2 WHERE organization_id = $3",
-                    params=[api_keys, now, organization_id]
+                    params=[api_keys, now, organization_id],
                 )
 
             return True
@@ -405,7 +444,7 @@ class ApiKeyRepository:
             async with self.db:
                 rows = await self.db.query(
                     f"SELECT organization_id, api_keys FROM {self.schema}.{self.organizations_table} WHERE api_keys IS NOT NULL",
-                    params=[]
+                    params=[],
                 )
 
             if not rows:
@@ -414,16 +453,17 @@ class ApiKeyRepository:
             total_removed = 0
 
             for row in rows:
-                api_keys = self._parse_api_keys(row.get('api_keys', []))
+                api_keys = self._parse_api_keys(row.get("api_keys", []))
 
                 now = datetime.now(timezone.utc)
                 original_count = len(api_keys)
 
                 api_keys = [
-                    key for key in api_keys
+                    key
+                    for key in api_keys
                     if not (
-                        key.get('expires_at') and
-                        datetime.fromisoformat(key['expires_at']) <= now
+                        key.get("expires_at")
+                        and datetime.fromisoformat(key["expires_at"]) <= now
                     )
                 ]
 
@@ -432,7 +472,7 @@ class ApiKeyRepository:
                     async with self.db:
                         await self.db.execute(
                             f"UPDATE {self.schema}.{self.organizations_table} SET api_keys = $1, updated_at = $2 WHERE organization_id = $3",
-                            params=[api_keys, now, row['organization_id']]
+                            params=[api_keys, now, row["organization_id"]],
                         )
                     total_removed += removed_count
 

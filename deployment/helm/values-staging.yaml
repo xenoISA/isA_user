@@ -34,6 +34,17 @@ resources:
 autoscaling:
   enabled: false
 
+# ---------------------------------------------------------------------------
+# Database pool sizing (epic #345 / story #346)
+# ---------------------------------------------------------------------------
+# See values-production.yaml for the full formula. Staging keeps modest
+# defaults to mirror prod behaviour during scale-out testing.
+database:
+  # Conservative defaults to mirror prod cross-service connection budget;
+  # see core/postgres_client.py module docstring.
+  poolBase: 2
+  poolGrowth: 1
+
 health:
   path: /health
   initialDelaySeconds: 60
@@ -120,6 +131,16 @@ env:
       secretKeyRef:
         name: user-secrets
         key: postgres-password
+
+  # --- DB pool sizing (epic #345 / story #346) ---
+  # core/postgres_client.py reads these to scale per-pod Postgres pool size.
+  # Staging defaults to 1 replica → pool floor of 5 connections.
+  - name: POD_REPLICA_COUNT
+    value: "1"
+  - name: DB_POOL_BASE
+    value: "2"
+  - name: DB_POOL_GROWTH
+    value: "1"
 
   # --- Redis (native - 6379) ---
   - name: REDIS_HOST
