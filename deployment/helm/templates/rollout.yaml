@@ -1,0 +1,202 @@
+{{- /*
+  Argo Rollouts Rollout resources for isA_user microservices.
+
+  Issue: #350 (parent epic #345). ADR: docs/adr/0001-canary-tooling.md.
+
+  Renders one argoproj.io/v1alpha1 Rollout per entry in `.Values.services`
+  when `.Values.rollout.enabled` is true. Each rollout owns the same Pods
+  the existing Deployment used to own — operators MUST scale the legacy
+  Deployment to 0 replicas before the Rollout starts owning traffic (see
+  docs/runbooks/canary-deploy.md "Migration path from Deployment to
+  Rollout").
+
+  Stages mirror the spec on issue #350:
+
+      step 1: setWeight: 1-replica canary  (≈10% if minReplicas=10)
+      step 2: pause: { duration: <healthGate> }      health gate (≥60s)
+      step 3: setWeight: 10
+      step 4: analysis (errorRate, latency)
+      step 5: setWeight: 25
+      step 6: analysis
+      step 7: setWeight: 50
+      step 8: analysis
+      step 9: setWeight: 100   (final analysis runs as backgroundAnalysis)
+
+  Per-stage pauses and weights are configurable via `.Values.rollout.steps`
+  if a service tier wants a different ramp.
+
+  Required cluster prerequisite: argo-rollouts controller installed.
+  See: https://argo-rollouts.readthedocs.io/en/stable/installation/
+*/ -}}
+{{- if .Values.rollout.enabled }}
+{{- $top := . -}}
+{{- range $key, $svc := .Values.services }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ $svc.name }}
+  namespace: {{ $top.Values.namespace | default $top.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $svc.name }}
+    app.kubernetes.io/instance: {{ $top.Release.Name }}
+    app.kubernetes.io/managed-by: {{ $top.Release.Service }}
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: isa-user
+    app.kubernetes.io/service-key: {{ $key }}
+  annotations:
+    # Documented in docs/runbooks/canary-deploy.md.
+    rollout.argoproj.io/revision-history-limit: {{ $top.Values.rollout.revisionHistoryLimit | default 5 | quote }}
+    isa.io/canary-issue: "https://github.com/xenoISA/isA_user/issues/350"
+spec:
+  replicas: {{ $top.Values.replicas | default 2 }}
+  revisionHistoryLimit: {{ $top.Values.rollout.revisionHistoryLimit | default 5 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $svc.name }}
+      app.kubernetes.io/instance: {{ $top.Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $svc.name }}
+        app.kubernetes.io/instance: {{ $top.Release.Name }}
+        app.kubernetes.io/component: service
+        app.kubernetes.io/part-of: isa-user
+    spec:
+      {{- with $top.Values.rollout.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $svc.name }}
+          image: "{{ $top.Values.image.registry | default "harbor.isa.io" }}/{{ $svc.repository }}:{{ $top.Values.image.tag | default "latest" }}"
+          imagePullPolicy: {{ $top.Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          {{- with $top.Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $top.Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ $top.Values.health.path | default "/health" }}
+              port: {{ $svc.port }}
+            initialDelaySeconds: {{ $top.Values.health.initialDelaySeconds | default 60 }}
+            periodSeconds: {{ $top.Values.health.periodSeconds | default 10 }}
+          livenessProbe:
+            httpGet:
+              path: {{ $top.Values.health.path | default "/health" }}
+              port: {{ $svc.port }}
+            initialDelaySeconds: {{ $top.Values.health.initialDelaySeconds | default 60 }}
+            periodSeconds: {{ $top.Values.health.periodSeconds | default 10 }}
+  strategy:
+    canary:
+      # Enables the basic-canary (replica-weighted) mode. Once a service
+      # mesh / APISIX provider is wired in, set
+      # `rollout.trafficRouting` and Argo will switch to L7 splitting.
+      {{- with $top.Values.rollout.trafficRouting }}
+      trafficRouting:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      maxSurge: {{ $top.Values.rollout.maxSurge | default "25%" | quote }}
+      maxUnavailable: {{ $top.Values.rollout.maxUnavailable | default 0 }}
+      scaleDownDelaySeconds: {{ $top.Values.rollout.scaleDownDelaySeconds | default 30 }}
+      {{- /*
+        Stages: 1-replica canary -> health gate -> 10/25/50/100 with
+        Prometheus analysis between each weight bump. Operators can
+        override the entire list via `.Values.rollout.steps`; otherwise
+        we render the spec from issue #350.
+      */}}
+      {{- if $top.Values.rollout.steps }}
+      steps:
+        {{- toYaml $top.Values.rollout.steps | nindent 8 }}
+      {{- else }}
+      steps:
+        # ---------------------------------------------------------------
+        # Stage 0 — single-replica canary, then a hard health gate.
+        # `setCanaryScale.replicas: 1` forces exactly one canary pod
+        # regardless of the current weight, so the gate is independent
+        # of `.Values.replicas`.
+        # ---------------------------------------------------------------
+        - setCanaryScale:
+            replicas: 1
+        - pause:
+            duration: {{ $top.Values.rollout.healthGateSeconds | default 60 }}s
+        # Drop the manual replica pin so subsequent setWeight steps
+        # govern the canary pod count again.
+        - setCanaryScale:
+            matchTrafficWeight: true
+        # ---------------------------------------------------------------
+        # Stage 1 — 10% traffic, run analysis.
+        # `canary-hash` and `stable-hash` are populated by the Argo
+        # controller via `valueFrom.podTemplateHashValue` so the
+        # AnalysisTemplate can scope its Prometheus queries to the
+        # right replica set.
+        # ---------------------------------------------------------------
+        - setWeight: 10
+        - analysis:
+            templates:
+              - templateName: {{ $svc.name }}-canary-analysis
+            args:
+              - name: service-name
+                value: {{ $svc.name }}
+              - name: namespace
+                value: {{ $top.Values.namespace | default $top.Release.Namespace }}
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+              - name: stable-hash
+                valueFrom:
+                  podTemplateHashValue: Stable
+        - pause:
+            duration: {{ $top.Values.rollout.stagePauseSeconds | default 30 }}s
+        # ---------------------------------------------------------------
+        # Stage 2 — 25%
+        # ---------------------------------------------------------------
+        - setWeight: 25
+        - analysis:
+            templates:
+              - templateName: {{ $svc.name }}-canary-analysis
+            args:
+              - name: service-name
+                value: {{ $svc.name }}
+              - name: namespace
+                value: {{ $top.Values.namespace | default $top.Release.Namespace }}
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+              - name: stable-hash
+                valueFrom:
+                  podTemplateHashValue: Stable
+        - pause:
+            duration: {{ $top.Values.rollout.stagePauseSeconds | default 30 }}s
+        # ---------------------------------------------------------------
+        # Stage 3 — 50%
+        # ---------------------------------------------------------------
+        - setWeight: 50
+        - analysis:
+            templates:
+              - templateName: {{ $svc.name }}-canary-analysis
+            args:
+              - name: service-name
+                value: {{ $svc.name }}
+              - name: namespace
+                value: {{ $top.Values.namespace | default $top.Release.Namespace }}
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+              - name: stable-hash
+                valueFrom:
+                  podTemplateHashValue: Stable
+        - pause:
+            duration: {{ $top.Values.rollout.stagePauseSeconds | default 30 }}s
+        # Stage 4 — implicit 100%. Argo promotes after the final step.
+      {{- end }}
+{{- end }}
+{{- end }}

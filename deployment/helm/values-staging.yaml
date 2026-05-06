@@ -76,6 +76,33 @@ migrationJob:
       value: "staging"
 
 # =============================================================================
+# Canary Rollout (issue #350, epic #345) — staging: DISABLED
+# =============================================================================
+# Staging keeps the simpler kubectl-driven rolling deploy from the
+# `Deploy Services` step in .github/workflows/deploy.yml. Faster feedback
+# matters more than canary safety here. Flip `enabled: true` if a
+# specific staging investigation needs the full canary ladder.
+# =============================================================================
+rollout:
+  enabled: false
+  healthGateSeconds: 60
+  stagePauseSeconds: 15
+  maxSurge: "25%"
+  maxUnavailable: 0
+  scaleDownDelaySeconds: 30
+  revisionHistoryLimit: 3
+  imagePullSecrets: []
+  trafficRouting: {}
+  steps: []
+  analysis:
+    prometheusAddress: "http://prometheus-server.monitoring.svc.cluster.local:9090"
+    errorRateThreshold: "0.01"
+    latencyRatioThreshold: "1.5"
+    interval: "30s"
+    count: 2
+    window: "2m"
+
+# =============================================================================
 # Shared Environment Variables (injected into all services)
 # =============================================================================
 env:

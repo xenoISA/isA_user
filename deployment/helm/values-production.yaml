@@ -85,6 +85,36 @@ migrationJob:
       value: "production"
 
 # =============================================================================
+# Canary Rollout (issue #350, epic #345) — production: ENABLED
+# =============================================================================
+# Production fronts user traffic, so we run every service through the
+# Argo Rollouts canary ladder. See deployment/helm/templates/rollout.yaml
+# and deployment/helm/templates/analysis-template.yaml.
+#
+# Tip for operators: scale the legacy Deployment for each service to 0
+# replicas BEFORE the first canary upgrade, otherwise both controllers
+# will fight over Pod ownership. See docs/runbooks/canary-deploy.md.
+# =============================================================================
+rollout:
+  enabled: true
+  healthGateSeconds: 60
+  stagePauseSeconds: 30
+  maxSurge: "25%"
+  maxUnavailable: 0
+  scaleDownDelaySeconds: 60
+  revisionHistoryLimit: 10
+  imagePullSecrets: []
+  trafficRouting: {}
+  steps: []
+  analysis:
+    prometheusAddress: "http://prometheus-server.monitoring.svc.cluster.local:9090"
+    errorRateThreshold: "0.01"
+    latencyRatioThreshold: "1.5"
+    interval: "30s"
+    count: 3
+    window: "2m"
+
+# =============================================================================
 # Shared Environment Variables (injected into all services)
 # =============================================================================
 env:

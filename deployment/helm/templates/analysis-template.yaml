@@ -1,0 +1,135 @@
+{{- /*
+  Argo Rollouts AnalysisTemplate — Prometheus-based canary gate.
+
+  Issue: #350. ADR: docs/adr/0001-canary-tooling.md.
+
+  One AnalysisTemplate per service (named `<service>-canary-analysis`). The
+  Rollout (templates/rollout.yaml) references it by name during each
+  ramp step. Two metrics per analysis run:
+
+    1. error-rate
+       - Query:  rate(http_requests_total{... ,code=~"5.."}[2m])
+                 / rate(http_requests_total{...}[2m])
+       - Fail when > 1%  (configurable via .Values.rollout.analysis.errorRateThreshold)
+
+    2. p95-latency-ratio
+       - Query:  canary_p95 / baseline_p95
+       - Fail when > 1.5x baseline (configurable)
+
+  Both metrics use `failureLimit: 0` so a single breach aborts and
+  triggers auto-rollback. The Argo Rollouts controller halts the canary
+  on a failed AnalysisRun and reverts traffic to the stable replica set.
+
+  Prometheus address defaults to the in-cluster monitoring stack but is
+  overridable via .Values.rollout.analysis.prometheusAddress.
+*/ -}}
+{{- if .Values.rollout.enabled }}
+{{- $top := . -}}
+{{- $analysis := .Values.rollout.analysis | default dict -}}
+{{- $promAddr := $analysis.prometheusAddress | default "http://prometheus-server.monitoring.svc.cluster.local:9090" -}}
+{{- $errorThreshold := $analysis.errorRateThreshold | default "0.01" -}}
+{{- $latencyRatioThreshold := $analysis.latencyRatioThreshold | default "1.5" -}}
+{{- $interval := $analysis.interval | default "30s" -}}
+{{- $count := $analysis.count | default 3 -}}
+{{- $window := $analysis.window | default "2m" -}}
+{{- range $key, $svc := .Values.services }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ $svc.name }}-canary-analysis
+  namespace: {{ $top.Values.namespace | default $top.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $svc.name }}
+    app.kubernetes.io/instance: {{ $top.Release.Name }}
+    app.kubernetes.io/managed-by: {{ $top.Release.Service }}
+    app.kubernetes.io/component: canary-analysis
+    app.kubernetes.io/part-of: isa-user
+spec:
+  args:
+    - name: service-name
+      value: {{ $svc.name }}
+    - name: namespace
+      value: {{ $top.Values.namespace | default $top.Release.Namespace }}
+    # canary-hash and stable-hash are supplied at run time by the
+    # Rollout via `valueFrom.podTemplateHashValue`. We declare them
+    # without a default so a missing value fails fast.
+    - name: canary-hash
+    - name: stable-hash
+  metrics:
+    # -----------------------------------------------------------------
+    # Metric 1: 5xx error rate on the canary replica set.
+    # Aborts when the rate exceeds errorRateThreshold (default 1%).
+    # -----------------------------------------------------------------
+    - name: error-rate
+      interval: {{ $interval }}
+      count: {{ $count }}
+      successCondition: result[0] <= {{ $errorThreshold }}
+      failureLimit: 0
+      provider:
+        prometheus:
+          address: {{ $promAddr | quote }}
+          query: |
+            sum(
+              rate(
+                http_requests_total{
+                  service="{{ "{{args.service-name}}" }}",
+                  namespace="{{ "{{args.namespace}}" }}",
+                  rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}",
+                  code=~"5.."
+                }[{{ $window }}]
+              )
+            )
+            /
+            sum(
+              rate(
+                http_requests_total{
+                  service="{{ "{{args.service-name}}" }}",
+                  namespace="{{ "{{args.namespace}}" }}",
+                  rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}"
+                }[{{ $window }}]
+              )
+            )
+    # -----------------------------------------------------------------
+    # Metric 2: p95 latency ratio (canary / stable).
+    # Aborts when canary p95 > latencyRatioThreshold * stable p95
+    # (default 1.5x).
+    # -----------------------------------------------------------------
+    - name: latency-p95-ratio
+      interval: {{ $interval }}
+      count: {{ $count }}
+      successCondition: result[0] <= {{ $latencyRatioThreshold }}
+      failureLimit: 0
+      provider:
+        prometheus:
+          address: {{ $promAddr | quote }}
+          query: |
+            (
+              histogram_quantile(0.95,
+                sum by (le) (
+                  rate(
+                    http_request_duration_seconds_bucket{
+                      service="{{ "{{args.service-name}}" }}",
+                      namespace="{{ "{{args.namespace}}" }}",
+                      rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}"
+                    }[{{ $window }}]
+                  )
+                )
+              )
+            )
+            /
+            (
+              histogram_quantile(0.95,
+                sum by (le) (
+                  rate(
+                    http_request_duration_seconds_bucket{
+                      service="{{ "{{args.service-name}}" }}",
+                      namespace="{{ "{{args.namespace}}" }}",
+                      rollouts_pod_template_hash="{{ "{{args.stable-hash}}" }}"
+                    }[{{ $window }}]
+                  )
+                )
+              )
+            )
+{{- end }}
+{{- end }}

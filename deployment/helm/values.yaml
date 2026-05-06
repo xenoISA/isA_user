@@ -81,6 +81,59 @@ migrationJob:
   extraEnv: []
 
 # =============================================================================
+# Canary Rollout (issue #350, epic #345)
+# =============================================================================
+# Renders deployment/helm/templates/rollout.yaml (Argo Rollouts CR) and
+# deployment/helm/templates/analysis-template.yaml (Prometheus analysis)
+# for every service in `.Values.services` when `enabled` is true.
+#
+# Defaults below match the AC on issue #350:
+#   - 1-replica canary with a 60s health gate
+#   - 10/25/50/100 traffic ramp
+#   - Prometheus error-rate >1% OR p95 latency >1.5x baseline triggers
+#     auto-rollback (single breach aborts: `failureLimit: 0`).
+#
+# Override per-environment:
+#   - values-production.yaml flips `enabled: true`
+#   - values-staging.yaml keeps it `false` (use simpler kubectl rollout)
+# =============================================================================
+rollout:
+  enabled: false
+  # How long the 1-replica canary bakes before any traffic is split.
+  healthGateSeconds: 60
+  # Pause between weight bumps (gives analysis a fresh window).
+  stagePauseSeconds: 30
+  # Argo's surge / unavailable knobs during the canary ramp.
+  maxSurge: "25%"
+  maxUnavailable: 0
+  scaleDownDelaySeconds: 30
+  revisionHistoryLimit: 5
+  # Image-pull secrets for the Rollout's Pod template.
+  imagePullSecrets: []
+  # Set this to enable L7 traffic splitting via a service mesh / ingress
+  # (Istio, SMI, Gateway API, ALB, Nginx, ...). Leave empty to use the
+  # built-in replica-weighted "basic canary" mode that needs no mesh.
+  trafficRouting: {}
+  # Override `steps` to ship a custom ramp for a specific service tier
+  # (e.g., a noisy background worker that wants a faster promotion).
+  # Leave empty to render the default 1-replica -> 60s -> 10/25/50/100
+  # ramp from templates/rollout.yaml.
+  steps: []
+  # Prometheus analysis knobs, consumed by templates/analysis-template.yaml.
+  analysis:
+    prometheusAddress: "http://prometheus-server.monitoring.svc.cluster.local:9090"
+    # Auto-rollback when 5xx rate exceeds 1% of total RPS over `window`.
+    errorRateThreshold: "0.01"
+    # Auto-rollback when canary p95 latency > 1.5x the stable replica set.
+    latencyRatioThreshold: "1.5"
+    # How frequently each metric is sampled inside one analysis run.
+    interval: "30s"
+    # Number of samples per analysis run before passing the gate.
+    count: 3
+    # Time window each Prometheus query looks back over.
+    window: "2m"
+
+# =============================================================================
 # Microservices Configuration
 # =============================================================================
 services:

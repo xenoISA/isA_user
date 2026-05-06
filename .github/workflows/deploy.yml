@@ -340,7 +340,52 @@ jobs:
           fi
           echo "::endgroup::"
 
-      - name: Blue-Green Deployment
+      # ---------------------------------------------------------------------
+      # Install / update the canary chart (issue #350, ADR 0001).
+      # ---------------------------------------------------------------------
+      # Renders the Argo Rollouts CRs and AnalysisTemplates for every
+      # service. Idempotent — re-running with the same values is a no-op
+      # for the controller. The actual image bump per service happens in
+      # the Canary Rollout step below.
+      # ---------------------------------------------------------------------
+      - name: Sync canary rollout chart
+        run: |
+          NAMESPACE=$(python core/deployment_targets.py --namespace production)
+
+          echo "Syncing Rollout / AnalysisTemplate CRs..."
+          helm upgrade --install isa-user-rollout ./deployment/helm \
+            -f ./deployment/helm/values-production.yaml \
+            --set "rollout.enabled=true" \
+            --namespace "$NAMESPACE" \
+            --create-namespace
+
+      # ---------------------------------------------------------------------
+      # Canary Rollout (issue #350)
+      # ---------------------------------------------------------------------
+      # Replaces the previous kubectl-driven blue/green step. For each
+      # target service, bumps the image on its argoproj.io Rollout CR and
+      # waits for Argo to walk the 1-replica -> 60s gate -> 10/25/50/100
+      # ladder, gated by Prometheus error-rate / p95 latency analysis.
+      # Auto-rollback (Argo aborts on a failed AnalysisRun) surfaces here
+      # as a non-zero exit, which fails the workflow.
+      #
+      # Operator runbook: docs/runbooks/canary-deploy.md.
+      # Tooling decision: docs/adr/0001-canary-tooling.md.
+      #
+      # NOTE: requires the Argo Rollouts controller installed in the
+      # cluster (one-time setup — see runbook section 0).
+      # ---------------------------------------------------------------------
+      - name: Install kubectl-argo-rollouts plugin
+        run: |
+          ROLLOUTS_VERSION=v1.7.2
+          curl -sSL -o /tmp/kubectl-argo-rollouts \
+            "https://github.com/argoproj/argo-rollouts/releases/download/${ROLLOUTS_VERSION}/kubectl-argo-rollouts-linux-amd64"
+          chmod +x /tmp/kubectl-argo-rollouts
+          sudo mv /tmp/kubectl-argo-rollouts /usr/local/bin/kubectl-argo-rollouts
+          kubectl argo rollouts version
+
+      - name: Canary Rollout
+        timeout-minutes: 45
         run: |
           resolve_target() {
             while IFS='=' read -r key value; do
@@ -355,29 +400,34 @@ jobs:
           for service in "${SERVICES[@]}"; do
             resolve_target "$service"
 
-            echo "Deploying ${TARGET_SERVICE_DIR} to production (blue-green) via ${TARGET_DEPLOYMENT_NAME}..."
+            ROLLOUT_NAME="${TARGET_DEPLOYMENT_NAME}"
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:${VERSION}"
 
-            echo "Validate rollout target ${TARGET_DEPLOYMENT_NAME}/${TARGET_CONTAINER_NAME}..."
-            if ! kubectl get deployment "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" >/dev/null 2>&1; then
-              echo "::error::Deployment ${TARGET_DEPLOYMENT_NAME} not found in namespace ${NAMESPACE} for service ${TARGET_SERVICE_DIR}"
+            echo "::group::Canary deploy ${ROLLOUT_NAME} -> ${IMAGE}"
+
+            if ! kubectl get rollout "${ROLLOUT_NAME}" -n "$NAMESPACE" >/dev/null 2>&1; then
+              echo "::error::Rollout ${ROLLOUT_NAME} not found in namespace ${NAMESPACE}."
+              echo "         Either the canary chart has not been synced yet, or this"
+              echo "         service is still on the legacy Deployment. See"
+              echo "         docs/runbooks/canary-deploy.md section 6 for the"
+              echo "         migration procedure."
               exit 1
             fi
-            container_names=$(kubectl get deployment "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}')
-            if ! grep -Fxq "${TARGET_CONTAINER_NAME}" <<< "$container_names"; then
-              echo "::error::Container ${TARGET_CONTAINER_NAME} not found in deployment ${TARGET_DEPLOYMENT_NAME}"
-              echo "Available containers:"
-              echo "$container_names"
-              exit 1
-            fi
 
-            # Update image tag
-            kubectl set image deployment/${TARGET_DEPLOYMENT_NAME} \
-              ${TARGET_CONTAINER_NAME}=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:$VERSION \
-              -n $NAMESPACE
+            # Bump the canary container image. Argo creates a new
+            # ReplicaSet and starts walking the canary steps.
+            kubectl argo rollouts set image "${ROLLOUT_NAME}" \
+              "${TARGET_CONTAINER_NAME}=${IMAGE}" \
+              -n "$NAMESPACE"
 
-            # Wait for rollout
-            kubectl rollout status deployment/${TARGET_DEPLOYMENT_NAME} \
-              -n $NAMESPACE --timeout=600s
+            # Block until the canary either fully promotes (Healthy) or
+            # auto-aborts (Degraded). --watch streams live progress.
+            kubectl argo rollouts status "${ROLLOUT_NAME}" \
+              -n "$NAMESPACE" \
+              --watch \
+              --timeout=30m
+
+            echo "::endgroup::"
           done
 
       - name: Production Health Check
