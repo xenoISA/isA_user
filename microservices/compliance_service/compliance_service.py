@@ -13,6 +13,8 @@ from datetime import datetime
 import uuid
 import asyncio
 
+from core.redis_cache import RedisCache, build_redis_cache
+
 from .compliance_repository import ComplianceRepository
 from .models import (
     ComplianceCheck,
@@ -36,11 +38,18 @@ from .events.publishers import (
 
 logger = logging.getLogger(__name__)
 
+# Issue #347: Policy cache TTL — 5 minutes. Long enough that we get hit
+# rates worth measuring, short enough that operators don't have to
+# manually invalidate after a routine policy edit.
+POLICY_CACHE_TTL_SECONDS = 300
+
 
 class ComplianceService:
     """合规服务核心业务逻辑"""
 
-    def __init__(self, event_bus=None, config=None):
+    def __init__(
+        self, event_bus=None, config=None, policy_cache: Optional[RedisCache] = None
+    ):
         self.repository = ComplianceRepository(config=config)
         self.event_bus = event_bus
 
@@ -48,8 +57,14 @@ class ComplianceService:
         self.enable_openai_moderation = True
         self.enable_local_checks = True
 
-        # 缓存
-        self._policy_cache: Dict[str, CompliancePolicy] = {}
+        # Policy cache — Redis-backed (issue #347). Falls back to "no-op cache"
+        # when REDIS_URL is unset so unit tests stay hermetic. Callers may
+        # inject a fakeredis-backed cache for component tests.
+        self._policy_cache: RedisCache = policy_cache or build_redis_cache(
+            "compliance:policy",
+            service_name="compliance_service",
+            default_ttl=POLICY_CACHE_TTL_SECONDS,
+        )
 
         # 统计
         self._stats = {"total_checks": 0, "blocked_content": 0, "flagged_content": 0}
@@ -745,17 +760,24 @@ class ComplianceService:
     async def _get_applicable_policy(
         self, request: ComplianceCheckRequest
     ) -> Optional[CompliancePolicy]:
-        """获取适用的策略"""
+        """获取适用的策略
+
+        Issue #347: backed by Redis cache so multiple replicas observe
+        the same policy without each maintaining a private dict. On
+        Redis outage we fall back to the DB and log — the cache is a
+        latency optimisation, not a correctness gate.
+        """
         try:
             if request.policy_id:
-                return await self.repository.get_policy_by_id(request.policy_id)
+                return await self._get_policy_by_id_cached(request.policy_id)
 
-            # 获取组织或全局策略
-            policies = await self.repository.get_active_policies(
-                request.organization_id
+            # Cache the per-org active policy list (lookup by content type
+            # happens client-side over the cached payload).
+            org_key = f"org:{request.organization_id or 'global'}:active"
+            policies = await self._get_active_policies_cached(
+                org_key, request.organization_id
             )
 
-            # 返回第一个匹配的策略（按优先级排序）
             for policy in policies:
                 if request.content_type in policy.content_types:
                     return policy
@@ -764,6 +786,123 @@ class ComplianceService:
         except Exception as e:
             logger.error(f"Error getting policy: {e}")
             return None
+
+    async def _get_policy_by_id_cached(
+        self, policy_id: str
+    ) -> Optional[CompliancePolicy]:
+        """Read a single policy through the Redis cache."""
+        cache_key = f"id:{policy_id}"
+
+        def _loads(raw: bytes) -> CompliancePolicy:
+            return CompliancePolicy.model_validate_json(raw)
+
+        def _dumps(policy: CompliancePolicy) -> bytes:
+            return policy.model_dump_json().encode()
+
+        cached = await self._policy_cache.get(cache_key, loads=_loads)
+        if cached is not None:
+            return cached
+
+        # DB fallback — also primes the cache when Redis is healthy.
+        policy = await self.repository.get_policy_by_id(policy_id)
+        if policy is not None:
+            await self._policy_cache.set(cache_key, policy, dumps=_dumps)
+        return policy
+
+    async def _get_active_policies_cached(
+        self, cache_key: str, organization_id: Optional[str]
+    ) -> List[CompliancePolicy]:
+        """Read the per-org active-policy list through the Redis cache."""
+
+        def _loads(raw: bytes) -> List[CompliancePolicy]:
+            import json as _json
+
+            data = _json.loads(raw)
+            return [CompliancePolicy.model_validate(p) for p in data]
+
+        def _dumps(policies: List[CompliancePolicy]) -> bytes:
+            payload = [p.model_dump(mode="json") for p in policies]
+            import json as _json
+
+            return _json.dumps(payload).encode()
+
+        cached = await self._policy_cache.get(cache_key, loads=_loads)
+        if cached is not None:
+            return cached
+
+        policies = await self.repository.get_active_policies(organization_id)
+        if policies:
+            await self._policy_cache.set(cache_key, policies, dumps=_dumps)
+        return policies
+
+    async def invalidate_policy_cache(
+        self,
+        *,
+        policy_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        purge_all_orgs: bool = False,
+    ) -> None:
+        """Drop cached policy entries after a write.
+
+        Issue #347 acceptance criterion — explicit DEL on writes (no
+        full FLUSHDB). Callers should invoke this whenever a policy is
+        created, updated, or deactivated.
+
+        Issue #347 follow-up (PR #357 review): when called with only
+        ``policy_id`` (the common path from update/delete handlers),
+        we now look the policy's ``organization_id`` up in the DB and
+        invalidate both the per-policy key AND the per-org active list.
+        Without this, the org's ``org:<x>:active`` entry stays for the
+        full TTL and the policy continues to apply on every replica
+        until it expires.
+
+        :param policy_id: When provided, drop ``id:<policy_id>`` AND
+            (after a DB lookup) the policy's owning org's active list.
+        :param organization_id: When provided, drop the org's active
+            list. Combined with ``policy_id`` this skips the DB lookup.
+        :param purge_all_orgs: When True, also walk every
+            ``org:*:active`` key via SCAN. Reserved for global policy
+            edits (e.g. retiring a platform-wide rule); never used by
+            the routine update path.
+        """
+        # Step 1 — when the caller knows the org, that's authoritative.
+        target_org: Optional[str] = organization_id
+
+        # Step 2 — if we only got a policy_id, look the org up so we can
+        # invalidate the corresponding active list. Tolerate a DB miss
+        # (the policy may already be deleted) by falling back to the
+        # global bucket invalidation.
+        if policy_id and organization_id is None:
+            try:
+                policy = await self.repository.get_policy_by_id(policy_id)
+            except Exception as exc:
+                policy = None
+                logger.warning(
+                    "invalidate_policy_cache: failed to look up policy %s "
+                    "for org-list invalidation: %s",
+                    policy_id,
+                    exc,
+                )
+            if policy is not None:
+                target_org = policy.organization_id
+
+        # Step 3 — drop the per-policy key.
+        if policy_id:
+            await self._policy_cache.delete(f"id:{policy_id}")
+
+        # Step 4 — drop the per-org active list (and the global bucket
+        # which represents org_id IS NULL policies).
+        if target_org is not None:
+            await self._policy_cache.delete(f"org:{target_org}:active")
+        await self._policy_cache.delete("org:global:active")
+
+        # Step 5 — only purge every org's active list when the caller
+        # explicitly opts in (e.g. retiring a platform-wide policy).
+        # raise_on_error=False because this is a best-effort fan-out.
+        if purge_all_orgs:
+            await self._policy_cache.delete_pattern(
+                "org:*:active", raise_on_error=False
+            )
 
     def _hash_content(self, content: str) -> str:
         """生成内容哈希"""

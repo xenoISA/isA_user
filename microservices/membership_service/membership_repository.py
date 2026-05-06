@@ -19,6 +19,7 @@ sys.path.append(
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
+from core.redis_cache import RedisCache, build_redis_cache
 from .models import (
     Membership,
     MembershipHistory,
@@ -46,11 +47,63 @@ def _pg_min_pool() -> int:
 
 logger = logging.getLogger(__name__)
 
+# Issue #347: Tier definitions change rarely (admin operation) but are
+# read on most membership lookups. 1 hour balances staleness vs
+# read-through DB load when Redis is healthy.
+TIER_CACHE_TTL_SECONDS = 3600
+
+# Default tiers used when DB is unavailable on bootstrap. Pulled into
+# module scope so the cache and the fallback share the same source.
+_DEFAULT_TIERS: Dict[str, Tier] = {
+    "bronze": Tier(
+        tier_code=MembershipTier.BRONZE,
+        tier_name="Bronze",
+        qualification_threshold=0,
+        point_multiplier=Decimal("1.0"),
+    ),
+    "silver": Tier(
+        tier_code=MembershipTier.SILVER,
+        tier_name="Silver",
+        qualification_threshold=5000,
+        point_multiplier=Decimal("1.25"),
+    ),
+    "gold": Tier(
+        tier_code=MembershipTier.GOLD,
+        tier_name="Gold",
+        qualification_threshold=20000,
+        point_multiplier=Decimal("1.5"),
+    ),
+    "platinum": Tier(
+        tier_code=MembershipTier.PLATINUM,
+        tier_name="Platinum",
+        qualification_threshold=50000,
+        point_multiplier=Decimal("2.0"),
+    ),
+    "diamond": Tier(
+        tier_code=MembershipTier.DIAMOND,
+        tier_name="Diamond",
+        qualification_threshold=100000,
+        point_multiplier=Decimal("3.0"),
+    ),
+}
+
+
+def _tier_dumps(tier: Tier) -> bytes:
+    return tier.model_dump_json().encode()
+
+
+def _tier_loads(raw: bytes) -> Tier:
+    return Tier.model_validate_json(raw)
+
 
 class MembershipRepository:
     """Membership service data repository - PostgreSQL (Async)"""
 
-    def __init__(self, config: Optional[ConfigManager] = None):
+    def __init__(
+        self,
+        config: Optional[ConfigManager] = None,
+        tier_cache: Optional[RedisCache] = None,
+    ):
         # Use config_manager for service discovery
         if config is None:
             config = ConfigManager("membership_service")
@@ -79,59 +132,56 @@ class MembershipRepository:
         self.tier_benefits_table = "tier_benefits"
         self.benefit_usage_table = "benefit_usage"
 
-        # Tier cache
-        self._tier_cache: Dict[str, Tier] = {}
+        # Issue #347: Redis-backed tier cache, replacing the in-process
+        # Dict[str, Tier]. Tests can inject a fakeredis-backed cache;
+        # production resolves REDIS_URL via the standard env vars.
+        self._tier_cache: RedisCache = tier_cache or build_redis_cache(
+            "membership:tier",
+            service_name="membership_service",
+            default_ttl=TIER_CACHE_TTL_SECONDS,
+        )
 
     async def initialize(self):
-        """Initialize database connection and load tier cache"""
+        """Initialize database connection and prime tier cache"""
         logger.info("Membership repository initialized with PostgreSQL")
         await self._load_tier_cache()
 
     async def close(self):
-        """Close database connection"""
+        """Close database connection and the cache client we own."""
+        await self._tier_cache.close()
         logger.info("Membership repository database connection closed")
 
     async def _load_tier_cache(self):
-        """Load tier definitions into memory cache"""
+        """Prime the Redis tier cache from the database.
+
+        Idempotent — if Redis is down or the DB lookup fails, falls back
+        to a known-good default tier set so the service still boots.
+
+        Issue #347 follow-up (PR #357 review item #8): when the DB load
+        fails on startup we used to prime defaults with the standard
+        TTL, which masked DB outages for the full TTL window. We now
+        cache defaults with a much shorter TTL so the next read after
+        the DB recovers re-fetches the real tiers within ~60s instead
+        of waiting for the standard TTL to expire.
+        """
         try:
             tiers = await self.get_all_tiers()
-            self._tier_cache = {t.tier_code.value: t for t in tiers}
-            logger.info(f"Loaded {len(self._tier_cache)} tiers into cache")
+            for tier in tiers:
+                await self._tier_cache.set(
+                    tier.tier_code.value, tier, dumps=_tier_dumps
+                )
+            logger.info(f"Loaded {len(tiers)} tiers into cache")
         except Exception as e:
-            logger.warning(f"Failed to load tier cache: {e}")
-            # Initialize with default tiers
-            self._tier_cache = {
-                "bronze": Tier(
-                    tier_code=MembershipTier.BRONZE,
-                    tier_name="Bronze",
-                    qualification_threshold=0,
-                    point_multiplier=Decimal("1.0"),
-                ),
-                "silver": Tier(
-                    tier_code=MembershipTier.SILVER,
-                    tier_name="Silver",
-                    qualification_threshold=5000,
-                    point_multiplier=Decimal("1.25"),
-                ),
-                "gold": Tier(
-                    tier_code=MembershipTier.GOLD,
-                    tier_name="Gold",
-                    qualification_threshold=20000,
-                    point_multiplier=Decimal("1.5"),
-                ),
-                "platinum": Tier(
-                    tier_code=MembershipTier.PLATINUM,
-                    tier_name="Platinum",
-                    qualification_threshold=50000,
-                    point_multiplier=Decimal("2.0"),
-                ),
-                "diamond": Tier(
-                    tier_code=MembershipTier.DIAMOND,
-                    tier_name="Diamond",
-                    qualification_threshold=100000,
-                    point_multiplier=Decimal("3.0"),
-                ),
-            }
+            logger.warning(
+                f"Failed to load tier cache from DB: {e}; "
+                "priming defaults with short TTL so next read re-checks the DB"
+            )
+            # Best-effort: prime defaults so reads have something to
+            # serve even if the DB is briefly unavailable on bootstrap.
+            # Use a short TTL (60s) so we re-attempt quickly once the DB
+            # recovers rather than serving defaults for the full TTL.
+            for code, tier in _DEFAULT_TIERS.items():
+                await self._tier_cache.set(code, tier, ttl=60, dumps=_tier_dumps)
 
     # ====================
     # Membership CRUD
@@ -472,10 +522,14 @@ class MembershipRepository:
             raise
 
     async def get_tier(self, tier_code: str) -> Optional[Tier]:
-        """Get tier definition"""
-        # Check cache first
-        if tier_code in self._tier_cache:
-            return self._tier_cache[tier_code]
+        """Get tier definition.
+
+        Issue #347: Reads from Redis first; falls back to the DB on miss
+        or Redis outage. Successful DB reads prime the cache.
+        """
+        cached = await self._tier_cache.get(tier_code, loads=_tier_loads)
+        if cached is not None:
+            return cached
 
         try:
             query = f"""
@@ -488,13 +542,28 @@ class MembershipRepository:
 
             if result:
                 tier = self._row_to_tier(result)
-                self._tier_cache[tier_code] = tier
+                await self._tier_cache.set(tier_code, tier, dumps=_tier_dumps)
                 return tier
             return None
 
         except Exception as e:
             logger.error(f"Error getting tier {tier_code}: {e}")
             return None
+
+    async def invalidate_tier_cache(self, tier_code: Optional[str] = None) -> None:
+        """Drop the cached tier definition after an admin write.
+
+        Issue #347 acceptance criterion — explicit DEL on writes (no
+        full FLUSHDB). Pass ``tier_code=None`` to drop every cached
+        tier (useful after a bulk reload).
+        """
+        if tier_code is not None:
+            await self._tier_cache.delete(tier_code)
+            return
+        # No specific tier — purge the namespace. This is the bulk-reload
+        # path; tolerate cache outages (raise_on_error=False) because the
+        # next read falls back to the DB anyway.
+        await self._tier_cache.delete_pattern("*", raise_on_error=False)
 
     async def get_all_tiers(self) -> List[Tier]:
         """Get all tier definitions"""
