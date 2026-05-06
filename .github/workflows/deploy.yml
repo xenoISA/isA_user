@@ -256,12 +256,165 @@ jobs:
               -n $NAMESPACE --timeout=300s
           done
 
-      - name: Run Smoke Tests
+      # ---------------------------------------------------------------------
+      # Post-deploy smoke test (issue #355)
+      # ---------------------------------------------------------------------
+      # Pings /health on every microservice listed in config/ports.yaml. The
+      # script honours core/health.py semantics: HTTP 200 healthy/degraded
+      # means the service is acceptably up; HTTP 503 (or unreachable) means
+      # it failed. degraded is treated as a warning, not a failure.
+      #
+      # On failure we capture the smoke report + service logs as workflow
+      # artifacts and revert each deployment via `kubectl rollout undo`.
+      # We attempt `helm rollback isa-user-migrations` so any failed
+      # migration release is also reverted.
+      # ---------------------------------------------------------------------
+      - name: Port-forward to staging cluster
         run: |
-          echo "Running smoke tests..."
-          # kubectl port-forward svc/apisix 8000:8000 -n $NAMESPACE &
-          # sleep 5
-          # bash tests/smoke/run_all.sh
+          NAMESPACE=$(python core/deployment_targets.py --namespace staging)
+          mkdir -p smoke-artifacts
+          # Forward each microservice's ClusterIP to localhost on its
+          # canonical port so smoke_test.sh can reach them with the
+          # default SMOKE_BASE_URL=http://localhost.
+          python3 scripts/_smoke_list_services.py > smoke-artifacts/services.tsv
+
+          # Track the PIDs we spawn so the cleanup step kills only our
+          # forwards, not unrelated kubectl port-forward processes that
+          # might be running on a shared/self-hosted runner.
+          PF_PIDS=()
+          PF_TARGETS=()
+          while IFS=$'\t' read -r short port; do
+            [ -z "$short" ] && continue
+            kubectl port-forward "svc/${short}" "${port}:${port}" \
+              -n "$NAMESPACE" >"smoke-artifacts/pf-${short}.log" 2>&1 &
+            PF_PIDS+=("$!")
+            PF_TARGETS+=("${short}:${port}")
+          done < smoke-artifacts/services.tsv
+          printf '%s\n' "${PF_PIDS[@]}" > smoke-artifacts/pf-pids.txt
+          printf '%s\n' "${PF_TARGETS[@]}" > smoke-artifacts/pf-targets.txt
+
+          # Readiness gate: poll each pf-<svc>.log until it reports
+          # "Forwarding from 127.0.0.1:<port>" or we hit the cap.
+          # A flat sleep would mask forwards that died during setup.
+          DEADLINE=$((SECONDS + 30))
+          NOT_READY=()
+          while IFS=$'\t' read -r short port; do
+            [ -z "$short" ] && continue
+            log="smoke-artifacts/pf-${short}.log"
+            ready=0
+            while [ "$SECONDS" -lt "$DEADLINE" ]; do
+              if [ -s "$log" ] && grep -q "Forwarding from 127\.0\.0\.1:${port}" "$log"; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" -ne 1 ]; then
+              NOT_READY+=("${short}:${port}")
+            fi
+          done < smoke-artifacts/services.tsv
+
+          if [ "${#NOT_READY[@]}" -gt 0 ]; then
+            echo "::error::port-forward readiness gate timed out for: ${NOT_READY[*]}"
+            for entry in "${NOT_READY[@]}"; do
+              short="${entry%%:*}"
+              echo "::group::pf-${short}.log"
+              cat "smoke-artifacts/pf-${short}.log" || true
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
+          echo "All ${#PF_PIDS[@]} port-forwards are ready."
+
+      - name: Post-deploy smoke test
+        id: smoke
+        env:
+          SMOKE_BASE_URL: http://localhost
+          SMOKE_GRACE_PERIOD_S: "120"
+          SMOKE_RETRY_INTERVAL_S: "5"
+          SMOKE_TIMEOUT_S: "5"
+          SMOKE_OUTPUT_FILE: smoke-artifacts/smoke-report.tsv
+        run: |
+          chmod +x scripts/smoke_test.sh
+          bash scripts/smoke_test.sh
+
+      - name: Stop port-forwards
+        if: always()
+        run: |
+          # Kill only the PIDs the port-forward step recorded. A blanket
+          # `pkill -f "kubectl port-forward"` would clobber unrelated
+          # forwards on shared/self-hosted runners.
+          if [ -f smoke-artifacts/pf-pids.txt ]; then
+            while read -r pid; do
+              [ -z "$pid" ] && continue
+              kill "$pid" 2>/dev/null || true
+            done < smoke-artifacts/pf-pids.txt
+          fi
+
+      - name: Capture smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-staging-${{ needs.prepare.outputs.version }}
+          path: smoke-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Rollback on smoke failure
+        if: failure() && steps.smoke.conclusion == 'failure'
+        run: |
+          NAMESPACE=$(python core/deployment_targets.py --namespace staging)
+          echo "::warning::Smoke test failed — rolling back deployments in ${NAMESPACE}"
+
+          # NOTE: the per-service `kubectl rollout undo` block below is
+          # what actually reverts traffic-serving pods. The Helm rollback
+          # here only reverts the pre-deploy migration release
+          # (isa-user-migrations). For a brand-new install with no prior
+          # revision, Helm rollback is a no-op — we skip it explicitly
+          # rather than relying on `|| true`.
+          if helm history isa-user-migrations -n "$NAMESPACE" >/dev/null 2>&1; then
+            REV_COUNT=$(helm history isa-user-migrations -n "$NAMESPACE" -o json 2>/dev/null \
+              | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
+            if [ "${REV_COUNT:-0}" -gt 1 ]; then
+              echo "Rolling back Helm release isa-user-migrations (revisions=${REV_COUNT})..."
+              helm rollback isa-user-migrations 0 -n "$NAMESPACE" || true
+            else
+              echo "Helm release isa-user-migrations has no prior revision — skipping rollback."
+            fi
+          else
+            echo "Helm release isa-user-migrations not found in ${NAMESPACE} — skipping rollback."
+          fi
+
+          # Revert each service Deployment to its previous ReplicaSet.
+          IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
+          resolve_target() {
+            while IFS='=' read -r key value; do
+              printf -v "$key" '%s' "$value"
+            done < <(python core/deployment_targets.py "$1" --format env)
+          }
+          for service in "${SERVICES[@]}"; do
+            resolve_target "$service"
+
+            # First-deploy guard: a brand-new Deployment has no rollout
+            # history, so `kubectl rollout undo` would error and be
+            # masked by `|| true`. `kubectl rollout history` prints a
+            # header line plus one row per revision — 2 lines total
+            # means a single (current) revision with nothing to revert.
+            history_lines=$(kubectl rollout history "deployment/${TARGET_DEPLOYMENT_NAME}" \
+              -n "$NAMESPACE" 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ' || echo 0)
+            if [ "${history_lines:-0}" -le 2 ]; then
+              echo "First deploy of ${TARGET_DEPLOYMENT_NAME} (history_lines=${history_lines}) — skipping rollback (no prior revision)."
+              continue
+            fi
+
+            echo "Rolling back deployment/${TARGET_DEPLOYMENT_NAME}..."
+            kubectl rollout undo "deployment/${TARGET_DEPLOYMENT_NAME}" \
+              -n "$NAMESPACE" || true
+            kubectl rollout status "deployment/${TARGET_DEPLOYMENT_NAME}" \
+              -n "$NAMESPACE" --timeout=300s || true
+          done
+          # Re-fail the workflow so the failure is loud and final.
+          exit 1
 
       - name: Deployment Summary
         run: |
@@ -380,10 +533,141 @@ jobs:
               -n $NAMESPACE --timeout=600s
           done
 
-      - name: Production Health Check
+      # ---------------------------------------------------------------------
+      # Post-deploy smoke test (issue #355) — production
+      # ---------------------------------------------------------------------
+      - name: Port-forward to production cluster
         run: |
-          echo "Verifying production health..."
-          # Add production health verification
+          NAMESPACE=$(python core/deployment_targets.py --namespace production)
+          mkdir -p smoke-artifacts
+          python3 scripts/_smoke_list_services.py > smoke-artifacts/services.tsv
+
+          # See deploy-staging port-forward step for rationale.
+          PF_PIDS=()
+          PF_TARGETS=()
+          while IFS=$'\t' read -r short port; do
+            [ -z "$short" ] && continue
+            kubectl port-forward "svc/${short}" "${port}:${port}" \
+              -n "$NAMESPACE" >"smoke-artifacts/pf-${short}.log" 2>&1 &
+            PF_PIDS+=("$!")
+            PF_TARGETS+=("${short}:${port}")
+          done < smoke-artifacts/services.tsv
+          printf '%s\n' "${PF_PIDS[@]}" > smoke-artifacts/pf-pids.txt
+          printf '%s\n' "${PF_TARGETS[@]}" > smoke-artifacts/pf-targets.txt
+
+          # Readiness gate: poll each pf-<svc>.log until it reports
+          # "Forwarding from 127.0.0.1:<port>" or we hit the cap.
+          DEADLINE=$((SECONDS + 30))
+          NOT_READY=()
+          while IFS=$'\t' read -r short port; do
+            [ -z "$short" ] && continue
+            log="smoke-artifacts/pf-${short}.log"
+            ready=0
+            while [ "$SECONDS" -lt "$DEADLINE" ]; do
+              if [ -s "$log" ] && grep -q "Forwarding from 127\.0\.0\.1:${port}" "$log"; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" -ne 1 ]; then
+              NOT_READY+=("${short}:${port}")
+            fi
+          done < smoke-artifacts/services.tsv
+
+          if [ "${#NOT_READY[@]}" -gt 0 ]; then
+            echo "::error::port-forward readiness gate timed out for: ${NOT_READY[*]}"
+            for entry in "${NOT_READY[@]}"; do
+              short="${entry%%:*}"
+              echo "::group::pf-${short}.log"
+              cat "smoke-artifacts/pf-${short}.log" || true
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
+          echo "All ${#PF_PIDS[@]} port-forwards are ready."
+
+      - name: Post-deploy smoke test
+        id: smoke
+        env:
+          SMOKE_BASE_URL: http://localhost
+          SMOKE_GRACE_PERIOD_S: "180"
+          SMOKE_RETRY_INTERVAL_S: "5"
+          SMOKE_TIMEOUT_S: "5"
+          SMOKE_OUTPUT_FILE: smoke-artifacts/smoke-report.tsv
+        run: |
+          chmod +x scripts/smoke_test.sh
+          bash scripts/smoke_test.sh
+
+      - name: Stop port-forwards
+        if: always()
+        run: |
+          # Kill only the PIDs the port-forward step recorded. See
+          # deploy-staging Stop port-forwards step for rationale.
+          if [ -f smoke-artifacts/pf-pids.txt ]; then
+            while read -r pid; do
+              [ -z "$pid" ] && continue
+              kill "$pid" 2>/dev/null || true
+            done < smoke-artifacts/pf-pids.txt
+          fi
+
+      - name: Capture smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-production-${{ needs.prepare.outputs.version }}
+          path: smoke-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Rollback on smoke failure
+        if: failure() && steps.smoke.conclusion == 'failure'
+        run: |
+          NAMESPACE=$(python core/deployment_targets.py --namespace production)
+          echo "::error::Smoke test failed — rolling back production deployments in ${NAMESPACE}"
+
+          # NOTE: the per-service `kubectl rollout undo` block below is
+          # what actually reverts traffic-serving pods. The Helm rollback
+          # here only reverts the pre-deploy migration release
+          # (isa-user-migrations). Skip it explicitly when there is no
+          # prior revision rather than relying on `|| true`.
+          if helm history isa-user-migrations -n "$NAMESPACE" >/dev/null 2>&1; then
+            REV_COUNT=$(helm history isa-user-migrations -n "$NAMESPACE" -o json 2>/dev/null \
+              | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
+            if [ "${REV_COUNT:-0}" -gt 1 ]; then
+              echo "Rolling back Helm release isa-user-migrations (revisions=${REV_COUNT})..."
+              helm rollback isa-user-migrations 0 -n "$NAMESPACE" || true
+            else
+              echo "Helm release isa-user-migrations has no prior revision — skipping rollback."
+            fi
+          else
+            echo "Helm release isa-user-migrations not found in ${NAMESPACE} — skipping rollback."
+          fi
+
+          IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
+          resolve_target() {
+            while IFS='=' read -r key value; do
+              printf -v "$key" '%s' "$value"
+            done < <(python core/deployment_targets.py "$1" --format env)
+          }
+          for service in "${SERVICES[@]}"; do
+            resolve_target "$service"
+
+            # First-deploy guard: see deploy-staging rollback step.
+            history_lines=$(kubectl rollout history "deployment/${TARGET_DEPLOYMENT_NAME}" \
+              -n "$NAMESPACE" 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ' || echo 0)
+            if [ "${history_lines:-0}" -le 2 ]; then
+              echo "First deploy of ${TARGET_DEPLOYMENT_NAME} (history_lines=${history_lines}) — skipping rollback (no prior revision)."
+              continue
+            fi
+
+            echo "Rolling back deployment/${TARGET_DEPLOYMENT_NAME}..."
+            kubectl rollout undo "deployment/${TARGET_DEPLOYMENT_NAME}" \
+              -n "$NAMESPACE" || true
+            kubectl rollout status "deployment/${TARGET_DEPLOYMENT_NAME}" \
+              -n "$NAMESPACE" --timeout=600s || true
+          done
+          exit 1
 
       - name: Deployment Summary
         run: |
