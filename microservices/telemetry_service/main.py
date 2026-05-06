@@ -1176,6 +1176,11 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
         await microservice.service.register_realtime_websocket(
             subscription_id, websocket_id, websocket
         )
+        # Include the rotated connect token (and its expiry) so the resilient
+        # client can use it on its next reconnect. The new token is already
+        # persisted in the durable subscription metadata by
+        # `prepare_realtime_websocket`, so emitting it here does not violate
+        # the persist-before-send invariant.
         await websocket.send_json(
             {
                 "type": "subscription.connected",
@@ -1186,6 +1191,8 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
                 "session_id": session_id,
                 "cursor": session.get("cursor"),
                 "retry_after": WS_RETRY_AFTER_SECONDS,
+                "connect_token": session.get("connect_token"),
+                "connect_token_expires_at": session.get("connect_token_expires_at"),
             }
         )
 

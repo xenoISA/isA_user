@@ -783,14 +783,29 @@ class TelemetryRepository:
         websocket_id: str,
         bound_instance_id: str,
         connection_expires_at: datetime,
+        new_connect_token_hash: Optional[str] = None,
+        new_connect_token_expires_at: Optional[datetime] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Mark a durable subscription as currently owned by a live websocket."""
+        """Mark a durable subscription as currently owned by a live websocket.
+
+        Optionally rotates the connect token atomically with the bind so the
+        client can use the refreshed (raw) token on its next reconnect. The
+        token rotation must be persisted before the raw token is returned to
+        the client — that invariant is upheld here by performing the update
+        before the call returns successfully.
+        """
         try:
-            metadata_update = {
+            metadata_update: Dict[str, Any] = {
                 "bound_instance_id": bound_instance_id,
                 "connection_expires_at": connection_expires_at.isoformat(),
                 "last_websocket_seen_at": datetime.now(timezone.utc).isoformat(),
             }
+            if new_connect_token_hash is not None:
+                metadata_update["connect_token_hash"] = new_connect_token_hash
+            if new_connect_token_expires_at is not None:
+                metadata_update[
+                    "connect_token_expires_at"
+                ] = new_connect_token_expires_at.isoformat()
             query = f"""
                 UPDATE {self.schema}.{self.realtime_subscriptions_table}
                 SET websocket_id = $2,

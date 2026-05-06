@@ -709,6 +709,13 @@ class TelemetryService:
         cursor of the prior connection (replica handoff support). The cursor
         is reconstructed solely from `subscription_id`, so a different replica
         can pick up where the previous one left off.
+
+        Atomically rotates the connect token: the old (presented) token is
+        consumed, and a fresh token with a TTL bounded by the subscription's
+        own `expires_at` is persisted. The new raw token is returned to the
+        caller so the resilient client can use it on its next reconnect —
+        without this, long-lived clients (subscription TTL > token TTL) hit
+        a 401 the moment the original token expires.
         """
         subscription = await self.repository.get_real_time_subscription(subscription_id)
         if not subscription or not subscription.get("active", True):
@@ -731,11 +738,28 @@ class TelemetryService:
 
         websocket_id = secrets.token_hex(12)
         connection_expires_at = utc_now() + self.connection_lease_ttl
+
+        # Mint a fresh token for the next reconnect. Bound the new token's
+        # TTL by the subscription's own expiry so we never hand out a token
+        # that outlives the durable subscription itself.
+        new_connect_token = secrets.token_urlsafe(32)
+        new_token_expires_at = utc_now() + self.connect_token_ttl
+        if expires_at is not None:
+            new_token_expires_at = min(new_token_expires_at, expires_at)
+        new_connect_token_hash = hash_connect_token(new_connect_token)
+
+        # Persist the new token hash + expiry atomically with the bind. We
+        # only return the raw `new_connect_token` to the client AFTER this
+        # call succeeds — if persistence fails, the client never sees the
+        # new token and will continue using the original one (which is
+        # still valid for the rest of its TTL).
         bound = await self.repository.bind_real_time_subscription_connection(
             subscription_id,
             websocket_id,
             self.instance_id,
             connection_expires_at,
+            new_connect_token_hash=new_connect_token_hash,
+            new_connect_token_expires_at=new_token_expires_at,
         )
         if not bound:
             raise RealtimeSubscriptionNotFoundError("Subscription could not be bound")
@@ -757,6 +781,8 @@ class TelemetryService:
             "connection_expires_at": connection_expires_at.isoformat(),
             "session_id": session_id,
             "cursor": cursor,
+            "connect_token": new_connect_token,
+            "connect_token_expires_at": new_token_expires_at.isoformat(),
         }
 
     @staticmethod
