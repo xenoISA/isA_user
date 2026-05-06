@@ -642,6 +642,44 @@ class DistributedLock:
                 )
             await asyncio.sleep(wait_poll_interval)
 
+        # We just acquired the lock — but the prior holder may have
+        # written the result to the cache and released *between* our
+        # last cache.get() and our successful acquire(). Re-check the
+        # cache one final time before doing the work so a late acquirer
+        # short-circuits to the cached result instead of re-running the
+        # handler. This closes the race that otherwise lets concurrent
+        # replays each acquire-after-release and re-process the event.
+        if result_cache is not None:
+            try:
+                cached = await result_cache.get(cache_key)
+            except Exception as exc:
+                logger.debug(
+                    "distributed_lock(%s): post-acquire cache.get failed: %s",
+                    self.namespace,
+                    exc,
+                )
+                cached = None
+            if cached is not None:
+                # Release the lock we just took — we won't be doing the
+                # work — then yield the cached outcome.
+                try:
+                    await self.release(cache_key, token)
+                except DistributedLockError as exc:
+                    logger.debug(
+                        "distributed_lock(%s): release after cache hit "
+                        "failed for %r: %s",
+                        self.namespace,
+                        cache_key,
+                        exc,
+                    )
+                yield LockOutcome(
+                    key=cache_key,
+                    token="",
+                    cached_result=cached,
+                    is_cached=True,
+                )
+                return
+
         outcome = LockOutcome(key=cache_key, token=token)
         try:
             yield outcome

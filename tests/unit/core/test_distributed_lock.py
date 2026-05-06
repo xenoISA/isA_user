@@ -285,6 +285,71 @@ async def test_guard_concurrent_replays_see_cached_result():
     assert statuses.count("cached") == 9
 
 
+async def test_guard_late_acquirer_rechecks_cache_after_acquire():
+    """Regression for the post-acquire cache re-check race.
+
+    A peer that takes the lock *after* the prior holder finished writing
+    the cache and released must NOT re-run the handler. Without the
+    post-acquire cache re-check, every late acquirer would re-process
+    the event because the cache check only happens before acquire.
+
+    Reproduces the failure mode where the guard's poll loop sees the
+    lock contended, sleeps, and on the next iteration the prior holder
+    has both written the cache *and* released the lock — the guard's
+    acquire then succeeds and (without the fix) skips the re-check.
+    """
+    server = fakeredis.aioredis.FakeServer()
+
+    def client():
+        return fakeredis.aioredis.FakeRedis(server=server, decode_responses=False)
+
+    cache = RedisCache("wallet_results", client=client(), default_ttl=60)
+
+    # Hold the lock externally so guard hits its contention loop.
+    external_lock = DistributedLock("wallet_service", client=client())
+    external_token = await external_lock.acquire("evt-LATE", ttl_seconds=30)
+    assert external_token is not None
+
+    work_calls = {"n": 0}
+
+    async def releaser():
+        # Wait until guard is mid-poll, then write the cache and release
+        # the lock. This simulates the prior holder finishing while a
+        # peer is in its sleep window: when the peer wakes up it will
+        # acquire on the next loop iteration. Without the post-acquire
+        # cache re-check, the peer would proceed to do the work.
+        await asyncio.sleep(0.05)
+        await cache.set("evt-LATE", {"prior": "result"})
+        await external_lock.release("evt-LATE", external_token)
+
+    releaser_task = asyncio.create_task(releaser())
+
+    guard_lock = DistributedLock("wallet_service", client=client())
+    try:
+        async with guard_lock.guard(
+            "evt-LATE",
+            ttl_seconds=30,
+            result_cache=cache,
+            wait_seconds=2.0,
+            wait_poll_interval=0.2,  # Coarse poll so the cache write
+            # most likely lands while the guard is sleeping, forcing
+            # the post-acquire path rather than the in-poll cache hit.
+        ) as outcome:
+            if not outcome.is_cached:  # pragma: no cover - regression target
+                work_calls["n"] += 1
+                cached_result = outcome.cached_result
+            else:
+                cached_result = outcome.cached_result
+    finally:
+        await releaser_task
+
+    assert work_calls["n"] == 0
+    assert cached_result == {"prior": "result"}
+    # The lock must be free again — the late acquirer must release the
+    # lock it briefly took before short-circuiting.
+    assert await client().get("lock:wallet_service:evt-LATE") is None
+
+
 async def test_guard_short_circuits_when_cache_already_populated():
     """If the cache already has the entry, we don't even touch the lock."""
     cache_client = _make_fake()
