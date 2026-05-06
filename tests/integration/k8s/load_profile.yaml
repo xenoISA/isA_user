@@ -1,0 +1,72 @@
+# =============================================================================
+# Load profile for HPA scale-up integration test (#354 / epic #345)
+# =============================================================================
+# Drives synthetic traffic against the test workload deployed by
+# ``test_scale_up.py``. The generator runs *inside* the cluster as a Pod
+# so kube-proxy round-robins requests to every replica that comes up —
+# without that, all load lands on one pod (port-forward limitation) and
+# the HPA scales replicas back down before they see any work.
+#
+# Tuned so steady-state CPU ~= 1.5x the HPA target on a single replica
+# (~75% util vs 50% target) without flooding the kind node's connection
+# table. The runner inside the test reads this YAML, so adjust without
+# touching code.
+# =============================================================================
+
+# Endpoint exercised during scale-up. /work burns ~50ms of CPU per request
+# so sustained traffic crosses the HPA's CPU utilization target.
+endpoint: /work
+
+# Total wall-clock duration of the load run (seconds). Long enough to let
+# the HPA decision cycle (~30s in stock K8s) react and for at least one
+# extra replica to become Ready.
+duration_seconds: 180
+
+# Number of concurrent worker threads inside the loadgen Pod. Each worker
+# opens one connection per request, so kube-proxy can spread the load
+# across all live replicas as they come up.
+concurrency: 12
+
+# Per-worker target requests-per-second. Aggregate target ~=
+# ``concurrency * rps_per_worker``. With 12 workers x 6 RPS we drive
+# ~72 RPS aggregate. The stub's /work uses ~50ms of CPU per call, so
+# concentrated on one replica that's ~3.6 CPU-seconds per second —
+# more than enough to push the 200m-limit pod above the HPA's 50%
+# utilization target.
+rps_per_worker: 6
+
+# HTTP request timeout. Generous so we don't false-flag transient retries
+# during pod churn as failures.
+request_timeout_seconds: 10.0
+
+# How long to wait after the load stops before sampling the cluster's
+# final replica count. Gives HPA + Deployment a chance to settle.
+post_load_settle_seconds: 30
+
+# Scale-up assertions
+assertions:
+  # Minimum replicas the HPA must scale to during/after the load run. The
+  # workload starts at 1; we expect at least this many by the end.
+  min_replicas_after_load: 2
+
+  # Maximum *5xx* rate the application is allowed to produce. The
+  # readiness gap when a new pod first joins kube-proxy's endpoints
+  # produces a small burst of 5xx until livenessProbe latches; 5% is
+  # generous enough to absorb that on a kind cluster while still
+  # catching genuine backend instability.
+  max_error_rate: 0.05
+
+  # Floor for ``compute_pool_size()`` — sanity-check that the per-pod
+  # pool never drops below this. The test additionally asserts the
+  # aggregate pool stays within the cross-service Postgres budget.
+  pool_size_per_pod_floor: 5
+
+# Scale-down assertions (graceful drain)
+scale_down:
+  # After load stops, we manually scale the deployment back to 1 to
+  # exercise ``core/graceful_shutdown.py``. We then issue a final burst
+  # of requests during the termination window and assert *zero*
+  # transport errors — that's the criterion that really matters for
+  # #354 (no in-flight requests cut off mid-drain).
+  final_burst_requests: 50
+  final_burst_concurrency: 4

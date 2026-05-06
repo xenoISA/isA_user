@@ -1,0 +1,259 @@
+# =============================================================================
+# Stub auth_service deployment for HPA scale-up integration test (#354)
+# =============================================================================
+# This manifest stands in for the real auth_service so the test can run
+# against a kind/k3d cluster *without* building a 1+GB Docker image in CI.
+# It is shaped to mirror the production deployment topology rendered by
+# ``isA_Cloud/deployments/charts/isa-service``:
+#
+#   * One container exposing /health on a configurable port
+#   * Resource requests low enough to fit on a single kind node
+#   * HPA targeting CPU utilization with the same scaleUp/scaleDown
+#     behavior as the production chart
+#   * env vars POD_REPLICA_COUNT / DB_POOL_BASE / DB_POOL_GROWTH wired to
+#     the same names ``core/postgres_client.py:compute_pool_size`` reads
+#
+# Replicating the real chart inline keeps the test hermetic — we don't
+# pull from harbor.local, don't depend on the isA_Cloud chart layout, and
+# don't need real Postgres / Consul to verify the scale path.
+#
+# Container image: ``python:3.11-slim`` running an inline asyncio server
+# that:
+#   * answers GET /health → 200 {"ok": true, "pool": <int>, "pod": <name>}
+#   * computes ``pool`` using the same formula as
+#     core.postgres_client.compute_pool_size, reading replica count from
+#     POD_REPLICA_COUNT
+#   * burns CPU on /work to make HPA scale up under load
+# =============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: scale-up-test
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-stub-app
+  namespace: scale-up-test
+data:
+  app.py: |
+    """Inline stub modeled after microservices/auth_service/main.py.
+
+    Implements just enough surface area to verify HPA scale-up:
+      GET /health -> 200 with computed Postgres pool size for the pod
+      GET /work   -> 200 after burning ~50ms of CPU (drives HPA up)
+    """
+    import json
+    import os
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    # Mirror of core.postgres_client.compute_pool_size — duplicated here
+    # because the stub container does not mount the repo. Keep the formula
+    # in sync if compute_pool_size changes (test asserts equality against
+    # the real function executed in pytest, not this copy).
+    POOL_FLOOR = 5
+
+    def compute_pool_size():
+        replicas = max(1, int(os.environ.get("POD_REPLICA_COUNT", "1")))
+        base = max(0, int(os.environ.get("DB_POOL_BASE", "2")))
+        growth = max(0, int(os.environ.get("DB_POOL_GROWTH", "1")))
+        return max(POOL_FLOOR, base + (replicas - 1) * growth)
+
+    POD_NAME = os.environ.get("POD_NAME", "unknown")
+    PORT = int(os.environ.get("SERVICE_PORT", "8201"))
+    SHUTTING_DOWN = False
+
+    class Handler(BaseHTTPRequestHandler):
+        # Force HTTP/1.1 so httpx keep-alive works — without this the
+        # stdlib server defaults to HTTP/1.0, closing the socket after
+        # every reply and exhausting the client's connection pool under
+        # the load profile.
+        protocol_version = "HTTP/1.1"
+
+        # Quiet the default access log — kubelet hits /health every few
+        # seconds and this fills the runner's pod log buffer.
+        def log_message(self, *_):
+            return
+
+        def _reply(self, status, body=b""):
+            """HTTP/1.1 needs explicit Content-Length on every reply or
+            the client will hang waiting for EOF that never comes."""
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
+        def do_GET(self):
+            if SHUTTING_DOWN:
+                # Mirror core/graceful_shutdown.py: once SIGTERM lands we
+                # return 503 so the Service drops us from endpoints
+                # without killing in-flight requests.
+                self._reply(503, b'{"shutting_down":true}')
+                return
+            if self.path == "/health":
+                body = json.dumps({
+                    "ok": True,
+                    "pool": compute_pool_size(),
+                    "pod": POD_NAME,
+                }).encode()
+                self._reply(200, body)
+            elif self.path == "/work":
+                # Burn ~50ms of CPU so a sustained load actually trips
+                # the HPA's CPU threshold on a kind node.
+                deadline = time.time() + 0.05
+                x = 0
+                while time.time() < deadline:
+                    x = (x * 1103515245 + 12345) & 0x7FFFFFFF
+                self._reply(200, b'{"ok":true}')
+            else:
+                self._reply(404, b'{"error":"not found"}')
+
+    def _install_term_handler(server):
+        import signal
+        def handler(_signum, _frame):
+            global SHUTTING_DOWN
+            SHUTTING_DOWN = True
+            # Give existing connections ~5s to drain, then shut the server.
+            def stop():
+                time.sleep(5.0)
+                server.shutdown()
+            import threading
+            threading.Thread(target=stop, daemon=True).start()
+        signal.signal(signal.SIGTERM, handler)
+        signal.signal(signal.SIGINT, handler)
+
+    if __name__ == "__main__":
+        srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+        _install_term_handler(srv)
+        print(f"auth-stub listening on :{PORT} pod={POD_NAME}", flush=True)
+        srv.serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-stub
+  namespace: scale-up-test
+  labels:
+    app: auth-stub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-stub
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: auth-stub
+    spec:
+      # Match the production chart's drain window so the test exercises a
+      # realistic graceful_shutdown timeline.
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: auth-stub
+        image: python:3.11-slim
+        command: ["python", "/app/app.py"]
+        ports:
+        - name: http
+          containerPort: 8201
+        env:
+        - name: SERVICE_PORT
+          value: "8201"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        # These three drive core/postgres_client.py:compute_pool_size
+        # — the test patches POD_REPLICA_COUNT after each scale event and
+        # re-asserts the per-pod pool stays within the budget.
+        - name: POD_REPLICA_COUNT
+          value: "1"
+        - name: DB_POOL_BASE
+          value: "2"
+        - name: DB_POOL_GROWTH
+          value: "1"
+        resources:
+          requests:
+            # Tiny enough to fit ~5 replicas on a single kind node, large
+            # enough that ``utilization = used/requested`` actually crosses
+            # the HPA threshold under the load profile.
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 1
+          periodSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        volumeMounts:
+        - name: app
+          mountPath: /app
+      volumes:
+      - name: app
+        configMap:
+          name: auth-stub-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-stub
+  namespace: scale-up-test
+spec:
+  type: ClusterIP
+  selector:
+    app: auth-stub
+  ports:
+  - name: http
+    port: 8201
+    targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: auth-stub
+  namespace: scale-up-test
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auth-stub
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  behavior:
+    # Mirror the production chart: scale up immediately, scale down with
+    # a 5-min stabilization window. The test override scales down manually
+    # via ``kubectl scale`` so we don't have to wait through the window.
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 300
