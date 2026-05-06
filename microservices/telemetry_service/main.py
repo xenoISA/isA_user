@@ -197,6 +197,18 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     shutdown_manager.initiate_shutdown()
+    # Drain any live websocket connections with `going away` (1001) so
+    # clients reconnect via Consul SRV instead of seeing a hard 1006. We
+    # do this BEFORE waiting for HTTP drain so subscribers can begin their
+    # reconnect handshake while remaining HTTP traffic finishes.
+    try:
+        if microservice.service is not None:
+            await microservice.service.drain_realtime_websockets(
+                retry_after_seconds=WS_RETRY_AFTER_SECONDS,
+                close_code=1001,
+            )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning(f"WebSocket drain failed during shutdown: {exc}")
     await shutdown_manager.wait_for_drain()
     await microservice.shutdown()
 
@@ -1119,9 +1131,28 @@ async def unsubscribe_real_time_data(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# How long clients should wait before reconnecting after a graceful drain.
+# Communicated to clients via the close reason and the `Retry-After` hint
+# returned in the initial `subscription.connected` frame.
+WS_RETRY_AFTER_SECONDS = 5
+
+# Cookie / header name used for ingress-level sticky-session affinity.
+# Clients echo this value back on reconnect so the load balancer can route
+# the resumed connection to the same replica when one is healthy.
+WS_SESSION_HEADER = "X-Telemetry-Session"
+WS_SESSION_COOKIE = "telemetry_session"
+
+
 @app.websocket("/ws/telemetry/{subscription_id}")
 async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str):
-    """WebSocket遥测数据流"""
+    """WebSocket遥测数据流.
+
+    On accept, the server emits an `X-Telemetry-Session` value (via the
+    initial JSON frame and a `Set-Cookie` header in the upgrade response)
+    that the client should echo on reconnect for sticky-session affinity.
+    The frame also includes the current resume cursor so a reconnect to a
+    different replica can pick up where the previous connection left off.
+    """
     websocket_id = None
     try:
         connect_token = websocket.query_params.get("token", "")
@@ -1129,7 +1160,19 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
             subscription_id, connect_token
         )
         websocket_id = session["websocket_id"]
-        await websocket.accept()
+        session_id = session.get("session_id") or ""
+        # Set sticky-session cookie on the WebSocket upgrade response. Most
+        # ingress controllers (NGINX, Traefik, APISIX) honour cookies set on
+        # the upgrade response for subsequent affinity decisions.
+        cookie_header = (
+            f"{WS_SESSION_COOKIE}={session_id}; Path=/; HttpOnly; SameSite=Lax"
+        )
+        await websocket.accept(
+            headers=[
+                (b"set-cookie", cookie_header.encode("utf-8")),
+                (WS_SESSION_HEADER.lower().encode("ascii"), session_id.encode("utf-8")),
+            ]
+        )
         await microservice.service.register_realtime_websocket(
             subscription_id, websocket_id, websocket
         )
@@ -1140,6 +1183,9 @@ async def websocket_telemetry_stream(websocket: WebSocket, subscription_id: str)
                 "websocket_id": websocket_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "connection_expires_at": session.get("connection_expires_at"),
+                "session_id": session_id,
+                "cursor": session.get("cursor"),
+                "retry_after": WS_RETRY_AFTER_SECONDS,
             }
         )
 

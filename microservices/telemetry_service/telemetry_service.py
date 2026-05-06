@@ -703,7 +703,13 @@ class TelemetryService:
     async def prepare_realtime_websocket(
         self, subscription_id: str, connect_token: str
     ) -> Dict[str, Any]:
-        """Validate a websocket connect token and bind the durable subscription."""
+        """Validate a websocket connect token and bind the durable subscription.
+
+        Returns enough state to allow the new connection to resume from the
+        cursor of the prior connection (replica handoff support). The cursor
+        is reconstructed solely from `subscription_id`, so a different replica
+        can pick up where the previous one left off.
+        """
         subscription = await self.repository.get_real_time_subscription(subscription_id)
         if not subscription or not subscription.get("active", True):
             raise RealtimeSubscriptionNotFoundError("Subscription not found")
@@ -734,11 +740,51 @@ class TelemetryService:
         if not bound:
             raise RealtimeSubscriptionNotFoundError("Subscription could not be bound")
 
+        # Reconstruct the cursor from durable subscription state so a new
+        # connection — even on a different replica — resumes from the last
+        # acknowledged delivery rather than restarting the stream.
+        cursor = self._build_subscription_cursor(subscription)
+        # Issue a fresh session token for ingress/load-balancer affinity. The
+        # client echoes this back via the `X-Telemetry-Session` header (or the
+        # `telemetry_session` cookie) on reconnect, allowing the LB to keep
+        # routing to the same replica when one is healthy.
+        session_id = self._build_session_id(subscription_id, websocket_id)
+
         return {
             "subscription_id": subscription_id,
             "websocket_id": websocket_id,
             "user_id": subscription.get("user_id"),
             "connection_expires_at": connection_expires_at.isoformat(),
+            "session_id": session_id,
+            "cursor": cursor,
+        }
+
+    @staticmethod
+    def _build_session_id(subscription_id: str, websocket_id: str) -> str:
+        """Stable, opaque session identifier used for sticky-session routing."""
+        return f"{subscription_id}.{websocket_id}"
+
+    @staticmethod
+    def _build_subscription_cursor(
+        subscription: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build a resumable cursor from the durable subscription record.
+
+        Pure function over the persisted subscription row — no replica-local
+        state. The client passes this back on reconnect; the new server
+        resumes delivery from `last_event_at` (or the persisted `last_sent`).
+        """
+        metadata = subscription.get("metadata") or {}
+        last_delivery = (
+            metadata.get("last_delivery_at")
+            or subscription.get("last_sent")
+        )
+        if isinstance(last_delivery, datetime):
+            last_delivery = last_delivery.astimezone(timezone.utc).isoformat()
+        return {
+            "subscription_id": subscription.get("subscription_id"),
+            "last_event_at": last_delivery,
+            "sequence_number": metadata.get("last_sequence_number"),
         }
 
     async def register_realtime_websocket(
@@ -763,6 +809,58 @@ class TelemetryService:
         self.realtime_heartbeat_tasks[subscription_id] = asyncio.create_task(
             self._heartbeat_realtime_connection(subscription_id, websocket_id)
         )
+
+    async def drain_realtime_websockets(
+        self,
+        retry_after_seconds: int = 5,
+        close_code: int = 1001,
+    ) -> int:
+        """Close all live WS connections with `going away` semantics.
+
+        Used by the graceful shutdown sequence: signals every connected
+        client to reconnect via Consul SRV after `retry_after_seconds`. The
+        durable subscription state is left intact so the resumed connection
+        (possibly on a different replica) can pick up from the cursor.
+
+        Returns the number of sockets that were drained.
+        """
+        if not self.realtime_connections:
+            return 0
+
+        # Snapshot the dict before iteration; unregister mutates it.
+        items = list(self.realtime_connections.items())
+        drained = 0
+        reason = f"going away; retry-after={retry_after_seconds}"
+        for subscription_id, websocket in items:
+            websocket_id = self.realtime_connection_ids.get(subscription_id)
+            try:
+                if hasattr(websocket, "close"):
+                    await websocket.close(code=close_code, reason=reason)
+                drained += 1
+            except Exception as exc:
+                logger.debug(
+                    "Failed to close ws for %s during drain: %s",
+                    subscription_id,
+                    exc,
+                )
+            try:
+                if websocket_id:
+                    await self.unregister_realtime_websocket(
+                        subscription_id, websocket_id
+                    )
+            except Exception as exc:
+                logger.debug(
+                    "Failed to unregister ws %s/%s during drain: %s",
+                    subscription_id,
+                    websocket_id,
+                    exc,
+                )
+        logger.info(
+            "Telemetry realtime drain complete: %s socket(s) closed with code=%s",
+            drained,
+            close_code,
+        )
+        return drained
 
     async def unregister_realtime_websocket(
         self, subscription_id: str, websocket_id: str

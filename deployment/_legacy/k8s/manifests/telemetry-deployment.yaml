@@ -63,8 +63,24 @@ metadata:
   namespace: isa-cloud-staging
   labels:
     app: telemetry
+  annotations:
+    # Sticky-session strategy is implemented at the Service layer using
+    # ClientIP affinity. This keeps long-lived `/ws/telemetry/{id}` streams
+    # pinned to the same replica during the connection lifetime, complementing
+    # the cookie/header (`X-Telemetry-Session`) emitted by the application.
+    # If an ingress controller (NGINX, APISIX, Traefik) fronts this service,
+    # prefer its cookie-affinity setting and remove this Service-level config
+    # to avoid double-stickiness — see microservices/telemetry_service/main.py.
+    isa.platform/affinity-strategy: "service-clientip"
 spec:
   type: ClusterIP
+  # Pin a client to a replica for the connection lifetime + 3h idle window.
+  # 10800s matches the longest realistic subscription_ttl (24h cap) divided
+  # by the average reconnect cadence; tune if HPA scale events show drift.
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
   ports:
   - port: 8225
     targetPort: 8225
