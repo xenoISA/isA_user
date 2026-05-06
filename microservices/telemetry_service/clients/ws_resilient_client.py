@@ -90,7 +90,7 @@ def compute_backoff_delay(
     """
     if attempt < 0:
         raise ValueError("attempt must be >= 0")
-    raw = base_seconds * (2 ** attempt)
+    raw = base_seconds * (2**attempt)
     capped = min(raw, max_seconds)
     if jitter <= 0:
         return capped
@@ -151,9 +151,7 @@ class ResilientTelemetryWebSocket:
     scheme: str = "ws"
     max_backoff_seconds: float = 30.0
     base_backoff_seconds: float = 0.5
-    websocket_factory: Optional[
-        Callable[[str], Awaitable[Any]]
-    ] = None
+    websocket_factory: Optional[Callable[[str], Awaitable[Any]]] = None
     sleeper: Callable[[float], Awaitable[None]] = field(
         default_factory=lambda: asyncio.sleep
     )
@@ -197,9 +195,7 @@ class ResilientTelemetryWebSocket:
             try:
                 raw = await self._socket.recv()
             except Exception as exc:
-                logger.info(
-                    "Telemetry WS recv error: %s; reconnecting", exc
-                )
+                logger.info("Telemetry WS recv error: %s; reconnecting", exc)
                 await self._handle_disconnect(WS_CODE_GOING_AWAY)
                 continue
 
@@ -244,9 +240,7 @@ class ResilientTelemetryWebSocket:
                 continue
 
         # All replicas failed: schedule a backed-off retry.
-        await self._handle_disconnect(
-            WS_CODE_GOING_AWAY, error=last_error
-        )
+        await self._handle_disconnect(WS_CODE_GOING_AWAY, error=last_error)
 
     async def _handle_disconnect(
         self, close_code: int, *, error: Optional[Exception] = None

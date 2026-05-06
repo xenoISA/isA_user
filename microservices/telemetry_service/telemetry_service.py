@@ -775,9 +775,8 @@ class TelemetryService:
         resumes delivery from `last_event_at` (or the persisted `last_sent`).
         """
         metadata = subscription.get("metadata") or {}
-        last_delivery = (
-            metadata.get("last_delivery_at")
-            or subscription.get("last_sent")
+        last_delivery = metadata.get("last_delivery_at") or subscription.get(
+            "last_sent"
         )
         if isinstance(last_delivery, datetime):
             last_delivery = last_delivery.astimezone(timezone.utc).isoformat()
