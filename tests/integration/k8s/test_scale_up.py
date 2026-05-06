@@ -82,6 +82,11 @@ PER_TEST_BUDGET = POSTGRES_MAX_CONNECTIONS - RESERVED_FOR_OPS
 pytestmark = [
     pytest.mark.k8s,
     pytest.mark.integration,
+    # End-to-end kind cluster + HPA scale + drain takes ~2min in CI; the
+    # default 30s pytest-timeout would kill the test before metrics-server
+    # even starts reporting. Allow up to 10 minutes — the workflow's
+    # job-level timeout is the real ceiling.
+    pytest.mark.timeout(600),
     # Default-skip unless someone has set up a cluster — this test is
     # heavyweight and not part of the normal pyramid run.
     pytest.mark.skipif(
