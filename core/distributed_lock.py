@@ -35,13 +35,35 @@ What this provides
 What this does NOT provide
 --------------------------
 * **Two-phase commit across DB + lock.** A handler that acquires the
-  lock, writes to its DB, then crashes before releasing the lock has
-  the same correctness as today: the DB row is committed and the lock
-  TTL eventually frees the key. Replays after the TTL will see the
-  cached result (if cache is reachable) or the DB-level idempotency
-  key (e.g. ``billing_repository.claim_event_processing``). Document
-  this for callers — same boundary as PR #357's revoke fail-closed
-  semantics.
+  lock, writes to its DB, then crashes between handler completion and
+  lock release has the same correctness as today: the DB row is
+  committed and the lock TTL eventually frees the key. **There is a
+  per-service asymmetry callers MUST understand:**
+
+  - ``billing_service`` has a DB-level second-line defence
+    (``billing_repository.claim_event_processing`` materialises a
+    durable claim row keyed by the event id). A crash + TTL-driven
+    replay re-runs the handler, but the DB claim short-circuits the
+    second pass before any duplicate billing.
+  - ``wallet_service`` and ``payment_service`` currently rely on the
+    distributed lock alone. If a worker crashes after the DB commit
+    but before the lock is released, NATS replay after the lock TTL
+    expires will re-cancel / re-refund / re-deposit. The window for
+    this is bounded by the lock TTL (default 120s; see
+    ``<SERVICE>_EVENT_LOCK_TTL_SECONDS``).
+
+  Operational implications:
+
+  - Keep lock TTL conservative — it is the dedupe window for those
+    two services until DB-level claims are added.
+  - Monitor ``event_lock_acquires_total`` for retry storms; sudden
+    growth past expected event rate is the leading indicator of
+    crash-and-replay duplicate processing.
+  - Adding a DB-level claim to ``wallet_service`` and
+    ``payment_service`` is tracked in issue #378 as a follow-up to
+    #348 (rather than expanding the scope of #348 itself).
+
+  Same boundary as PR #357's revoke fail-closed semantics.
 * **Redlock multi-master.** Single Redis is sufficient per the issue
   scope. If/when we move to Redis Sentinel, swap the client builder
   here without touching call sites.
@@ -365,7 +387,7 @@ class DistributedLock:
             LOCK_ERRORS.labels(service=self.service_label, operation=operation).inc()
             raise DistributedLockError(
                 f"distributed_lock({self.namespace}): Redis latch open; "
-                "refusing {operation} until recovery cooldown elapses"
+                f"refusing {operation} until recovery cooldown elapses"
             )
         recovered = await self._attempt_recovery(client)
         if not recovered:

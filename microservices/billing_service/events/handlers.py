@@ -492,10 +492,47 @@ async def handle_session_tokens_used(event: Event, billing_service, event_bus):
     Handle session.tokens_used event
     Record AI token usage for billing
 
-    Legacy handler - converts session events to usage records
+    Legacy handler - converts session events to usage records.
+
+    Wrapped in a distributed idempotency lock (#348) keyed by event.id
+    so HPA scale-out cannot let two replicas double-bill the same
+    session token-usage event.
     """
+    if is_event_processed(event.id):
+        logger.debug(f"Event {event.id} already processed, skipping")
+        return
+
     try:
-        # Check idempotency
+        async with _event_lock_guard("session_tokens_used", event.id) as outcome:
+            if outcome.is_cached:
+                mark_event_processed(event.id)
+                return
+            if outcome.token == "":
+                logger.info(
+                    "session.tokens_used %s contended on lock; another "
+                    "replica is processing",
+                    event.id,
+                )
+                return
+            await _process_session_tokens_used(
+                event, billing_service, event_bus, outcome
+            )
+    except DistributedLockError as exc:
+        logger.error(
+            "session.tokens_used %s aborted: distributed lock unavailable: %s",
+            event.id,
+            exc,
+        )
+    except LockContended:
+        logger.info("session.tokens_used %s contended; will retry", event.id)
+    except Exception as e:
+        logger.error(f"❌ Failed to handle session.tokens_used event {event.id}: {e}")
+
+
+async def _process_session_tokens_used(event, billing_service, event_bus, outcome):
+    """Inner body of handle_session_tokens_used — runs under the distributed lock."""
+    try:
+        # Re-check idempotency under the lock (covers same-replica retries).
         if is_event_processed(event.id):
             logger.debug(f"Event {event.id} already processed, skipping")
             return
@@ -541,6 +578,13 @@ async def handle_session_tokens_used(event: Event, billing_service, event_bus):
         mark_event_processed(event.id)
 
         if result.success:
+            outcome.set_result(
+                {
+                    "status": "billed",
+                    "user_id": user_id,
+                    "tokens_used": tokens_used,
+                }
+            )
             logger.info(
                 f"✅ Recorded {tokens_used} tokens for user {user_id} (event: {event.id})"
             )
@@ -550,7 +594,8 @@ async def handle_session_tokens_used(event: Event, billing_service, event_bus):
             )
 
     except Exception as e:
-        logger.error(f"❌ Failed to handle session.tokens_used event {event.id}: {e}")
+        logger.error(f"❌ Error processing session.tokens_used event {event.id}: {e}")
+        raise
 
 
 async def handle_order_completed(event: Event, billing_service, event_bus):
@@ -558,10 +603,45 @@ async def handle_order_completed(event: Event, billing_service, event_bus):
     Handle order.completed event
     Record revenue from completed orders
 
-    Legacy handler - tracks order revenue
+    Legacy handler - tracks order revenue.
+
+    Wrapped in a distributed idempotency lock (#348) keyed by event.id
+    so HPA scale-out cannot let two replicas double-record revenue
+    for the same completed order.
     """
+    if is_event_processed(event.id):
+        logger.debug(f"Event {event.id} already processed, skipping")
+        return
+
     try:
-        # Check idempotency
+        async with _event_lock_guard("order_completed", event.id) as outcome:
+            if outcome.is_cached:
+                mark_event_processed(event.id)
+                return
+            if outcome.token == "":
+                logger.info(
+                    "order.completed %s contended on lock; another replica "
+                    "is processing",
+                    event.id,
+                )
+                return
+            await _process_order_completed(event, billing_service, event_bus, outcome)
+    except DistributedLockError as exc:
+        logger.error(
+            "order.completed %s aborted: distributed lock unavailable: %s",
+            event.id,
+            exc,
+        )
+    except LockContended:
+        logger.info("order.completed %s contended; will retry", event.id)
+    except Exception as e:
+        logger.error(f"❌ Failed to handle order.completed event {event.id}: {e}")
+
+
+async def _process_order_completed(event, billing_service, event_bus, outcome):
+    """Inner body of handle_order_completed — runs under the distributed lock."""
+    try:
+        # Re-check idempotency under the lock (covers same-replica retries).
         if is_event_processed(event.id):
             logger.debug(f"Event {event.id} already processed, skipping")
             return
@@ -606,6 +686,14 @@ async def handle_order_completed(event: Event, billing_service, event_bus):
         mark_event_processed(event.id)
 
         if result.success:
+            outcome.set_result(
+                {
+                    "status": "billed",
+                    "order_id": order_id,
+                    "user_id": user_id,
+                    "total_amount": str(total_amount),
+                }
+            )
             logger.info(
                 f"✅ Recorded order revenue ${total_amount} for user {user_id} "
                 f"(order: {order_id}, event: {event.id})"
@@ -616,7 +704,8 @@ async def handle_order_completed(event: Event, billing_service, event_bus):
             )
 
     except Exception as e:
-        logger.error(f"❌ Failed to handle order.completed event {event.id}: {e}")
+        logger.error(f"❌ Error processing order.completed event {event.id}: {e}")
+        raise
 
 
 async def handle_session_ended(event: Event, billing_service, event_bus):
@@ -671,13 +760,50 @@ async def handle_user_deleted(event: Event, billing_service, event_bus):
     - Mark user's billing history as from deleted account
     - Cancel any active subscriptions
 
+    Wrapped in a distributed idempotency lock (#348) keyed by event.id
+    so HPA scale-out cannot let two replicas double-finalise / double-
+    cancel for the same deleted user.
+
     Args:
         event: Event object
         billing_service: BillingService instance
         event_bus: Event bus instance
     """
+    if is_event_processed(event.id):
+        logger.debug(f"Event {event.id} already processed, skipping")
+        return
+
     try:
-        # Check idempotency
+        async with _event_lock_guard("user_deleted_billing", event.id) as outcome:
+            if outcome.is_cached:
+                mark_event_processed(event.id)
+                return
+            if outcome.token == "":
+                logger.info(
+                    "user.deleted (billing) %s contended on lock; another "
+                    "replica is processing",
+                    event.id,
+                )
+                return
+            await _process_user_deleted_billing(
+                event, billing_service, event_bus, outcome
+            )
+    except DistributedLockError as exc:
+        logger.error(
+            "user.deleted (billing) %s aborted: distributed lock unavailable: %s",
+            event.id,
+            exc,
+        )
+    except LockContended:
+        logger.info("user.deleted (billing) %s contended; will retry", event.id)
+    except Exception as e:
+        logger.error(f"❌ Failed to handle user.deleted event {event.id}: {e}")
+
+
+async def _process_user_deleted_billing(event, billing_service, event_bus, outcome):
+    """Inner body of handle_user_deleted — runs under the distributed lock."""
+    try:
+        # Re-check idempotency under the lock (covers same-replica retries).
         if is_event_processed(event.id):
             logger.debug(f"Event {event.id} already processed, skipping")
             return
@@ -709,10 +835,17 @@ async def handle_user_deleted(event: Event, billing_service, event_bus):
         # Mark as processed
         mark_event_processed(event.id)
 
+        outcome.set_result(
+            {
+                "status": "user_billing_finalised",
+                "user_id": user_id,
+            }
+        )
         logger.info(f"Successfully handled user.deleted event for user {user_id}")
 
     except Exception as e:
-        logger.error(f"❌ Failed to handle user.deleted event {event.id}: {e}")
+        logger.error(f"❌ Error processing user.deleted event {event.id}: {e}")
+        raise
 
 
 def get_event_handlers(billing_service, event_bus):

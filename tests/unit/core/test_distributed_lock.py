@@ -131,14 +131,13 @@ async def test_lock_ttl_set_via_setnx_ex():
 
 
 async def test_lock_auto_releases_after_ttl():
-    """After TTL fakeredis would tick the key out — simulate by deleting."""
-    fake = _make_fake()
-    lock_a = DistributedLock("wallet_service", client=fake)
-    fake_b = fakeredis.aioredis.FakeRedis(
-        server=fake.connection_pool.get_connection.__self__.server if False else None,
-        decode_responses=False,
-    )  # noqa: E501
-    # Simpler: shared server pair.
+    """After TTL fakeredis would tick the key out — simulate by deleting.
+
+    fakeredis does not advance wall-clock time on its own, so we model
+    TTL-driven expiry by explicitly deleting the underlying key and
+    asserting that a second client can then acquire. ``test_lock_ttl_set_via_setnx_ex``
+    above covers the TTL value being honoured at SET time.
+    """
     a, b = _make_shared_pair()
     lock_a = DistributedLock("wallet_service", client=a)
     lock_b = DistributedLock("wallet_service", client=b)
