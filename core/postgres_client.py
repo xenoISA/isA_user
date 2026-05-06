@@ -12,11 +12,24 @@ not exhaust the per-pod pool:
     max_pool_size = max(POOL_FLOOR,
                         DB_POOL_BASE + (POD_REPLICA_COUNT - 1) * DB_POOL_GROWTH)
 
-Defaults: base=5, growth=3, floor=5. With 1 replica → 5 connections per pod;
-with 10 replicas → 5 + 9*3 = 32 per pod. Operators are expected to size
-Postgres `max_connections` accordingly (capacity-planning is tracked
-separately, see epic #345). Callers may still override via constructor args
-or the legacy `PG_MIN_POOL_SIZE` / `PG_MAX_POOL_SIZE` env vars.
+Defaults: base=2, growth=1, floor=5. With 1 replica → 5 connections per pod
+(floor); with 10 replicas → max(5, 2 + 9*1) = 11 per pod.
+
+Cross-service connection budget
+-------------------------------
+isA's user platform runs ~35 microservices. Each pod opens its own pool, so
+the per-Postgres connection cost is ``services * replicas * max_pool_size``.
+The defaults above were chosen to stay close to the (conservative) shared
+budget at ``replicas=2`` (~280 connections) while still letting individual
+services grow under HPA load. Before raising ``DB_POOL_BASE`` /
+``DB_POOL_GROWTH`` or pushing ``replicas`` past the values in the chart,
+verify the Postgres ``max_connections`` ceiling — Postgres defaults to 100
+and our cluster has historically run close to that ceiling. The capacity
+plan (PgBouncer fronting + Postgres ``max_connections`` raise) is tracked
+in `docs/runbooks/hpa-capacity.md` (pending — see issue #353) and the
+follow-up infra issue linked from PR #358. Operators may override via
+constructor args or the legacy ``PG_MIN_POOL_SIZE`` / ``PG_MAX_POOL_SIZE``
+env vars while that work lands.
 
 Pool utilization metrics (`pg_pool_in_use`, `pg_pool_idle`, `pg_pool_waiters`)
 are exported via the standard isa_common metrics registry, scraped by
@@ -88,9 +101,13 @@ def compute_pool_size(
     if replica_count is None:
         replica_count = _read_int_env("POD_REPLICA_COUNT", 1)
     if base is None:
-        base = _read_int_env("DB_POOL_BASE", 5)
+        # Default lowered from 5 → 2 to stay within the cross-service Postgres
+        # connection budget (~35 services, ~100 max_connections). See module
+        # docstring and the tracking issue referenced in PR #358.
+        base = _read_int_env("DB_POOL_BASE", 2)
     if growth is None:
-        growth = _read_int_env("DB_POOL_GROWTH", 3)
+        # Default lowered from 3 → 1 for the same reason.
+        growth = _read_int_env("DB_POOL_GROWTH", 1)
 
     # Negative inputs are nonsensical; clamp to 1 replica / 0 growth so the
     # formula degenerates to ``max(floor, base)`` instead of going negative.

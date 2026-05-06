@@ -52,8 +52,11 @@ autoscaling:
 # expose live HPA replica count to pods). Re-roll the deployment to pick
 # up an updated count.
 database:
-  poolBase: 5
-  poolGrowth: 3
+  # Conservative defaults for cross-service connection budget; see
+  # core/postgres_client.py module docstring and the tracking issue
+  # referenced in PR #358 for the capacity-bump plan.
+  poolBase: 2
+  poolGrowth: 1
 
 health:
   path: /health
@@ -162,9 +165,9 @@ env:
   - name: POD_REPLICA_COUNT
     value: "2"
   - name: DB_POOL_BASE
-    value: "5"
+    value: "2"
   - name: DB_POOL_GROWTH
-    value: "3"
+    value: "1"
 
   # --- Redis (native - 6379) ---
   - name: REDIS_HOST

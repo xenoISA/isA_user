@@ -40,8 +40,10 @@ autoscaling:
 # See values-production.yaml for the full formula. Staging keeps modest
 # defaults to mirror prod behaviour during scale-out testing.
 database:
-  poolBase: 5
-  poolGrowth: 3
+  # Conservative defaults to mirror prod cross-service connection budget;
+  # see core/postgres_client.py module docstring.
+  poolBase: 2
+  poolGrowth: 1
 
 health:
   path: /health
@@ -136,9 +138,9 @@ env:
   - name: POD_REPLICA_COUNT
     value: "1"
   - name: DB_POOL_BASE
-    value: "5"
+    value: "2"
   - name: DB_POOL_GROWTH
-    value: "3"
+    value: "1"
 
   # --- Redis (native - 6379) ---
   - name: REDIS_HOST

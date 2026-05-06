@@ -37,11 +37,15 @@ consul:
 # Database pool sizing defaults (epic #345 / story #346).
 # Per-pod Postgres pool size scales with replica count:
 #   max_pool_size = max(5, poolBase + (POD_REPLICA_COUNT - 1) * poolGrowth)
+# Conservative defaults (base=2, growth=1) keep the cross-service connection
+# budget plausible for ~35 microservices on a shared Postgres while the
+# capacity plan (PgBouncer + max_connections raise) lands — see the tracking
+# issue referenced in PR #358 and docs/runbooks/hpa-capacity.md (pending).
 # Override per env via values-{staging,production}.yaml. Each environment
 # also injects POD_REPLICA_COUNT, DB_POOL_BASE, DB_POOL_GROWTH env vars.
 database:
-  poolBase: 5
-  poolGrowth: 3
+  poolBase: 2
+  poolGrowth: 1
 
 # =============================================================================
 # Pre-deploy Migration Job (issue #349, epic #345)

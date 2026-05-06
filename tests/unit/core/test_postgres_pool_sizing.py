@@ -24,8 +24,9 @@ from core.postgres_client import (
 
 
 class TestComputePoolSize:
-    """The formula ``max(floor, base + (replicas - 1) * growth)`` (defaults
-    base=5, growth=3, floor=5)."""
+    """The formula ``max(floor, base + (replicas - 1) * growth)`` (conservative
+    defaults base=2, growth=1, floor=5; capacity bump tracked separately —
+    see PR #358 tracking issue)."""
 
     def test_single_replica_returns_floor(self):
         assert compute_pool_size(replica_count=1, base=5, growth=3) == 5
@@ -35,8 +36,9 @@ class TestComputePoolSize:
         assert compute_pool_size(replica_count=2, base=5, growth=3) == 8
 
     def test_ten_replicas_matches_acceptance_criterion(self):
-        # Story #346 AC: "10 replicas: per-instance pool >= 8"
-        # 5 + (10-1)*3 = 32 — well above 8.
+        # Story #346 AC: "10 replicas: per-instance pool >= 8".
+        # With explicit base=5/growth=3 → 32 (legacy/aspirational sizing
+        # available once max_connections is raised).
         assert compute_pool_size(replica_count=10, base=5, growth=3) == 32
 
     def test_floor_respected_when_base_is_small(self):
@@ -64,13 +66,13 @@ class TestComputePoolSizeFromEnv:
         yield
 
     def test_defaults_when_unset(self):
-        # 1 replica, base=5, growth=3 -> 5
+        # 1 replica, defaults base=2, growth=1 → max(floor=5, 2) = 5
         assert compute_pool_size() == 5
 
     def test_reads_pod_replica_count(self, monkeypatch):
         monkeypatch.setenv("POD_REPLICA_COUNT", "4")
-        # 5 + 3*3 = 14
-        assert compute_pool_size() == 14
+        # max(5, 2 + 3*1) = max(5, 5) = 5
+        assert compute_pool_size() == 5
 
     def test_reads_db_pool_base_and_growth(self, monkeypatch):
         monkeypatch.setenv("POD_REPLICA_COUNT", "5")
@@ -84,8 +86,9 @@ class TestComputePoolSizeFromEnv:
         # Falls back to default 1 -> floor of 5
         assert compute_pool_size() == 5
 
-    def test_growth_is_strictly_positive_per_replica(self, monkeypatch):
-        # Acceptance: 10 replicas should yield a pool >= 8 (story #346)
+    def test_growth_at_high_replicas_meets_floor(self, monkeypatch):
+        # Conservative defaults (base=2, growth=1, floor=5): 10 replicas yields
+        # max(5, 2 + 9*1) = 11 — above the floor and the story #346 AC of >= 8.
         monkeypatch.setenv("POD_REPLICA_COUNT", "10")
         assert compute_pool_size() >= 8
 
@@ -123,9 +126,10 @@ class TestResolvePoolSizes:
 
     def test_replica_formula_used_by_default(self, monkeypatch):
         monkeypatch.setenv("POD_REPLICA_COUNT", "3")
-        # 5 + 2*3 = 11
+        # Conservative defaults (base=2, growth=1, floor=5):
+        # max(5, 2 + 2*1) = max(5, 4) = 5
         min_size, max_size = _resolve_pool_sizes(None, None)
-        assert max_size == 11
+        assert max_size == 5
         # Default min: 2 when max >= 4
         assert min_size == 2
 
@@ -183,12 +187,13 @@ class TestPostgresClientWrapperPoolSizing:
     def test_default_uses_replica_formula(self, _stub_async_client, monkeypatch):
         monkeypatch.setenv("POD_REPLICA_COUNT", "4")
         wrapper = PostgresClientWrapper(service_name="test_service")
-        # 5 + 3*3 = 14
-        assert wrapper.max_pool_size == 14
+        # Conservative defaults (base=2, growth=1, floor=5):
+        # max(5, 2 + 3*1) = max(5, 5) = 5
+        assert wrapper.max_pool_size == 5
         assert wrapper.min_pool_size == 2  # default min when max >= 4
         kwargs = _stub_async_client.call_args.kwargs
         assert kwargs["min_pool_size"] == 2
-        assert kwargs["max_pool_size"] == 14
+        assert kwargs["max_pool_size"] == 5
 
     def test_explicit_override_wins(self, _stub_async_client, monkeypatch):
         monkeypatch.setenv("POD_REPLICA_COUNT", "10")
