@@ -38,6 +38,77 @@ autoscaling:
   targetCPUUtilization: 70
   targetMemoryUtilization: 80
 
+# =============================================================================
+# HorizontalPodAutoscaler — KEDA ScaledObjects (issue #352, epic #345)
+# =============================================================================
+# PRODUCTION rolls out KEDA-driven custom metrics. Prerequisite: the cluster
+# operator must install the KEDA controller before this Helm release is
+# upgraded with `hpa.enabled=true`:
+#
+#   helm repo add kedacore https://kedacore.github.io/charts
+#   helm install keda kedacore/keda -n keda --create-namespace
+#
+# See docs/runbooks/hpa-metrics.md and
+# docs/adr/0001-hpa-custom-metrics-tooling.md for tier rationale and
+# threshold-tuning playbook.
+# =============================================================================
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  pollingInterval: 30
+  cooldownPeriod: 300
+  scaleDownStabilization: 300
+  fallbackCPUUtilization: 70
+  fallbackMemoryUtilization: 80
+  tiers:
+    default:
+      triggers: []
+    event:
+      # NATS JetStream backlog — primary signal for wallet/billing/payment.
+      # `lagThreshold` is the per-replica pending-message ceiling: KEDA scales
+      # up once the consumer's backlog exceeds N * lagThreshold. Tune per
+      # service in the per-service `hpa.triggers` override below.
+      triggers:
+        - type: nats-jetstream
+          metricType: AverageValue
+          metadata:
+            natsServerMonitoringEndpoint: "nats.isa-cloud-prod.svc.cluster.local:8222"
+            account: "$G"
+            stream: "isa-events"
+            consumer: "isa-user-consumer"
+            lagThreshold: "100"
+            useHttps: "false"
+    auth:
+      # p95 request latency from the shared isA_Common HTTP histogram. Scales
+      # up when p95 >= threshold seconds; auth/account/authorization tail-spike
+      # long before CPU saturates because the bottleneck is downstream
+      # Postgres/Redis fan-out. The `__SVC__` placeholder is interpolated by
+      # the per-service override below — leaving it unsubstituted at the tier
+      # level matches every service and is intentional as a safe default.
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-prod.svc.cluster.local:9090"
+            metricName: "isa_user_request_latency_p95_seconds"
+            threshold: "0.5"
+            query: |
+              histogram_quantile(0.95,
+                sum(rate(isa_user_http_request_duration_seconds_bucket[2m])) by (le))
+    telemetry:
+      # WebSocket connection count from the telemetry exporter. Scales up at
+      # ~500 active sockets per replica to keep fan-out broadcast cheap.
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-prod.svc.cluster.local:9090"
+            metricName: "isa_user_websocket_active_connections"
+            threshold: "500"
+            query: |
+              sum(isa_user_websocket_active_connections)
+
 health:
   path: /health
   initialDelaySeconds: 60
@@ -204,10 +275,36 @@ services:
     name: user-auth-service
     repository: isa/user-auth
     port: 8201
+    hpa:
+      tier: auth
+      # Per-service threshold override: auth has the tightest SLA — page on
+      # p95 > 300ms, scale up at 250ms.
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-prod.svc.cluster.local:9090"
+            metricName: "isa_user_auth_request_latency_p95_seconds"
+            threshold: "0.25"
+            query: |
+              histogram_quantile(0.95,
+                sum(rate(isa_user_http_request_duration_seconds_bucket{service="user-auth-service"}[2m])) by (le))
   account:
     name: user-account-service
     repository: isa/user-account
     port: 8202
+    hpa:
+      tier: auth
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-prod.svc.cluster.local:9090"
+            metricName: "isa_user_account_request_latency_p95_seconds"
+            threshold: "0.4"
+            query: |
+              histogram_quantile(0.95,
+                sum(rate(isa_user_http_request_duration_seconds_bucket{service="user-account-service"}[2m])) by (le))
   session:
     name: user-session-service
     repository: isa/user-session
@@ -216,6 +313,18 @@ services:
     name: user-authorization-service
     repository: isa/user-authorization
     port: 8204
+    hpa:
+      tier: auth
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-prod.svc.cluster.local:9090"
+            metricName: "isa_user_authorization_request_latency_p95_seconds"
+            threshold: "0.25"
+            query: |
+              histogram_quantile(0.95,
+                sum(rate(isa_user_http_request_duration_seconds_bucket{service="user-authorization-service"}[2m])) by (le))
   audit:
     name: user-audit-service
     repository: isa/user-audit
@@ -228,10 +337,36 @@ services:
     name: user-payment-service
     repository: isa/user-payment
     port: 8207
+    hpa:
+      tier: event
+      maxReplicas: 15
+      triggers:
+        - type: nats-jetstream
+          metricType: AverageValue
+          metadata:
+            natsServerMonitoringEndpoint: "nats.isa-cloud-prod.svc.cluster.local:8222"
+            account: "$G"
+            stream: "isa-events"
+            consumer: "user-payment-service"
+            lagThreshold: "50"
+            useHttps: "false"
   wallet:
     name: user-wallet-service
     repository: isa/user-wallet
     port: 8208
+    hpa:
+      tier: event
+      maxReplicas: 15
+      triggers:
+        - type: nats-jetstream
+          metricType: AverageValue
+          metadata:
+            natsServerMonitoringEndpoint: "nats.isa-cloud-prod.svc.cluster.local:8222"
+            account: "$G"
+            stream: "isa-events"
+            consumer: "user-wallet-service"
+            lagThreshold: "100"
+            useHttps: "false"
   storage:
     name: user-storage-service
     repository: isa/user-storage
@@ -264,6 +399,18 @@ services:
     name: user-billing-service
     repository: isa/user-billing
     port: 8216
+    hpa:
+      tier: event
+      triggers:
+        - type: nats-jetstream
+          metricType: AverageValue
+          metadata:
+            natsServerMonitoringEndpoint: "nats.isa-cloud-prod.svc.cluster.local:8222"
+            account: "$G"
+            stream: "isa-events"
+            consumer: "user-billing-service"
+            lagThreshold: "100"
+            useHttps: "false"
   calendar:
     name: user-calendar-service
     repository: isa/user-calendar
@@ -300,6 +447,22 @@ services:
     name: user-telemetry-service
     repository: isa/user-telemetry
     port: 8225
+    hpa:
+      tier: telemetry
+      # NOTE: requires `isa_user_websocket_active_connections` Prometheus
+      # gauge exported from telemetry_service. If the exporter is missing
+      # at deploy time the trigger will fall through to the CPU/memory
+      # fallback ceilings — file a follow-up issue rather than scaling on
+      # CPU alone (#352 explicitly calls this out).
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-prod.svc.cluster.local:9090"
+            metricName: "isa_user_telemetry_active_connections"
+            threshold: "500"
+            query: |
+              sum(isa_user_websocket_active_connections{service="user-telemetry-service"})
   compliance:
     name: user-compliance-service
     repository: isa/user-compliance

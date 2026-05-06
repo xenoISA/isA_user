@@ -81,6 +81,85 @@ migrationJob:
   extraEnv: []
 
 # =============================================================================
+# HorizontalPodAutoscaler — KEDA ScaledObjects (issue #352, epic #345)
+# =============================================================================
+# This block configures the per-service KEDA ScaledObject rendered by
+# `templates/hpa.yaml`. KEDA itself is NOT installed by this chart — the
+# cluster operator must run `helm install keda kedacore/keda -n keda
+# --create-namespace` before `hpa.enabled=true` is rolled out. See
+# docs/runbooks/hpa-metrics.md and docs/adr/0001-hpa-custom-metrics-tooling.md.
+#
+# Tier-based defaults map a service-class onto a trigger preset:
+#   * `event`     — NATS JetStream queue depth (wallet/billing/payment)
+#   * `auth`      — Prometheus p95 request latency (auth/account/authorization)
+#   * `telemetry` — Prometheus WebSocket connection count or msg rate
+#   * `default`   — CPU/memory only (every other service)
+#
+# Each ScaledObject ALWAYS includes the CPU+memory fallback triggers, so a
+# stuck custom-metric collector still scales on raw load.
+#
+# Override examples:
+#   services.wallet.hpa.tier: event           # change preset
+#   services.payment.hpa.maxReplicas: 20       # raise ceiling
+#   services.auth.hpa.triggers: [...]          # custom inline trigger list
+#   services.notification.hpa.enabled: false   # opt out a single service
+# =============================================================================
+hpa:
+  # Disabled by default at chart level. values-staging.yaml leaves this off;
+  # values-production.yaml flips it on.
+  enabled: false
+  # Chart-wide defaults — per-service overrides win.
+  minReplicas: 2
+  maxReplicas: 10
+  # KEDA polling cadence and cool-down. 30s polling matches our Prometheus
+  # scrape interval; 300s cooldown keeps scale-down from oscillating during
+  # short post-burst lulls.
+  pollingInterval: 30
+  cooldownPeriod: 300
+  scaleDownStabilization: 300
+  # Fallback ceilings — applied in addition to any custom trigger.
+  fallbackCPUUtilization: 70
+  fallbackMemoryUtilization: 80
+  # Tier presets. Override a service's tier via `services.<name>.hpa.tier`.
+  # `metadata.serverAddress` / `metadata.value` reference cluster-internal DNS
+  # — values-{staging,production}.yaml override host strings as needed.
+  tiers:
+    default:
+      triggers: []
+    event:
+      triggers:
+        - type: nats-jetstream
+          metricType: AverageValue
+          metadata:
+            natsServerMonitoringEndpoint: "nats.isa-cloud-prod.svc.cluster.local:8222"
+            account: "$G"
+            stream: "isa-events"
+            consumer: "isa-user-consumer"
+            lagThreshold: "100"
+            useHttps: "false"
+    auth:
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-prod.svc.cluster.local:9090"
+            metricName: "isa_user_request_latency_p95_seconds"
+            threshold: "0.5"
+            query: |
+              histogram_quantile(0.95,
+                sum(rate(isa_user_http_request_duration_seconds_bucket{service="__SVC__"}[2m])) by (le))
+    telemetry:
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-prod.svc.cluster.local:9090"
+            metricName: "isa_user_websocket_active_connections"
+            threshold: "500"
+            query: |
+              sum(isa_user_websocket_active_connections{service="__SVC__"})
+
+# =============================================================================
 # Microservices Configuration
 # =============================================================================
 services:
@@ -88,10 +167,14 @@ services:
     name: user-auth-service
     repository: isa/user-auth
     port: 8201
+    hpa:
+      tier: auth
   account:
     name: user-account-service
     repository: isa/user-account
     port: 8202
+    hpa:
+      tier: auth
   session:
     name: user-session-service
     repository: isa/user-session
@@ -100,6 +183,8 @@ services:
     name: user-authorization-service
     repository: isa/user-authorization
     port: 8204
+    hpa:
+      tier: auth
   audit:
     name: user-audit-service
     repository: isa/user-audit
@@ -112,10 +197,14 @@ services:
     name: user-payment-service
     repository: isa/user-payment
     port: 8207
+    hpa:
+      tier: event
   wallet:
     name: user-wallet-service
     repository: isa/user-wallet
     port: 8208
+    hpa:
+      tier: event
   storage:
     name: user-storage-service
     repository: isa/user-storage
@@ -148,6 +237,8 @@ services:
     name: user-billing-service
     repository: isa/user-billing
     port: 8216
+    hpa:
+      tier: event
   calendar:
     name: user-calendar-service
     repository: isa/user-calendar
@@ -184,6 +275,8 @@ services:
     name: user-telemetry-service
     repository: isa/user-telemetry
     port: 8225
+    hpa:
+      tier: telemetry
   compliance:
     name: user-compliance-service
     repository: isa/user-compliance

@@ -1,0 +1,110 @@
+{{- /*
+  Per-service KEDA ScaledObject (issue #352, parent epic #345).
+
+  Renders one ScaledObject per entry in `.Values.services` whose
+  `hpa.enabled` is true (or — when the per-service block is absent — when the
+  global `.Values.hpa.enabled` is true). KEDA synthesises the underlying
+  HorizontalPodAutoscaler from each ScaledObject; CPU/memory triggers remain
+  as fallback ceilings even on services whose primary signal is queue depth
+  or p95 latency.
+
+  This template is **opt-in**: a service that does not declare an `hpa:` block
+  in values-*.yaml inherits the global default. Set
+  `services.<name>.hpa.enabled=false` to skip rendering for a single service
+  without disabling autoscaling cluster-wide.
+
+  ADR: docs/adr/0001-hpa-custom-metrics-tooling.md
+  Runbook: docs/runbooks/hpa-metrics.md
+
+  Prerequisite: the KEDA controller (CRDs + operator) must already be
+  installed in the cluster. This chart deliberately does not bundle KEDA —
+  see the ADR's Consequences section.
+*/ -}}
+{{- if .Values.hpa.enabled }}
+{{- $globalHpa := .Values.hpa -}}
+{{- $namespace := .Values.namespace | default .Release.Namespace -}}
+{{- range $key, $svc := .Values.services }}
+{{- /* Per-service override; falls back to the global block. */ -}}
+{{- $svcHpa := default dict $svc.hpa -}}
+{{- $enabled := true -}}
+{{- if hasKey $svcHpa "enabled" -}}
+  {{- $enabled = $svcHpa.enabled -}}
+{{- end }}
+{{- if $enabled }}
+{{- /* Resolve the trigger preset by tier (event | auth | telemetry | default) */ -}}
+{{- $tier := default "default" $svcHpa.tier -}}
+{{- $tierDefaults := index $globalHpa.tiers $tier | default (index $globalHpa.tiers "default") -}}
+{{- $minReplicas := default $globalHpa.minReplicas $svcHpa.minReplicas -}}
+{{- $maxReplicas := default $globalHpa.maxReplicas $svcHpa.maxReplicas -}}
+{{- $pollingInterval := default $globalHpa.pollingInterval $svcHpa.pollingInterval -}}
+{{- $cooldownPeriod := default $globalHpa.cooldownPeriod $svcHpa.cooldownPeriod -}}
+{{- $triggers := default $tierDefaults.triggers $svcHpa.triggers -}}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $svc.name }}
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $svc.name }}
+    app.kubernetes.io/part-of: isa-user
+    app.kubernetes.io/component: autoscaler
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+    isa.io/service-tier: {{ $tier }}
+  annotations:
+    isa.io/issue: "https://github.com/xenoISA/isA_user/issues/352"
+    isa.io/adr: "docs/adr/0001-hpa-custom-metrics-tooling.md"
+spec:
+  scaleTargetRef:
+    name: {{ $svc.name }}
+  minReplicaCount: {{ $minReplicas }}
+  maxReplicaCount: {{ $maxReplicas }}
+  pollingInterval: {{ $pollingInterval }}
+  cooldownPeriod: {{ $cooldownPeriod }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      name: {{ $svc.name }}-keda
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: {{ default 300 (default $globalHpa.scaleDownStabilization $svcHpa.scaleDownStabilization) }}
+          policies:
+            - type: Percent
+              value: 50
+              periodSeconds: 60
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 30
+            - type: Pods
+              value: 4
+              periodSeconds: 30
+          selectPolicy: Max
+  triggers:
+{{- /* Per-service or per-tier custom triggers */}}
+{{- range $t := $triggers }}
+    - type: {{ $t.type }}
+      {{- with $t.name }}
+      name: {{ . }}
+      {{- end }}
+      {{- with $t.metricType }}
+      metricType: {{ . }}
+      {{- end }}
+      metadata:
+{{- /* Render the metadata map verbatim — values are scaler-specific. */}}
+{{ toYaml $t.metadata | indent 8 }}
+{{- end }}
+{{- /* Fallback CPU/memory triggers — kept on every ScaledObject so a stuck
+       custom-metric collector still surfaces real load (issue #352 AC). */}}
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "{{ default 70 $globalHpa.fallbackCPUUtilization }}"
+    - type: memory
+      metricType: Utilization
+      metadata:
+        value: "{{ default 80 $globalHpa.fallbackMemoryUtilization }}"
+{{ end }}
+{{- end }}
+{{- end }}

@@ -34,6 +34,64 @@ resources:
 autoscaling:
   enabled: false
 
+# =============================================================================
+# HorizontalPodAutoscaler — KEDA ScaledObjects (issue #352, epic #345)
+# =============================================================================
+# Staging keeps KEDA-driven HPA OFF by default — single-replica services keep
+# debug latency low and we want deterministic test behaviour. Flip
+# `hpa.enabled=true` for short load tests once the cluster has the KEDA
+# controller installed:
+#
+#   helm install keda kedacore/keda -n keda --create-namespace
+#
+# Endpoints below already point at the staging NATS / Prometheus services so
+# the toggle is one-shot.
+# =============================================================================
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  pollingInterval: 30
+  cooldownPeriod: 180
+  scaleDownStabilization: 120
+  fallbackCPUUtilization: 80
+  fallbackMemoryUtilization: 85
+  tiers:
+    default:
+      triggers: []
+    event:
+      triggers:
+        - type: nats-jetstream
+          metricType: AverageValue
+          metadata:
+            natsServerMonitoringEndpoint: "nats.isa-cloud-staging.svc.cluster.local:8222"
+            account: "$G"
+            stream: "isa-events"
+            consumer: "isa-user-consumer"
+            lagThreshold: "50"
+            useHttps: "false"
+    auth:
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-staging.svc.cluster.local:9090"
+            metricName: "isa_user_request_latency_p95_seconds"
+            threshold: "0.75"
+            query: |
+              histogram_quantile(0.95,
+                sum(rate(isa_user_http_request_duration_seconds_bucket[2m])) by (le))
+    telemetry:
+      triggers:
+        - type: prometheus
+          metricType: AverageValue
+          metadata:
+            serverAddress: "http://prometheus.isa-cloud-staging.svc.cluster.local:9090"
+            metricName: "isa_user_websocket_active_connections"
+            threshold: "200"
+            query: |
+              sum(isa_user_websocket_active_connections)
+
 health:
   path: /health
   initialDelaySeconds: 60
@@ -183,10 +241,14 @@ services:
     name: user-auth-service
     repository: isa/user-auth
     port: 8201
+    hpa:
+      tier: auth
   account:
     name: user-account-service
     repository: isa/user-account
     port: 8202
+    hpa:
+      tier: auth
   session:
     name: user-session-service
     repository: isa/user-session
@@ -195,6 +257,8 @@ services:
     name: user-authorization-service
     repository: isa/user-authorization
     port: 8204
+    hpa:
+      tier: auth
   audit:
     name: user-audit-service
     repository: isa/user-audit
@@ -207,10 +271,14 @@ services:
     name: user-payment-service
     repository: isa/user-payment
     port: 8207
+    hpa:
+      tier: event
   wallet:
     name: user-wallet-service
     repository: isa/user-wallet
     port: 8208
+    hpa:
+      tier: event
   storage:
     name: user-storage-service
     repository: isa/user-storage
@@ -243,6 +311,8 @@ services:
     name: user-billing-service
     repository: isa/user-billing
     port: 8216
+    hpa:
+      tier: event
   calendar:
     name: user-calendar-service
     repository: isa/user-calendar
@@ -279,6 +349,8 @@ services:
     name: user-telemetry-service
     repository: isa/user-telemetry
     port: 8225
+    hpa:
+      tier: telemetry
   compliance:
     name: user-compliance-service
     repository: isa/user-compliance
