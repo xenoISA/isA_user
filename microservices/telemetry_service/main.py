@@ -195,12 +195,22 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # Shutdown — ORDERING INVARIANT (do not change without thinking):
+    #
+    #   1. initiate_shutdown        — middleware starts rejecting new HTTP work
+    #   2. microservice.shutdown()  — DEREGISTERS from Consul. This MUST happen
+    #                                 before draining websockets so that any
+    #                                 client reconnecting via Consul SRV
+    #                                 immediately misses this dying pod and
+    #                                 lands on a healthy replica. Draining
+    #                                 first creates a window where freshly
+    #                                 reconnecting clients can still resolve
+    #                                 this pod via stale SRV cache and bounce
+    #                                 right back onto the dying instance.
+    #   3. drain_realtime_websockets — close live sockets with 1001 + retry-after
+    #   4. wait_for_drain           — finish in-flight HTTP requests
     shutdown_manager.initiate_shutdown()
-    # Drain any live websocket connections with `going away` (1001) so
-    # clients reconnect via Consul SRV instead of seeing a hard 1006. We
-    # do this BEFORE waiting for HTTP drain so subscribers can begin their
-    # reconnect handshake while remaining HTTP traffic finishes.
+    await microservice.shutdown()
     try:
         if microservice.service is not None:
             await microservice.service.drain_realtime_websockets(
@@ -210,7 +220,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning(f"WebSocket drain failed during shutdown: {exc}")
     await shutdown_manager.wait_for_drain()
-    await microservice.shutdown()
 
 
 # Create FastAPI application
