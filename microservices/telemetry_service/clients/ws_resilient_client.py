@@ -79,14 +79,23 @@ def compute_backoff_delay(
     *,
     base_seconds: float = 0.5,
     max_seconds: float = 30.0,
-    jitter: float = 0.2,
+    jitter: float = 0.5,
 ) -> float:
-    """Exponential backoff with bounded jitter.
+    """Exponential backoff with equal-jitter (AWS-style).
 
     Pure function — pulled out so it can be exercised in unit tests without
     starting a network server. The curve is `base * 2**attempt`, hard-capped
-    at `max_seconds`. Jitter widens the upper bound to avoid thundering-herd
-    reconnects across many clients.
+    at `max_seconds`. With the default `jitter=0.5` (equal-jitter) the
+    returned delay is `capped/2 + random.uniform(0, capped/2)` — half the
+    backoff is fixed, the other half is uniform random. This shape spreads
+    reconnect storms (e.g. hundreds of clients drained from one replica)
+    without ever returning a delay shorter than `capped/2`, which would
+    defeat the point of backing off in the first place.
+
+    `jitter` controls the random fraction of the cap:
+      * 0.0   — no jitter, deterministic exponential
+      * 0.5   — equal-jitter (default, recommended)
+      * 1.0   — full-jitter (random in [0, capped])
     """
     if attempt < 0:
         raise ValueError("attempt must be >= 0")
@@ -94,8 +103,39 @@ def compute_backoff_delay(
     capped = min(raw, max_seconds)
     if jitter <= 0:
         return capped
+    # Equal-jitter (when jitter==0.5): keep half the cap, randomize the rest.
+    # For arbitrary `jitter` in (0, 1], the fixed floor is `capped*(1-jitter)`
+    # and the random portion is `[0, capped*jitter]`.
+    jitter = min(jitter, 1.0)
+    fixed = capped * (1.0 - jitter)
     spread = capped * jitter
-    return min(max_seconds, capped + random.uniform(0.0, spread))
+    return fixed + random.uniform(0.0, spread)
+
+
+def apply_retry_after_jitter(
+    retry_after_seconds: float,
+    *,
+    jitter_ratio: float = 0.5,
+    max_seconds: float = 30.0,
+) -> float:
+    """Add equal-jitter to a server-supplied `Retry-After` hint.
+
+    A constant retry-after across hundreds of drained clients creates a
+    thundering herd — they all wake up at exactly the same moment and slam
+    the new replica. We turn the constant hint into a uniform window:
+
+        delay ∈ [retry_after, retry_after * (1 + jitter_ratio)]
+
+    With `jitter_ratio=0.5` (the default) a 5s hint becomes a uniform draw
+    over `[5, 7.5]`, which is enough to spread a stampede over 2.5 seconds
+    without making any individual client wait noticeably longer.
+    """
+    if retry_after_seconds <= 0:
+        return 0.0
+    jitter_ratio = max(0.0, jitter_ratio)
+    upper = retry_after_seconds * (1.0 + jitter_ratio)
+    delay = random.uniform(retry_after_seconds, upper)
+    return min(delay, max_seconds)
 
 
 def discover_replicas(
@@ -151,6 +191,7 @@ class ResilientTelemetryWebSocket:
     scheme: str = "ws"
     max_backoff_seconds: float = 30.0
     base_backoff_seconds: float = 0.5
+    retry_after_jitter_ratio: float = 0.5
     websocket_factory: Optional[Callable[[str], Awaitable[Any]]] = None
     sleeper: Callable[[float], Awaitable[None]] = field(
         default_factory=lambda: asyncio.sleep
@@ -211,6 +252,12 @@ class ResilientTelemetryWebSocket:
                 hint = msg.get("retry_after")
                 if isinstance(hint, (int, float)) and hint > 0:
                     self._retry_after_hint = float(hint)
+                # Adopt the rotated connect token so the next reconnect uses
+                # a fresh credential. The server has already persisted the
+                # new hash before sending us this frame.
+                rotated_token = msg.get("connect_token")
+                if isinstance(rotated_token, str) and rotated_token:
+                    self.connect_token = rotated_token
 
             yield msg
 
@@ -249,9 +296,16 @@ class ResilientTelemetryWebSocket:
             return
         self._socket = None
         # Use the server-supplied retry hint for the very first delay; fall
-        # back to the exponential schedule afterwards.
+        # back to the exponential schedule afterwards. The hint is jittered
+        # (equal-jitter by default) so a fleet of drained clients doesn't
+        # all wake up at exactly the same instant and stampede the fresh
+        # replica.
         if self._attempt == 0 and self._retry_after_hint > 0:
-            delay = min(self._retry_after_hint, self.max_backoff_seconds)
+            delay = apply_retry_after_jitter(
+                self._retry_after_hint,
+                jitter_ratio=self.retry_after_jitter_ratio,
+                max_seconds=self.max_backoff_seconds,
+            )
         else:
             delay = compute_backoff_delay(
                 self._attempt,
@@ -279,6 +333,7 @@ class ResilientTelemetryWebSocket:
 __all__ = [
     "ResilientTelemetryWebSocket",
     "ReplicaEndpoint",
+    "apply_retry_after_jitter",
     "compute_backoff_delay",
     "discover_replicas",
     "WS_CODE_GOING_AWAY",

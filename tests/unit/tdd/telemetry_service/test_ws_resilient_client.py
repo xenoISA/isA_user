@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from typing import Any, List
 from unittest.mock import AsyncMock
 
@@ -17,6 +18,7 @@ from microservices.telemetry_service.clients.ws_resilient_client import (
     ReplicaEndpoint,
     ResilientTelemetryWebSocket,
     WS_CODE_GOING_AWAY,
+    apply_retry_after_jitter,
     compute_backoff_delay,
     discover_replicas,
 )
@@ -58,6 +60,61 @@ class TestComputeBackoffDelay:
         """Acceptance: 0.5 * 2**6 = 32 > cap, so attempt 6 must be capped."""
         delay = compute_backoff_delay(6, base_seconds=0.5, max_seconds=30.0, jitter=0)
         assert math.isclose(delay, 30.0)
+
+    def test_equal_jitter_floor_and_cap(self) -> None:
+        """With jitter=0.5 (equal-jitter), delay must lie in [capped/2, capped]."""
+        # Force the cap: 0.5 * 2**10 = 512 → capped to 30.
+        for _ in range(200):
+            delay = compute_backoff_delay(
+                10, base_seconds=0.5, max_seconds=30.0, jitter=0.5
+            )
+            assert 15.0 <= delay <= 30.0
+
+    def test_full_jitter_can_return_zero(self) -> None:
+        """With jitter=1.0 (full-jitter), delay can be anywhere in [0, capped]."""
+        rng = random.Random(0)
+        # We can't seed `random.uniform` inside the function, but we can
+        # assert the bounds across many samples.
+        observed = [
+            compute_backoff_delay(10, base_seconds=0.5, max_seconds=30.0, jitter=1.0)
+            for _ in range(500)
+        ]
+        assert min(observed) >= 0.0
+        assert max(observed) <= 30.0
+        # With 500 samples in [0, 30] uniformly, we should see a sample below 5.
+        assert any(d < 5.0 for d in observed)
+        _ = rng  # silence unused
+
+
+class TestApplyRetryAfterJitter:
+    """Server-supplied `Retry-After` hint MUST be jittered to avoid stampedes."""
+
+    def test_zero_retry_after_returns_zero(self) -> None:
+        assert apply_retry_after_jitter(0) == 0.0
+        assert apply_retry_after_jitter(-1) == 0.0
+
+    def test_jitter_window_lower_bound_is_retry_after(self) -> None:
+        """A 5s hint with default jitter_ratio=0.5 must produce delays >= 5s."""
+        for _ in range(200):
+            delay = apply_retry_after_jitter(5.0)
+            assert 5.0 <= delay <= 7.5
+
+    def test_jitter_window_upper_bound_respects_max(self) -> None:
+        """Even with a large hint and high jitter, delay must respect max_seconds."""
+        for _ in range(50):
+            delay = apply_retry_after_jitter(20.0, jitter_ratio=1.0, max_seconds=25.0)
+            assert delay <= 25.0
+
+    def test_jitter_ratio_zero_returns_exact_hint(self) -> None:
+        delay = apply_retry_after_jitter(5.0, jitter_ratio=0.0)
+        assert delay == 5.0
+
+    def test_jitter_spreads_stampede(self) -> None:
+        """100 simulated drained clients with a 5s hint should spread out."""
+        delays = [apply_retry_after_jitter(5.0, jitter_ratio=0.5) for _ in range(100)]
+        # If everyone slept exactly 5.0 we'd see no spread. Equal-jitter must
+        # produce at least 1s of spread across 100 samples in expectation.
+        assert (max(delays) - min(delays)) > 1.0
 
 
 class FakeConsul:
@@ -214,6 +271,92 @@ class TestResilientWebSocketStream:
         assert factory.await_count == 2
         # Exactly one reconnect-induced sleep happened.
         assert len(sleeps) == 1
+
+    async def test_connected_frame_rotates_connect_token(self) -> None:
+        """The server emits a fresh `connect_token` in every connected frame
+        so that long-lived clients can reconnect after the original token's
+        TTL has expired. The client MUST adopt the new token."""
+        rotated_frame = json.dumps(
+            {
+                "type": "subscription.connected",
+                "session_id": "sub_x.ws_y",
+                "cursor": {"sequence_number": 0},
+                "retry_after": 5,
+                "connect_token": "rotated-token-v2",
+                "connect_token_expires_at": "2026-05-04T01:00:00+00:00",
+            }
+        )
+        sock = FakeSocket([rotated_frame])
+        factory = AsyncMock(return_value=sock)
+
+        client = ResilientTelemetryWebSocket(
+            subscription_id="sub_x",
+            connect_token="original-token",
+            fallback_replicas=[ReplicaEndpoint(address="t", port=8225)],
+            websocket_factory=factory,
+            sleeper=AsyncMock(),
+        )
+
+        async with client:
+            agen = client.stream()
+            frame = await agen.__anext__()
+            await agen.aclose()
+
+        assert frame["connect_token"] == "rotated-token-v2"
+        # Client adopted the rotated token — next reconnect will use it.
+        assert client.connect_token == "rotated-token-v2"
+
+    async def test_long_lived_client_reconnects_with_rotated_token(self) -> None:
+        """Regression for the connect-token TTL bug: a client connected for
+        >1h must reconnect successfully because the server rotated the
+        token on each `subscription.connected` frame."""
+        first_frame = json.dumps(
+            {
+                "type": "subscription.connected",
+                "session_id": "first",
+                "cursor": {"sequence_number": 1},
+                "connect_token": "rotated-1",
+                "retry_after": 0,
+            }
+        )
+        second_frame = json.dumps(
+            {
+                "type": "subscription.connected",
+                "session_id": "second",
+                "cursor": {"sequence_number": 2},
+                "connect_token": "rotated-2",
+            }
+        )
+
+        # First socket emits one frame and then dies (simulating 65 minutes
+        # later when the original 1h token would have expired).
+        sock_a = FakeSocket([first_frame])
+        sock_b = FakeSocket([second_frame])
+        seen_urls: List[str] = []
+
+        async def factory(url: str) -> Any:
+            seen_urls.append(url)
+            return sock_a if len(seen_urls) == 1 else sock_b
+
+        client = ResilientTelemetryWebSocket(
+            subscription_id="sub_long",
+            connect_token="ORIGINAL",  # would be expired in real time
+            fallback_replicas=[ReplicaEndpoint(address="t", port=8225)],
+            websocket_factory=factory,
+            sleeper=AsyncMock(),
+        )
+
+        async with client:
+            agen = client.stream()
+            await agen.__anext__()  # first connected frame
+            await agen.__anext__()  # second connected frame after reconnect
+            await agen.aclose()
+
+        # First connect used the original token.
+        assert "token=ORIGINAL" in seen_urls[0]
+        # Reconnect used the rotated token — proving long-lived clients
+        # can survive past the original token TTL.
+        assert "token=rotated-1" in seen_urls[1]
 
     async def test_close_is_idempotent_when_no_socket(self) -> None:
         client = ResilientTelemetryWebSocket(
