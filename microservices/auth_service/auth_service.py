@@ -13,6 +13,7 @@ This service uses dependency injection for all external dependencies:
 
 import asyncio
 import logging
+import os
 from typing import TYPE_CHECKING, Dict, Any, Optional, List
 from datetime import datetime, timedelta, timezone
 import uuid
@@ -48,6 +49,20 @@ def _normalize_scopes(scopes: set) -> set:
     for scope in scopes:
         normalized.add(_SCOPE_MIGRATION_MAP.get(scope, scope))
     return normalized
+
+
+def is_dev_bypass_admin_email(email: Optional[str]) -> bool:
+    """Return true when dev-bypass mode promotes this email to dev admin."""
+    if os.getenv("AUTH_DEV_BYPASS_ENABLED", "").lower() != "true":
+        return False
+    if not email:
+        return False
+    admin_allowlist = {
+        e.strip().lower()
+        for e in os.getenv("AUTH_DEV_BYPASS_ADMINS", "").split(",")
+        if e.strip()
+    }
+    return email.strip().lower() in admin_allowlist
 
 
 class AuthenticationService:
@@ -1333,6 +1348,9 @@ class AuthenticationService:
         tenant_id = metadata.get("tenant_id") or organization_id
         permissions = list(verification_result.get("permissions") or [])
         admin_roles = list(metadata.get("admin_roles") or [])
+        is_dev_admin = is_dev_bypass_admin_email(email)
+        if is_dev_admin and "auth.admin" not in permissions:
+            permissions.append("auth.admin")
 
         raw_roles = metadata.get("roles") or metadata.get("role") or []
         if isinstance(raw_roles, str):
@@ -1341,7 +1359,9 @@ class AuthenticationService:
             roles = list(raw_roles)
 
         scope = (verification_result.get("scope") or "").lower()
-        if (scope == "admin" or "auth.admin" in permissions or admin_roles) and "admin" not in roles:
+        if (
+            scope == "admin" or "auth.admin" in permissions or admin_roles or is_dev_admin
+        ) and "admin" not in roles:
             roles.append("admin")
 
         preferred_username = (

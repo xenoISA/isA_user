@@ -123,3 +123,28 @@ async def test_userinfo_missing_org_context_has_stable_empty_tenant_claims(
     assert result["roles"] == []
     assert result["permissions"] == []
     assert result["preferred_username"] == "solo"
+
+
+@pytest.mark.asyncio
+async def test_userinfo_adds_dev_bypass_admin_claims_only_when_enabled(
+    auth_service, jwt_manager, monkeypatch
+):
+    token = _token(
+        jwt_manager,
+        email="admin@example.com",
+        org_id=None,
+        metadata={"dev_bypass": True},
+    )
+
+    monkeypatch.setenv("AUTH_DEV_BYPASS_ENABLED", "true")
+    monkeypatch.setenv("AUTH_DEV_BYPASS_ADMINS", "admin@example.com")
+    enabled = await auth_service.get_user_info_from_token(token)
+
+    assert enabled["roles"] == ["admin"]
+    assert enabled["permissions"] == ["auth.admin"]
+
+    monkeypatch.setenv("AUTH_DEV_BYPASS_ENABLED", "false")
+    disabled = await auth_service.get_user_info_from_token(token)
+
+    assert disabled["roles"] == []
+    assert disabled["permissions"] == []
