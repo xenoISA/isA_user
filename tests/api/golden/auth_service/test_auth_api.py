@@ -869,10 +869,21 @@ class TestUserInfoEndpoint:
         token = factory.make_jwt_token()
 
         # Mock user info response
-        mock_auth_service.extract_user_info.return_value = {
-            "user_id": factory.make_user_id(),
-            "email": factory.make_email(),
-            "provider": "isa_user"
+        user_id = factory.make_user_id()
+        email = factory.make_email()
+        mock_auth_service.get_user_info_from_token.return_value = {
+            "success": True,
+            "sub": user_id,
+            "user_id": user_id,
+            "email": email,
+            "preferred_username": email.split("@", 1)[0],
+            "name": "Test User",
+            "organization_id": "org_test_123",
+            "tenant_id": "org_test_123",
+            "roles": ["member"],
+            "admin_roles": [],
+            "permissions": ["read"],
+            "provider": "isa_user",
         }
 
         response = await client.post(
