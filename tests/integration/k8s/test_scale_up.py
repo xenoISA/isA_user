@@ -100,7 +100,9 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 
 
-def _kubectl(*args: str, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
+def _kubectl(
+    *args: str, check: bool = True, capture: bool = True
+) -> subprocess.CompletedProcess:
     """Run ``kubectl`` against the active cluster. Tiny wrapper for grep-ability."""
     cmd = ["kubectl", *args]
     return subprocess.run(
@@ -121,7 +123,9 @@ def _wait_for(
         try:
             if predicate():
                 return
-        except Exception as exc:  # noqa: BLE001 — we want any error to propagate as the timeout reason
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 — we want any error to propagate as the timeout reason
             last_err = exc
         time.sleep(interval)
     msg = f"timed out after {timeout:.0f}s waiting for {label}"
@@ -382,7 +386,9 @@ print("LOADGEN_RESULT=" + json.dumps(counters))
 
     # Apply via stdin so we don't have to write tempfiles. ``kubectl
     # apply -f -`` reads YAML/JSON from stdin.
-    apply_payload = json.dumps({"items": [cm_manifest, pod_manifest], "kind": "List", "apiVersion": "v1"})
+    apply_payload = json.dumps(
+        {"items": [cm_manifest, pod_manifest], "kind": "List", "apiVersion": "v1"}
+    )
     subprocess.run(
         ["kubectl", "apply", "-f", "-"],
         input=apply_payload,
@@ -395,9 +401,15 @@ print("LOADGEN_RESULT=" + json.dumps(counters))
         deadline = time.time() + duration_seconds + 120.0
         phase = ""
         while time.time() < deadline:
-            phase = json.loads(
-                _kubectl("get", "pod", job_name, "-n", NAMESPACE, "-o", "json").stdout
-            ).get("status", {}).get("phase", "")
+            phase = (
+                json.loads(
+                    _kubectl(
+                        "get", "pod", job_name, "-n", NAMESPACE, "-o", "json"
+                    ).stdout
+                )
+                .get("status", {})
+                .get("phase", "")
+            )
             if phase in {"Succeeded", "Failed"}:
                 break
             time.sleep(2.0)
@@ -585,9 +597,9 @@ async def test_hpa_scale_up_and_drain(cluster_workload, load_profile):
     )
 
     pods = _list_pods()
-    assert len(pods) >= final_replicas, (
-        f"only {len(pods)} Running pods found, expected >= {final_replicas}"
-    )
+    assert (
+        len(pods) >= final_replicas
+    ), f"only {len(pods)} Running pods found, expected >= {final_replicas}"
     for pod in pods:
         # ``kubectl exec`` into each pod and curl localhost. Avoids
         # Service-level randomness and proves *this specific pod* is
@@ -611,7 +623,9 @@ async def test_hpa_scale_up_and_drain(cluster_workload, load_profile):
         assert status_line.strip() == "200", f"pod {pod} /health -> {status_line}"
         payload = json.loads(body)
         assert payload.get("ok") is True, f"pod {pod} unhealthy: {payload}"
-        assert payload.get("pool") >= 5, f"pod {pod} reported pool={payload.get('pool')} < floor"
+        assert (
+            payload.get("pool") >= 5
+        ), f"pod {pod} reported pool={payload.get('pool')} < floor"
 
     # ---- 4. Graceful drain on scale-down -------------------------------
     # Manually scale to 1 to exercise graceful_shutdown.py — the surplus
