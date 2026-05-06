@@ -637,6 +637,15 @@ ISA_SERVICE_CHART_PATH=../isA_Cloud/deployments/charts/isa-service \
 Canonical Kubernetes namespaces are defined in `config/ports.yaml`. The
 production namespace is `isa-cloud-prod`.
 
+### Capacity Planning
+
+Per-service HPA limits, replica budgets, and aggregate Postgres / Redis /
+memory / NATS budgets across all 35 services are documented in
+[`docs/runbooks/hpa-capacity.md`](docs/runbooks/hpa-capacity.md). Read this
+before raising `HPA.maxReplicas` or onboarding a new service — current
+defaults already exceed the documented Postgres connection ceiling at HPA
+min.
+
 ## 📈 Monitoring & Observability
 
 - **Health Checks**: `/health` endpoint on each service
