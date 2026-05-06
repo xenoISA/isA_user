@@ -206,6 +206,9 @@ dev:
     - package: "fakeredis"
       version: ">=2.20.0"
       description: "In-memory Redis fake for distributed-backend tests"
+    - package: "lupa"
+      version: ">=2.0"
+      description: "Lua interpreter — required by fakeredis to evaluate EVAL scripts (e.g. distributed_lock release/extend Lua)"
 
   # Code Formatting & Linting
   linting:

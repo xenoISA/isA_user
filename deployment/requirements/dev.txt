@@ -35,6 +35,11 @@ coverage>=7.3.0
 factory-boy>=3.3.0
 faker>=22.0.0
 fakeredis>=2.20.0
+# lupa: Lua interpreter required by fakeredis to evaluate EVAL scripts.
+# core/distributed_lock.py uses Lua compare-and-delete / compare-and-extend
+# for atomic release/extend; without lupa, fakeredis raises
+# "unknown command 'eval'" in CI.
+lupa>=2.0
 
 # ==========================================
 # Linting

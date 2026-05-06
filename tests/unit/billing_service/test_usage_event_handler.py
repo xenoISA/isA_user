@@ -99,9 +99,34 @@ def _make_event(
 
 @pytest.fixture(autouse=True)
 def clear_processed_event_ids():
+    """Reset both the in-memory dedup set and the distributed lock /
+    result cache singletons so each test starts with a clean,
+    fakeredis-backed idempotency stack (issue #348)."""
+    import fakeredis.aioredis
+
+    from core.distributed_lock import DistributedLock
+    from core.redis_cache import RedisCache
+
+    server = fakeredis.aioredis.FakeServer()
+    lock_client = fakeredis.aioredis.FakeRedis(server=server, decode_responses=False)
+    cache_client = fakeredis.aioredis.FakeRedis(server=server, decode_responses=False)
+    billing_handlers.set_event_idempotency_backends(
+        lock=DistributedLock(
+            "billing_service",
+            client=lock_client,
+            default_ttl_seconds=120,
+        ),
+        result_cache=RedisCache(
+            "billing_event_results",
+            client=cache_client,
+            default_ttl=900,
+        ),
+    )
     billing_handlers._processed_event_ids.clear()
     yield
     billing_handlers._processed_event_ids.clear()
+    billing_handlers._event_lock = None
+    billing_handlers._event_result_cache = None
 
 
 @pytest.mark.unit
@@ -129,7 +154,9 @@ class TestUsageEventHandler:
 
         billing_service.record_usage_with_external_billing.assert_called_once()
         billing_service.record_usage_and_bill.assert_not_called()
-        request_arg = billing_service.record_usage_with_external_billing.call_args.args[0]
+        request_arg = billing_service.record_usage_with_external_billing.call_args.args[
+            0
+        ]
         assert request_arg.product_id == "gpt-4o-mini"
         assert request_arg.service_type == ServiceType.MODEL_INFERENCE
         assert request_arg.actor_user_id == "user_123"
@@ -146,12 +173,19 @@ class TestUsageEventHandler:
                 "provider": "openai",
             }
         ]
-        assert request_arg.usage_details["cost_components"][0]["component_id"] == "openai_model_provider"
-        assert billing_service.record_usage_with_external_billing.call_args.kwargs["credits_used"] == 84
         assert (
-            billing_service.record_usage_with_external_billing.call_args.kwargs["cost_usd"]
-            == Decimal("0.0042")
+            request_arg.usage_details["cost_components"][0]["component_id"]
+            == "openai_model_provider"
         )
+        assert (
+            billing_service.record_usage_with_external_billing.call_args.kwargs[
+                "credits_used"
+            ]
+            == 84
+        )
+        assert billing_service.record_usage_with_external_billing.call_args.kwargs[
+            "cost_usd"
+        ] == Decimal("0.0042")
         assert "evt_001" in billing_handlers._processed_event_ids
         assert "idem:evt_001" in billing_handlers._processed_event_ids
 
@@ -355,7 +389,9 @@ class TestBillingServiceExternalBilling:
         assert record.unit_price == Decimal("0.0001")
 
     @pytest.mark.asyncio
-    async def test_record_usage_and_bill_passes_canonical_context_to_process_billing(self):
+    async def test_record_usage_and_bill_passes_canonical_context_to_process_billing(
+        self,
+    ):
         repository = AsyncMock()
         service = BillingService(
             repository=repository,
@@ -443,7 +479,9 @@ class TestBillingServiceExternalBilling:
     async def test_process_billing_persists_request_context_for_internal_billing(self):
         repository = AsyncMock()
         repository.create_billing_record = AsyncMock(side_effect=lambda record: record)
-        repository.update_billing_record_status = AsyncMock(side_effect=lambda *args, **kwargs: None)
+        repository.update_billing_record_status = AsyncMock(
+            side_effect=lambda *args, **kwargs: None
+        )
         repository.create_billing_event = AsyncMock(side_effect=lambda event: event)
         service = BillingService(
             repository=repository,
