@@ -271,7 +271,7 @@ async def test_custom_serialiser_roundtrip():
     def my_loads(b: bytes):
         text = b.decode()
         assert text.startswith("V1::")
-        return json.loads(text[len("V1::"):])
+        return json.loads(text[len("V1::") :])
 
     await cache.set("gold", payload, dumps=my_dumps)
     assert await cache.get("gold", loads=my_loads) == payload
@@ -570,10 +570,7 @@ async def test_latch_recovery_only_one_concurrent_probe():
 
 def test_service_env_prefix_strips_service_suffix():
     """The env-var prefix is documented; lock the contract under test."""
-    assert (
-        cache_mod._service_env_prefix("authorization_service")
-        == "AUTHORIZATION"
-    )
+    assert cache_mod._service_env_prefix("authorization_service") == "AUTHORIZATION"
     assert cache_mod._service_env_prefix("compliance_service") == "COMPLIANCE"
     assert cache_mod._service_env_prefix("membership_service") == "MEMBERSHIP"
 

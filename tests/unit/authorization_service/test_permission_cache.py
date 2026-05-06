@@ -526,6 +526,6 @@ async def test_deny_decisions_use_shorter_ttl_than_allow():
     # Inspect the underlying TTL on the cached entry.
     full_key = cache._full_key(svc._permission_cache_key(deny_req))
     ttl = await cache._client.ttl(full_key)
-    assert 0 < ttl <= PERMISSION_DENY_CACHE_TTL_SECONDS, (
-        f"deny TTL {ttl} should be at most {PERMISSION_DENY_CACHE_TTL_SECONDS}"
-    )
+    assert (
+        0 < ttl <= PERMISSION_DENY_CACHE_TTL_SECONDS
+    ), f"deny TTL {ttl} should be at most {PERMISSION_DENY_CACHE_TTL_SECONDS}"

@@ -47,7 +47,9 @@ POLICY_CACHE_TTL_SECONDS = 300
 class ComplianceService:
     """合规服务核心业务逻辑"""
 
-    def __init__(self, event_bus=None, config=None, policy_cache: Optional[RedisCache] = None):
+    def __init__(
+        self, event_bus=None, config=None, policy_cache: Optional[RedisCache] = None
+    ):
         self.repository = ComplianceRepository(config=config)
         self.event_bus = event_bus
 

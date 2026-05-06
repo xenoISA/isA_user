@@ -583,9 +583,7 @@ class AuthorizationService:
                 # we log loudly but still return success — the DB write
                 # is the source of truth.
                 try:
-                    await self.invalidate_permission_cache(
-                        user_id=request.user_id
-                    )
+                    await self.invalidate_permission_cache(user_id=request.user_id)
                 except CacheInvalidationError as cache_exc:
                     logger.error(
                         "Cache invalidation failed after grant for user %s; "
@@ -697,9 +695,7 @@ class AuthorizationService:
                 # serving the granted state for up to 10 minutes. This
                 # is the security correctness hole called out in PR #357.
                 try:
-                    await self.invalidate_permission_cache(
-                        user_id=request.user_id
-                    )
+                    await self.invalidate_permission_cache(user_id=request.user_id)
                 except CacheInvalidationError as cache_exc:
                     logger.error(
                         "Cache invalidation failed after revoke for user "
@@ -1290,9 +1286,7 @@ class AuthorizationService:
 
     # ---- Permission cache helpers (issue #347) ----
 
-    def _permission_cache_key(
-        self, request: ResourceAccessRequest
-    ) -> Optional[str]:
+    def _permission_cache_key(self, request: ResourceAccessRequest) -> Optional[str]:
         """Build a stable cache key for a permission check.
 
         Returns ``None`` for requests we explicitly do not cache (e.g.

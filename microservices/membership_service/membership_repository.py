@@ -55,11 +55,36 @@ TIER_CACHE_TTL_SECONDS = 3600
 # Default tiers used when DB is unavailable on bootstrap. Pulled into
 # module scope so the cache and the fallback share the same source.
 _DEFAULT_TIERS: Dict[str, Tier] = {
-    "bronze": Tier(tier_code=MembershipTier.BRONZE, tier_name="Bronze", qualification_threshold=0, point_multiplier=Decimal("1.0")),
-    "silver": Tier(tier_code=MembershipTier.SILVER, tier_name="Silver", qualification_threshold=5000, point_multiplier=Decimal("1.25")),
-    "gold": Tier(tier_code=MembershipTier.GOLD, tier_name="Gold", qualification_threshold=20000, point_multiplier=Decimal("1.5")),
-    "platinum": Tier(tier_code=MembershipTier.PLATINUM, tier_name="Platinum", qualification_threshold=50000, point_multiplier=Decimal("2.0")),
-    "diamond": Tier(tier_code=MembershipTier.DIAMOND, tier_name="Diamond", qualification_threshold=100000, point_multiplier=Decimal("3.0")),
+    "bronze": Tier(
+        tier_code=MembershipTier.BRONZE,
+        tier_name="Bronze",
+        qualification_threshold=0,
+        point_multiplier=Decimal("1.0"),
+    ),
+    "silver": Tier(
+        tier_code=MembershipTier.SILVER,
+        tier_name="Silver",
+        qualification_threshold=5000,
+        point_multiplier=Decimal("1.25"),
+    ),
+    "gold": Tier(
+        tier_code=MembershipTier.GOLD,
+        tier_name="Gold",
+        qualification_threshold=20000,
+        point_multiplier=Decimal("1.5"),
+    ),
+    "platinum": Tier(
+        tier_code=MembershipTier.PLATINUM,
+        tier_name="Platinum",
+        qualification_threshold=50000,
+        point_multiplier=Decimal("2.0"),
+    ),
+    "diamond": Tier(
+        tier_code=MembershipTier.DIAMOND,
+        tier_name="Diamond",
+        qualification_threshold=100000,
+        point_multiplier=Decimal("3.0"),
+    ),
 }
 
 
@@ -156,9 +181,7 @@ class MembershipRepository:
             # Use a short TTL (60s) so we re-attempt quickly once the DB
             # recovers rather than serving defaults for the full TTL.
             for code, tier in _DEFAULT_TIERS.items():
-                await self._tier_cache.set(
-                    code, tier, ttl=60, dumps=_tier_dumps
-                )
+                await self._tier_cache.set(code, tier, ttl=60, dumps=_tier_dumps)
 
     # ====================
     # Membership CRUD
@@ -527,9 +550,7 @@ class MembershipRepository:
             logger.error(f"Error getting tier {tier_code}: {e}")
             return None
 
-    async def invalidate_tier_cache(
-        self, tier_code: Optional[str] = None
-    ) -> None:
+    async def invalidate_tier_cache(self, tier_code: Optional[str] = None) -> None:
         """Drop the cached tier definition after an admin write.
 
         Issue #347 acceptance criterion — explicit DEL on writes (no

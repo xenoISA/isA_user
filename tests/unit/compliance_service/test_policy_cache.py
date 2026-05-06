@@ -29,7 +29,9 @@ from microservices.compliance_service.models import (
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 
-def _make_policy(policy_id: str = "p1", organization_id: str = None) -> CompliancePolicy:
+def _make_policy(
+    policy_id: str = "p1", organization_id: str = None
+) -> CompliancePolicy:
     return CompliancePolicy(
         policy_id=policy_id,
         policy_name=f"policy-{policy_id}",
@@ -144,9 +146,7 @@ async def test_invalidate_drops_specific_policy_id():
 async def test_invalidate_does_not_flush_other_keys():
     cache = _fake_cache()
     repo = MagicMock()
-    repo.get_policy_by_id = AsyncMock(
-        side_effect=lambda pid: _make_policy(pid)
-    )
+    repo.get_policy_by_id = AsyncMock(side_effect=lambda pid: _make_policy(pid))
 
     service = _build_service(cache, repo)
 
@@ -297,7 +297,9 @@ async def test_invalidate_policy_id_does_not_purge_other_orgs():
     p1 = _make_policy("p1", organization_id="org-7")
     p2 = _make_policy("p2", organization_id="org-9")
     repo.get_policy_by_id = AsyncMock(side_effect=lambda pid: p1 if pid == "p1" else p2)
-    repo.get_active_policies = AsyncMock(side_effect=lambda org: [p1] if org == "org-7" else [p2])
+    repo.get_active_policies = AsyncMock(
+        side_effect=lambda org: [p1] if org == "org-7" else [p2]
+    )
 
     service = _build_service(cache, repo)
 
@@ -325,7 +327,9 @@ async def test_invalidate_purge_all_orgs_walks_pattern():
     """
     cache = _fake_cache()
     repo = MagicMock()
-    repo.get_active_policies = AsyncMock(side_effect=lambda org: [_make_policy("p1", organization_id=org)])
+    repo.get_active_policies = AsyncMock(
+        side_effect=lambda org: [_make_policy("p1", organization_id=org)]
+    )
 
     service = _build_service(cache, repo)
 
@@ -347,7 +351,9 @@ async def test_invalidate_with_explicit_org_skips_db_lookup():
     """
     cache = _fake_cache()
     repo = MagicMock()
-    repo.get_policy_by_id = AsyncMock(return_value=_make_policy("p1", organization_id="org-7"))
+    repo.get_policy_by_id = AsyncMock(
+        return_value=_make_policy("p1", organization_id="org-7")
+    )
 
     service = _build_service(cache, repo)
 
