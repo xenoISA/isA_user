@@ -46,6 +46,36 @@ consul:
   enabled: true
 
 # =============================================================================
+# Pre-deploy Migration Job (issue #349, epic #345)
+# =============================================================================
+migrationJob:
+  enabled: true
+  image:
+    registry: harbor.local:30443
+    repository: isa/user-base
+    tag: latest
+    pullPolicy: Always
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  serviceAccountName: ""
+  imagePullSecrets: []
+  nodeSelector: {}
+  tolerations: []
+  extraEnv:
+    - name: LOG_LEVEL
+      value: "DEBUG"
+    - name: ENV
+      value: "staging"
+
+# =============================================================================
 # Shared Environment Variables (injected into all services)
 # =============================================================================
 env:

@@ -35,6 +35,52 @@ consul:
   enabled: true
 
 # =============================================================================
+# Pre-deploy Migration Job (issue #349, epic #345)
+# =============================================================================
+# Renders deployment/helm/templates/migration-job.yaml as a Helm
+# `pre-install,pre-upgrade` hook. Helm waits for this Job to succeed before
+# rolling out the service workloads. On failure, existing pods continue
+# serving traffic uninterrupted (failed pre-hook = aborted upgrade).
+#
+# Override per-environment in values-staging.yaml / values-production.yaml.
+# =============================================================================
+migrationJob:
+  enabled: true
+  # Image used by the Job. SHOULD match the version being deployed so the
+  # alembic scripts on disk match the schema the new pods expect.
+  image:
+    registry: harbor.local:30443
+    repository: isa/user-base
+    tag: latest
+    pullPolicy: Always
+  # Modest resource asks — Alembic is light. Bump if you have many
+  # services/many migrations chained.
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  # Fail fast — schema mismatches deserve human triage, not implicit retries.
+  backoffLimit: 0
+  # Hard cap on runtime. 600s is generous for the all-services Alembic chain;
+  # increase if you have heavy data backfills.
+  activeDeadlineSeconds: 600
+  # Keep terminated Jobs around briefly so `kubectl logs job/...` works after
+  # the hook completes. Failed Jobs persist regardless (no `hook-failed` in
+  # the deletion policy) until manually cleaned.
+  ttlSecondsAfterFinished: 86400
+  # Optional: bind to a service account that has access to the DB secret.
+  serviceAccountName: ""
+  imagePullSecrets: []
+  nodeSelector: {}
+  tolerations: []
+  # Extra env appended after the shared `.Values.env` block. Use this to add
+  # migration-only flags (e.g., a higher LOG_LEVEL).
+  extraEnv: []
+
+# =============================================================================
 # Microservices Configuration
 # =============================================================================
 services:

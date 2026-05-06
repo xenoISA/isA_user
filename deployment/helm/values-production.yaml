@@ -50,6 +50,41 @@ consul:
   enabled: true
 
 # =============================================================================
+# Pre-deploy Migration Job (issue #349, epic #345)
+# =============================================================================
+# Pinned production image — keep `tag` aligned with the release being shipped
+# so alembic scripts in the migration container match the schema the new
+# service pods will read/write. The CI workflow overrides this via
+# `--set migrationJob.image.tag=$VERSION`.
+# =============================================================================
+migrationJob:
+  enabled: true
+  image:
+    registry: harbor.isa.io
+    repository: isa/user-base
+    tag: "0.0.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  serviceAccountName: ""
+  imagePullSecrets: []
+  nodeSelector: {}
+  tolerations: []
+  extraEnv:
+    - name: LOG_LEVEL
+      value: "INFO"
+    - name: ENV
+      value: "production"
+
+# =============================================================================
 # Shared Environment Variables (injected into all services)
 # =============================================================================
 env:

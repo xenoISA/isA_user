@@ -1,0 +1,113 @@
+{{- /*
+  Pre-deploy Alembic migration Job (issue #349, parent epic #345).
+
+  Runs `scripts/migrate.sh upgrade all` against the configured Postgres
+  instance. Helm fires this Job as a `pre-install,pre-upgrade` hook so
+  rolling deploys of the service charts are gated by a successful schema
+  migration. Existing replicas keep serving traffic if the Job fails.
+
+  Deletion policy keeps FAILED Jobs around for `kubectl logs` debugging
+  (`hook-failed` is intentionally NOT in the policy). Successful Jobs
+  are cleaned up before the next hook fires.
+*/ -}}
+{{- if .Values.migrationJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "migrations.fullname" . }}-{{ now | unixEpoch }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "migrations.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrationJob.backoffLimit | default 0 }}
+  activeDeadlineSeconds: {{ .Values.migrationJob.activeDeadlineSeconds | default 600 }}
+  ttlSecondsAfterFinished: {{ .Values.migrationJob.ttlSecondsAfterFinished | default 86400 }}
+  template:
+    metadata:
+      labels:
+        {{- include "migrations.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+      annotations:
+        # Opt-out of service mesh sidecars and Consul Connect — we just need
+        # outbound DB access, not request routing.
+        sidecar.istio.io/inject: "false"
+        consul.hashicorp.com/connect-inject: "false"
+    spec:
+      restartPolicy: Never
+      {{- with .Values.migrationJob.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- with .Values.migrationJob.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.migrationJob.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.migrationJob.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: alembic-migrate
+          image: "{{ .Values.migrationJob.image.registry }}/{{ .Values.migrationJob.image.repository }}:{{ .Values.migrationJob.image.tag }}"
+          imagePullPolicy: {{ .Values.migrationJob.image.pullPolicy | default "IfNotPresent" }}
+          # We bypass the service Dockerfile's uvicorn CMD and run the
+          # migration helper directly. The base image already has alembic +
+          # all migration scripts mounted at /app.
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              echo "=================================================="
+              echo "isA_user pre-deploy migration runner"
+              echo "Release:   {{ .Release.Name }}"
+              echo "Namespace: {{ .Values.namespace | default .Release.Namespace }}"
+              echo "Chart:     {{ .Chart.Name }}-{{ .Chart.Version }}"
+              echo "Started:   $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "=================================================="
+              echo ""
+              echo "Listing services with Alembic migrations:"
+              bash scripts/migrate.sh list
+              echo ""
+              echo "--- Pre-migration status ---"
+              bash scripts/migrate.sh status all || true
+              echo ""
+              echo "--- Running upgrade head for all services ---"
+              bash scripts/migrate.sh upgrade all
+              echo ""
+              echo "--- Post-migration status ---"
+              bash scripts/migrate.sh status all
+              echo ""
+              echo "--- Tracked raw SQL migrations ---"
+              bash scripts/migrate.sh sql-upgrade all || {
+                code=$?
+                echo "Raw SQL migration step exited with $code"
+                exit $code
+              }
+              echo ""
+              echo "Migration job complete at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          workingDir: /app
+          env:
+            {{- /* Inherit the same DB/secret config as the service workloads */}}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.migrationJob.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.migrationJob.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+            capabilities:
+              drop:
+                - ALL
+{{- end }}
