@@ -1,51 +1,180 @@
 """
 Payment Service Event Handlers
 
-Handlers for events from other services
+Handlers for events from other services.
+
+Distributed event idempotency (issue #348):
+    Events that mutate persistent state (creating payment intents,
+    cancelling subscriptions, anonymising payment history) are
+    wrapped in a Redis-backed distributed lock keyed by the source
+    event id so two replicas under HPA scale-out cannot race.
+
+    Note: most upstream callers in this module pass ``event_data``
+    rather than the full ``event`` envelope, so the wrapper helpers
+    accept an explicit ``event_id`` arg from the dispatcher in
+    ``get_event_handlers``.
 """
 
 import logging
-from typing import Dict, Any
+import os
+from typing import Any, Dict, Optional
 from decimal import Decimal
+
+from core.distributed_lock import (
+    DistributedLock,
+    DistributedLockError,
+    LockContended,
+    build_distributed_lock,
+)
+from core.redis_cache import RedisCache, build_redis_cache
 
 from ..models import CreatePaymentIntentRequest, Currency
 
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# Distributed lock + result cache singletons (issue #348)
+# ============================================================================
+
+_event_lock: Optional[DistributedLock] = None
+_event_result_cache: Optional[RedisCache] = None
+
+_DEFAULT_LOCK_TTL_SECONDS = int(os.getenv("PAYMENT_EVENT_LOCK_TTL_SECONDS", "120"))
+_DEFAULT_RESULT_CACHE_TTL_SECONDS = int(
+    os.getenv("PAYMENT_EVENT_RESULT_CACHE_TTL_SECONDS", "900")
+)
+
+
+def _get_event_lock() -> DistributedLock:
+    global _event_lock
+    if _event_lock is None:
+        _event_lock = build_distributed_lock(
+            "payment_service",
+            service_name="payment_service",
+            default_ttl_seconds=_DEFAULT_LOCK_TTL_SECONDS,
+        )
+    return _event_lock
+
+
+def _get_result_cache() -> RedisCache:
+    global _event_result_cache
+    if _event_result_cache is None:
+        _event_result_cache = build_redis_cache(
+            "payment_event_results",
+            service_name="payment_service",
+            default_ttl=_DEFAULT_RESULT_CACHE_TTL_SECONDS,
+        )
+    return _event_result_cache
+
+
+def set_event_idempotency_backends(
+    *,
+    lock: Optional[DistributedLock] = None,
+    result_cache: Optional[RedisCache] = None,
+) -> None:
+    """Override the lock / result cache singletons (test hook)."""
+    global _event_lock, _event_result_cache
+    if lock is not None:
+        _event_lock = lock
+    if result_cache is not None:
+        _event_result_cache = result_cache
+
+
+def _event_lock_guard(handler_label: str, event_id: str):
+    return _get_event_lock().guard(
+        f"{handler_label}:{event_id}",
+        ttl_seconds=_DEFAULT_LOCK_TTL_SECONDS,
+        result_cache=_get_result_cache(),
+        wait_seconds=0.5,
+        wait_poll_interval=0.05,
+        on_contended="return",
+    )
+
+
+def _resolve_event_id(event_or_data: Any) -> str:
+    """Pull a stable identifier off an Event envelope or raw data dict.
+
+    Handlers historically receive ``event.data`` (a dict). The
+    dispatcher in ``get_event_handlers`` now passes the envelope so
+    we can use ``event.id``, but legacy callers may still hand a
+    raw dict — we fall back to a domain key when present.
+    """
+    if hasattr(event_or_data, "id") and getattr(event_or_data, "id"):
+        return str(event_or_data.id)
+    if isinstance(event_or_data, dict):
+        for key in (
+            "event_id",
+            "order_id",
+            "payment_id",
+            "subscription_id",
+            "user_id",
+        ):
+            if event_or_data.get(key):
+                return str(event_or_data[key])
+    return "anonymous"
+
+
 async def handle_order_created(event_data: Dict[str, Any], payment_service) -> None:
     """
     Handle order.created event
 
-    Automatically create payment intent for new orders
+    Automatically create payment intent for new orders. Wrapped in a
+    distributed idempotency lock keyed by the order id (#348) so two
+    replicas processing the same event don't both create a payment
+    intent.
     """
+    event_id = _resolve_event_id(event_data)
     try:
-        order_id = event_data.get("order_id")
-        user_id = event_data.get("user_id")
-        amount = event_data.get("total_amount")
-        payment_intent_id = event_data.get("payment_intent_id")
-        currency = event_data.get("currency", "USD")
+        async with _event_lock_guard("order_created", event_id) as outcome:
+            if outcome.is_cached:
+                logger.debug("order.created %s served from idempotency cache", event_id)
+                return
+            if outcome.token == "":
+                logger.info(
+                    "order.created %s contended on lock; another replica is "
+                    "processing",
+                    event_id,
+                )
+                return
 
-        if payment_intent_id:
-            logger.info(f"Order {order_id} already has payment_intent_id, skipping")
-            return
+            order_id = event_data.get("order_id")
+            user_id = event_data.get("user_id")
+            amount = event_data.get("total_amount")
+            payment_intent_id = event_data.get("payment_intent_id")
+            currency = event_data.get("currency", "USD")
 
-        if not all([order_id, user_id, amount]):
-            logger.warning("order.created event missing required fields")
-            return
+            if payment_intent_id:
+                logger.info(f"Order {order_id} already has payment_intent_id, skipping")
+                outcome.set_result(
+                    {"status": "skipped", "reason": "already_has_intent"}
+                )
+                return
 
-        logger.info(f"Processing order.created event for order {order_id}")
+            if not all([order_id, user_id, amount]):
+                logger.warning("order.created event missing required fields")
+                return
 
-        request = CreatePaymentIntentRequest(
-            user_id=user_id,
-            amount=Decimal(str(amount)),
-            currency=Currency(currency),
-            order_id=order_id,
-            metadata={"order_id": order_id},
+            logger.info(f"Processing order.created event for order {order_id}")
+
+            request = CreatePaymentIntentRequest(
+                user_id=user_id,
+                amount=Decimal(str(amount)),
+                currency=Currency(currency),
+                order_id=order_id,
+                metadata={"order_id": order_id},
+            )
+
+            await payment_service.create_payment_intent(request)
+            outcome.set_result({"status": "intent_created", "order_id": order_id})
+    except DistributedLockError as exc:
+        logger.error(
+            "order.created %s aborted: distributed lock unavailable: %s",
+            event_id,
+            exc,
         )
-
-        await payment_service.create_payment_intent(request)
-
+    except LockContended:
+        logger.info("order.created %s contended; will retry", event_id)
     except Exception as e:
         logger.error(f"❌ Error handling order.created event: {e}")
 
@@ -139,8 +268,43 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
     """
     Handle user.deleted event
 
-    Cancel all subscriptions and process prorated refunds
+    Cancel all subscriptions and process prorated refunds. Wrapped in
+    a distributed idempotency lock keyed by user_id (#348) so two
+    replicas don't both refund / cancel the same user.
     """
+    event_id = _resolve_event_id(event_data)
+    try:
+        async with _event_lock_guard("user_deleted_payment", event_id) as outcome:
+            if outcome.is_cached:
+                logger.debug(
+                    "user.deleted (payment) %s served from idempotency cache",
+                    event_id,
+                )
+                return
+            if outcome.token == "":
+                logger.info(
+                    "user.deleted (payment) %s contended on lock; another "
+                    "replica is processing",
+                    event_id,
+                )
+                return
+            await _process_user_deleted_payment(event_data, payment_service, outcome)
+    except DistributedLockError as exc:
+        logger.error(
+            "user.deleted (payment) %s aborted: distributed lock unavailable: %s",
+            event_id,
+            exc,
+        )
+    except LockContended:
+        logger.info("user.deleted (payment) %s contended; will retry", event_id)
+    except Exception as e:
+        logger.error(f"❌ Error handling user.deleted event: {e}", exc_info=True)
+
+
+async def _process_user_deleted_payment(
+    event_data: Dict[str, Any], payment_service, outcome
+) -> None:
+    """Inner body of handle_user_deleted — runs under the distributed lock."""
     try:
         user_id = event_data.get("user_id")
 
@@ -196,6 +360,15 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
             # Anonymize payment history (keep for accounting, remove PII)
             await payment_service.repository.anonymize_user_payment_history(user_id)
 
+            outcome.set_result(
+                {
+                    "status": "cleaned_up",
+                    "user_id": user_id,
+                    "cancelled_subscriptions": cancelled_count,
+                    "cancelled_intents": cancelled_intents,
+                    "refund_total": str(refund_total),
+                }
+            )
             logger.info(
                 f"✅ User {user_id} payment cleanup: "
                 f"{cancelled_count} subscriptions cancelled, "

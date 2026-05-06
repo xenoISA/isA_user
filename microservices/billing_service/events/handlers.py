@@ -9,17 +9,34 @@ Supports both:
 
 Both Event and EventEnvelope have the same interface:
 - .id, .type, .source, .data, .timestamp, .metadata
+
+Distributed event idempotency (issue #348):
+    The repository-level ``claim_event_processing`` was the first
+    line of defence (DB-level idempotency). We add a Redis-backed
+    distributed lock as a thin pre-DB gate so two replicas don't
+    even start racing — they short-circuit on the lock and either
+    wait for the cached result or skip. Lock + DB claim together
+    cover both fast retries (lock catches them) and slow retries
+    (DB claim catches them after the lock TTL).
 """
 
 import logging
 import os
 from datetime import datetime
 from decimal import Decimal
-from typing import Set, Union
+from typing import Optional, Set, Union
+
+from core.distributed_lock import (
+    DistributedLock,
+    DistributedLockError,
+    LockContended,
+    build_distributed_lock,
+)
 
 # Support both old and new event types
 from core.nats_client import Event
 from core.nats_client import EventEnvelope
+from core.redis_cache import RedisCache, build_redis_cache
 
 from ..models import RecordUsageRequest, ServiceType
 from .models import parse_usage_event
@@ -29,6 +46,66 @@ from .publishers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Distributed lock + result cache singletons (issue #348)
+# ============================================================================
+
+_event_lock: Optional[DistributedLock] = None
+_event_result_cache: Optional[RedisCache] = None
+
+_DEFAULT_LOCK_TTL_SECONDS = int(os.getenv("BILLING_EVENT_LOCK_TTL_SECONDS", "120"))
+_DEFAULT_RESULT_CACHE_TTL_SECONDS = int(
+    os.getenv("BILLING_EVENT_RESULT_CACHE_TTL_SECONDS", "900")
+)
+
+
+def _get_event_lock() -> DistributedLock:
+    global _event_lock
+    if _event_lock is None:
+        _event_lock = build_distributed_lock(
+            "billing_service",
+            service_name="billing_service",
+            default_ttl_seconds=_DEFAULT_LOCK_TTL_SECONDS,
+        )
+    return _event_lock
+
+
+def _get_result_cache() -> RedisCache:
+    global _event_result_cache
+    if _event_result_cache is None:
+        _event_result_cache = build_redis_cache(
+            "billing_event_results",
+            service_name="billing_service",
+            default_ttl=_DEFAULT_RESULT_CACHE_TTL_SECONDS,
+        )
+    return _event_result_cache
+
+
+def set_event_idempotency_backends(
+    *,
+    lock: Optional[DistributedLock] = None,
+    result_cache: Optional[RedisCache] = None,
+) -> None:
+    """Override the lock / result cache singletons (test hook)."""
+    global _event_lock, _event_result_cache
+    if lock is not None:
+        _event_lock = lock
+    if result_cache is not None:
+        _event_result_cache = result_cache
+
+
+def _event_lock_guard(handler_label: str, event_id: str):
+    return _get_event_lock().guard(
+        f"{handler_label}:{event_id}",
+        ttl_seconds=_DEFAULT_LOCK_TTL_SECONDS,
+        result_cache=_get_result_cache(),
+        wait_seconds=0.5,
+        wait_poll_interval=0.05,
+        on_contended="return",
+    )
+
 
 # Type alias for both event types
 EventType = Union[Event, EventEnvelope]
@@ -132,15 +209,53 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
     """
     Handle a `billing.usage.recorded.*` event from another service.
 
+    Wrapped in a distributed idempotency lock (#348) keyed by event.id
+    so HPA scale-out cannot let two replicas double-bill the same
+    usage event before the DB-level ``claim_event_processing`` row
+    materialises.
+
     Args:
         event: The incoming event envelope.
         billing_service: Billing service instance.
         event_bus: Event bus instance.
     """
+    if is_event_processed(event.id):
+        logger.debug(f"Event {event.id} already processed, skipping")
+        return
+
+    try:
+        async with _event_lock_guard("usage_recorded", event.id) as outcome:
+            if outcome.is_cached:
+                mark_event_processed(event.id)
+                return
+            if outcome.token == "":
+                logger.info(
+                    "billing.usage.recorded %s contended on lock; another "
+                    "replica is processing",
+                    event.id,
+                )
+                return
+            await _process_usage_recorded(event, billing_service, event_bus, outcome)
+    except DistributedLockError as exc:
+        logger.error(
+            "billing.usage.recorded %s aborted: distributed lock unavailable: %s",
+            event.id,
+            exc,
+        )
+    except LockContended:
+        logger.info("billing.usage.recorded %s contended; will retry", event.id)
+    except Exception as e:
+        logger.error(
+            f"❌ Error wrapping billing.usage.recorded handler: {e}", exc_info=True
+        )
+
+
+async def _process_usage_recorded(event, billing_service, event_bus, outcome):
+    """Inner body of handle_usage_recorded — runs under the distributed lock."""
     dedup_key = event.id
     completed = False
     try:
-        # Check idempotency by event id first
+        # Re-check idempotency under the lock (covers same-replica retries).
         if is_event_processed(event.id):
             logger.debug(f"Event {event.id} already processed, skipping")
             return
@@ -321,6 +436,14 @@ async def handle_usage_recorded(event: Event, billing_service, event_bus):
                 exc_info=True,
             )
 
+        outcome.set_result(
+            {
+                "status": "billed",
+                "user_id": usage_data.user_id,
+                "billing_record_id": billing_result.billing_record_id,
+                "amount_charged": str(billing_result.amount_charged or "0"),
+            }
+        )
         logger.info(
             f"✅ Successfully processed usage event {event.id}, "
             f"charged: ${billing_result.amount_charged}, "

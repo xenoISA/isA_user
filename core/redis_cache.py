@@ -205,9 +205,7 @@ class RedisCache:
         try:
             import redis.asyncio as redis_async  # local import — keeps redis optional
 
-            self._client = redis_async.from_url(
-                self._url, decode_responses=False
-            )
+            self._client = redis_async.from_url(self._url, decode_responses=False)
             return self._client
         except Exception as exc:
             logger.warning(
@@ -242,9 +240,7 @@ class RedisCache:
             # Defensive — if the latch is False but we never recorded a
             # trip, treat the next call as a probe so we don't deadlatch.
             return True
-        return (
-            time.monotonic() - self._unhealthy_since
-        ) >= self._recovery_cooldown
+        return (time.monotonic() - self._unhealthy_since) >= self._recovery_cooldown
 
     async def _attempt_recovery(self, client: Any) -> bool:
         """Attempt a single PING probe under the recovery lock.
@@ -275,9 +271,7 @@ class RedisCache:
                     self.namespace,
                     exc,
                 )
-                CACHE_ERRORS.labels(
-                    cache=self.namespace, operation="recovery"
-                ).inc()
+                CACHE_ERRORS.labels(cache=self.namespace, operation="recovery").inc()
                 return False
             if not pong:
                 self._unhealthy_since = time.monotonic()
@@ -499,6 +493,26 @@ class RedisCache:
                     f"cannot invalidate pattern {pattern!r}"
                 )
             return 0
+        # Half-open recovery (issue #348 follow-up to PR #357): if the
+        # latch is tripped, attempt a single recovery probe before
+        # raising on a security-critical invalidation. Without this, a
+        # transient Redis blip would permanently fail-closed every
+        # subsequent ``delete_pattern`` call until the latch was reset
+        # by a successful read/write — but invalidations have no
+        # complementary "successful read" path that would clear it.
+        if not self._healthy:
+            if self._should_attempt_recovery():
+                recovered = await self._attempt_recovery(client)
+            else:
+                recovered = False
+            if not recovered:
+                CACHE_ERRORS.labels(cache=self.namespace, operation="scan").inc()
+                if raise_on_error:
+                    raise CacheInvalidationError(
+                        f"redis_cache({self.namespace}): cache latch open; "
+                        f"cannot confirm invalidation of pattern {pattern!r}"
+                    )
+                return 0
         full_pattern = self._full_key(pattern)
         deleted = 0
         try:
