@@ -138,11 +138,20 @@ env:
   # Services connect through PgBouncer (port 6432) instead of Postgres direct
   # (port 5432) so per-pod application pools can grow with HPA without
   # exceeding the Postgres backend max_connections ceiling. PgBouncer chart:
-  # xenoISA/isA_Cloud#231 (PR #233) — Service `pgbouncer.isa-cloud-prod`.
+  # xenoISA/isA_Cloud#231 (PR #233) — Service `pgbouncer.isa-cloud-production`.
   # PgBouncer's [databases] section maps `isa_platform` straight through to
   # the postgresql-ha-pgpool backend; no DB-name change.
+  #
+  # NOTE: The Service hostname uses `isa-cloud-production` (full name) because
+  # that's where the PgBouncer chart actually deploys per isA_Cloud's
+  # `deployments/kubernetes/production/values/pgbouncer.yaml` (and where the
+  # rest of the production stack lives — verified against isA_Cloud's
+  # production manifests). The other env vars in this file use the
+  # `isa-cloud-prod` short form which is pre-existing drift across services
+  # (consul, redis, qdrant, nats, neo4j, minio, emqx, postgresql); cleanup
+  # tracked separately as a follow-up to this PR.
   - name: POSTGRES_HOST
-    value: "pgbouncer.isa-cloud-prod.svc.cluster.local"
+    value: "pgbouncer.isa-cloud-production.svc.cluster.local"
   - name: POSTGRES_PORT
     value: "6432"
   - name: POSTGRES_DB
