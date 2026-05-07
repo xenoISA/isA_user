@@ -93,8 +93,8 @@ def mock_session_client():
     )
     client.get_session_messages = AsyncMock(
         return_value=[
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi there"},
+            {"id": "msg-1", "role": "user", "content": "hello"},
+            {"id": "msg-2", "role": "assistant", "content": "hi there"},
         ]
     )
     return client
@@ -134,12 +134,51 @@ class TestCreateShare:
         assert call_args["expires_at"] is not None
 
     @pytest.mark.asyncio
-    async def test_create_share_with_permissions(self, sharing_service, mock_share_repo):
+    async def test_create_share_with_permissions(
+        self, sharing_service, mock_share_repo
+    ):
         request = ShareCreateRequest(permissions=SharePermission.CAN_EDIT)
         result = await sharing_service.create_share("sess-1", "user-1", request)
 
         call_args = mock_share_repo.create_share.call_args[0][0]
         assert call_args["permissions"] == "can_edit"
+
+    @pytest.mark.asyncio
+    async def test_create_share_captures_immutable_snapshot(
+        self, sharing_service, mock_share_repo
+    ):
+        request = ShareCreateRequest()
+        await sharing_service.create_share("sess-1", "user-1", request)
+
+        call_args = mock_share_repo.create_share.call_args[0][0]
+        assert call_args["session_snapshot"]["session_id"] == "sess-1"
+        assert call_args["session_snapshot"]["message_count"] == 2
+        assert call_args["messages_snapshot"] == [
+            {"id": "msg-1", "role": "user", "content": "hello"},
+            {"id": "msg-2", "role": "assistant", "content": "hi there"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_create_share_can_snapshot_until_message(
+        self, sharing_service, mock_share_repo
+    ):
+        request = ShareCreateRequest(share_until_message_id="msg-1")
+        await sharing_service.create_share("sess-1", "user-1", request)
+
+        call_args = mock_share_repo.create_share.call_args[0][0]
+        assert call_args["session_snapshot"]["message_count"] == 1
+        assert call_args["messages_snapshot"] == [
+            {"id": "msg-1", "role": "user", "content": "hello"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_create_share_rejects_unknown_snapshot_boundary(
+        self, sharing_service
+    ):
+        request = ShareCreateRequest(share_until_message_id="missing-msg")
+
+        with pytest.raises(ShareValidationError, match="share_until_message_id"):
+            await sharing_service.create_share("sess-1", "user-1", request)
 
     @pytest.mark.asyncio
     async def test_create_share_session_not_found(
@@ -152,9 +191,7 @@ class TestCreateShare:
             await sharing_service.create_share("bad-sess", "user-1", request)
 
     @pytest.mark.asyncio
-    async def test_create_share_not_owner(
-        self, sharing_service, mock_session_client
-    ):
+    async def test_create_share_not_owner(self, sharing_service, mock_session_client):
         mock_session_client.get_session.return_value = {
             "session_id": "sess-1",
             "user_id": "other-user",
@@ -165,9 +202,7 @@ class TestCreateShare:
             await sharing_service.create_share("sess-1", "user-1", request)
 
     @pytest.mark.asyncio
-    async def test_create_share_publishes_event(
-        self, sharing_service, mock_event_bus
-    ):
+    async def test_create_share_publishes_event(self, sharing_service, mock_event_bus):
         request = ShareCreateRequest()
         await sharing_service.create_share("sess-1", "user-1", request)
 
@@ -176,9 +211,7 @@ class TestCreateShare:
         assert event.type == "share.created"
 
     @pytest.mark.asyncio
-    async def test_create_share_repo_failure(
-        self, sharing_service, mock_share_repo
-    ):
+    async def test_create_share_repo_failure(self, sharing_service, mock_share_repo):
         mock_share_repo.create_share.return_value = None
 
         request = ShareCreateRequest()
@@ -201,6 +234,45 @@ class TestAccessShare:
         assert result.message_count == 2
 
     @pytest.mark.asyncio
+    async def test_access_share_uses_snapshot_not_live_session(
+        self, sharing_service, mock_share_repo, mock_session_client
+    ):
+        mock_share_repo.get_by_token.return_value = _make_share(
+            share_id="share-snapshot",
+            session_id="sess-1",
+            share_token="snapshot-token",
+        ).model_copy(
+            update={
+                "session_snapshot": {
+                    "session_id": "sess-1",
+                    "session_summary": "Frozen summary",
+                    "message_count": 1,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "last_activity": "2026-01-01T00:00:00Z",
+                },
+                "messages_snapshot": [
+                    {"id": "msg-1", "role": "user", "content": "frozen"}
+                ],
+            }
+        )
+        mock_session_client.get_session.return_value = {
+            "session_id": "sess-1",
+            "user_id": "user-1",
+            "session_summary": "Changed live summary",
+        }
+        mock_session_client.get_session_messages.return_value = [
+            {"id": "msg-2", "role": "assistant", "content": "changed"}
+        ]
+
+        result = await sharing_service.access_share("snapshot-token")
+
+        assert result.session_summary == "Frozen summary"
+        assert result.message_count == 1
+        assert result.messages == [{"id": "msg-1", "role": "user", "content": "frozen"}]
+        mock_session_client.get_session.assert_not_called()
+        mock_session_client.get_session_messages.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_access_share_increments_count(
         self, sharing_service, mock_share_repo
     ):
@@ -208,18 +280,14 @@ class TestAccessShare:
         mock_share_repo.increment_access_count.assert_called_once_with("share-1")
 
     @pytest.mark.asyncio
-    async def test_access_share_not_found(
-        self, sharing_service, mock_share_repo
-    ):
+    async def test_access_share_not_found(self, sharing_service, mock_share_repo):
         mock_share_repo.get_by_token.return_value = None
 
         with pytest.raises(ShareNotFoundError):
             await sharing_service.access_share("bad-token")
 
     @pytest.mark.asyncio
-    async def test_access_share_expired(
-        self, sharing_service, mock_share_repo
-    ):
+    async def test_access_share_expired(self, sharing_service, mock_share_repo):
         expired_share = _make_share(
             expires_at=datetime(2020, 1, 1, tzinfo=timezone.utc)
         )
@@ -229,9 +297,7 @@ class TestAccessShare:
             await sharing_service.access_share("test-token-abc")
 
     @pytest.mark.asyncio
-    async def test_access_share_not_expired(
-        self, sharing_service, mock_share_repo
-    ):
+    async def test_access_share_not_expired(self, sharing_service, mock_share_repo):
         future = datetime.now(timezone.utc) + timedelta(hours=24)
         valid_share = _make_share(expires_at=future)
         mock_share_repo.get_by_token.return_value = valid_share
@@ -240,9 +306,7 @@ class TestAccessShare:
         assert result.session_id == "sess-1"
 
     @pytest.mark.asyncio
-    async def test_access_share_publishes_event(
-        self, sharing_service, mock_event_bus
-    ):
+    async def test_access_share_publishes_event(self, sharing_service, mock_event_bus):
         await sharing_service.access_share("test-token-abc")
 
         mock_event_bus.publish_event.assert_called_once()
@@ -272,9 +336,7 @@ class TestRevokeShare:
         mock_share_repo.delete_by_token.assert_called_once_with("test-token-abc")
 
     @pytest.mark.asyncio
-    async def test_revoke_share_not_found(
-        self, sharing_service, mock_share_repo
-    ):
+    async def test_revoke_share_not_found(self, sharing_service, mock_share_repo):
         mock_share_repo.get_by_token.return_value = None
 
         with pytest.raises(ShareNotFoundError):
@@ -286,14 +348,28 @@ class TestRevokeShare:
             await sharing_service.revoke_share("test-token-abc", "other-user")
 
     @pytest.mark.asyncio
-    async def test_revoke_share_publishes_event(
-        self, sharing_service, mock_event_bus
-    ):
+    async def test_revoke_share_publishes_event(self, sharing_service, mock_event_bus):
         await sharing_service.revoke_share("test-token-abc", "user-1")
 
         mock_event_bus.publish_event.assert_called_once()
         event = mock_event_bus.publish_event.call_args[0][0]
         assert event.type == "share.revoked"
+
+    @pytest.mark.asyncio
+    async def test_revoke_session_share_success(self, sharing_service, mock_share_repo):
+        result = await sharing_service.revoke_session_share(
+            "sess-1", "test-token-abc", "user-1"
+        )
+
+        assert result is True
+        mock_share_repo.delete_by_token.assert_called_once_with("test-token-abc")
+
+    @pytest.mark.asyncio
+    async def test_revoke_session_share_rejects_session_mismatch(self, sharing_service):
+        with pytest.raises(ShareNotFoundError):
+            await sharing_service.revoke_session_share(
+                "other-session", "test-token-abc", "user-1"
+            )
 
 
 # ============================================================================
@@ -320,9 +396,7 @@ class TestListSessionShares:
             await sharing_service.list_session_shares("bad-sess", "user-1")
 
     @pytest.mark.asyncio
-    async def test_list_shares_not_owner(
-        self, sharing_service, mock_session_client
-    ):
+    async def test_list_shares_not_owner(self, sharing_service, mock_session_client):
         mock_session_client.get_session.return_value = {
             "session_id": "sess-1",
             "user_id": "other-user",
@@ -332,9 +406,7 @@ class TestListSessionShares:
             await sharing_service.list_session_shares("sess-1", "user-1")
 
     @pytest.mark.asyncio
-    async def test_list_shares_empty(
-        self, sharing_service, mock_share_repo
-    ):
+    async def test_list_shares_empty(self, sharing_service, mock_share_repo):
         mock_share_repo.get_session_shares.return_value = []
         result = await sharing_service.list_session_shares("sess-1", "user-1")
         assert result.total == 0

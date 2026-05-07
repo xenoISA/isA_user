@@ -34,6 +34,7 @@ class TestShareCreateRequest:
         req = ShareCreateRequest()
         assert req.permissions == SharePermission.VIEW_ONLY
         assert req.expires_in_hours is None
+        assert req.share_until_message_id is None
 
     def test_custom_permissions(self):
         req = ShareCreateRequest(permissions=SharePermission.CAN_EDIT)
@@ -55,6 +56,10 @@ class TestShareCreateRequest:
         req = ShareCreateRequest(expires_in_hours=8760)
         assert req.expires_in_hours == 8760
 
+    def test_share_until_message_id(self):
+        req = ShareCreateRequest(share_until_message_id="msg-123")
+        assert req.share_until_message_id == "msg-123"
+
 
 class TestShare:
     def test_valid_share(self):
@@ -67,6 +72,8 @@ class TestShare:
         assert share.permissions == SharePermission.VIEW_ONLY
         assert share.access_count == 0
         assert share.expires_at is None
+        assert share.session_snapshot is None
+        assert share.messages_snapshot is None
 
     def test_share_from_attributes(self):
         data = {
@@ -81,6 +88,18 @@ class TestShare:
         share = Share.model_validate(data)
         assert share.permissions == "can_comment"
         assert share.access_count == 5
+
+    def test_share_with_snapshot_fields(self):
+        share = Share(
+            id="share-1",
+            session_id="sess-1",
+            owner_id="user-1",
+            share_token="abc",
+            session_snapshot={"session_id": "sess-1", "message_count": 1},
+            messages_snapshot=[{"id": "msg-1", "content": "hello"}],
+        )
+        assert share.session_snapshot["message_count"] == 1
+        assert share.messages_snapshot == [{"id": "msg-1", "content": "hello"}]
 
 
 class TestShareResponse:
