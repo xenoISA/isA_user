@@ -177,6 +177,34 @@ class PaymentRepositoryProtocol(Protocol):
         """Get subscription statistics"""
         ...
 
+    # Durable event-processing claims (issue #378)
+    async def claim_event_processing(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        processor_id: str,
+        stale_after_seconds: int = 300,
+    ) -> bool:
+        """Claim an event for processing; False when already active/completed."""
+        ...
+
+    async def mark_event_processing_completed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+    ) -> None:
+        """Mark a claimed event as completed."""
+        ...
+
+    async def mark_event_processing_failed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        error_message: str,
+    ) -> None:
+        """Mark a claimed event as failed unless it already completed."""
+        ...
+
 
 # ====================
 # Event Bus Protocol

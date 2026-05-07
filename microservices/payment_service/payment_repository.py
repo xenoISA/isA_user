@@ -90,6 +90,7 @@ class PaymentRepository:
         self.invoices_table = "invoices"
         self.refunds_table = "refunds"
         self.payment_methods_table = "payment_methods"
+        self.event_processing_claims_table = "event_processing_claims"
 
         logger.info("PaymentRepository initialized with PostgresClient")
 
@@ -107,6 +108,175 @@ class PaymentRepository:
         except Exception as e:
             logger.error(f"数据库连接检查失败: {e}")
             return False
+
+    # ====================
+    # Durable event-processing claims (issue #378)
+    #
+    # DB-level second-line idempotency for payment event handlers.
+    # Mirrors ``billing_repository.claim_event_processing`` so a worker
+    # crashing between a successful DB commit and the distributed-lock
+    # release cannot be re-driven by NATS replay after the lock TTL.
+    # ====================
+
+    async def claim_event_processing(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        processor_id: str,
+        stale_after_seconds: int = 300,
+    ) -> bool:
+        """Claim a payment event for processing.
+
+        Returns True when the caller has won the claim and should run
+        the handler. Returns False when another processor already owns
+        an active or completed claim for the same key.
+
+        A previously failed claim — or a claim that has been quiet
+        beyond ``stale_after_seconds`` — is reclaimed in place so a
+        crashed processor cannot wedge the row indefinitely.
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            stale_cutoff = now - timedelta(seconds=max(stale_after_seconds, 1))
+
+            insert_query = f"""
+                INSERT INTO {self.schema}.{self.event_processing_claims_table} (
+                    claim_key,
+                    source_event_id,
+                    processing_status,
+                    processor_id,
+                    claimed_at,
+                    completed_at,
+                    last_error,
+                    created_at,
+                    updated_at
+                ) VALUES ($1, $2, 'processing', $3, $4, NULL, NULL, $4, $4)
+                ON CONFLICT (claim_key) DO NOTHING
+                RETURNING claim_key
+            """
+
+            async with self.db:
+                inserted = await self.db.query_row(
+                    insert_query,
+                    [claim_key, source_event_id, processor_id, now],
+                    schema=self.schema,
+                )
+                if inserted:
+                    return True
+
+                reclaim_query = f"""
+                    UPDATE {self.schema}.{self.event_processing_claims_table}
+                    SET source_event_id = $2,
+                        processing_status = 'processing',
+                        processor_id = $3,
+                        claimed_at = $4,
+                        completed_at = NULL,
+                        last_error = NULL,
+                        updated_at = $4
+                    WHERE claim_key = $1
+                      AND processing_status <> 'completed'
+                      AND (
+                          processing_status = 'failed'
+                          OR updated_at < $5
+                      )
+                    RETURNING claim_key
+                """
+                reclaimed = await self.db.query_row(
+                    reclaim_query,
+                    [
+                        claim_key,
+                        source_event_id,
+                        processor_id,
+                        now,
+                        stale_cutoff,
+                    ],
+                    schema=self.schema,
+                )
+
+            return bool(reclaimed)
+
+        except Exception as e:
+            logger.error(
+                "Error claiming payment event processing: %s", e, exc_info=True
+            )
+            raise
+
+    async def mark_event_processing_completed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+    ) -> None:
+        """Mark a claimed payment event as completed."""
+        try:
+            query = f"""
+                UPDATE {self.schema}.{self.event_processing_claims_table}
+                SET source_event_id = $2,
+                    processing_status = 'completed',
+                    completed_at = $3,
+                    last_error = NULL,
+                    updated_at = $3
+                WHERE claim_key = $1
+            """
+
+            completed_at = datetime.now(timezone.utc)
+            async with self.db:
+                await self.db.execute(
+                    query,
+                    [claim_key, source_event_id, completed_at],
+                    schema=self.schema,
+                )
+
+        except Exception as e:
+            logger.error(
+                "Error marking payment event processing completed: %s",
+                e,
+                exc_info=True,
+            )
+            raise
+
+    async def mark_event_processing_failed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        error_message: str,
+    ) -> None:
+        """Mark a claimed payment event as failed.
+
+        A claim that already reached ``completed`` is left alone so a
+        late-arriving error from a stale processor cannot reopen a
+        successfully processed event for replay.
+        """
+        try:
+            query = f"""
+                UPDATE {self.schema}.{self.event_processing_claims_table}
+                SET source_event_id = $2,
+                    processing_status = 'failed',
+                    last_error = $3,
+                    updated_at = $4
+                WHERE claim_key = $1
+                  AND processing_status <> 'completed'
+            """
+
+            failed_at = datetime.now(timezone.utc)
+            async with self.db:
+                await self.db.execute(
+                    query,
+                    [
+                        claim_key,
+                        source_event_id,
+                        (error_message or "")[:2000],
+                        failed_at,
+                    ],
+                    schema=self.schema,
+                )
+
+        except Exception as e:
+            logger.error(
+                "Error marking payment event processing failed: %s",
+                e,
+                exc_info=True,
+            )
+            raise
 
     # ====================
     # 订阅计划管理

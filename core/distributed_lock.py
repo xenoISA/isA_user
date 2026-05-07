@@ -40,28 +40,31 @@ What this does NOT provide
   committed and the lock TTL eventually frees the key. **There is a
   per-service asymmetry callers MUST understand:**
 
-  - ``billing_service`` has a DB-level second-line defence
-    (``billing_repository.claim_event_processing`` materialises a
+  - ``billing_service`` and ``payment_service`` have a DB-level
+    second-line defence (``billing_repository.claim_event_processing``
+    / ``payment_repository.claim_event_processing`` materialise a
     durable claim row keyed by the event id). A crash + TTL-driven
     replay re-runs the handler, but the DB claim short-circuits the
-    second pass before any duplicate billing.
-  - ``wallet_service`` and ``payment_service`` currently rely on the
-    distributed lock alone. If a worker crashes after the DB commit
-    but before the lock is released, NATS replay after the lock TTL
-    expires will re-cancel / re-refund / re-deposit. The window for
-    this is bounded by the lock TTL (default 120s; see
-    ``<SERVICE>_EVENT_LOCK_TTL_SECONDS``).
+    second pass before any duplicate billing / cancel / refund /
+    anonymisation.
+  - ``wallet_service`` still relies on the distributed lock alone.
+    If a worker crashes after the DB commit but before the lock is
+    released, NATS replay after the lock TTL expires will re-deposit
+    / re-credit. The window for this is bounded by the lock TTL
+    (default 120s; see ``<SERVICE>_EVENT_LOCK_TTL_SECONDS``). Adding
+    a DB-level claim to ``wallet_service`` is tracked in issue #380
+    as a follow-up to #348 / #378 (parent epic #345).
 
   Operational implications:
 
-  - Keep lock TTL conservative — it is the dedupe window for those
-    two services until DB-level claims are added.
+  - Keep lock TTL conservative for ``wallet_service`` — it is still
+    the only dedupe window until that service's DB-level claim
+    lands.
   - Monitor ``event_lock_acquires_total`` for retry storms; sudden
     growth past expected event rate is the leading indicator of
     crash-and-replay duplicate processing.
-  - Adding a DB-level claim to ``wallet_service`` and
-    ``payment_service`` is tracked in issue #378 as a follow-up to
-    #348 (rather than expanding the scope of #348 itself).
+  - Issue #378 closed the gap for ``payment_service``; issue #380
+    tracks the same work for ``wallet_service``.
 
   Same boundary as PR #357's revoke fail-closed semantics.
 * **Redlock multi-master.** Single Redis is sufficient per the issue

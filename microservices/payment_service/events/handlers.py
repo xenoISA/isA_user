@@ -3,11 +3,19 @@ Payment Service Event Handlers
 
 Handlers for events from other services.
 
-Distributed event idempotency (issue #348):
+Distributed event idempotency (issues #348 / #378):
     Events that mutate persistent state (creating payment intents,
     cancelling subscriptions, anonymising payment history) are
     wrapped in a Redis-backed distributed lock keyed by the source
-    event id so two replicas under HPA scale-out cannot race.
+    event id so two replicas under HPA scale-out cannot race (#348).
+
+    A second-line DB-level claim (#378) is layered inside the lock:
+    after the lock is held the handler asks the repository to claim
+    the event in ``payment.event_processing_claims``. A worker that
+    crashes between a successful DB commit and the lock release is
+    therefore safe — when the lock TTL expires and NATS replays the
+    event, the durable claim short-circuits the handler before any
+    duplicate cancel / refund / anonymisation runs.
 
     Note: most upstream callers in this module pass ``event_data``
     rather than the full ``event`` envelope, so the wrapper helpers
@@ -31,6 +39,115 @@ from core.redis_cache import RedisCache, build_redis_cache
 from ..models import CreatePaymentIntentRequest, Currency
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Durable DB-level event-processing claims (issue #378)
+# ============================================================================
+
+# Methods the repository must expose to participate in DB-level
+# idempotency. A repository missing any of these (e.g. a test fake)
+# falls back to lock-only behaviour from #348.
+_CLAIM_REPOSITORY_METHODS = (
+    "claim_event_processing",
+    "mark_event_processing_completed",
+    "mark_event_processing_failed",
+)
+
+
+def _get_claim_repository(payment_service):
+    """Return the repository iff it implements the claim contract."""
+    repository = getattr(payment_service, "repository", None)
+    if repository is None:
+        return None
+    if all(hasattr(repository, m) for m in _CLAIM_REPOSITORY_METHODS):
+        return repository
+    return None
+
+
+def _processor_id() -> str:
+    """Stable processor id for claim attribution (host + pid)."""
+    return f"payment_service:{os.getenv('HOSTNAME') or 'local'}:{os.getpid()}"
+
+
+async def _claim_payment_event(
+    payment_service,
+    claim_key: str,
+    source_event_id: str,
+) -> bool:
+    """Try to claim the event durably. Returns True when the caller wins."""
+    repository = _get_claim_repository(payment_service)
+    if repository is None:
+        # No repository / no claim contract — lock-only path is the only
+        # defence available. Treat as a successful claim so the handler
+        # still runs (matching pre-#378 behaviour).
+        return True
+    try:
+        return await repository.claim_event_processing(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+            processor_id=_processor_id(),
+        )
+    except Exception as exc:
+        # Fail closed: do not run the handler if the durable claim layer
+        # is broken — better to skip and let a replay re-attempt than to
+        # double-process. Mirrors billing's posture for #348.
+        logger.error(
+            "Failed to acquire payment event claim for %s (%s): %s",
+            claim_key,
+            source_event_id,
+            exc,
+            exc_info=True,
+        )
+        return False
+
+
+async def _mark_payment_event_completed(
+    payment_service,
+    claim_key: str,
+    source_event_id: str,
+) -> None:
+    repository = _get_claim_repository(payment_service)
+    if repository is None:
+        return
+    try:
+        await repository.mark_event_processing_completed(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to mark payment event %s (key=%s) completed: %s",
+            source_event_id,
+            claim_key,
+            exc,
+            exc_info=True,
+        )
+
+
+async def _mark_payment_event_failed(
+    payment_service,
+    claim_key: str,
+    source_event_id: str,
+    error_message: str,
+) -> None:
+    repository = _get_claim_repository(payment_service)
+    if repository is None:
+        return
+    try:
+        await repository.mark_event_processing_failed(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+            error_message=error_message,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to mark payment event %s (key=%s) failed: %s",
+            source_event_id,
+            claim_key,
+            exc,
+            exc_info=True,
+        )
 
 
 # ============================================================================
@@ -120,11 +237,15 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
     Handle order.created event
 
     Automatically create payment intent for new orders. Wrapped in a
-    distributed idempotency lock keyed by the order id (#348) so two
-    replicas processing the same event don't both create a payment
-    intent.
+    distributed idempotency lock keyed by the order id (#348) plus a
+    DB-level second-line claim (#378) so a worker that crashes between
+    creating the payment intent and releasing the lock cannot be
+    replayed by NATS after the lock TTL.
     """
     event_id = _resolve_event_id(event_data)
+    claim_key = f"payment:order_created:{event_id}"
+    completed = False
+    claimed = False
     try:
         async with _event_lock_guard("order_created", event_id) as outcome:
             if outcome.is_cached:
@@ -138,6 +259,22 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
                 )
                 return
 
+            # Durable second-line claim — short-circuits replays after a
+            # crash that survived the lock TTL window.
+            claimed = await _claim_payment_event(
+                payment_service=payment_service,
+                claim_key=claim_key,
+                source_event_id=event_id,
+            )
+            if not claimed:
+                logger.info(
+                    "order.created %s already has an active/completed "
+                    "durable claim; skipping",
+                    event_id,
+                )
+                outcome.set_result({"status": "skipped", "reason": "already_claimed"})
+                return
+
             order_id = event_data.get("order_id")
             user_id = event_data.get("user_id")
             amount = event_data.get("total_amount")
@@ -149,10 +286,22 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
                 outcome.set_result(
                     {"status": "skipped", "reason": "already_has_intent"}
                 )
+                await _mark_payment_event_completed(
+                    payment_service=payment_service,
+                    claim_key=claim_key,
+                    source_event_id=event_id,
+                )
+                completed = True
                 return
 
             if not all([order_id, user_id, amount]):
                 logger.warning("order.created event missing required fields")
+                await _mark_payment_event_failed(
+                    payment_service=payment_service,
+                    claim_key=claim_key,
+                    source_event_id=event_id,
+                    error_message="missing required fields",
+                )
                 return
 
             logger.info(f"Processing order.created event for order {order_id}")
@@ -167,6 +316,12 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
 
             await payment_service.create_payment_intent(request)
             outcome.set_result({"status": "intent_created", "order_id": order_id})
+            await _mark_payment_event_completed(
+                payment_service=payment_service,
+                claim_key=claim_key,
+                source_event_id=event_id,
+            )
+            completed = True
     except DistributedLockError as exc:
         logger.error(
             "order.created %s aborted: distributed lock unavailable: %s",
@@ -177,6 +332,13 @@ async def handle_order_created(event_data: Dict[str, Any], payment_service) -> N
         logger.info("order.created %s contended; will retry", event_id)
     except Exception as e:
         logger.error(f"❌ Error handling order.created event: {e}")
+        if claimed and not completed:
+            await _mark_payment_event_failed(
+                payment_service=payment_service,
+                claim_key=claim_key,
+                source_event_id=event_id,
+                error_message=str(e),
+            )
 
 
 async def handle_wallet_balance_changed(
@@ -269,10 +431,14 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
     Handle user.deleted event
 
     Cancel all subscriptions and process prorated refunds. Wrapped in
-    a distributed idempotency lock keyed by user_id (#348) so two
-    replicas don't both refund / cancel the same user.
+    a distributed idempotency lock keyed by user_id (#348) plus a
+    DB-level second-line claim (#378) so a worker that crashes
+    mid-cleanup cannot be replayed by NATS after the lock TTL.
     """
     event_id = _resolve_event_id(event_data)
+    claim_key = f"payment:user_deleted:{event_id}"
+    completed = False
+    claimed = False
     try:
         async with _event_lock_guard("user_deleted_payment", event_id) as outcome:
             if outcome.is_cached:
@@ -288,7 +454,28 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
                     event_id,
                 )
                 return
+
+            claimed = await _claim_payment_event(
+                payment_service=payment_service,
+                claim_key=claim_key,
+                source_event_id=event_id,
+            )
+            if not claimed:
+                logger.info(
+                    "user.deleted (payment) %s already has an active/completed "
+                    "durable claim; skipping",
+                    event_id,
+                )
+                outcome.set_result({"status": "skipped", "reason": "already_claimed"})
+                return
+
             await _process_user_deleted_payment(event_data, payment_service, outcome)
+            await _mark_payment_event_completed(
+                payment_service=payment_service,
+                claim_key=claim_key,
+                source_event_id=event_id,
+            )
+            completed = True
     except DistributedLockError as exc:
         logger.error(
             "user.deleted (payment) %s aborted: distributed lock unavailable: %s",
@@ -299,6 +486,13 @@ async def handle_user_deleted(event_data: Dict[str, Any], payment_service) -> No
         logger.info("user.deleted (payment) %s contended; will retry", event_id)
     except Exception as e:
         logger.error(f"❌ Error handling user.deleted event: {e}", exc_info=True)
+        if claimed and not completed:
+            await _mark_payment_event_failed(
+                payment_service=payment_service,
+                claim_key=claim_key,
+                source_event_id=event_id,
+                error_message=str(e),
+            )
 
 
 async def _process_user_deleted_payment(
@@ -382,6 +576,10 @@ async def _process_user_deleted_payment(
 
     except Exception as e:
         logger.error(f"❌ Error handling user.deleted event: {e}", exc_info=True)
+        # Re-raise so the outer wrapper can mark the durable claim as
+        # failed; without this the claim would be left as ``processing``
+        # until a stale-cutoff reclaim, hiding the failure in dashboards.
+        raise
 
 
 async def handle_user_upgraded(event_data: Dict[str, Any], payment_service) -> None:
