@@ -1,7 +1,7 @@
 """
 Wallet Event Handlers
 
-Distributed event idempotency (issue #348):
+Distributed event idempotency (issues #348 / #380):
     Each handler wraps its work in
     ``_event_lock().guard(event_id, ...)``. The first replica acquires
     a Redis-backed lock keyed by the event ID; concurrent replicas
@@ -10,6 +10,15 @@ Distributed event idempotency (issue #348):
     handler frees the key automatically. The result cache short-
     circuits retried events back to the original outcome without
     re-processing — see ``core/distributed_lock.py`` for the contract.
+
+    A second-line DB-level claim (#380) is layered inside the lock:
+    after the lock is held the handler asks the repository to claim
+    the event in ``wallet.event_processing_claims``. A worker that
+    crashes between a successful DB commit and the lock release is
+    therefore safe — when the lock TTL expires and NATS replays the
+    event, the durable claim short-circuits the handler before any
+    duplicate deposit / credit allocation / wallet creation /
+    anonymisation runs.
 """
 
 import logging
@@ -34,6 +43,116 @@ from .models import (
 from .publishers import publish_tokens_deducted, publish_tokens_insufficient
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Durable DB-level event-processing claims (issue #380)
+# ============================================================================
+
+# Methods the repository must expose to participate in DB-level
+# idempotency. A repository missing any of these (e.g. a test fake)
+# falls back to lock-only behaviour from #348.
+_CLAIM_REPOSITORY_METHODS = (
+    "claim_event_processing",
+    "mark_event_processing_completed",
+    "mark_event_processing_failed",
+)
+
+
+def _get_claim_repository(wallet_service):
+    """Return the repository iff it implements the claim contract."""
+    repository = getattr(wallet_service, "repository", None)
+    if repository is None:
+        return None
+    if all(hasattr(repository, m) for m in _CLAIM_REPOSITORY_METHODS):
+        return repository
+    return None
+
+
+def _processor_id() -> str:
+    """Stable processor id for claim attribution (host + pid)."""
+    return f"wallet_service:{os.getenv('HOSTNAME') or 'local'}:{os.getpid()}"
+
+
+async def _claim_wallet_event(
+    wallet_service,
+    claim_key: str,
+    source_event_id: str,
+) -> bool:
+    """Try to claim the event durably. Returns True when the caller wins."""
+    repository = _get_claim_repository(wallet_service)
+    if repository is None:
+        # No repository / no claim contract — lock-only path is the only
+        # defence available. Treat as a successful claim so the handler
+        # still runs (matching pre-#380 behaviour).
+        return True
+    try:
+        return await repository.claim_event_processing(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+            processor_id=_processor_id(),
+        )
+    except Exception as exc:
+        # Fail closed: do not run the handler if the durable claim layer
+        # is broken — better to skip and let a replay re-attempt than to
+        # double-process. Mirrors billing's posture for #348 and
+        # payment's for #378.
+        logger.error(
+            "Failed to acquire wallet event claim for %s (%s): %s",
+            claim_key,
+            source_event_id,
+            exc,
+            exc_info=True,
+        )
+        return False
+
+
+async def _mark_wallet_event_completed(
+    wallet_service,
+    claim_key: str,
+    source_event_id: str,
+) -> None:
+    repository = _get_claim_repository(wallet_service)
+    if repository is None:
+        return
+    try:
+        await repository.mark_event_processing_completed(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to mark wallet event %s (key=%s) completed: %s",
+            source_event_id,
+            claim_key,
+            exc,
+            exc_info=True,
+        )
+
+
+async def _mark_wallet_event_failed(
+    wallet_service,
+    claim_key: str,
+    source_event_id: str,
+    error_message: str,
+) -> None:
+    repository = _get_claim_repository(wallet_service)
+    if repository is None:
+        return
+    try:
+        await repository.mark_event_processing_failed(
+            claim_key=claim_key,
+            source_event_id=source_event_id,
+            error_message=error_message,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to mark wallet event %s (key=%s) failed: %s",
+            source_event_id,
+            claim_key,
+            exc,
+            exc_info=True,
+        )
 
 
 # ============================================================================
@@ -128,6 +247,7 @@ async def handle_billing_calculated(event: Event, wallet_service, event_bus):
 
     工作流程:
         0. Acquire distributed idempotency lock keyed by event_id
+        0b. Acquire DB-level durable claim (#380) inside the lock
         1. 解析计费事件数据
         2. 检查是否需要扣费（免费额度、订阅包含的不扣费）
         3. 获取用户钱包
@@ -135,6 +255,9 @@ async def handle_billing_calculated(event: Event, wallet_service, event_bus):
         5. 扣除 token
         6. 发布 tokens.deducted 或 tokens.insufficient 事件
     """
+    claim_key = f"wallet:billing_calculated:{event.id}"
+    completed = False
+    claimed = False
     try:
         async with _get_event_lock().guard(
             f"billing_calculated:{event.id}",
@@ -157,7 +280,28 @@ async def handle_billing_calculated(event: Event, wallet_service, event_bus):
                     event.id,
                 )
                 return
+
+            claimed = await _claim_wallet_event(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            if not claimed:
+                logger.info(
+                    "billing.calculated %s already has an active/completed "
+                    "durable claim; skipping",
+                    event.id,
+                )
+                outcome.set_result({"status": "skipped", "reason": "already_claimed"})
+                return
+
             await _process_billing_calculated(event, wallet_service, event_bus, outcome)
+            await _mark_wallet_event_completed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            completed = True
     except DistributedLockError as exc:
         logger.error(
             "billing.calculated %s aborted: distributed lock unavailable: %s",
@@ -168,10 +312,17 @@ async def handle_billing_calculated(event: Event, wallet_service, event_bus):
         logger.info("billing.calculated %s contended; will retry", event.id)
     except Exception as e:
         logger.error(f"Error handling billing_calculated event: {e}", exc_info=True)
+        if claimed and not completed:
+            await _mark_wallet_event_failed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+                error_message=str(e),
+            )
 
 
 async def _process_billing_calculated(event, wallet_service, event_bus, outcome):
-    """Inner body of handle_billing_calculated — runs under the lock."""
+    """Inner body of handle_billing_calculated — runs under the lock + claim."""
     try:
         # 解析事件数据
         billing_data = parse_billing_calculated_event(event.data)
@@ -303,6 +454,10 @@ async def _process_billing_calculated(event, wallet_service, event_bus, outcome)
 
     except Exception as e:
         logger.error(f"Error handling billing_calculated event: {e}", exc_info=True)
+        # Re-raise so the outer wrapper can mark the durable claim as
+        # failed; without this the claim would be left as ``processing``
+        # until a stale-cutoff reclaim, hiding the failure in dashboards.
+        raise
 
 
 async def setup_event_subscriptions(event_bus, wallet_service):
@@ -385,6 +540,7 @@ async def handle_payment_completed(event: Event, wallet_service):
 
     Workflow:
         1. Acquire distributed idempotency lock keyed by event ID (#348)
+        1b. Acquire DB-level durable claim (#380) inside the lock
         2. Validate event data
         3. Get user's primary wallet
         4. Deposit funds to wallet
@@ -394,6 +550,9 @@ async def handle_payment_completed(event: Event, wallet_service):
         logger.debug(f"Event {event.id} already processed, skipping")
         return
 
+    claim_key = f"wallet:payment_completed:{event.id}"
+    completed = False
+    claimed = False
     try:
         async with _get_event_lock().guard(
             f"payment_completed:{event.id}",
@@ -420,6 +579,20 @@ async def handle_payment_completed(event: Event, wallet_service):
                 )
                 return
 
+            claimed = await _claim_wallet_event(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            if not claimed:
+                logger.info(
+                    "payment.completed %s already has an active/completed "
+                    "durable claim; skipping",
+                    event.id,
+                )
+                outcome.set_result({"status": "skipped", "reason": "already_claimed"})
+                return
+
             user_id = event.data.get("user_id")
             amount = event.data.get("amount")
             currency = event.data.get("currency", "USD")
@@ -429,6 +602,12 @@ async def handle_payment_completed(event: Event, wallet_service):
                 logger.warning(
                     f"payment.completed event missing required fields: {event.id}"
                 )
+                await _mark_wallet_event_failed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                    error_message="missing required fields",
+                )
                 return
 
             # Get user's primary wallet
@@ -437,6 +616,12 @@ async def handle_payment_completed(event: Event, wallet_service):
                 logger.warning(f"No wallet found for user {user_id}, skipping deposit")
                 _mark_event_processed(event.id)
                 outcome.set_result({"status": "skipped", "reason": "no_wallet"})
+                await _mark_wallet_event_completed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                )
+                completed = True
                 return
 
             # Import here to avoid circular imports
@@ -468,6 +653,12 @@ async def handle_payment_completed(event: Event, wallet_service):
                     "payment_id": payment_id,
                 }
             )
+            await _mark_wallet_event_completed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            completed = True
             logger.info(
                 f"✅ Deposited {amount} {currency} to wallet for user {user_id} (event: {event.id})"
             )
@@ -485,6 +676,13 @@ async def handle_payment_completed(event: Event, wallet_service):
         logger.info("payment.completed %s contended on lock; will retry", event.id)
     except Exception as e:
         logger.error(f"Failed to handle payment.completed event {event.id}: {e}")
+        if claimed and not completed:
+            await _mark_wallet_event_failed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+                error_message=str(e),
+            )
 
 
 async def handle_payment_refunded(event: Event, wallet_service):
@@ -506,6 +704,7 @@ async def handle_payment_refunded(event: Event, wallet_service):
 
     Workflow:
         0. Acquire distributed idempotency lock keyed by event_id (#348)
+        0b. Acquire DB-level durable claim (#380) inside the lock
         1. Validate event data
         2. Get user's primary wallet
         3. Deposit refund to wallet
@@ -515,6 +714,9 @@ async def handle_payment_refunded(event: Event, wallet_service):
         logger.debug(f"Event {event.id} already processed, skipping")
         return
 
+    claim_key = f"wallet:payment_refunded:{event.id}"
+    completed = False
+    claimed = False
     try:
         async with _event_lock_guard("payment_refunded", event.id) as outcome:
             if outcome.is_cached:
@@ -528,6 +730,20 @@ async def handle_payment_refunded(event: Event, wallet_service):
                 )
                 return
 
+            claimed = await _claim_wallet_event(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            if not claimed:
+                logger.info(
+                    "payment.refunded %s already has an active/completed "
+                    "durable claim; skipping",
+                    event.id,
+                )
+                outcome.set_result({"status": "skipped", "reason": "already_claimed"})
+                return
+
             user_id = event.data.get("user_id")
             amount = event.data.get("amount")
             currency = event.data.get("currency", "USD")
@@ -539,6 +755,12 @@ async def handle_payment_refunded(event: Event, wallet_service):
                 logger.warning(
                     f"payment.refunded event missing required fields: {event.id}"
                 )
+                await _mark_wallet_event_failed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                    error_message="missing required fields",
+                )
                 return
 
             wallet = await wallet_service.repository.get_primary_wallet(user_id)
@@ -548,6 +770,12 @@ async def handle_payment_refunded(event: Event, wallet_service):
                 )
                 _mark_event_processed(event.id)
                 outcome.set_result({"status": "skipped", "reason": "no_wallet"})
+                await _mark_wallet_event_completed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                )
+                completed = True
                 return
 
             from ..models import DepositRequest
@@ -580,6 +808,12 @@ async def handle_payment_refunded(event: Event, wallet_service):
                     "refund_id": refund_id,
                 }
             )
+            await _mark_wallet_event_completed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            completed = True
             logger.info(
                 f"✅ Refunded {amount} {currency} to wallet for user {user_id} "
                 f"(refund: {refund_id}, event: {event.id})"
@@ -594,6 +828,13 @@ async def handle_payment_refunded(event: Event, wallet_service):
         logger.info("payment.refunded %s contended; will retry", event.id)
     except Exception as e:
         logger.error(f"Failed to handle payment.refunded event {event.id}: {e}")
+        if claimed and not completed:
+            await _mark_wallet_event_failed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+                error_message=str(e),
+            )
 
 
 async def handle_subscription_created(event: Event, wallet_service):
@@ -613,6 +854,7 @@ async def handle_subscription_created(event: Event, wallet_service):
 
     Workflow:
         0. Acquire distributed idempotency lock keyed by event_id (#348)
+        0b. Acquire DB-level durable claim (#380) inside the lock
         1. Validate event data
         2. Get user's primary wallet
         3. Allocate subscription credits
@@ -621,6 +863,9 @@ async def handle_subscription_created(event: Event, wallet_service):
         logger.debug(f"Event {event.id} already processed, skipping")
         return
 
+    claim_key = f"wallet:subscription_created:{event.id}"
+    completed = False
+    claimed = False
     try:
         async with _event_lock_guard("subscription_created", event.id) as outcome:
             if outcome.is_cached:
@@ -634,6 +879,20 @@ async def handle_subscription_created(event: Event, wallet_service):
                 )
                 return
 
+            claimed = await _claim_wallet_event(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            if not claimed:
+                logger.info(
+                    "subscription.created %s already has an active/completed "
+                    "durable claim; skipping",
+                    event.id,
+                )
+                outcome.set_result({"status": "skipped", "reason": "already_claimed"})
+                return
+
             user_id = event.data.get("user_id")
             subscription_id = event.data.get("subscription_id")
             plan_id = event.data.get("plan_id")
@@ -642,6 +901,12 @@ async def handle_subscription_created(event: Event, wallet_service):
             if not user_id or not subscription_id:
                 logger.warning(
                     f"subscription.created event missing required fields: {event.id}"
+                )
+                await _mark_wallet_event_failed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                    error_message="missing required fields",
                 )
                 return
 
@@ -652,6 +917,12 @@ async def handle_subscription_created(event: Event, wallet_service):
                 )
                 _mark_event_processed(event.id)
                 outcome.set_result({"status": "skipped", "reason": "no_wallet"})
+                await _mark_wallet_event_completed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                )
+                completed = True
                 return
 
             if monthly_credits and float(monthly_credits) > 0:
@@ -697,6 +968,12 @@ async def handle_subscription_created(event: Event, wallet_service):
                 )
 
             _mark_event_processed(event.id)
+            await _mark_wallet_event_completed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            completed = True
     except DistributedLockError as exc:
         logger.error(
             "subscription.created %s aborted: distributed lock unavailable: %s",
@@ -707,6 +984,13 @@ async def handle_subscription_created(event: Event, wallet_service):
         logger.info("subscription.created %s contended; will retry", event.id)
     except Exception as e:
         logger.error(f"Failed to handle subscription.created event {event.id}: {e}")
+        if claimed and not completed:
+            await _mark_wallet_event_failed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+                error_message=str(e),
+            )
 
 
 async def handle_user_deleted(event: Event, wallet_service):
@@ -723,6 +1007,7 @@ async def handle_user_deleted(event: Event, wallet_service):
 
     Workflow:
         0. Acquire distributed idempotency lock keyed by event_id (#348)
+        0b. Acquire DB-level durable claim (#380) inside the lock
         1. Validate event data
         2. Get user's wallets
         3. Mark wallets as deleted/frozen
@@ -732,6 +1017,9 @@ async def handle_user_deleted(event: Event, wallet_service):
         logger.debug(f"Event {event.id} already processed, skipping")
         return
 
+    claim_key = f"wallet:user_deleted:{event.id}"
+    completed = False
+    claimed = False
     try:
         async with _event_lock_guard("user_deleted_wallet", event.id) as outcome:
             if outcome.is_cached:
@@ -745,10 +1033,30 @@ async def handle_user_deleted(event: Event, wallet_service):
                 )
                 return
 
+            claimed = await _claim_wallet_event(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            if not claimed:
+                logger.info(
+                    "user.deleted (wallet) %s already has an active/completed "
+                    "durable claim; skipping",
+                    event.id,
+                )
+                outcome.set_result({"status": "skipped", "reason": "already_claimed"})
+                return
+
             user_id = event.data.get("user_id")
 
             if not user_id:
                 logger.warning(f"user.deleted event missing user_id: {event.id}")
+                await _mark_wallet_event_failed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                    error_message="missing user_id",
+                )
                 return
 
             logger.info(f"Processing user.deleted for wallet cleanup: {user_id}")
@@ -759,6 +1067,12 @@ async def handle_user_deleted(event: Event, wallet_service):
                 logger.info(f"No wallets found for deleted user {user_id}")
                 _mark_event_processed(event.id)
                 outcome.set_result({"status": "skipped", "reason": "no_wallets"})
+                await _mark_wallet_event_completed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                )
+                completed = True
                 return
 
             frozen_count = 0
@@ -797,6 +1111,12 @@ async def handle_user_deleted(event: Event, wallet_service):
                     "frozen_count": frozen_count,
                 }
             )
+            await _mark_wallet_event_completed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            completed = True
             logger.info(
                 f"✅ User {user_id} wallet cleanup completed: {frozen_count} wallets frozen"
             )
@@ -810,6 +1130,13 @@ async def handle_user_deleted(event: Event, wallet_service):
         logger.info("user.deleted (wallet) %s contended; will retry", event.id)
     except Exception as e:
         logger.error(f"Failed to handle user.deleted event {event.id}: {e}")
+        if claimed and not completed:
+            await _mark_wallet_event_failed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+                error_message=str(e),
+            )
 
 
 async def handle_user_created(event: Event, wallet_service):
@@ -826,6 +1153,7 @@ async def handle_user_created(event: Event, wallet_service):
 
     Workflow:
         0. Acquire distributed idempotency lock keyed by event_id (#348)
+        0b. Acquire DB-level durable claim (#380) inside the lock
         1. Validate event data
         2. Create default wallet for user
         3. Publish wallet.created event
@@ -834,6 +1162,9 @@ async def handle_user_created(event: Event, wallet_service):
         logger.debug(f"Event {event.id} already processed, skipping")
         return
 
+    claim_key = f"wallet:user_created:{event.id}"
+    completed = False
+    claimed = False
     try:
         async with _event_lock_guard("user_created", event.id) as outcome:
             if outcome.is_cached:
@@ -847,10 +1178,30 @@ async def handle_user_created(event: Event, wallet_service):
                 )
                 return
 
+            claimed = await _claim_wallet_event(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            if not claimed:
+                logger.info(
+                    "user.created %s already has an active/completed "
+                    "durable claim; skipping",
+                    event.id,
+                )
+                outcome.set_result({"status": "skipped", "reason": "already_claimed"})
+                return
+
             user_id = event.data.get("user_id")
 
             if not user_id:
                 logger.warning(f"user.created event missing user_id: {event.id}")
+                await _mark_wallet_event_failed(
+                    wallet_service=wallet_service,
+                    claim_key=claim_key,
+                    source_event_id=event.id,
+                    error_message="missing user_id",
+                )
                 return
 
             # Import here to avoid circular imports
@@ -881,6 +1232,12 @@ async def handle_user_created(event: Event, wallet_service):
                     "wallet_id": str(wallet.wallet_id),
                 }
             )
+            await _mark_wallet_event_completed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+            )
+            completed = True
             logger.info(
                 f"✅ Auto-created wallet {wallet.wallet_id} for user {user_id} (event: {event.id})"
             )
@@ -894,6 +1251,13 @@ async def handle_user_created(event: Event, wallet_service):
         logger.info("user.created %s contended; will retry", event.id)
     except Exception as e:
         logger.error(f"Failed to handle user.created event {event.id}: {e}")
+        if claimed and not completed:
+            await _mark_wallet_event_failed(
+                wallet_service=wallet_service,
+                claim_key=claim_key,
+                source_event_id=event.id,
+                error_message=str(e),
+            )
 
 
 # =============================================================================
