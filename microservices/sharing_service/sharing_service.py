@@ -226,7 +226,9 @@ class SharingService:
                 session = await self.session_client.get_session(share.session_id)
                 if not session:
                     raise ShareServiceError("Shared session no longer exists")
-                messages = await self.session_client.get_session_messages(share.session_id)
+                messages = await self.session_client.get_session_messages(
+                    share.session_id
+                )
 
             # Publish access event
             if self.event_bus:

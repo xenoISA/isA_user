@@ -45,7 +45,9 @@ class FakeSharingService:
 
 def test_singular_create_share_route_alias_uses_owner_query():
     service = FakeSharingService()
-    sharing_main.app.dependency_overrides[sharing_main.get_sharing_service] = lambda: service
+    sharing_main.app.dependency_overrides[
+        sharing_main.get_sharing_service
+    ] = lambda: service
 
     try:
         client = TestClient(sharing_main.app)
@@ -67,7 +69,9 @@ def test_singular_create_share_route_alias_uses_owner_query():
 
 def test_public_shared_route_alias_returns_read_only_snapshot():
     service = FakeSharingService()
-    sharing_main.app.dependency_overrides[sharing_main.get_sharing_service] = lambda: service
+    sharing_main.app.dependency_overrides[
+        sharing_main.get_sharing_service
+    ] = lambda: service
 
     try:
         client = TestClient(sharing_main.app)
@@ -85,7 +89,9 @@ def test_public_shared_route_alias_returns_read_only_snapshot():
 
 def test_session_scoped_revoke_route_requires_token_and_owner():
     service = FakeSharingService()
-    sharing_main.app.dependency_overrides[sharing_main.get_sharing_service] = lambda: service
+    sharing_main.app.dependency_overrides[
+        sharing_main.get_sharing_service
+    ] = lambda: service
 
     try:
         client = TestClient(sharing_main.app)
@@ -97,6 +103,4 @@ def test_session_scoped_revoke_route_requires_token_and_owner():
 
     assert response.status_code == 200
     assert response.json()["message"] == "Share link revoked successfully"
-    service.revoke_session_share.assert_awaited_once_with(
-        "sess-1", "token-1", "user-1"
-    )
+    service.revoke_session_share.assert_awaited_once_with("sess-1", "token-1", "user-1")
