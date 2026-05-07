@@ -107,7 +107,9 @@ async def test_concurrent_payment_completed_runs_deposit_exactly_once(fake_event
             await release_deposit.wait()
         return MagicMock(wallet_id=wallet_id)
 
-    wallet_repo = MagicMock()
+    # spec=["get_primary_wallet"] so this legacy fake does NOT expose the
+    # #380 claim contract — handler should fall back to lock-only behaviour.
+    wallet_repo = MagicMock(spec=["get_primary_wallet"])
     wallet_repo.get_primary_wallet = AsyncMock(
         return_value=SimpleNamespace(wallet_id="wallet-123")
     )
@@ -152,7 +154,7 @@ async def test_replay_after_completion_returns_cached_outcome(fake_event):
         deposit_calls["n"] += 1
         return MagicMock(wallet_id=wallet_id)
 
-    wallet_repo = MagicMock()
+    wallet_repo = MagicMock(spec=["get_primary_wallet"])
     wallet_repo.get_primary_wallet = AsyncMock(
         return_value=SimpleNamespace(wallet_id="wallet-123")
     )
@@ -270,7 +272,7 @@ async def test_contention_increments_metric(distributed_lock, fake_event):
     assert token is not None
 
     # Now run the handler — it should observe contention.
-    wallet_repo = MagicMock()
+    wallet_repo = MagicMock(spec=["get_primary_wallet"])
     wallet_repo.get_primary_wallet = AsyncMock(
         return_value=SimpleNamespace(wallet_id="wallet-123")
     )
@@ -294,3 +296,261 @@ async def test_contention_increments_metric(distributed_lock, fake_event):
 
     # Cleanup.
     await other.release("payment_completed:evt-contend", token)
+
+
+# ----------------------------------------------------------------------
+# Durable DB-level claim — issue #380 crash-and-replay coverage
+# ----------------------------------------------------------------------
+
+
+class _FakeClaimRepository:
+    """In-memory claim store implementing the #380 contract.
+
+    Wraps a real wallet repository fake so handlers can call both the
+    domain methods (get_primary_wallet, anonymize_user_transactions, …)
+    and the new claim_event_processing trio.
+    """
+
+    def __init__(self, base):
+        self._base = base
+        self.claims: dict = {}
+        self.claim_calls: list = []
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+    async def claim_event_processing(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        processor_id: str,
+        stale_after_seconds: int = 300,
+    ) -> bool:
+        self.claim_calls.append(("claim", claim_key))
+        existing = self.claims.get(claim_key)
+        if existing and existing["status"] in {"processing", "completed"}:
+            return False
+        self.claims[claim_key] = {
+            "status": "processing",
+            "source_event_id": source_event_id,
+            "processor_id": processor_id,
+        }
+        return True
+
+    async def mark_event_processing_completed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+    ) -> None:
+        self.claim_calls.append(("complete", claim_key))
+        self.claims[claim_key] = {
+            "status": "completed",
+            "source_event_id": source_event_id,
+        }
+
+    async def mark_event_processing_failed(
+        self,
+        claim_key: str,
+        source_event_id: str,
+        error_message: str,
+    ) -> None:
+        self.claim_calls.append(("fail", claim_key))
+        existing = self.claims.get(claim_key)
+        if existing and existing.get("status") == "completed":
+            return
+        self.claims[claim_key] = {
+            "status": "failed",
+            "source_event_id": source_event_id,
+            "error_message": error_message,
+        }
+
+
+def _make_wallet_service_with_claims():
+    """Build a wallet_service mock backed by a claim-aware fake repository."""
+    base = MagicMock()
+    base.get_primary_wallet = AsyncMock(
+        return_value=SimpleNamespace(wallet_id="wallet-380")
+    )
+    base.get_user_wallets = AsyncMock(
+        return_value=[SimpleNamespace(wallet_id="wallet-380")]
+    )
+    base.deactivate_wallet = AsyncMock(return_value=True)
+    base.update_wallet_metadata = AsyncMock(return_value=True)
+    base.anonymize_user_transactions = AsyncMock(return_value=0)
+    repo = _FakeClaimRepository(base)
+    wallet_service = SimpleNamespace(
+        repository=repo,
+        deposit=AsyncMock(),
+        create_wallet=AsyncMock(return_value=SimpleNamespace(wallet_id="wallet-new")),
+        consume_by_user=AsyncMock(),
+    )
+    return wallet_service, repo
+
+
+async def test_payment_completed_replay_short_circuited_by_durable_claim(fake_event):
+    """First delivery deposits; second delivery (after lock TTL elapses)
+    is short-circuited by the durable claim and does NOT double-deposit.
+    """
+    wallet_service, repo = _make_wallet_service_with_claims()
+    event = fake_event(
+        "evt-380-pay",
+        {
+            "user_id": "user-380",
+            "amount": "10.00",
+            "currency": "USD",
+            "payment_id": "pay-380",
+        },
+    )
+
+    await wallet_handlers.handle_payment_completed(event, wallet_service)
+    assert wallet_service.deposit.await_count == 1
+    assert repo.claims["wallet:payment_completed:evt-380-pay"]["status"] == "completed"
+
+    # Simulate TTL expiry: clear in-memory dedup + cached lock result so
+    # the second delivery actually re-acquires the lock — the durable
+    # claim is the only remaining defence.
+    wallet_handlers._processed_event_ids = set()
+    await wallet_handlers._event_result_cache._client.delete(
+        "wallet_event_results:payment_completed:evt-380-pay"
+    )
+
+    await wallet_handlers.handle_payment_completed(event, wallet_service)
+
+    # Still exactly one deposit.
+    assert wallet_service.deposit.await_count == 1
+
+
+async def test_payment_refunded_replay_does_not_double_credit(fake_event):
+    """A refund replay after the lock TTL must not double-credit the wallet."""
+    wallet_service, repo = _make_wallet_service_with_claims()
+    event = fake_event(
+        "evt-380-refund",
+        {
+            "user_id": "user-380",
+            "amount": "5.00",
+            "currency": "USD",
+            "payment_id": "pay-380",
+            "refund_id": "refund-380",
+        },
+        event_type="payment.refunded",
+    )
+
+    await wallet_handlers.handle_payment_refunded(event, wallet_service)
+    assert wallet_service.deposit.await_count == 1
+    assert (
+        repo.claims["wallet:payment_refunded:evt-380-refund"]["status"] == "completed"
+    )
+
+    wallet_handlers._processed_event_ids = set()
+    await wallet_handlers._event_result_cache._client.delete(
+        "wallet_event_results:payment_refunded:evt-380-refund"
+    )
+
+    await wallet_handlers.handle_payment_refunded(event, wallet_service)
+    assert wallet_service.deposit.await_count == 1
+
+
+async def test_subscription_created_replay_does_not_double_allocate(fake_event):
+    """Subscription credit allocation must run exactly once across replays."""
+    wallet_service, repo = _make_wallet_service_with_claims()
+    event = fake_event(
+        "evt-380-sub",
+        {
+            "user_id": "user-380",
+            "subscription_id": "sub-380",
+            "plan_id": "premium",
+            "monthly_credits": "100",
+        },
+        event_type="subscription.created",
+    )
+
+    await wallet_handlers.handle_subscription_created(event, wallet_service)
+    assert wallet_service.deposit.await_count == 1
+    assert (
+        repo.claims["wallet:subscription_created:evt-380-sub"]["status"] == "completed"
+    )
+
+    wallet_handlers._processed_event_ids = set()
+    await wallet_handlers._event_result_cache._client.delete(
+        "wallet_event_results:subscription_created:evt-380-sub"
+    )
+
+    await wallet_handlers.handle_subscription_created(event, wallet_service)
+    # Exactly one credit allocation across both deliveries.
+    assert wallet_service.deposit.await_count == 1
+
+
+async def test_user_created_replay_does_not_create_two_wallets(fake_event):
+    """Wallet auto-create must run exactly once across replays."""
+    wallet_service, repo = _make_wallet_service_with_claims()
+    event = fake_event(
+        "evt-380-user",
+        {"user_id": "user-380"},
+        event_type="user.created",
+    )
+
+    await wallet_handlers.handle_user_created(event, wallet_service)
+    assert wallet_service.create_wallet.await_count == 1
+    assert repo.claims["wallet:user_created:evt-380-user"]["status"] == "completed"
+
+    wallet_handlers._processed_event_ids = set()
+    await wallet_handlers._event_result_cache._client.delete(
+        "wallet_event_results:user_created:evt-380-user"
+    )
+
+    await wallet_handlers.handle_user_created(event, wallet_service)
+    assert wallet_service.create_wallet.await_count == 1
+
+
+async def test_user_deleted_replay_does_not_re_anonymize(fake_event):
+    """GDPR cleanup must run exactly once across replays."""
+    wallet_service, repo = _make_wallet_service_with_claims()
+    event = fake_event(
+        "evt-380-del",
+        {"user_id": "user-380"},
+        event_type="user.deleted",
+    )
+
+    await wallet_handlers.handle_user_deleted(event, wallet_service)
+    assert repo.anonymize_user_transactions.await_count == 1
+    assert repo.claims["wallet:user_deleted:evt-380-del"]["status"] == "completed"
+
+    wallet_handlers._processed_event_ids = set()
+    await wallet_handlers._event_result_cache._client.delete(
+        "wallet_event_results:user_deleted_wallet:evt-380-del"
+    )
+
+    await wallet_handlers.handle_user_deleted(event, wallet_service)
+    # Exactly one anonymisation across both deliveries.
+    assert repo.anonymize_user_transactions.await_count == 1
+
+
+async def test_legacy_repository_without_claim_contract_falls_back_to_lock(fake_event):
+    """A repository missing the #380 claim methods (e.g. an older fake)
+    must not crash the handler — it falls back to lock-only behaviour.
+
+    This guards the migration window: services may roll forward at
+    different rates and tests built before #380 must continue to pass.
+    """
+    legacy_repo = MagicMock(spec=["get_primary_wallet"])
+    legacy_repo.get_primary_wallet = AsyncMock(
+        return_value=SimpleNamespace(wallet_id="wallet-legacy")
+    )
+    wallet_service = SimpleNamespace(
+        repository=legacy_repo,
+        deposit=AsyncMock(),
+    )
+    event = fake_event(
+        "evt-380-legacy",
+        {
+            "user_id": "user-1",
+            "amount": "1.00",
+            "currency": "USD",
+            "payment_id": "pay-legacy",
+        },
+    )
+
+    await wallet_handlers.handle_payment_completed(event, wallet_service)
+
+    # Handler ran the deposit even without claim contract on the repo.
+    assert wallet_service.deposit.await_count == 1
