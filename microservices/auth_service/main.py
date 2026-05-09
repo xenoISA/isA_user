@@ -1417,8 +1417,16 @@ async def get_user_info_from_token(
             expires_at = expires_at.isoformat()
 
         return {
+            "sub": result.get("sub"),
             "user_id": result.get("user_id"),
             "email": result.get("email"),
+            "preferred_username": result.get("preferred_username"),
+            "name": result.get("name"),
+            "organization_id": result.get("organization_id"),
+            "tenant_id": result.get("tenant_id"),
+            "roles": result.get("roles", []),
+            "admin_roles": result.get("admin_roles", []),
+            "permissions": result.get("permissions", []),
             "provider": result.get("provider"),
             "expires_at": expires_at,
         }

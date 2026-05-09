@@ -1318,12 +1318,53 @@ class AuthenticationService:
         if not verification_result.get("valid"):
             return {"success": False, "error": verification_result.get("error")}
 
+        metadata = verification_result.get("metadata", {}) or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        user_id = verification_result.get("user_id")
+        email = verification_result.get("email")
+        organization_id = (
+            verification_result.get("organization_id")
+            or metadata.get("organization_id")
+            or metadata.get("org_id")
+            or metadata.get("tenant_id")
+        )
+        tenant_id = metadata.get("tenant_id") or organization_id
+        permissions = list(verification_result.get("permissions") or [])
+        admin_roles = list(metadata.get("admin_roles") or [])
+
+        raw_roles = metadata.get("roles") or metadata.get("role") or []
+        if isinstance(raw_roles, str):
+            roles = [raw_roles]
+        else:
+            roles = list(raw_roles)
+
+        scope = (verification_result.get("scope") or "").lower()
+        if (
+            scope == "admin" or "auth.admin" in permissions or admin_roles
+        ) and "admin" not in roles:
+            roles.append("admin")
+
+        preferred_username = (
+            metadata.get("preferred_username")
+            or metadata.get("username")
+            or (email.split("@", 1)[0] if email and "@" in email else None)
+            or user_id
+        )
+
         return {
             "success": True,
-            "user_id": verification_result.get("user_id"),
-            "email": verification_result.get("email"),
-            "organization_id": verification_result.get("organization_id"),
-            "permissions": verification_result.get("permissions", []),
+            "sub": user_id,
+            "user_id": user_id,
+            "email": email,
+            "preferred_username": preferred_username,
+            "name": metadata.get("name"),
+            "organization_id": organization_id,
+            "tenant_id": tenant_id,
+            "roles": roles,
+            "admin_roles": admin_roles,
+            "permissions": permissions,
             "provider": verification_result.get("provider"),
             "expires_at": verification_result.get("expires_at"),
         }

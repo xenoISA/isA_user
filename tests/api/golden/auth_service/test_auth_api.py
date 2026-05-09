@@ -34,7 +34,7 @@ Usage:
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient, ASGITransport
 
 # Import from centralized data contracts
@@ -44,7 +44,6 @@ from tests.contracts.auth.data_contract import (
     TokenResponseContract,
     RegistrationStartResponseContract,
     RegistrationVerifyResponseContract,
-    ApiKeyCreateResponseContract,
     ApiKeyVerifyResponseContract,
     DeviceRegisterResponseContract,
     DeviceAuthenticateResponseContract,
@@ -61,10 +60,13 @@ pytestmark = [pytest.mark.api, pytest.mark.golden, pytest.mark.asyncio]
 # Fixtures
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def client():
     """Create async HTTP client for testing FastAPI app"""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
         yield ac
 
 
@@ -86,6 +88,7 @@ def mock_auth_service():
 # ============================================================================
 # Health Check Tests (2 tests)
 # ============================================================================
+
 
 class TestHealthCheck:
     """
@@ -132,6 +135,7 @@ class TestHealthCheck:
 # Token Verification Tests (5 tests)
 # ============================================================================
 
+
 class TestTokenVerificationEndpoints:
     """
     GOLDEN tests for POST /api/v1/auth/verify-token
@@ -139,7 +143,9 @@ class TestTokenVerificationEndpoints:
     Tests token verification endpoint contract.
     """
 
-    async def test_verify_token_endpoint_success(self, client, factory, mock_auth_service):
+    async def test_verify_token_endpoint_success(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/verify-token with valid token returns 200
         """
@@ -149,8 +155,7 @@ class TestTokenVerificationEndpoints:
         mock_auth_service.verify_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify-token", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200 OK
@@ -164,7 +169,9 @@ class TestTokenVerificationEndpoints:
         validated = TokenVerificationResponseContract(**data)
         assert validated.valid is not None
 
-    async def test_verify_token_invalid_token_returns_valid_response(self, client, factory, mock_auth_service):
+    async def test_verify_token_invalid_token_returns_valid_response(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/verify-token with invalid token returns 200 with valid=false
         """
@@ -172,15 +179,13 @@ class TestTokenVerificationEndpoints:
             token=factory.make_invalid_token()
         )
         expected_response = factory.make_token_verification_response(
-            valid=False,
-            error="Invalid token format"
+            valid=False, error="Invalid token format"
         )
 
         mock_auth_service.verify_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify-token", json=request_data.model_dump()
         )
 
         # GOLDEN: Invalid token still returns 200 with valid=false
@@ -208,7 +213,9 @@ class TestTokenVerificationEndpoints:
         data = response.json()
         assert "detail" in data
 
-    async def test_verify_token_invalid_provider(self, client, factory, mock_auth_service):
+    async def test_verify_token_invalid_provider(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/verify-token with invalid provider still processes
         """
@@ -220,8 +227,7 @@ class TestTokenVerificationEndpoints:
         mock_auth_service.verify_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify-token", json=request_data.model_dump()
         )
 
         # GOLDEN: Should return valid response structure
@@ -235,15 +241,13 @@ class TestTokenVerificationEndpoints:
             token=factory.make_expired_token()
         )
         expected_response = factory.make_token_verification_response(
-            valid=False,
-            error="Token expired"
+            valid=False, error="Token expired"
         )
 
         mock_auth_service.verify_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify-token", json=request_data.model_dump()
         )
 
         # GOLDEN: Expired token returns 200 with valid=false
@@ -256,6 +260,7 @@ class TestTokenVerificationEndpoints:
 # ============================================================================
 # Registration Endpoints Tests (6 tests)
 # ============================================================================
+
 
 class TestRegistrationEndpoints:
     """
@@ -275,8 +280,7 @@ class TestRegistrationEndpoints:
         mock_auth_service.start_registration.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/register",
-            json=request_data.model_dump()
+            "/api/v1/auth/register", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200 OK
@@ -297,8 +301,7 @@ class TestRegistrationEndpoints:
         )
 
         response = await client.post(
-            "/api/v1/auth/register",
-            json=request_data.model_dump()
+            "/api/v1/auth/register", json=request_data.model_dump()
         )
 
         # GOLDEN: Invalid email returns 422
@@ -314,7 +317,7 @@ class TestRegistrationEndpoints:
         """
         payload = {
             "email": factory.make_email(),
-            "password": factory.make_invalid_password()  # Too short
+            "password": factory.make_invalid_password(),  # Too short
         }
 
         response = await client.post("/api/v1/auth/register", json=payload)
@@ -322,7 +325,9 @@ class TestRegistrationEndpoints:
         # GOLDEN: Short password returns 422
         assert response.status_code == 422
 
-    async def test_verify_registration_success(self, client, factory, mock_auth_service):
+    async def test_verify_registration_success(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/verify with correct code returns 200 and tokens
         """
@@ -332,8 +337,7 @@ class TestRegistrationEndpoints:
         mock_auth_service.verify_registration.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200 OK
@@ -344,7 +348,9 @@ class TestRegistrationEndpoints:
         validated = RegistrationVerifyResponseContract(**data)
         assert validated.success is True
 
-    async def test_verify_registration_invalid_code(self, client, factory, mock_auth_service):
+    async def test_verify_registration_invalid_code(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/verify with wrong code returns 200 with success=false
         """
@@ -352,15 +358,13 @@ class TestRegistrationEndpoints:
             code="999999"  # Wrong code
         )
         expected_response = factory.make_registration_verify_response(
-            success=False,
-            error="Invalid verification code"
+            success=False, error="Invalid verification code"
         )
 
         mock_auth_service.verify_registration.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify", json=request_data.model_dump()
         )
 
         # GOLDEN: Returns 200 with success=false
@@ -388,6 +392,7 @@ class TestRegistrationEndpoints:
 # Token Generation Tests (6 tests)
 # ============================================================================
 
+
 class TestTokenGenerationEndpoints:
     """
     GOLDEN tests for token generation endpoints.
@@ -407,8 +412,7 @@ class TestTokenGenerationEndpoints:
         mock_auth_service.generate_dev_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/dev-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/dev-token", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200 OK
@@ -420,7 +424,9 @@ class TestTokenGenerationEndpoints:
         assert validated.success is True
         assert validated.token or validated.access_token
 
-    async def test_generate_dev_token_invalid_expires_in_returns_422(self, client, factory):
+    async def test_generate_dev_token_invalid_expires_in_returns_422(
+        self, client, factory
+    ):
         """
         GOLDEN: POST /api/v1/auth/dev-token with invalid expires_in returns 422
         """
@@ -429,14 +435,15 @@ class TestTokenGenerationEndpoints:
         )
 
         response = await client.post(
-            "/api/v1/auth/dev-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/dev-token", json=request_data.model_dump()
         )
 
         # GOLDEN: Invalid expires_in returns 422
         assert response.status_code == 422
 
-    async def test_generate_token_pair_success(self, client, factory, mock_auth_service):
+    async def test_generate_token_pair_success(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/token-pair generates access and refresh tokens
         """
@@ -444,14 +451,13 @@ class TestTokenGenerationEndpoints:
         expected_response = factory.make_token_response(
             success=True,
             access_token=factory.make_jwt_token(),
-            refresh_token=factory.make_refresh_token()
+            refresh_token=factory.make_refresh_token(),
         )
 
         mock_auth_service.generate_token_pair.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/token-pair",
-            json=request_data.model_dump()
+            "/api/v1/auth/token-pair", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200 OK
@@ -464,7 +470,9 @@ class TestTokenGenerationEndpoints:
         assert validated.access_token
         assert validated.refresh_token
 
-    async def test_generate_token_pair_missing_user_id_returns_422(self, client, factory):
+    async def test_generate_token_pair_missing_user_id_returns_422(
+        self, client, factory
+    ):
         """
         GOLDEN: POST /api/v1/auth/token-pair without user_id returns 422
         """
@@ -484,21 +492,24 @@ class TestTokenGenerationEndpoints:
         """
         request_data = factory.make_refresh_token_request()
         expected_response = factory.make_token_response(
-            success=True,
-            access_token=factory.make_jwt_token()
+            success=True, access_token=factory.make_jwt_token()
         )
 
         mock_auth_service.refresh_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/refresh",
-            json=request_data.model_dump()
+            "/api/v1/auth/refresh", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200 OK
-        assert response.status_code in [200, 401]  # May fail if JWT manager not configured
+        assert response.status_code in [
+            200,
+            401,
+        ]  # May fail if JWT manager not configured
 
-    async def test_refresh_token_invalid_token_returns_error(self, client, factory, mock_auth_service):
+    async def test_refresh_token_invalid_token_returns_error(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/refresh with invalid refresh token returns error
         """
@@ -508,11 +519,13 @@ class TestTokenGenerationEndpoints:
 
         # Mock invalid token response
         from microservices.auth_service.auth_service import AuthenticationError
-        mock_auth_service.refresh_token.side_effect = AuthenticationError("Invalid refresh token")
+
+        mock_auth_service.refresh_token.side_effect = AuthenticationError(
+            "Invalid refresh token"
+        )
 
         response = await client.post(
-            "/api/v1/auth/refresh",
-            json=request_data.model_dump()
+            "/api/v1/auth/refresh", json=request_data.model_dump()
         )
 
         # GOLDEN: Invalid token returns 401
@@ -522,6 +535,7 @@ class TestTokenGenerationEndpoints:
 # ============================================================================
 # API Key Endpoints Tests (6 tests)
 # ============================================================================
+
 
 class TestApiKeyEndpoints:
     """
@@ -544,14 +558,19 @@ class TestApiKeyEndpoints:
         mock_auth_service.create_api_key.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/api-keys",
-            json=request_data.model_dump()
+            "/api/v1/auth/api-keys", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200 or 201
-        assert response.status_code in [200, 201, 500]  # May fail if repository not configured
+        assert response.status_code in [
+            200,
+            201,
+            500,
+        ]  # May fail if repository not configured
 
-    async def test_create_api_key_invalid_expires_days_returns_422(self, client, factory):
+    async def test_create_api_key_invalid_expires_days_returns_422(
+        self, client, factory
+    ):
         """
         GOLDEN: POST /api/v1/auth/api-keys with invalid expires_days returns 422
         """
@@ -560,8 +579,7 @@ class TestApiKeyEndpoints:
         )
 
         response = await client.post(
-            "/api/v1/auth/api-keys",
-            json=request_data.model_dump()
+            "/api/v1/auth/api-keys", json=request_data.model_dump()
         )
 
         # GOLDEN: Invalid expires_days returns 422
@@ -579,20 +597,21 @@ class TestApiKeyEndpoints:
             key_id=factory.make_key_id(),
             organization_id=factory.make_organization_id(),
             name=factory.make_api_key_name(),
-            permissions=factory.make_permissions()
+            permissions=factory.make_permissions(),
         )
 
         mock_auth_service.verify_api_key.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify-api-key",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify-api-key", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200
         assert response.status_code in [200, 500]
 
-    async def test_verify_api_key_invalid_key_returns_valid_false(self, client, factory, mock_auth_service):
+    async def test_verify_api_key_invalid_key_returns_valid_false(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/verify-api-key with invalid key returns valid=false
         """
@@ -601,15 +620,13 @@ class TestApiKeyEndpoints:
         )
 
         expected_response = ApiKeyVerifyResponseContract(
-            valid=False,
-            error="Invalid API key"
+            valid=False, error="Invalid API key"
         )
 
         mock_auth_service.verify_api_key.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify-api-key",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify-api-key", json=request_data.model_dump()
         )
 
         # GOLDEN: Invalid key returns 200 with valid=false
@@ -646,6 +663,7 @@ class TestApiKeyEndpoints:
 # Device Authentication Endpoints Tests (6 tests)
 # ============================================================================
 
+
 class TestDeviceEndpoints:
     """
     GOLDEN tests for device authentication endpoints.
@@ -667,14 +685,13 @@ class TestDeviceEndpoints:
             success=True,
             device_id=request_data.device_id,
             device_secret=factory.make_device_secret(),
-            organization_id=request_data.organization_id
+            organization_id=request_data.organization_id,
         )
 
         mock_auth_service.register_device.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/device/register",
-            json=request_data.model_dump()
+            "/api/v1/auth/device/register", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200 or 201
@@ -694,7 +711,9 @@ class TestDeviceEndpoints:
         # GOLDEN: Missing required field returns 422
         assert response.status_code == 422
 
-    async def test_authenticate_device_success(self, client, factory, mock_auth_service):
+    async def test_authenticate_device_success(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/device/authenticate authenticates device
         """
@@ -706,20 +725,21 @@ class TestDeviceEndpoints:
             organization_id=factory.make_organization_id(),
             access_token=factory.make_jwt_token(),
             token_type="Bearer",
-            expires_in=3600
+            expires_in=3600,
         )
 
         mock_auth_service.authenticate_device.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/device/authenticate",
-            json=request_data.model_dump()
+            "/api/v1/auth/device/authenticate", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200
         assert response.status_code in [200, 500]
 
-    async def test_authenticate_device_invalid_secret_returns_error(self, client, factory, mock_auth_service):
+    async def test_authenticate_device_invalid_secret_returns_error(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/device/authenticate with invalid secret returns error
         """
@@ -728,22 +748,21 @@ class TestDeviceEndpoints:
         )
 
         expected_response = DeviceAuthenticateResponseContract(
-            success=False,
-            authenticated=False,
-            error="Invalid device secret"
+            success=False, authenticated=False, error="Invalid device secret"
         )
 
         mock_auth_service.authenticate_device.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/device/authenticate",
-            json=request_data.model_dump()
+            "/api/v1/auth/device/authenticate", json=request_data.model_dump()
         )
 
         # GOLDEN: Invalid secret returns 200 with authenticated=false or 401
         assert response.status_code in [200, 401, 500]
 
-    async def test_verify_device_token_success(self, client, factory, mock_auth_service):
+    async def test_verify_device_token_success(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/device/verify-token verifies device token
         """
@@ -753,8 +772,7 @@ class TestDeviceEndpoints:
         mock_auth_service.verify_device_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/device/verify-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/device/verify-token", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200
@@ -769,8 +787,7 @@ class TestDeviceEndpoints:
         mock_auth_service.list_devices.return_value = []
 
         response = await client.get(
-            "/api/v1/auth/device/list",
-            params={"organization_id": org_id}
+            "/api/v1/auth/device/list", params={"organization_id": org_id}
         )
 
         # GOLDEN: Success returns 200
@@ -781,6 +798,7 @@ class TestDeviceEndpoints:
 # Device Pairing Tests (3 tests)
 # ============================================================================
 
+
 class TestDevicePairingEndpoints:
     """
     GOLDEN tests for device pairing endpoints.
@@ -789,7 +807,9 @@ class TestDevicePairingEndpoints:
     POST /api/v1/auth/device/pairing-token/verify - Verify pairing token
     """
 
-    async def test_generate_pairing_token_success(self, client, factory, mock_auth_service):
+    async def test_generate_pairing_token_success(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/device/{device_id}/pairing-token generates pairing token
         """
@@ -799,7 +819,7 @@ class TestDevicePairingEndpoints:
             pairing_token=factory.make_pairing_token(),
             device_id=device_id,
             expires_at=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
-            expires_in=300
+            expires_in=300,
         )
 
         mock_auth_service.generate_pairing_token.return_value = expected_response
@@ -809,42 +829,41 @@ class TestDevicePairingEndpoints:
         # GOLDEN: Success returns 200
         assert response.status_code in [200, 500]
 
-    async def test_verify_pairing_token_success(self, client, factory, mock_auth_service):
+    async def test_verify_pairing_token_success(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/device/pairing-token/verify verifies pairing token
         """
         request_data = factory.make_device_pairing_verify_request()
         expected_response = DevicePairingResponseContract(
-            valid=True,
-            device_id=request_data.device_id,
-            user_id=request_data.user_id
+            valid=True, device_id=request_data.device_id, user_id=request_data.user_id
         )
 
         mock_auth_service.verify_pairing_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/device/pairing-token/verify",
-            json=request_data.model_dump()
+            "/api/v1/auth/device/pairing-token/verify", json=request_data.model_dump()
         )
 
         # GOLDEN: Success returns 200
         assert response.status_code in [200, 500]
 
-    async def test_verify_pairing_token_invalid_returns_error(self, client, factory, mock_auth_service):
+    async def test_verify_pairing_token_invalid_returns_error(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: POST /api/v1/auth/device/pairing-token/verify with invalid token returns error
         """
         request_data = factory.make_device_pairing_verify_request()
         expected_response = DevicePairingResponseContract(
-            valid=False,
-            error="Invalid or expired pairing token"
+            valid=False, error="Invalid or expired pairing token"
         )
 
         mock_auth_service.verify_pairing_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/device/pairing-token/verify",
-            json=request_data.model_dump()
+            "/api/v1/auth/device/pairing-token/verify", json=request_data.model_dump()
         )
 
         # GOLDEN: Invalid token returns 200 with valid=false or 400
@@ -854,6 +873,7 @@ class TestDevicePairingEndpoints:
 # ============================================================================
 # User Info Endpoint Tests (2 tests)
 # ============================================================================
+
 
 class TestUserInfoEndpoint:
     """
@@ -869,16 +889,24 @@ class TestUserInfoEndpoint:
         token = factory.make_jwt_token()
 
         # Mock user info response
-        mock_auth_service.extract_user_info.return_value = {
-            "user_id": factory.make_user_id(),
-            "email": factory.make_email(),
-            "provider": "isa_user"
+        user_id = factory.make_user_id()
+        email = factory.make_email()
+        mock_auth_service.get_user_info_from_token.return_value = {
+            "success": True,
+            "sub": user_id,
+            "user_id": user_id,
+            "email": email,
+            "preferred_username": email.split("@", 1)[0],
+            "name": "Test User",
+            "organization_id": "org_test_123",
+            "tenant_id": "org_test_123",
+            "roles": ["member"],
+            "admin_roles": [],
+            "permissions": ["read"],
+            "provider": "isa_user",
         }
 
-        response = await client.post(
-            "/api/v1/auth/user-info",
-            json={"token": token}
-        )
+        response = await client.post("/api/v1/auth/user-info", json={"token": token})
 
         # GOLDEN: Success returns 200
         assert response.status_code in [200, 401, 500]
@@ -897,6 +925,7 @@ class TestUserInfoEndpoint:
 # Stats Endpoint Tests (1 test)
 # ============================================================================
 
+
 class TestStatsEndpoint:
     """
     GOLDEN tests for GET /api/v1/auth/stats
@@ -912,7 +941,7 @@ class TestStatsEndpoint:
             "total_users": 1250,
             "active_devices": 450,
             "api_keys_issued": 120,
-            "recent_registrations_7d": 45
+            "recent_registrations_7d": 45,
         }
 
         mock_auth_service.get_stats.return_value = mock_stats
@@ -931,6 +960,7 @@ class TestStatsEndpoint:
 # Error Handling Tests (6 tests)
 # ============================================================================
 
+
 class TestErrorHandling:
     """
     GOLDEN tests for error response formats and status codes.
@@ -945,7 +975,7 @@ class TestErrorHandling:
         response = await client.post(
             "/api/v1/auth/verify-token",
             content="invalid json{",
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
 
         # GOLDEN: Invalid JSON returns 400 or 422
@@ -994,15 +1024,13 @@ class TestErrorHandling:
         )
 
         expected_response = factory.make_token_verification_response(
-            valid=False,
-            error="Malformed token"
+            valid=False, error="Malformed token"
         )
 
         mock_auth_service.verify_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify-token", json=request_data.model_dump()
         )
 
         # GOLDEN: Malformed token returns 200 with valid=false
@@ -1014,7 +1042,7 @@ class TestErrorHandling:
         """
         payload = {
             "email": factory.make_invalid_email(),
-            "password": factory.make_invalid_password()
+            "password": factory.make_invalid_password(),
         }
 
         response = await client.post("/api/v1/auth/register", json=payload)
@@ -1032,6 +1060,7 @@ class TestErrorHandling:
 # Response Contract Validation Tests (4 tests)
 # ============================================================================
 
+
 class TestResponseContractValidation:
     """
     GOLDEN tests for validating response structure matches contracts.
@@ -1039,7 +1068,9 @@ class TestResponseContractValidation:
     Ensures all responses conform to defined Pydantic contracts.
     """
 
-    async def test_token_verification_response_matches_contract(self, client, factory, mock_auth_service):
+    async def test_token_verification_response_matches_contract(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: Token verification response exactly matches TokenVerificationResponseContract
         """
@@ -1049,8 +1080,7 @@ class TestResponseContractValidation:
         mock_auth_service.verify_token.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/verify-token",
-            json=request_data.model_dump()
+            "/api/v1/auth/verify-token", json=request_data.model_dump()
         )
 
         data = response.json()
@@ -1062,7 +1092,9 @@ class TestResponseContractValidation:
         assert validated.valid is not None
         assert isinstance(validated.valid, bool)
 
-    async def test_registration_start_response_matches_contract(self, client, factory, mock_auth_service):
+    async def test_registration_start_response_matches_contract(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: Registration start response matches RegistrationStartResponseContract
         """
@@ -1072,8 +1104,7 @@ class TestResponseContractValidation:
         mock_auth_service.start_registration.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/register",
-            json=request_data.model_dump()
+            "/api/v1/auth/register", json=request_data.model_dump()
         )
 
         data = response.json()
@@ -1086,21 +1117,22 @@ class TestResponseContractValidation:
         assert validated.verification_required is not None
         assert validated.expires_at
 
-    async def test_token_pair_response_matches_contract(self, client, factory, mock_auth_service):
+    async def test_token_pair_response_matches_contract(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: Token pair response matches TokenResponseContract
         """
         request_data = factory.make_token_pair_request()
         expected_response = factory.make_token_response(
             access_token=factory.make_jwt_token(),
-            refresh_token=factory.make_refresh_token()
+            refresh_token=factory.make_refresh_token(),
         )
 
         mock_auth_service.generate_token_pair.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/token-pair",
-            json=request_data.model_dump()
+            "/api/v1/auth/token-pair", json=request_data.model_dump()
         )
 
         data = response.json()
@@ -1112,7 +1144,9 @@ class TestResponseContractValidation:
         assert validated.success is not None
         assert validated.token_type == "Bearer"
 
-    async def test_device_register_response_matches_contract(self, client, factory, mock_auth_service):
+    async def test_device_register_response_matches_contract(
+        self, client, factory, mock_auth_service
+    ):
         """
         GOLDEN: Device register response matches DeviceRegisterResponseContract
         """
@@ -1121,14 +1155,13 @@ class TestResponseContractValidation:
             success=True,
             device_id=request_data.device_id,
             device_secret=factory.make_device_secret(),
-            organization_id=request_data.organization_id
+            organization_id=request_data.organization_id,
         )
 
         mock_auth_service.register_device.return_value = expected_response
 
         response = await client.post(
-            "/api/v1/auth/device/register",
-            json=request_data.model_dump()
+            "/api/v1/auth/device/register", json=request_data.model_dump()
         )
 
         # Accept both success and error states
