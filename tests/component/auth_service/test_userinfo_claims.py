@@ -4,6 +4,8 @@ Component tests for canonical auth userinfo claims.
 Covers: #366 — userinfo claims consumed by JupyterHub and model services.
 """
 
+# ruff: noqa: E402
+
 import os
 import sys
 
@@ -14,7 +16,12 @@ PROJECT_ROOT = os.path.dirname(
 )
 sys.path.insert(0, PROJECT_ROOT)
 
-from core.jwt_manager import JWTManager, TokenClaims, TokenScope, TokenType
+from core.jwt_manager import (
+    JWTManager,
+    TokenClaims,
+    TokenScope,
+    TokenType,
+)
 from microservices.auth_service.auth_service import AuthenticationService
 
 pytestmark = pytest.mark.component
@@ -59,7 +66,9 @@ def _token(
 
 
 @pytest.mark.asyncio
-async def test_userinfo_returns_canonical_oauth_claims_for_non_admin(auth_service, jwt_manager):
+async def test_userinfo_returns_canonical_oauth_claims_for_non_admin(
+    auth_service, jwt_manager
+):
     token = _token(
         jwt_manager,
         permissions=["features.read"],

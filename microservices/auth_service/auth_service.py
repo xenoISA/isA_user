@@ -1341,7 +1341,9 @@ class AuthenticationService:
             roles = list(raw_roles)
 
         scope = (verification_result.get("scope") or "").lower()
-        if (scope == "admin" or "auth.admin" in permissions or admin_roles) and "admin" not in roles:
+        if (
+            scope == "admin" or "auth.admin" in permissions or admin_roles
+        ) and "admin" not in roles:
             roles.append("admin")
 
         preferred_username = (
