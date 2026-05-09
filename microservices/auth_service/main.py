@@ -41,7 +41,7 @@ from core.rate_limiter import RateLimitConfig, RateLimitMiddleware
 from .api_key_repository import ApiKeyRepository
 from .api_key_service import ApiKeyService, raise_api_key_rate_limit_if_present
 from .auth_repository import AuthRepository
-from .auth_service import AuthenticationService
+from .auth_service import AuthenticationService, is_dev_bypass_admin_email
 from .device_auth_repository import DeviceAuthRepository
 from .device_auth_service import DeviceAuthService
 from .oauth_client_repository import OAuthClientRepository
@@ -79,6 +79,9 @@ class TokenVerificationResponse(BaseModel):
     provider: Optional[str] = None
     user_id: Optional[str] = None
     email: Optional[str] = None
+    role: Optional[str] = None
+    permissions: Optional[List[str]] = None
+    scopes: Optional[List[str]] = None
     subscription_level: Optional[str] = None
     organization_id: Optional[str] = None
     expires_at: Optional[datetime] = None
@@ -650,12 +653,20 @@ async def verify_token(
         subscription_level = (
             metadata.get("subscription_level") if isinstance(metadata, dict) else None
         )
+        permissions = list(result.get("permissions") or [])
+        is_dev_admin = is_dev_bypass_admin_email(result.get("email"))
+        if is_dev_admin and "auth.admin" not in permissions:
+            permissions.append("auth.admin")
+        is_admin = is_dev_admin or (result.get("scope") or "").lower() == "admin"
 
         return TokenVerificationResponse(
             valid=result.get("valid", False),
             provider=result.get("provider"),
             user_id=result.get("user_id"),
             email=result.get("email"),
+            role="admin" if is_admin else result.get("role"),
+            permissions=permissions,
+            scopes=["read", "write", "admin"] if is_admin else result.get("scopes"),
             subscription_level=subscription_level,
             organization_id=result.get("organization_id"),
             expires_at=result.get("expires_at"),
