@@ -19,7 +19,7 @@ The checked-in deployment assets now use one active layout:
 Canonical Kubernetes namespaces are defined in `config/ports.yaml`:
 
 - `staging`: `isa-cloud-staging`
-- `production`: `isa-cloud-prod`
+- `production`: `isa-cloud-production`
 
 ## Directory Structure
 
