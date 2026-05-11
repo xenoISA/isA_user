@@ -35,7 +35,7 @@ if [ "$ENV" = "--help" ]; then
     echo ""
     echo "Environments:"
     echo "  staging      Deploy to isa-cloud-staging namespace"
-    echo "  production   Deploy to isa-cloud-prod namespace"
+    echo "  production   Deploy to isa-cloud-production namespace"
     echo ""
     echo "Options:"
     echo "  [service]    Deploy only specific service (e.g., auth, billing)"
