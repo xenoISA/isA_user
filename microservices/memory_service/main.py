@@ -220,7 +220,7 @@ setup_metrics(app, "memory_service")
 health = HealthCheck(
     "memory_service", version="1.0.0", shutdown_manager=shutdown_manager
 )
-health.add_neo4j(lambda: graph_client)
+health.add_memory_graph(lambda: graph_client)
 health.add_qdrant(
     lambda: memory_service.factual_service.qdrant
     if memory_service and getattr(memory_service, "factual_service", None)

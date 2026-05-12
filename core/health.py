@@ -75,7 +75,19 @@ class HealthCheck:
 
     def add_neo4j(self, get_client: Callable, critical: bool = False):
         """Register a Neo4j/graph dependency probe."""
-        self._probes.append(_Probe("neo4j", _probe_neo4j, get_client, critical))
+        self._probes.append(_Probe("neo4j", _probe_graph_client, get_client, critical))
+
+    def add_memory_graph(self, get_client: Callable, critical: bool = False):
+        """Register the Falkor-backed memory graph dependency probe."""
+        self._probes.append(
+            _Probe("memory_graph", _probe_graph_client, get_client, critical)
+        )
+
+    def add_graph(
+        self, get_client: Callable, critical: bool = False, name: str = "graph"
+    ):
+        """Register a generic graph dependency probe."""
+        self._probes.append(_Probe(name, _probe_graph_client, get_client, critical))
 
     def add_qdrant(self, get_client: Callable, critical: bool = False):
         """Register a Qdrant dependency probe."""
@@ -93,10 +105,16 @@ class HealthCheck:
         rather than ``unhealthy``. ``critical`` defaults to False
         to enforce that contract.
         """
-        self._probes.append(_Probe("redis_cache", _probe_redis_cache, get_cache, critical))
+        self._probes.append(
+            _Probe("redis_cache", _probe_redis_cache, get_cache, critical)
+        )
 
     def add_custom(
-        self, name: str, probe_fn: Callable, get_client: Callable, critical: bool = False
+        self,
+        name: str,
+        probe_fn: Callable,
+        get_client: Callable,
+        critical: bool = False,
     ):
         """Register a custom dependency probe."""
         self._probes.append(_Probe(name, probe_fn, get_client, critical))
@@ -242,8 +260,8 @@ async def _probe_minio(client) -> bool:
     return client is not None
 
 
-async def _probe_neo4j(client) -> bool:
-    """Probe Neo4j via graph_client.health_check()."""
+async def _probe_graph_client(client) -> bool:
+    """Probe graph clients via health_check()."""
     if hasattr(client, "health_check"):
         result = client.health_check()
         if inspect.isawaitable(result):
