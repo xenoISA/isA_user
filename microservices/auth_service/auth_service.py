@@ -22,6 +22,7 @@ import secrets
 # Import protocols (no I/O dependencies) - NOT the concrete implementations!
 from .protocols import (
     AccountClientProtocol,
+    OrganizationClientProtocol,
     NotificationClientProtocol,
     JWTManagerProtocol,
     EventBusProtocol,
@@ -76,6 +77,7 @@ class AuthenticationService:
         self,
         jwt_manager: Optional[JWTManagerProtocol] = None,
         account_client: Optional[AccountClientProtocol] = None,
+        organization_service_client: Optional[OrganizationClientProtocol] = None,
         notification_client: Optional[NotificationClientProtocol] = None,
         event_bus: Optional[EventBusProtocol] = None,
         auth_repository: Optional[AuthRepositoryProtocol] = None,
@@ -89,6 +91,7 @@ class AuthenticationService:
         Args:
             jwt_manager: JWT manager for token operations (inject mock for testing)
             account_client: Account service client (inject mock for testing)
+            organization_service_client: Organization service client (inject mock for testing)
             notification_client: Notification service client (inject mock for testing)
             event_bus: Event bus for publishing events (optional)
             auth_repository: Auth repository for database operations (inject mock for testing)
@@ -99,6 +102,7 @@ class AuthenticationService:
         # Store injected dependencies
         self.jwt_manager = jwt_manager
         self.account_client = account_client
+        self.organization_service_client = organization_service_client
         self.notification_client = notification_client
         self.event_bus = event_bus
         self.auth_repository = auth_repository
@@ -125,6 +129,72 @@ class AuthenticationService:
         self._pending_registrations: Dict[str, Dict[str, Any]] = {}
 
         logger.info("Auth service initialized with dependency injection")
+
+    @staticmethod
+    def _normalize_role(value: Any) -> Optional[str]:
+        """Normalize enum/string role values from organization service."""
+        if value is None:
+            return None
+        if hasattr(value, "value"):
+            return str(value.value)
+        return str(value)
+
+    @staticmethod
+    def _dedupe(values: List[str]) -> List[str]:
+        """Return values with stable order and no duplicates."""
+        seen = set()
+        result = []
+        for value in values:
+            if value not in seen:
+                seen.add(value)
+                result.append(value)
+        return result
+
+    async def _resolve_organization_claim_context(
+        self, user_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """Resolve tenant claims from organization_service, degrading to individual."""
+        empty = {
+            "organization_id": None,
+            "tenant_id": None,
+            "org_role": None,
+            "organization_permissions": [],
+        }
+        if not user_id or not self.organization_service_client:
+            return empty
+
+        try:
+            context = await self.organization_service_client.get_user_context(user_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to resolve organization context for user %s: %s",
+                user_id,
+                exc,
+            )
+            return empty
+
+        if not context:
+            return empty
+        if not isinstance(context, dict):
+            try:
+                context = context.model_dump(mode="json")
+            except AttributeError:
+                context = dict(context)
+
+        organization_id = context.get("organization_id")
+        if not organization_id or context.get("context_type") == "individual":
+            return empty
+
+        permissions = context.get("permissions") or []
+        if isinstance(permissions, str):
+            permissions = [permissions]
+
+        return {
+            "organization_id": organization_id,
+            "tenant_id": organization_id,
+            "org_role": self._normalize_role(context.get("user_role")),
+            "organization_permissions": list(permissions),
+        }
 
     @property
     def http_client(self):
@@ -1339,14 +1409,22 @@ class AuthenticationService:
 
         user_id = verification_result.get("user_id")
         email = verification_result.get("email")
-        organization_id = (
+        org_context = await self._resolve_organization_claim_context(user_id)
+        token_organization_id = (
             verification_result.get("organization_id")
             or metadata.get("organization_id")
             or metadata.get("org_id")
             or metadata.get("tenant_id")
         )
-        tenant_id = metadata.get("tenant_id") or organization_id
+        organization_id = org_context.get("organization_id") or token_organization_id
+        tenant_id = (
+            org_context.get("tenant_id") or metadata.get("tenant_id") or organization_id
+        )
         permissions = list(verification_result.get("permissions") or [])
+        organization_permissions = list(
+            org_context.get("organization_permissions") or []
+        )
+        permissions = self._dedupe([*permissions, *organization_permissions])
         admin_roles = list(metadata.get("admin_roles") or [])
         is_dev_admin = is_dev_bypass_admin_email(email)
         if is_dev_admin and "auth.admin" not in permissions:
@@ -1357,6 +1435,9 @@ class AuthenticationService:
             roles = [raw_roles]
         else:
             roles = list(raw_roles)
+        org_role = org_context.get("org_role")
+        if org_role and org_role not in roles:
+            roles.append(org_role)
 
         scope = (verification_result.get("scope") or "").lower()
         if (
@@ -1383,8 +1464,10 @@ class AuthenticationService:
             "name": metadata.get("name"),
             "organization_id": organization_id,
             "tenant_id": tenant_id,
+            "org_role": org_role,
             "roles": roles,
             "admin_roles": admin_roles,
+            "organization_permissions": organization_permissions,
             "permissions": permissions,
             "provider": verification_result.get("provider"),
             "expires_at": verification_result.get("expires_at"),

@@ -394,7 +394,9 @@ class AuthMicroservice:
             from .factory import create_auth_service
 
             self.auth_service = create_auth_service(
-                config=config_manager, event_bus=self.event_bus
+                config=config_manager,
+                event_bus=self.event_bus,
+                organization_service_client=self.organization_service_client,
             )
             self.api_key_service = ApiKeyService(
                 self.api_key_repository,
@@ -1435,8 +1437,10 @@ async def get_user_info_from_token(
             "name": result.get("name"),
             "organization_id": result.get("organization_id"),
             "tenant_id": result.get("tenant_id"),
+            "org_role": result.get("org_role"),
             "roles": result.get("roles", []),
             "admin_roles": result.get("admin_roles", []),
+            "organization_permissions": result.get("organization_permissions", []),
             "permissions": result.get("permissions", []),
             "provider": result.get("provider"),
             "expires_at": expires_at,

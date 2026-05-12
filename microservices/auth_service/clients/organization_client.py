@@ -69,6 +69,19 @@ class OrganizationServiceClient:
             )
             return None
 
+    async def get_user_context(self, user_id: str):
+        """Get current organization context for auth claim composition."""
+        try:
+            if not self.client:
+                logger.warning("OrganizationServiceClient not available")
+                return None
+            if hasattr(self.client, "get_user_context"):
+                return await self.client.get_user_context(user_id)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get organization context for user {user_id}: {e}")
+            return None
+
     async def close(self):
         """Close HTTP client"""
         if self.client:

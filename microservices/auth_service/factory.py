@@ -19,6 +19,7 @@ from .auth_service import AuthenticationService
 def create_auth_service(
     config: Optional[ConfigManager] = None,
     event_bus=None,
+    organization_service_client=None,
 ) -> AuthenticationService:
     """
     Create AuthenticationService with real dependencies.
@@ -29,6 +30,7 @@ def create_auth_service(
     Args:
         config: Configuration manager
         event_bus: Event bus for publishing events
+        organization_service_client: Organization service client for tenant claims
 
     Returns:
         Configured AuthenticationService instance
@@ -48,8 +50,10 @@ def create_auth_service(
 
     if config:
         # Extract config from ServiceConfig object
-        jwt_secret = getattr(config, 'local_jwt_secret', None) or os.getenv("JWT_SECRET")
-        jwt_expiry = getattr(config, 'jwt_expiration', 3600)
+        jwt_secret = getattr(config, "local_jwt_secret", None) or os.getenv(
+            "JWT_SECRET"
+        )
+        jwt_expiry = getattr(config, "jwt_expiration", 3600)
     else:
         jwt_secret = os.getenv("JWT_SECRET")
 
@@ -75,6 +79,7 @@ def create_auth_service(
     return AuthenticationService(
         jwt_manager=jwt_manager,
         account_client=account_client,
+        organization_service_client=organization_service_client,
         notification_client=notification_client,
         event_bus=event_bus,
         auth_repository=auth_repository,

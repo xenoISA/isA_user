@@ -12,43 +12,52 @@ from .models import AuthUser, AuthSession
 
 # Custom exceptions - defined here to avoid importing repository
 
+
 class AuthenticationError(Exception):
     """Base authentication error"""
+
     pass
 
 
 class InvalidTokenError(AuthenticationError):
     """Invalid or expired token"""
+
     pass
 
 
 class UserNotFoundError(AuthenticationError):
     """User not found in auth system"""
+
     pass
 
 
 class SessionNotFoundError(AuthenticationError):
     """Session not found or expired"""
+
     pass
 
 
 class RegistrationError(AuthenticationError):
     """Registration failed"""
+
     pass
 
 
 class VerificationError(AuthenticationError):
     """Verification failed"""
+
     pass
 
 
 class InvalidCredentialsError(AuthenticationError):
     """Invalid email or password"""
+
     pass
 
 
 class AccountDisabledError(AuthenticationError):
     """Account is disabled"""
+
     pass
 
 
@@ -77,7 +86,9 @@ class AuthRepositoryProtocol(Protocol):
         """Update user information"""
         ...
 
-    async def create_session(self, session_data: Dict[str, Any]) -> Optional[AuthSession]:
+    async def create_session(
+        self, session_data: Dict[str, Any]
+    ) -> Optional[AuthSession]:
         """Create authentication session"""
         ...
 
@@ -135,6 +146,15 @@ class AccountClientProtocol(Protocol):
         self, user_id: str, email: str, name: str
     ) -> Optional[Dict[str, Any]]:
         """Ensure account exists in account service"""
+        ...
+
+
+@runtime_checkable
+class OrganizationClientProtocol(Protocol):
+    """Interface for Organization Service Client - no I/O imports"""
+
+    async def get_user_context(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get current organization context for a user"""
         ...
 
 
