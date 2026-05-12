@@ -14,13 +14,13 @@
 # Service Tiers:
 #   Tier 1 — Foundation:  auth, account, organization (no internal deps)
 #   Tier 2 — Core Platform: session, authorization, wallet, memory, storage,
-#                            event, audit, notification (needed by platform)
+#                            event, audit, notification, project (needed by platform)
 #   Tier 3 — Business:    billing, subscription, product, telemetry, vault
 #                          (needed by isA_Model/Agent SDK/OS)
 #   Tier 4 — Optional:    payment, order, task, calendar, weather, album,
 #                          device, ota, media, location, compliance, document,
 #                          credit, invitation, membership, campaign, inventory,
-#                          tax, fulfillment (domain features)
+#                          tax, fulfillment, sharing (domain features)
 # =============================================================================
 set -e
 
@@ -49,13 +49,13 @@ cd "$PROJECT_ROOT"
 TIER1_SERVICES="auth_service account_service organization_service"
 
 # Tier 2: Core Platform — depends on Tier 1, required by MCP/Agent SDK
-TIER2_SERVICES="session_service authorization_service wallet_service memory_service storage_service event_service audit_service notification_service"
+TIER2_SERVICES="session_service authorization_service wallet_service memory_service storage_service event_service audit_service notification_service project_service"
 
 # Tier 3: Business — depends on Tier 1+2, required by Model/Agent SDK/OS
 TIER3_SERVICES="billing_service subscription_service product_service telemetry_service vault_service"
 
 # Tier 4: Optional — domain features, not required for core platform
-TIER4_SERVICES="payment_service order_service task_service calendar_service weather_service album_service device_service ota_service media_service location_service compliance_service document_service credit_service invitation_service membership_service campaign_service inventory_service tax_service fulfillment_service"
+TIER4_SERVICES="payment_service order_service task_service calendar_service weather_service album_service device_service ota_service media_service location_service compliance_service document_service credit_service invitation_service membership_service campaign_service inventory_service tax_service fulfillment_service sharing_service"
 
 TIER_NAMES=("" "Foundation" "Core Platform" "Business" "Optional")
 
@@ -540,11 +540,11 @@ case "${1:-}" in
         echo ""
         echo "Service Tiers:"
         echo "  1 — Foundation:    auth, account, organization"
-        echo "  2 — Core Platform: session, authorization, wallet, memory, storage, event, audit, notification"
+        echo "  2 — Core Platform: session, authorization, wallet, memory, storage, event, audit, notification, project"
         echo "  3 — Business:      billing, subscription, product, telemetry, vault"
         echo "  4 — Optional:      payment, order, task, calendar, weather, album, device, ota, media,"
         echo "                     location, compliance, document, credit, invitation, membership,"
-        echo "                     campaign, inventory, tax, fulfillment"
+        echo "                     campaign, inventory, tax, fulfillment, sharing"
         echo ""
         echo "Examples:"
         echo "  $0 --setup"
