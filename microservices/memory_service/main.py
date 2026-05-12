@@ -44,7 +44,7 @@ from .models import (
     GraphSearchResponse,
     GraphNeighborsResponse,
 )
-from .graph_client import GraphClient
+from .memory_graph import MemoryGraphAdapter
 from .context_ordering import order_by_importance_edges
 from .context_compressor import ContextCompressor
 from .mmr_reranker import apply_mmr_reranking
@@ -61,9 +61,13 @@ logger = setup_service_logger("memory_service")
 
 # Global service instance
 memory_service = None
-graph_client: Optional[GraphClient] = None
+graph_client: Optional[MemoryGraphAdapter] = None
 consul_registry: Optional[ConsulRegistry] = None
 shutdown_manager = GracefulShutdown("memory_service")
+
+
+def _build_graph_client() -> MemoryGraphAdapter:
+    return MemoryGraphAdapter()
 
 
 async def _maybe_rerank(results, query, service, rerank, mmr_lambda, limit):
@@ -133,20 +137,20 @@ async def lifespan(app: FastAPI):
             logger.error("Failed to connect to database")
             raise RuntimeError("Database connection failed")
 
-    # Initialize GraphClient for Neo4j knowledge graph queries via isA_Data
+    # Initialize local FalkorDB memory graph adapter.
     try:
-        graph_client = GraphClient()
+        graph_client = _build_graph_client()
         if await graph_client.health_check():
-            logger.info("GraphClient connected to isA_Data graph service")
+            logger.info("Memory graph adapter connected to FalkorDB")
         else:
             logger.warning(
-                "isA_Data graph service not reachable — graph queries will degrade gracefully"
+                "FalkorDB memory graph not reachable — graph queries will degrade gracefully"
             )
     except Exception as e:
         logger.warning(
-            f"Failed to initialize GraphClient: {e}. Graph queries disabled."
+            f"Failed to initialize memory graph adapter: {e}. Graph queries disabled."
         )
-        graph_client = GraphClient()  # keep instance for graceful degradation
+        graph_client = _build_graph_client()  # keep instance for graceful degradation
 
     # Consul 服务注册
     if service_config.consul_enabled:
@@ -192,6 +196,9 @@ async def lifespan(app: FastAPI):
     if event_bus:
         await event_bus.close()
         logger.info("Event bus closed")
+    if graph_client:
+        await graph_client.close()
+        logger.info("Memory graph adapter closed")
 
     # Consul deregistration is handled by shutdown_manager.initiate_shutdown()
     # so traffic stops before we reject requests with 503.
@@ -1099,7 +1106,7 @@ async def search_all_memories(
         500, ge=50, le=5000, description="Target token count for compressed summary"
     ),
     include_graph: bool = Query(
-        False, description="Include knowledge graph results from Neo4j via isA_Data"
+        False, description="Include local FalkorDB memory graph results"
     ),
 ):
     """
@@ -1339,10 +1346,10 @@ async def hybrid_search(
     ),
 ):
     """
-    Hybrid search combining Qdrant vector similarity with Neo4j graph traversal.
+    Hybrid search combining Qdrant vector similarity with FalkorDB graph traversal.
 
     Merges results from both sources using configurable weights.
-    Falls back to vector-only if the graph service (isA_Data) is unavailable.
+    Falls back to vector-only if the local memory graph is unavailable.
 
     Each result includes a 'source' field: "vector", "graph", or "both".
     """
@@ -1393,15 +1400,13 @@ async def hybrid_search(
                     "Hybrid search: vector search failed for %s: %s", mem_type, e
                 )
 
-        # --- Graph search via GraphClient ---
+        # --- Graph search via local memory graph adapter ---
         graph_results: List[Dict[str, Any]] = []
-        graph_available = True
+        graph_available = False
 
         try:
-            from .graph_client import GraphClient
-
-            graph_client = GraphClient(consul_registry=consul_registry)
-            if await graph_client.health_check():
+            if graph_client is not None and await graph_client.health_check():
+                graph_available = True
                 entity_resp = await graph_client.search_entities(
                     query=query, user_id=user_id, limit=limit
                 )
@@ -1419,15 +1424,9 @@ async def hybrid_search(
                         }
                     )
             else:
-                graph_available = False
                 logger.info(
                     "Hybrid search: graph service unavailable, falling back to vector-only"
                 )
-        except ImportError:
-            graph_available = False
-            logger.info(
-                "Hybrid search: graph_client not available, falling back to vector-only"
-            )
         except Exception as e:
             graph_available = False
             logger.warning(
