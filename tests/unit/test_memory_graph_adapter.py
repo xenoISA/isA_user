@@ -30,6 +30,16 @@ async def test_health_check_returns_false_on_error(falkor_client):
     adapter = MemoryGraphAdapter(client=falkor_client)
 
     assert await adapter.health_check() is False
+    assert adapter._client is None
+
+
+@pytest.mark.asyncio
+async def test_health_check_resets_client_on_unhealthy_result(falkor_client):
+    falkor_client.health_check.return_value = {"healthy": False}
+    adapter = MemoryGraphAdapter(client=falkor_client)
+
+    assert await adapter.health_check() is False
+    assert adapter._client is None
 
 
 @pytest.mark.asyncio
@@ -77,6 +87,7 @@ async def test_search_entities_degrades_on_falkor_error(falkor_client):
     assert result["entities"] == []
     assert result["total"] == 0
     assert "error" in result
+    assert adapter._client is None
 
 
 @pytest.mark.asyncio
@@ -158,3 +169,29 @@ async def test_factory_builds_async_falkor_client_with_memory_graph():
 
     assert await adapter.health_check() is True
     assert created["graph"] == "memory_graph"
+
+
+@pytest.mark.asyncio
+async def test_factory_uses_falkor_host_and_port_env(monkeypatch):
+    created = {}
+
+    class FakeFalkorClient:
+        def __init__(self, **kwargs):
+            created.update(kwargs)
+
+        async def health_check(self):
+            return {"healthy": True}
+
+    monkeypatch.setenv("FALKOR_HOST", "127.0.0.1")
+    monkeypatch.setenv("FALKOR_PORT", "6380")
+
+    adapter = MemoryGraphAdapter(
+        client_factory=FakeFalkorClient, graph_name="memory_graph"
+    )
+
+    assert await adapter.health_check() is True
+    assert created == {
+        "graph": "memory_graph",
+        "host": "127.0.0.1",
+        "port": 6380,
+    }
