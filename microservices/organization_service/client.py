@@ -203,6 +203,23 @@ class OrganizationServiceClient:
             logger.error(f"Error getting user organizations: {e}")
             return None
 
+    async def get_user_context(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get current organization context for a user."""
+        try:
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/organization/organizations/context",
+                headers={"user-id": user_id},
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to get user context: {e.response.status_code}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting user context: {e}")
+            return None
+
     async def get_org_rate_limits(
         self, organization_id: str
     ) -> Optional[Dict[str, Any]]:

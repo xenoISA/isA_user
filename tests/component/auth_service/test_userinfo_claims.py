@@ -43,6 +43,17 @@ def auth_service(jwt_manager):
     return AuthenticationService(jwt_manager=jwt_manager)
 
 
+class FakeOrganizationClient:
+    def __init__(self, context=None, error=None):
+        self.context = context
+        self.error = error
+
+    async def get_user_context(self, user_id):
+        if self.error:
+            raise self.error
+        return self.context
+
+
 def _token(
     jwt_manager,
     *,
@@ -132,6 +143,89 @@ async def test_userinfo_missing_org_context_has_stable_empty_tenant_claims(
     assert result["roles"] == []
     assert result["permissions"] == []
     assert result["preferred_username"] == "solo"
+
+
+@pytest.mark.asyncio
+async def test_userinfo_resolves_active_org_context_from_organization_service(
+    jwt_manager,
+):
+    auth_service = AuthenticationService(
+        jwt_manager=jwt_manager,
+        organization_service_client=FakeOrganizationClient(
+            {
+                "context_type": "organization",
+                "organization_id": "org_live_001",
+                "organization_name": "Live Org",
+                "user_role": "owner",
+                "permissions": ["org.manage", "billing.read"],
+            }
+        ),
+    )
+    token = _token(
+        jwt_manager,
+        org_id=None,
+        permissions=["features.read"],
+        metadata={"roles": ["member"]},
+    )
+
+    result = await auth_service.get_user_info_from_token(token)
+
+    assert result["success"] is True
+    assert result["organization_id"] == "org_live_001"
+    assert result["tenant_id"] == "org_live_001"
+    assert result["org_role"] == "owner"
+    assert result["organization_permissions"] == ["org.manage", "billing.read"]
+    assert result["roles"] == ["member", "owner"]
+    assert result["permissions"] == ["features.read", "org.manage", "billing.read"]
+
+
+@pytest.mark.asyncio
+async def test_userinfo_individual_org_context_returns_empty_tenant_claims(
+    jwt_manager,
+):
+    auth_service = AuthenticationService(
+        jwt_manager=jwt_manager,
+        organization_service_client=FakeOrganizationClient(
+            {
+                "context_type": "individual",
+                "organization_id": None,
+                "user_role": None,
+                "permissions": [],
+            }
+        ),
+    )
+    token = _token(jwt_manager, email="solo@example.com", org_id=None)
+
+    result = await auth_service.get_user_info_from_token(token)
+
+    assert result["success"] is True
+    assert result["organization_id"] is None
+    assert result["tenant_id"] is None
+    assert result["org_role"] is None
+    assert result["organization_permissions"] == []
+    assert result["permissions"] == []
+
+
+@pytest.mark.asyncio
+async def test_userinfo_org_service_failure_degrades_to_empty_tenant_claims(
+    jwt_manager, caplog
+):
+    auth_service = AuthenticationService(
+        jwt_manager=jwt_manager,
+        organization_service_client=FakeOrganizationClient(
+            error=RuntimeError("organization unavailable")
+        ),
+    )
+    token = _token(jwt_manager, email="solo@example.com", org_id=None)
+
+    result = await auth_service.get_user_info_from_token(token)
+
+    assert result["success"] is True
+    assert result["organization_id"] is None
+    assert result["tenant_id"] is None
+    assert result["org_role"] is None
+    assert result["organization_permissions"] == []
+    assert "Failed to resolve organization context" in caplog.text
 
 
 @pytest.mark.asyncio
