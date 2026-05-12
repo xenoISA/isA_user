@@ -43,6 +43,17 @@ def auth_service(jwt_manager):
     return AuthenticationService(jwt_manager=jwt_manager)
 
 
+class FakeAccountClient:
+    def __init__(self, claims=None, error=None):
+        self.claims = claims
+        self.error = error
+
+    async def get_account_claims(self, user_id):
+        if self.error:
+            raise self.error
+        return self.claims
+
+
 class FakeOrganizationClient:
     def __init__(self, context=None, error=None):
         self.context = context
@@ -94,6 +105,8 @@ async def test_userinfo_returns_canonical_oauth_claims_for_non_admin(
     assert result["email"] == "user@example.com"
     assert result["preferred_username"] == "user"
     assert result["name"] == "Model User"
+    assert result["account_active"] is None
+    assert result["account_missing"] is False
     assert result["organization_id"] == "org_claims_001"
     assert result["tenant_id"] == "org_claims_001"
     assert result["roles"] == ["member"]
@@ -143,6 +156,84 @@ async def test_userinfo_missing_org_context_has_stable_empty_tenant_claims(
     assert result["roles"] == []
     assert result["permissions"] == []
     assert result["preferred_username"] == "solo"
+
+
+@pytest.mark.asyncio
+async def test_userinfo_resolves_account_name_active_status_and_admin_roles(
+    jwt_manager,
+):
+    auth_service = AuthenticationService(
+        jwt_manager=jwt_manager,
+        account_client=FakeAccountClient(
+            {
+                "user_id": "usr_admin_claims",
+                "name": "Account Admin",
+                "is_active": True,
+                "admin_roles": ["super_admin", "billing_admin"],
+            }
+        ),
+    )
+    token = _token(
+        jwt_manager,
+        user_id="usr_admin_claims",
+        email="admin@example.com",
+        org_id=None,
+        metadata={"name": "Token Name"},
+    )
+
+    result = await auth_service.get_user_info_from_token(token)
+
+    assert result["success"] is True
+    assert result["name"] == "Account Admin"
+    assert result["account_active"] is True
+    assert result["account_missing"] is False
+    assert result["admin_roles"] == ["super_admin", "billing_admin"]
+    assert result["roles"] == ["admin"]
+
+
+@pytest.mark.asyncio
+async def test_userinfo_inactive_account_is_explicit(jwt_manager):
+    auth_service = AuthenticationService(
+        jwt_manager=jwt_manager,
+        account_client=FakeAccountClient(
+            {
+                "user_id": "usr_inactive",
+                "name": "Inactive User",
+                "is_active": False,
+                "admin_roles": [],
+            }
+        ),
+    )
+    token = _token(
+        jwt_manager,
+        user_id="usr_inactive",
+        email="inactive@example.com",
+        org_id=None,
+    )
+
+    result = await auth_service.get_user_info_from_token(token)
+
+    assert result["success"] is True
+    assert result["name"] == "Inactive User"
+    assert result["account_active"] is False
+    assert result["account_missing"] is False
+    assert result["admin_roles"] == []
+
+
+@pytest.mark.asyncio
+async def test_userinfo_missing_account_is_explicit(jwt_manager):
+    auth_service = AuthenticationService(
+        jwt_manager=jwt_manager,
+        account_client=FakeAccountClient(claims=None),
+    )
+    token = _token(jwt_manager, org_id=None)
+
+    result = await auth_service.get_user_info_from_token(token)
+
+    assert result["success"] is True
+    assert result["account_active"] is None
+    assert result["account_missing"] is True
+    assert result["admin_roles"] == []
 
 
 @pytest.mark.asyncio

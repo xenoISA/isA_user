@@ -146,6 +146,29 @@ class AccountServiceClient:
             logger.error(f"Error getting account profile: {e}")
             return None
 
+    async def get_account_claims(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get minimal account identity fields for auth claim composition.
+
+        Returns name, active status, and platform admin roles without exposing
+        preferences or other profile data.
+        """
+        try:
+            response = await self.client.get(
+                f"{self._get_base_url()}/api/v1/accounts/claims/{user_id}"
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            logger.error(f"Failed to get account claims: {e.response.status_code}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting account claims: {e}")
+            return None
+
     async def get_account_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """
         Get account by email address
