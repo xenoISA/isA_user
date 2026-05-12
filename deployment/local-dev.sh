@@ -28,6 +28,7 @@ PROJECT_NAME="isa_user"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INFRA_NAMESPACE="${ISA_CLOUD_NAMESPACE:-isa-cloud-local}"
 
 cd "$PROJECT_ROOT"
 
@@ -293,14 +294,16 @@ case "${1:-}" in
 
         # Port-forwards (native service ports - no gRPC gateway needed)
         pkill -f "kubectl port-forward" 2>/dev/null || true
-        kubectl port-forward -n isa-cloud-staging svc/postgres 5432:5432 &>/dev/null &
-        kubectl port-forward -n isa-cloud-staging svc/redis 6379:6379 &>/dev/null &
-        kubectl port-forward -n isa-cloud-staging svc/qdrant 6333:6333 &>/dev/null &
-        kubectl port-forward -n isa-cloud-staging svc/minio 9000:9000 &>/dev/null &
-        kubectl port-forward -n isa-cloud-staging svc/neo4j 7687:7687 &>/dev/null &
-        kubectl port-forward -n isa-cloud-staging svc/nats 4222:4222 &>/dev/null &
-        kubectl port-forward -n isa-cloud-staging svc/mosquitto 1883:1883 &>/dev/null &
-        kubectl port-forward -n isa-cloud-staging svc/consul-expose-servers 8500:8500 &>/dev/null &
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/postgres 5432:5432 &>/dev/null &
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/redis 6379:6379 &>/dev/null &
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/qdrant 6333:6333 &>/dev/null &
+        # FalkorDB listens on 6379 in-cluster; expose it on 6380 locally to avoid Redis.
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/falkordb 6380:6379 &>/dev/null &
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/minio 9000:9000 &>/dev/null &
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/neo4j 7687:7687 &>/dev/null &
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/nats 4222:4222 &>/dev/null &
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/mosquitto 1883:1883 &>/dev/null &
+        kubectl port-forward -n "$INFRA_NAMESPACE" svc/consul-expose-servers 8500:8500 &>/dev/null &
         sleep 2
 
         echo "Setup complete!"

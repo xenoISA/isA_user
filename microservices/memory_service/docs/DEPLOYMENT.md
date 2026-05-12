@@ -51,6 +51,30 @@ Functions:
 - **Base URL**: http://localhost:8223
 - **Health Endpoint**: http://localhost:8223/health
 
+## Memory Graph Configuration
+
+memory_service owns the user memory graph runtime path and connects directly to
+FalkorDB through `MemoryGraphAdapter`. It does not require isA_Data or Neo4j for
+graph search or hybrid search.
+
+Local development uses two Redis-protocol stores:
+
+```bash
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+FALKOR_HOST=localhost
+FALKOR_PORT=6380
+MEMORY_GRAPH_NAME=memory_graph
+MEMORY_GRAPH_TIMEOUT_MS=1500
+```
+
+`deployment/local-dev.sh --setup` port-forwards the in-cluster FalkorDB service
+from `6379` to local `6380` so it does not collide with Redis. The script uses
+`ISA_CLOUD_NAMESPACE` when set and defaults to `isa-cloud-local`. If `/health`
+reports `memory_graph` degraded, vector search still remains available through
+Qdrant and hybrid search should fall back to vector-only results.
+
 ## Starting the Service
 
 ### Using supervisor (in Docker)

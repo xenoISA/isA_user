@@ -24,11 +24,11 @@ Provide a scalable, intelligent memory service that transforms conversational AI
 ### Key Differentiators
 1. **Cognitive Science Foundation**: Six memory types based on human cognition
 2. **AI-Powered Extraction**: LLM automatically extracts structured memories
-3. **Triple Storage**: PostgreSQL (structured) + Qdrant (vector) + Neo4j (graph) for optimal retrieval
+3. **Triple Storage**: PostgreSQL (structured) + Qdrant (vector) + FalkorDB (memory graph) for optimal retrieval
 4. **Event-Driven**: Real-time notifications for memory mutations via NATS
 5. **Type Safety**: Full Pydantic validation throughout
 6. **Active Forgetting**: Ebbinghaus-inspired memory decay with spaced repetition
-7. **Knowledge Graph**: Entity/relationship extraction with graph traversal (via isA_Data)
+7. **Knowledge Graph**: User memory entity/relationship traversal through memory_service's local FalkorDB adapter
 8. **Context Engineering**: MMR diversity, lost-in-the-middle ordering, LLM compression
 
 ---
@@ -461,13 +461,13 @@ Provide a scalable, intelligent memory service that transforms conversational AI
 
 ### Epic 7: Memory System v2 — Decay, Graph Integration, and Retrieval Quality [Complete]
 
-**Objective**: Upgrade the memory system to bridge the gap between v1 implementation and 2026 SOTA (MAGMA, SimpleMem, A-MEM, MemoryBank). Integrate with isA_Data's existing Neo4j, MMR, and entity extraction capabilities.
+**Objective**: Upgrade the memory system to bridge the gap between v1 implementation and 2026 SOTA (MAGMA, SimpleMem, A-MEM, MemoryBank). Add memory-owned graph retrieval, MMR, and entity extraction capabilities.
 
 **GitHub**: Epic #111 (closed), Milestone "Memory System v2" (10/10 stories closed)
 
 **Architecture Decision**:
-- Graph building: NATS events (`memory.created` → isA_Data subscribes, async non-blocking)
-- Graph retrieval: HTTP calls to isA_Data (sync, agent needs results immediately)
+- Graph building: memory_service writes user memory entities/relationships to FalkorDB and still publishes NATS events for optional downstream consumers
+- Graph retrieval: direct FalkorDB reads through `MemoryGraphAdapter` (sync, agent needs results immediately)
 - Decay: Internal to memory_service (no external dependency)
 - Re-ranking: Standalone MMR implementation in memory_service
 
@@ -501,19 +501,19 @@ Provide a scalable, intelligent memory service that transforms conversational AI
 
 **API Reference**: `GET /api/v1/memories/search?rerank=true&mmr_lambda=0.5`
 
-#### E7-US3: Neo4j Knowledge Graph Wiring [Complete]
+#### E7-US3: Memory Graph Wiring [Complete]
 **As a** Knowledge System
 **I want to** build a knowledge graph from extracted memories
 **So that** I can support multi-hop reasoning and relationship queries
 
 **Acceptance Criteria**:
 - [x] `memory.created` NATS events include enriched `memory_data` field for downstream extraction
-- [x] `GraphClient` queries isA_Data's Neo4j graph via HTTP (5s timeout, Consul discovery)
+- [x] `MemoryGraphAdapter` queries the memory-owned FalkorDB graph directly (bounded timeout, local configuration)
 - [x] `include_graph=true` on universal search merges graph results
 - [x] Graph endpoints: `GET /memories/graph/search`, `GET /memories/graph/neighbors`
 - [x] Graceful degradation when graph service unavailable
 
-**Note**: isA_Data NATS subscriber to consume events and populate Neo4j is pending (isA_Data side).
+**Note**: memory_service owns the user memory graph runtime path. isA_Data may still consume memory events for a platform-wide graph, but graph search and hybrid search must not depend on isA_Data or Neo4j being healthy.
 
 **API Reference**: `GET /api/v1/memories/graph/search`, `GET /api/v1/memories/graph/neighbors`
 
@@ -680,7 +680,7 @@ System SHALL support MMR re-ranking to eliminate near-duplicate search results a
 System SHALL automatically link new memories to related existing memories using LLM-classified relationship types (similar_to, elaborates, contradicts)
 
 ### FR-14: Knowledge Graph Integration (v2)
-System SHALL publish enriched NATS events for downstream entity extraction and provide graph query endpoints for Neo4j traversal via isA_Data
+System SHALL publish enriched NATS events for downstream consumers and provide graph query endpoints backed by memory_service's FalkorDB memory graph
 
 ### FR-15: Context Engineering (v2)
 System SHALL support context ordering (lost-in-the-middle mitigation) and LLM-based context compression before injection
@@ -761,12 +761,13 @@ System SHALL support combined vector similarity + graph traversal search with co
    - Service: memory_service
    - SLA: 99.9% availability
 
-6. **isA_Data Service** (v2): Graph storage, entity extraction, re-ranking
-   - Host: `isa-data:8230` (via Consul discovery or `DATA_SERVICE_URL` env)
-   - Components: Neo4jStore, GenericEntityExtractor, GenericRelationExtractor, GraphRAGRetriever
-   - Integration: NATS events (async graph building) + HTTP (sync graph retrieval)
-   - Timeout: 5s per request, graceful degradation when unavailable
-   - SLA: 99.5% availability (memory_service operates without it)
+6. **FalkorDB**: Memory-owned graph storage and traversal
+   - Local dev: `FALKOR_HOST=localhost`, `FALKOR_PORT=6380`
+   - In-cluster: service discovery or environment-specific `FALKOR_*` settings
+   - Graph: `MEMORY_GRAPH_NAME=memory_graph`
+   - Integration: direct `AsyncFalkorClient` access from `MemoryGraphAdapter`
+   - Timeout: bounded by `MEMORY_GRAPH_TIMEOUT_MS`, graceful degradation when unavailable
+   - SLA: 99.5% availability (memory_service vector search operates without it)
 
 ---
 
@@ -788,7 +789,7 @@ System SHALL support combined vector similarity + graph traversal search with co
 ### Phase 2.5: Memory System v2 — Decay, Graph, Retrieval Quality [Complete]
 - [x] Ebbinghaus memory decay (Epic 7, #112)
 - [x] MMR re-ranking for search diversity (Epic 7, #113)
-- [x] Neo4j graph client + enriched NATS events (Epic 7, #114)
+- [x] FalkorDB memory graph adapter + enriched NATS events (Epic 7, #114)
 - [x] Graph retrieval endpoints (Epic 7, #115)
 - [x] A-MEM-style memory cross-links (Epic 7, #116)
 - [x] Context ordering — lost-in-the-middle mitigation (Epic 7, #117)
@@ -799,8 +800,8 @@ System SHALL support combined vector similarity + graph traversal search with co
 - [x] Quality hardening — 10 MUST FIX + 8 SHOULD FIX resolved (#136)
 - [x] Smoke tests for all v2 endpoints (8 new scripts, #133)
 
-### Phase 2.5 — Pending (isA_Data side)
-- [ ] isA_Data NATS subscriber to consume `memory.created` events and populate Neo4j
+### Phase 2.5 — Pending follow-ups
+- [ ] Optional platform graph consumer for `memory.created` events outside the memory_service runtime path
 - [ ] isA_Agent_SDK MemoryAggregator integration with graph retrieval + compression
 
 ### Phase 3: Production Ready (Future)

@@ -153,7 +153,7 @@ async def test_traverse_graph_returns_paths(falkor_client):
 
 
 @pytest.mark.asyncio
-async def test_factory_builds_async_falkor_client_with_memory_graph():
+async def test_factory_builds_async_falkor_client_with_memory_graph(monkeypatch):
     created = {}
 
     class FakeFalkorClient:
@@ -162,6 +162,11 @@ async def test_factory_builds_async_falkor_client_with_memory_graph():
 
         async def health_check(self):
             return {"healthy": True}
+
+    monkeypatch.delenv("FALKOR_HOST", raising=False)
+    monkeypatch.delenv("FALKORDB_HOST", raising=False)
+    monkeypatch.delenv("FALKOR_PORT", raising=False)
+    monkeypatch.delenv("FALKORDB_PORT", raising=False)
 
     adapter = MemoryGraphAdapter(
         client_factory=FakeFalkorClient, graph_name="memory_graph"

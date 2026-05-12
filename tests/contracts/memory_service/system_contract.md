@@ -35,7 +35,8 @@ microservices/memory_service/
 ├── association_service.py      # Memory association service
 ├── association_repository.py   # Association data access
 ├── base_repository.py          # Shared repository base class
-├── graph_client.py             # Neo4j graph client
+├── memory_graph.py             # FalkorDB memory graph adapter
+├── graph_client.py             # Legacy external graph client
 ├── hybrid_search.py            # Combined vector + graph search
 ├── context_compressor.py       # Context compression for LLM
 ├── context_ordering.py         # Context ordering by importance
@@ -62,8 +63,8 @@ microservices/memory_service/
 | **Orchestrator** | `memory_service.py` | Delegates to sub-services by memory type | All sub-services |
 | **Sub-Services** | `*_service.py` | Type-specific memory logic | Corresponding repository |
 | **Repositories** | `*_repository.py` | Data access (PostgreSQL + Qdrant) | AsyncPostgresClient, Qdrant |
-| **Graph** | `graph_client.py` | Neo4j entity/relationship queries | Neo4j |
-| **Search** | `hybrid_search.py` | Combined vector + graph search | Qdrant, Neo4j |
+| **Graph** | `memory_graph.py` | User memory entity/relationship queries | FalkorDB |
+| **Search** | `hybrid_search.py` | Combined vector + graph search | Qdrant, FalkorDB |
 
 ### External Dependencies
 
@@ -71,7 +72,7 @@ microservices/memory_service/
 |------------|------|---------|----------|
 | PostgreSQL | gRPC | Structured memory storage | isa-postgres-grpc:50061 |
 | Qdrant | HTTP/gRPC | Vector embeddings search | qdrant:6333/6334 |
-| Neo4j | Bolt | Entity relationship graph | neo4j:7687 |
+| FalkorDB | Redis protocol | User memory entity relationship graph | falkordb:6379 |
 | NATS | Native | Event pub/sub | nats:4222 |
 | Consul | HTTP | Service registration | consul:8500 |
 | ISA Model | HTTP | AI extraction and embeddings | via service discovery |
@@ -175,7 +176,7 @@ Subscribes to entity extraction events for graph updates.
 
 ## 5-6. Client & Repository Pattern
 
-Each memory type has its own repository. Repositories use both PostgreSQL (structured data) and Qdrant (vector embeddings). Graph client uses Neo4j for entity relationships.
+Each memory type has its own repository. Repositories use both PostgreSQL (structured data) and Qdrant (vector embeddings). The memory graph adapter uses FalkorDB for user memory entity relationships.
 
 **Unique Features:**
 - Hybrid search (vector + graph)
@@ -221,8 +222,8 @@ SERVICE_METADATA = {
 - ConfigManager with port 8223
 - `setup_service_logger("memory_service")`
 - GracefulShutdown with signal handlers
-- Graph client (Neo4j) initialization for entity extraction
-- Hybrid search combining Qdrant vectors and Neo4j graph
+- Memory graph adapter (FalkorDB) initialization for entity traversal
+- Hybrid search combining Qdrant vectors and FalkorDB graph
 
 ---
 
@@ -231,7 +232,7 @@ SERVICE_METADATA = {
 - [x] `protocols.py` defines 8 protocol interfaces (Repository + 6 memory types + EventBus)
 - [x] `factory.py` creates orchestrator with 7 sub-services
 - [x] 6 memory types (factual, procedural, episodic, semantic, working, session)
-- [x] Triple-store architecture (PostgreSQL + Qdrant + Neo4j)
+- [x] Triple-store architecture (PostgreSQL + Qdrant + FalkorDB)
 - [x] AI-powered extraction via ISA Model
 - [x] Hybrid search (vector + graph)
 - [x] Memory decay and consolidation
@@ -248,7 +249,8 @@ SERVICE_METADATA = {
 | `microservices/memory_service/factual_service.py` | Factual memory logic |
 | `microservices/memory_service/protocols.py` | DI interfaces |
 | `microservices/memory_service/factory.py` | DI factory |
-| `microservices/memory_service/graph_client.py` | Neo4j client |
+| `microservices/memory_service/memory_graph.py` | FalkorDB memory graph adapter |
+| `microservices/memory_service/graph_client.py` | Legacy external graph client |
 | `microservices/memory_service/hybrid_search.py` | Combined search |
 | `microservices/memory_service/routes_registry.py` | Consul metadata |
 | `microservices/memory_service/events/` | Event handlers, models, publishers |
