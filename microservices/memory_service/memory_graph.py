@@ -17,6 +17,16 @@ _DEFAULT_GRAPH = "memory_graph"
 _DEFAULT_TIMEOUT_MS = 1500
 
 
+def _optional_int(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring invalid Falkor port value: %s", value)
+        return None
+
+
 def _clamp_limit(value: int, *, default: int = 10, maximum: int = 100) -> int:
     try:
         parsed = int(value)
@@ -67,6 +77,10 @@ class MemoryGraphAdapter:
             or os.getenv("FALKOR_GRAPH")
             or _DEFAULT_GRAPH
         )
+        self.host = os.getenv("FALKOR_HOST") or os.getenv("FALKORDB_HOST")
+        self.port = _optional_int(
+            os.getenv("FALKOR_PORT") or os.getenv("FALKORDB_PORT")
+        )
         self.timeout_ms = int(
             os.getenv("MEMORY_GRAPH_TIMEOUT_MS", str(timeout_ms or _DEFAULT_TIMEOUT_MS))
         )
@@ -78,17 +92,35 @@ class MemoryGraphAdapter:
                 from isa_common import AsyncFalkorClient
 
                 factory = AsyncFalkorClient
-            self._client = factory(graph=self.graph_name)
+            kwargs = {"graph": self.graph_name}
+            if self.host:
+                kwargs["host"] = self.host
+            if self.port:
+                kwargs["port"] = self.port
+            self._client = factory(**kwargs)
         return self._client
+
+    async def _reset_client(self) -> None:
+        client = self._client
+        self._client = None
+        if client is not None and hasattr(client, "close"):
+            try:
+                await client.close()
+            except Exception as exc:
+                logger.debug("Memory graph client close after failure failed: %s", exc)
 
     async def health_check(self) -> bool:
         """Return True when FalkorDB is reachable for the memory graph."""
         try:
             client = await self._get_client()
             result = await client.health_check()
-            return bool(result and result.get("healthy"))
+            healthy = bool(result and result.get("healthy"))
+            if not healthy:
+                await self._reset_client()
+            return healthy
         except Exception as exc:
             logger.debug("Memory graph health check failed: %s", exc)
+            await self._reset_client()
             return False
 
     async def search_entities(
@@ -133,6 +165,7 @@ class MemoryGraphAdapter:
             return {"entities": entities, "total": len(entities)}
         except Exception as exc:
             logger.warning("Memory graph entity search failed: %s", exc)
+            await self._reset_client()
             return {"entities": [], "total": 0, "error": str(exc)}
 
     async def get_entity_neighbors(
@@ -172,6 +205,7 @@ class MemoryGraphAdapter:
             return {"neighbors": neighbors, "entity_id": entity_id}
         except Exception as exc:
             logger.warning("Memory graph neighbor lookup failed: %s", exc)
+            await self._reset_client()
             return {"neighbors": [], "entity_id": entity_id, "error": str(exc)}
 
     async def traverse_graph(
@@ -221,6 +255,7 @@ class MemoryGraphAdapter:
             return {"paths": paths, "total_paths": len(paths)}
         except Exception as exc:
             logger.warning("Memory graph traversal failed: %s", exc)
+            await self._reset_client()
             return {"paths": [], "total_paths": 0, "error": str(exc)}
 
     async def close(self) -> None:
