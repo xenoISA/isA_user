@@ -18,16 +18,19 @@ class User(BaseModel):
     Note: This is the identity anchor only. Subscription information
     is managed by subscription_service and should be queried from there.
     """
+
     user_id: str
     email: Optional[str] = None
     name: Optional[str] = None
     is_active: bool = True
-    admin_roles: Optional[List[str]] = Field(default=None, description="Admin roles (JSONB)")
+    admin_roles: Optional[List[str]] = Field(
+        default=None, description="Admin roles (JSONB)"
+    )
     preferences: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    @field_validator('preferences', mode='before')
+    @field_validator("preferences", mode="before")
     @classmethod
     def parse_preferences(cls, v):
         if isinstance(v, str):
@@ -42,9 +45,9 @@ class User(BaseModel):
 
 
 # Account Service Specific Request Models
-
 class AccountEnsureRequest(BaseModel):
     """Account ensure request"""
+
     user_id: str = Field(..., description="User ID (from auth service)")
     email: EmailStr = Field(..., description="User email")
     name: str = Field(..., description="User name")
@@ -52,34 +55,49 @@ class AccountEnsureRequest(BaseModel):
 
 class AccountUpdateRequest(BaseModel):
     """Account profile update request"""
-    name: Optional[str] = Field(None, description="User display name", min_length=1, max_length=100)
+
+    name: Optional[str] = Field(
+        None, description="User display name", min_length=1, max_length=100
+    )
     email: Optional[EmailStr] = Field(None, description="User email address")
     preferences: Optional[Dict[str, Any]] = Field(None, description="User preferences")
 
 
 class AccountPreferencesRequest(BaseModel):
     """Account preferences update request"""
+
     timezone: Optional[str] = Field(None, description="User timezone")
-    language: Optional[str] = Field(None, description="Preferred language", max_length=5)
-    notification_email: Optional[bool] = Field(None, description="Email notifications enabled")
-    notification_push: Optional[bool] = Field(None, description="Push notifications enabled")
-    theme: Optional[str] = Field(None, description="UI theme preference", pattern="^(light|dark|auto)$")
+    language: Optional[str] = Field(
+        None, description="Preferred language", max_length=5
+    )
+    notification_email: Optional[bool] = Field(
+        None, description="Email notifications enabled"
+    )
+    notification_push: Optional[bool] = Field(
+        None, description="Push notifications enabled"
+    )
+    theme: Optional[str] = Field(
+        None, description="UI theme preference", pattern="^(light|dark|auto)$"
+    )
 
 
 class AccountStatusChangeRequest(BaseModel):
     """Account status change request (admin operation)"""
+
     is_active: bool = Field(..., description="Account active status")
-    reason: Optional[str] = Field(None, description="Reason for status change", max_length=255)
+    reason: Optional[str] = Field(
+        None, description="Reason for status change", max_length=255
+    )
 
 
 # Account Service Specific Response Models
-
 class AccountProfileResponse(BaseModel):
     """
     Detailed account profile response
 
     Note: For subscription information, query subscription_service directly.
     """
+
     user_id: str
     email: Optional[str] = None
     name: Optional[str] = None
@@ -92,8 +110,21 @@ class AccountProfileResponse(BaseModel):
         from_attributes = True
 
 
+class AccountClaimsResponse(BaseModel):
+    """Minimal account identity fields needed for auth claim composition."""
+
+    user_id: str
+    name: Optional[str] = None
+    is_active: bool
+    admin_roles: List[str] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
 class AccountSummaryResponse(BaseModel):
     """Account summary response (for lists)"""
+
     user_id: str
     email: Optional[str] = None
     name: Optional[str] = None
@@ -106,6 +137,7 @@ class AccountSummaryResponse(BaseModel):
 
 class AccountSearchResponse(BaseModel):
     """Account search response with pagination"""
+
     accounts: List[AccountSummaryResponse]
     total_count: int
     page: int
@@ -115,6 +147,7 @@ class AccountSearchResponse(BaseModel):
 
 class AccountStatsResponse(BaseModel):
     """Account service statistics"""
+
     total_accounts: int
     active_accounts: int
     inactive_accounts: int
@@ -123,9 +156,9 @@ class AccountStatsResponse(BaseModel):
 
 
 # Service Status Models
-
 class AccountServiceStatus(BaseModel):
     """Account service status response"""
+
     service: str = "account_service"
     status: str = "operational"
     port: int = 8202
@@ -135,17 +168,20 @@ class AccountServiceStatus(BaseModel):
 
 
 # Query Parameter Models
-
 class AccountListParams(BaseModel):
     """Account list query parameters"""
+
     page: int = Field(1, ge=1, description="Page number")
     page_size: int = Field(50, ge=1, le=100, description="Items per page")
     is_active: Optional[bool] = Field(None, description="Filter by active status")
-    search: Optional[str] = Field(None, description="Search in name/email", max_length=100)
+    search: Optional[str] = Field(
+        None, description="Search in name/email", max_length=100
+    )
 
 
 class AccountSearchParams(BaseModel):
     """Account search query parameters"""
+
     query: str = Field(..., description="Search query", min_length=1, max_length=100)
     limit: int = Field(50, ge=1, le=100, description="Maximum results")
     include_inactive: bool = Field(False, description="Include inactive accounts")
@@ -174,6 +210,7 @@ class AdminRolesUpdateRequest(BaseModel):
     The class-level validator below is still exposed for direct (non-HTTP)
     callers that want a model-level semantic check.
     """
+
     admin_roles: List[str] = Field(..., description="List of admin roles to assign")
 
     @classmethod
@@ -194,6 +231,7 @@ class AdminRolesUpdateRequest(BaseModel):
 
 class AdminAccountResponse(BaseModel):
     """Account response including admin_roles for admin endpoints"""
+
     user_id: str
     email: Optional[str] = None
     name: Optional[str] = None
@@ -208,6 +246,7 @@ class AdminAccountResponse(BaseModel):
 
 class AdminAccountListResponse(BaseModel):
     """Admin account list response with pagination"""
+
     accounts: List[AdminAccountResponse]
     total_count: int
     page: int
@@ -222,10 +261,13 @@ ACCOUNT_STATUSES = ["active", "suspended", "banned"]
 
 class AdminStatusUpdateRequest(BaseModel):
     """Admin request to change account status (activate/suspend/ban)"""
-    status: str = Field(..., description="Target status: active, suspended, or banned")
-    reason: Optional[str] = Field(None, description="Reason for the status change", max_length=500)
 
-    @field_validator('status')
+    status: str = Field(..., description="Target status: active, suspended, or banned")
+    reason: Optional[str] = Field(
+        None, description="Reason for the status change", max_length=500
+    )
+
+    @field_validator("status")
     @classmethod
     def validate_status(cls, v):
         if v not in ACCOUNT_STATUSES:
@@ -235,11 +277,13 @@ class AdminStatusUpdateRequest(BaseModel):
 
 class AdminNoteRequest(BaseModel):
     """Admin request to add an internal support note"""
+
     note: str = Field(..., description="Note content", min_length=1, max_length=2000)
 
 
 class AdminNote(BaseModel):
     """A single admin/support note"""
+
     note_id: str
     user_id: str
     author_id: str
@@ -249,6 +293,7 @@ class AdminNote(BaseModel):
 
 class AdminAccountDetailResponse(BaseModel):
     """Full account detail response for admin view"""
+
     user_id: str
     email: Optional[str] = None
     name: Optional[str] = None
@@ -267,6 +312,7 @@ class AdminAccountDetailResponse(BaseModel):
 
 class AdminNoteResponse(BaseModel):
     """Response after adding an admin note"""
+
     note_id: str
     user_id: str
     author_id: str
@@ -276,13 +322,27 @@ class AdminNoteResponse(BaseModel):
 
 # Export all models
 __all__ = [
-    'User',
-    'AccountEnsureRequest', 'AccountUpdateRequest', 'AccountPreferencesRequest',
-    'AccountStatusChangeRequest', 'AccountProfileResponse', 'AccountSummaryResponse',
-    'AccountSearchResponse', 'AccountStatsResponse', 'AccountServiceStatus',
-    'AccountListParams', 'AccountSearchParams',
-    'ADMIN_ROLES', 'AdminRolesUpdateRequest', 'AdminAccountResponse',
-    'AdminAccountListResponse',
-    'ACCOUNT_STATUSES', 'AdminStatusUpdateRequest', 'AdminNoteRequest',
-    'AdminNote', 'AdminAccountDetailResponse', 'AdminNoteResponse',
+    "User",
+    "AccountEnsureRequest",
+    "AccountUpdateRequest",
+    "AccountPreferencesRequest",
+    "AccountStatusChangeRequest",
+    "AccountProfileResponse",
+    "AccountClaimsResponse",
+    "AccountSummaryResponse",
+    "AccountSearchResponse",
+    "AccountStatsResponse",
+    "AccountServiceStatus",
+    "AccountListParams",
+    "AccountSearchParams",
+    "ADMIN_ROLES",
+    "AdminRolesUpdateRequest",
+    "AdminAccountResponse",
+    "AdminAccountListResponse",
+    "ACCOUNT_STATUSES",
+    "AdminStatusUpdateRequest",
+    "AdminNoteRequest",
+    "AdminNote",
+    "AdminAccountDetailResponse",
+    "AdminNoteResponse",
 ]

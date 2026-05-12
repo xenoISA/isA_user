@@ -142,6 +142,10 @@ class AccountClientProtocol(Protocol):
         """Get account profile from account service"""
         ...
 
+    async def get_account_claims(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get minimal account identity fields for auth claim composition"""
+        ...
+
     async def ensure_account(
         self, user_id: str, email: str, name: str
     ) -> Optional[Dict[str, Any]]:

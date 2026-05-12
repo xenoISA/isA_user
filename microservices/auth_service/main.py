@@ -1435,6 +1435,8 @@ async def get_user_info_from_token(
             "email": result.get("email"),
             "preferred_username": result.get("preferred_username"),
             "name": result.get("name"),
+            "account_active": result.get("account_active"),
+            "account_missing": result.get("account_missing", False),
             "organization_id": result.get("organization_id"),
             "tenant_id": result.get("tenant_id"),
             "org_role": result.get("org_role"),

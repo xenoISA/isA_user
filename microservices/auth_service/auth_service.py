@@ -196,6 +196,51 @@ class AuthenticationService:
             "organization_permissions": list(permissions),
         }
 
+    async def _resolve_account_claim_context(
+        self, user_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """Resolve account claims, degrading to unknown account state."""
+        empty = {
+            "name": None,
+            "account_active": None,
+            "account_missing": False,
+            "admin_roles": [],
+        }
+        if not user_id or not self.account_client:
+            return empty
+
+        try:
+            if hasattr(self.account_client, "get_account_claims"):
+                account = await self.account_client.get_account_claims(user_id)
+            else:
+                account = await self.account_client.get_account_profile(user_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to resolve account claims for user %s: %s",
+                user_id,
+                exc,
+            )
+            return empty
+
+        if not account:
+            return {**empty, "account_missing": True}
+        if not isinstance(account, dict):
+            try:
+                account = account.model_dump(mode="json")
+            except AttributeError:
+                account = dict(account)
+
+        admin_roles = account.get("admin_roles") or []
+        if isinstance(admin_roles, str):
+            admin_roles = [admin_roles]
+
+        return {
+            "name": account.get("name"),
+            "account_active": bool(account.get("is_active")),
+            "account_missing": False,
+            "admin_roles": list(admin_roles),
+        }
+
     @property
     def http_client(self):
         """Lazy load HTTP client for Auth0 verification"""
@@ -1409,6 +1454,7 @@ class AuthenticationService:
 
         user_id = verification_result.get("user_id")
         email = verification_result.get("email")
+        account_context = await self._resolve_account_claim_context(user_id)
         org_context = await self._resolve_organization_claim_context(user_id)
         token_organization_id = (
             verification_result.get("organization_id")
@@ -1425,7 +1471,12 @@ class AuthenticationService:
             org_context.get("organization_permissions") or []
         )
         permissions = self._dedupe([*permissions, *organization_permissions])
-        admin_roles = list(metadata.get("admin_roles") or [])
+        admin_roles = self._dedupe(
+            [
+                *list(metadata.get("admin_roles") or []),
+                *list(account_context.get("admin_roles") or []),
+            ]
+        )
         is_dev_admin = is_dev_bypass_admin_email(email)
         if is_dev_admin and "auth.admin" not in permissions:
             permissions.append("auth.admin")
@@ -1461,7 +1512,9 @@ class AuthenticationService:
             "user_id": user_id,
             "email": email,
             "preferred_username": preferred_username,
-            "name": metadata.get("name"),
+            "name": account_context.get("name") or metadata.get("name"),
+            "account_active": account_context.get("account_active"),
+            "account_missing": account_context.get("account_missing"),
             "organization_id": organization_id,
             "tenant_id": tenant_id,
             "org_role": org_role,

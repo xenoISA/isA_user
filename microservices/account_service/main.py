@@ -45,6 +45,7 @@ from .clients import (
 from .events import get_event_handlers
 from .models import (
     AccountEnsureRequest,
+    AccountClaimsResponse,
     AccountListParams,
     AccountPreferencesRequest,
     AccountProfileResponse,
@@ -341,6 +342,31 @@ async def get_account_profile(
     """
     try:
         return await account_service.get_account_profile(user_id)
+    except AccountNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AccountServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.get("/api/v1/accounts/claims/{user_id}", response_model=AccountClaimsResponse)
+async def get_account_claims(
+    user_id: str,
+    account_service: AccountService = Depends(get_account_service),
+    caller_id: str = Depends(get_authenticated_caller),
+):
+    """Get minimal account identity data needed for auth claim composition."""
+    try:
+        account = await account_service.account_repo.get_account_by_id(user_id)
+        if not account:
+            raise AccountNotFoundError(f"Account not found: {user_id}")
+        return AccountClaimsResponse(
+            user_id=account.user_id,
+            name=account.name,
+            is_active=account.is_active,
+            admin_roles=account.admin_roles or [],
+        )
     except AccountNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except AccountServiceError as e:
