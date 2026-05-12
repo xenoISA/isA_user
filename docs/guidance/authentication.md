@@ -15,6 +15,11 @@ Authentication in isA User is handled by four core services:
 
 ## Auth Service (8201)
 
+Model-side consumers should use the canonical
+[Identity Claims Contract](identity_claims_contract.md) for `verify-token` and
+`user-info` claim names, sources of truth, dev-bypass behavior, and validation
+commands.
+
 ### JWT Authentication
 
 ```bash
