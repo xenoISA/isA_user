@@ -46,6 +46,7 @@ jobs:
     outputs:
       environment: ${{ steps.set-env.outputs.environment }}
       services: ${{ steps.set-services.outputs.services }}
+      service_matrix: ${{ steps.set-services.outputs.service_matrix }}
       version: ${{ steps.set-version.outputs.version }}
 
     steps:
@@ -72,6 +73,8 @@ jobs:
             services=$(python core/deployment_targets.py --normalize-list "${{ github.event.inputs.services }}" --format csv)
           fi
           echo "services=$services" >> $GITHUB_OUTPUT
+          service_matrix=$(SERVICES="$services" python -c 'import json, os; print(json.dumps([s for s in os.environ["SERVICES"].split(",") if s]))')
+          echo "service_matrix=$service_matrix" >> $GITHUB_OUTPUT
 
       - name: Set Version
         id: set-version
@@ -424,10 +427,10 @@ jobs:
           echo "**Services:** ${{ needs.prepare.outputs.services }}" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
-  # Deploy to Production
+  # Prepare Production Deployment
   # ===========================================================================
   deploy-production:
-    name: Deploy to Production
+    name: Prepare Production Deployment
     runs-on: ubuntu-latest
     needs: [prepare, build]
     if: needs.prepare.outputs.environment == 'production'
@@ -493,7 +496,35 @@ jobs:
           fi
           echo "::endgroup::"
 
-      - name: Blue-Green Deployment
+  # ===========================================================================
+  # Canary Rollout to Production
+  # ===========================================================================
+  deploy-production-service:
+    name: Canary Rollout (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [prepare, build, deploy-production]
+    if: needs.prepare.outputs.environment == 'production'
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.prepare.outputs.service_matrix) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
+
+      - name: Canary Rollout
         run: |
           resolve_target() {
             while IFS='=' read -r key value; do
@@ -503,35 +534,59 @@ jobs:
 
           NAMESPACE=$(python core/deployment_targets.py --namespace production)
           VERSION="${{ needs.prepare.outputs.version }}"
+          SERVICE="${{ matrix.service }}"
+          resolve_target "$SERVICE"
 
-          IFS=',' read -ra SERVICES <<< "${{ needs.prepare.outputs.services }}"
-          for service in "${SERVICES[@]}"; do
-            resolve_target "$service"
+          echo "Deploying ${TARGET_SERVICE_DIR} to production via canary Rollout ${TARGET_DEPLOYMENT_NAME}..."
 
-            echo "Deploying ${TARGET_SERVICE_DIR} to production (blue-green) via ${TARGET_DEPLOYMENT_NAME}..."
+          echo "Validate rollout target ${TARGET_DEPLOYMENT_NAME}/${TARGET_CONTAINER_NAME}..."
+          if ! kubectl get rollout "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "::error::Rollout ${TARGET_DEPLOYMENT_NAME} not found in namespace ${NAMESPACE} for service ${TARGET_SERVICE_DIR}"
+            exit 1
+          fi
+          container_names=$(kubectl get rollout "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" -o jsonpath='{range .spec.template.spec.template.spec.containers[*]}{.name}{"\n"}{end}')
+          if ! grep -Fxq "${TARGET_CONTAINER_NAME}" <<< "$container_names"; then
+            echo "::error::Container ${TARGET_CONTAINER_NAME} not found in rollout ${TARGET_DEPLOYMENT_NAME}"
+            echo "Available containers:"
+            echo "$container_names"
+            exit 1
+          fi
 
-            echo "Validate rollout target ${TARGET_DEPLOYMENT_NAME}/${TARGET_CONTAINER_NAME}..."
-            if ! kubectl get deployment "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" >/dev/null 2>&1; then
-              echo "::error::Deployment ${TARGET_DEPLOYMENT_NAME} not found in namespace ${NAMESPACE} for service ${TARGET_SERVICE_DIR}"
-              exit 1
-            fi
-            container_names=$(kubectl get deployment "${TARGET_DEPLOYMENT_NAME}" -n "$NAMESPACE" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}')
-            if ! grep -Fxq "${TARGET_CONTAINER_NAME}" <<< "$container_names"; then
-              echo "::error::Container ${TARGET_CONTAINER_NAME} not found in deployment ${TARGET_DEPLOYMENT_NAME}"
-              echo "Available containers:"
-              echo "$container_names"
-              exit 1
-            fi
+          kubectl argo rollouts set image "${TARGET_DEPLOYMENT_NAME}" \
+            "${TARGET_CONTAINER_NAME}=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:$VERSION" \
+            -n "$NAMESPACE"
 
-            # Update image tag
-            kubectl set image deployment/${TARGET_DEPLOYMENT_NAME} \
-              ${TARGET_CONTAINER_NAME}=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${TARGET_IMAGE_NAME}:$VERSION \
-              -n $NAMESPACE
+          kubectl argo rollouts status "${TARGET_DEPLOYMENT_NAME}" \
+            -n "$NAMESPACE" --watch --timeout=30m
 
-            # Wait for rollout
-            kubectl rollout status deployment/${TARGET_DEPLOYMENT_NAME} \
-              -n $NAMESPACE --timeout=600s
-          done
+  # ===========================================================================
+  # Production Smoke and Summary
+  # ===========================================================================
+  production-smoke:
+    name: Production Smoke
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-production-service]
+    if: needs.prepare.outputs.environment == 'production'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.14.0'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
 
       # ---------------------------------------------------------------------
       # Post-deploy smoke test (issue #355) — production
@@ -654,18 +709,18 @@ jobs:
             resolve_target "$service"
 
             # First-deploy guard: see deploy-staging rollback step.
-            history_lines=$(kubectl rollout history "deployment/${TARGET_DEPLOYMENT_NAME}" \
+            history_lines=$(kubectl argo rollouts history "${TARGET_DEPLOYMENT_NAME}" \
               -n "$NAMESPACE" 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ' || echo 0)
             if [ "${history_lines:-0}" -le 2 ]; then
               echo "First deploy of ${TARGET_DEPLOYMENT_NAME} (history_lines=${history_lines}) — skipping rollback (no prior revision)."
               continue
             fi
 
-            echo "Rolling back deployment/${TARGET_DEPLOYMENT_NAME}..."
-            kubectl rollout undo "deployment/${TARGET_DEPLOYMENT_NAME}" \
+            echo "Rolling back rollout/${TARGET_DEPLOYMENT_NAME}..."
+            kubectl argo rollouts undo "${TARGET_DEPLOYMENT_NAME}" \
               -n "$NAMESPACE" || true
-            kubectl rollout status "deployment/${TARGET_DEPLOYMENT_NAME}" \
-              -n "$NAMESPACE" --timeout=600s || true
+            kubectl argo rollouts status "${TARGET_DEPLOYMENT_NAME}" \
+              -n "$NAMESPACE" --watch --timeout=30m || true
           done
           exit 1
 
@@ -683,7 +738,7 @@ jobs:
     name: Rollback
     runs-on: ubuntu-latest
     if: failure() && (github.event_name == 'workflow_dispatch')
-    needs: [deploy-staging, deploy-production]
+    needs: [deploy-staging, production-smoke]
 
     steps:
       - name: Rollback Deployment

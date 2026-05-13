@@ -38,6 +38,9 @@ autoscaling:
   targetCPUUtilization: 70
   targetMemoryUtilization: 80
 
+rollout:
+  enabled: true
+
 # ---------------------------------------------------------------------------
 # Database pool sizing (epic #345 / story #346)
 # ---------------------------------------------------------------------------
