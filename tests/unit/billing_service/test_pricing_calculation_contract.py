@@ -7,7 +7,6 @@ from microservices.billing_service.billing_service import BillingService
 from microservices.billing_service.models import (
     BillingCalculationRequest,
     BillingMethod,
-    BillingStatus,
     Currency,
 )
 
