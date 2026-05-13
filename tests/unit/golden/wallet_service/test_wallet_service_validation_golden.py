@@ -23,6 +23,7 @@ class TestWalletServiceCreation:
     def _create_service(self, repository=None, event_bus=None, account_client=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(
             repository=repository or MagicMock(),
             event_bus=event_bus,
@@ -38,6 +39,7 @@ class TestWalletServiceCreation:
     ):
         """Create WalletCreate request"""
         from microservices.wallet_service.models import WalletCreate, WalletType
+
         return WalletCreate(
             user_id=user_id,
             wallet_type=WalletType(wallet_type),
@@ -48,21 +50,22 @@ class TestWalletServiceCreation:
     @pytest.mark.asyncio
     async def test_create_wallet_success(self):
         """GOLDEN: Valid wallet creation succeeds"""
-        from microservices.wallet_service.wallet_service import WalletService
         from microservices.wallet_service.models import WalletBalance, WalletType
 
         mock_repo = AsyncMock()
         mock_repo.get_user_wallets = AsyncMock(return_value=[])
-        mock_repo.create_wallet = AsyncMock(return_value=WalletBalance(
-            wallet_id="wallet_123",
-            user_id="user_test_123",
-            balance=Decimal("100"),
-            locked_balance=Decimal("0"),
-            available_balance=Decimal("100"),
-            currency="CREDIT",
-            wallet_type=WalletType.FIAT,
-            last_updated=datetime.now(timezone.utc),
-        ))
+        mock_repo.create_wallet = AsyncMock(
+            return_value=WalletBalance(
+                wallet_id="wallet_123",
+                user_id="user_test_123",
+                balance=Decimal("100"),
+                locked_balance=Decimal("0"),
+                available_balance=Decimal("100"),
+                currency="CREDIT",
+                wallet_type=WalletType.FIAT,
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
 
         service = self._create_service(repository=mock_repo)
         request = self._create_wallet_create_request(initial_balance=Decimal("100"))
@@ -76,7 +79,6 @@ class TestWalletServiceCreation:
     @pytest.mark.asyncio
     async def test_create_duplicate_fiat_wallet_fails(self):
         """GOLDEN: Creating second FIAT wallet returns existing wallet info"""
-        from microservices.wallet_service.wallet_service import WalletService
         from microservices.wallet_service.models import WalletBalance, WalletType
 
         existing_wallet = WalletBalance(
@@ -106,21 +108,22 @@ class TestWalletServiceCreation:
     @pytest.mark.asyncio
     async def test_create_wallet_publishes_event(self):
         """GOLDEN: Successful wallet creation publishes event"""
-        from microservices.wallet_service.wallet_service import WalletService
         from microservices.wallet_service.models import WalletBalance, WalletType
 
         mock_repo = AsyncMock()
         mock_repo.get_user_wallets = AsyncMock(return_value=[])
-        mock_repo.create_wallet = AsyncMock(return_value=WalletBalance(
-            wallet_id="wallet_123",
-            user_id="user_test_123",
-            balance=Decimal("0"),
-            locked_balance=Decimal("0"),
-            available_balance=Decimal("0"),
-            currency="CREDIT",
-            wallet_type=WalletType.FIAT,
-            last_updated=datetime.now(timezone.utc),
-        ))
+        mock_repo.create_wallet = AsyncMock(
+            return_value=WalletBalance(
+                wallet_id="wallet_123",
+                user_id="user_test_123",
+                balance=Decimal("0"),
+                locked_balance=Decimal("0"),
+                available_balance=Decimal("0"),
+                currency="CREDIT",
+                wallet_type=WalletType.FIAT,
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
 
         mock_event_bus = AsyncMock()
         mock_event_bus.publish_event = AsyncMock()
@@ -142,6 +145,7 @@ class TestWalletServiceDeposit:
     def _create_service(self, repository=None, event_bus=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(
             repository=repository or MagicMock(),
             event_bus=event_bus,
@@ -155,6 +159,7 @@ class TestWalletServiceDeposit:
     ):
         """Create DepositRequest"""
         from microservices.wallet_service.models import DepositRequest
+
         return DepositRequest(
             amount=amount,
             description=description,
@@ -164,19 +169,24 @@ class TestWalletServiceDeposit:
     @pytest.mark.asyncio
     async def test_deposit_success(self):
         """GOLDEN: Valid deposit succeeds"""
-        from microservices.wallet_service.models import WalletTransaction, TransactionType
+        from microservices.wallet_service.models import (
+            WalletTransaction,
+            TransactionType,
+        )
 
         mock_repo = AsyncMock()
-        mock_repo.deposit = AsyncMock(return_value=WalletTransaction(
-            transaction_id="txn_123",
-            wallet_id="wallet_456",
-            user_id="user_789",
-            transaction_type=TransactionType.DEPOSIT,
-            amount=Decimal("100"),
-            balance_before=Decimal("500"),
-            balance_after=Decimal("600"),
-            created_at=datetime.now(timezone.utc),
-        ))
+        mock_repo.deposit = AsyncMock(
+            return_value=WalletTransaction(
+                transaction_id="txn_123",
+                wallet_id="wallet_456",
+                user_id="user_789",
+                transaction_type=TransactionType.DEPOSIT,
+                amount=Decimal("100"),
+                balance_before=Decimal("500"),
+                balance_after=Decimal("600"),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
 
         service = self._create_service(repository=mock_repo)
         request = self._create_deposit_request()
@@ -203,19 +213,24 @@ class TestWalletServiceDeposit:
     @pytest.mark.asyncio
     async def test_deposit_publishes_event(self):
         """GOLDEN: Successful deposit publishes event"""
-        from microservices.wallet_service.models import WalletTransaction, TransactionType
+        from microservices.wallet_service.models import (
+            WalletTransaction,
+            TransactionType,
+        )
 
         mock_repo = AsyncMock()
-        mock_repo.deposit = AsyncMock(return_value=WalletTransaction(
-            transaction_id="txn_123",
-            wallet_id="wallet_456",
-            user_id="user_789",
-            transaction_type=TransactionType.DEPOSIT,
-            amount=Decimal("100"),
-            balance_before=Decimal("500"),
-            balance_after=Decimal("600"),
-            created_at=datetime.now(timezone.utc),
-        ))
+        mock_repo.deposit = AsyncMock(
+            return_value=WalletTransaction(
+                transaction_id="txn_123",
+                wallet_id="wallet_456",
+                user_id="user_789",
+                transaction_type=TransactionType.DEPOSIT,
+                amount=Decimal("100"),
+                balance_before=Decimal("500"),
+                balance_after=Decimal("600"),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
 
         mock_event_bus = AsyncMock()
         mock_event_bus.publish_event = AsyncMock()
@@ -237,6 +252,7 @@ class TestWalletServiceWithdraw:
     def _create_service(self, repository=None, event_bus=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(
             repository=repository or MagicMock(),
             event_bus=event_bus,
@@ -250,6 +266,7 @@ class TestWalletServiceWithdraw:
     ):
         """Create WithdrawRequest"""
         from microservices.wallet_service.models import WithdrawRequest
+
         return WithdrawRequest(
             amount=amount,
             description=description,
@@ -267,26 +284,30 @@ class TestWalletServiceWithdraw:
         )
 
         mock_repo = AsyncMock()
-        mock_repo.get_wallet = AsyncMock(return_value=WalletBalance(
-            wallet_id="wallet_456",
-            user_id="user_789",
-            balance=Decimal("500"),
-            locked_balance=Decimal("0"),
-            available_balance=Decimal("500"),
-            currency="CREDIT",
-            wallet_type=WalletType.FIAT,
-            last_updated=datetime.now(timezone.utc),
-        ))
-        mock_repo.withdraw = AsyncMock(return_value=WalletTransaction(
-            transaction_id="txn_123",
-            wallet_id="wallet_456",
-            user_id="user_789",
-            transaction_type=TransactionType.WITHDRAW,
-            amount=Decimal("50"),
-            balance_before=Decimal("500"),
-            balance_after=Decimal("450"),
-            created_at=datetime.now(timezone.utc),
-        ))
+        mock_repo.get_wallet = AsyncMock(
+            return_value=WalletBalance(
+                wallet_id="wallet_456",
+                user_id="user_789",
+                balance=Decimal("500"),
+                locked_balance=Decimal("0"),
+                available_balance=Decimal("500"),
+                currency="CREDIT",
+                wallet_type=WalletType.FIAT,
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+        mock_repo.withdraw = AsyncMock(
+            return_value=WalletTransaction(
+                transaction_id="txn_123",
+                wallet_id="wallet_456",
+                user_id="user_789",
+                transaction_type=TransactionType.WITHDRAW,
+                amount=Decimal("50"),
+                balance_before=Decimal("500"),
+                balance_after=Decimal("450"),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
 
         service = self._create_service(repository=mock_repo)
         request = self._create_withdraw_request()
@@ -302,16 +323,18 @@ class TestWalletServiceWithdraw:
         from microservices.wallet_service.models import WalletBalance, WalletType
 
         mock_repo = AsyncMock()
-        mock_repo.get_wallet = AsyncMock(return_value=WalletBalance(
-            wallet_id="wallet_456",
-            user_id="user_789",
-            balance=Decimal("30"),
-            locked_balance=Decimal("0"),
-            available_balance=Decimal("30"),
-            currency="CREDIT",
-            wallet_type=WalletType.FIAT,
-            last_updated=datetime.now(timezone.utc),
-        ))
+        mock_repo.get_wallet = AsyncMock(
+            return_value=WalletBalance(
+                wallet_id="wallet_456",
+                user_id="user_789",
+                balance=Decimal("30"),
+                locked_balance=Decimal("0"),
+                available_balance=Decimal("30"),
+                currency="CREDIT",
+                wallet_type=WalletType.FIAT,
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
         mock_repo.withdraw = AsyncMock(return_value=None)  # Insufficient balance
 
         service = self._create_service(repository=mock_repo)
@@ -320,7 +343,10 @@ class TestWalletServiceWithdraw:
         result = await service.withdraw("wallet_456", request)
 
         assert result.success is False
-        assert "insufficient" in result.message.lower() or "failed" in result.message.lower()
+        assert (
+            "insufficient" in result.message.lower()
+            or "failed" in result.message.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_withdraw_from_nonexistent_wallet_fails(self):
@@ -345,6 +371,7 @@ class TestWalletServiceConsume:
     def _create_service(self, repository=None, event_bus=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(
             repository=repository or MagicMock(),
             event_bus=event_bus,
@@ -358,6 +385,7 @@ class TestWalletServiceConsume:
     ):
         """Create ConsumeRequest"""
         from microservices.wallet_service.models import ConsumeRequest
+
         return ConsumeRequest(
             amount=amount,
             description=description,
@@ -367,19 +395,24 @@ class TestWalletServiceConsume:
     @pytest.mark.asyncio
     async def test_consume_success(self):
         """GOLDEN: Valid consumption succeeds"""
-        from microservices.wallet_service.models import WalletTransaction, TransactionType
+        from microservices.wallet_service.models import (
+            WalletTransaction,
+            TransactionType,
+        )
 
         mock_repo = AsyncMock()
-        mock_repo.consume = AsyncMock(return_value=WalletTransaction(
-            transaction_id="txn_123",
-            wallet_id="wallet_456",
-            user_id="user_789",
-            transaction_type=TransactionType.CONSUME,
-            amount=Decimal("25"),
-            balance_before=Decimal("500"),
-            balance_after=Decimal("475"),
-            created_at=datetime.now(timezone.utc),
-        ))
+        mock_repo.consume = AsyncMock(
+            return_value=WalletTransaction(
+                transaction_id="txn_123",
+                wallet_id="wallet_456",
+                user_id="user_789",
+                transaction_type=TransactionType.CONSUME,
+                amount=Decimal("25"),
+                balance_before=Decimal("500"),
+                balance_after=Decimal("475"),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
 
         service = self._create_service(repository=mock_repo)
         request = self._create_consume_request()
@@ -412,6 +445,7 @@ class TestWalletServiceTransfer:
     def _create_service(self, repository=None, event_bus=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(
             repository=repository or MagicMock(),
             event_bus=event_bus,
@@ -425,6 +459,7 @@ class TestWalletServiceTransfer:
     ):
         """Create TransferRequest"""
         from microservices.wallet_service.models import TransferRequest
+
         return TransferRequest(
             to_wallet_id=to_wallet_id,
             amount=amount,
@@ -434,7 +469,10 @@ class TestWalletServiceTransfer:
     @pytest.mark.asyncio
     async def test_transfer_success(self):
         """GOLDEN: Valid transfer succeeds"""
-        from microservices.wallet_service.models import WalletTransaction, TransactionType
+        from microservices.wallet_service.models import (
+            WalletTransaction,
+            TransactionType,
+        )
 
         from_txn = WalletTransaction(
             transaction_id="txn_from_123",
@@ -485,7 +523,10 @@ class TestWalletServiceTransfer:
     @pytest.mark.asyncio
     async def test_transfer_publishes_event(self):
         """GOLDEN: Successful transfer publishes event"""
-        from microservices.wallet_service.models import WalletTransaction, TransactionType
+        from microservices.wallet_service.models import (
+            WalletTransaction,
+            TransactionType,
+        )
 
         from_txn = WalletTransaction(
             transaction_id="txn_from_123",
@@ -531,6 +572,7 @@ class TestWalletServiceRefund:
     def _create_service(self, repository=None, event_bus=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(
             repository=repository or MagicMock(),
             event_bus=event_bus,
@@ -544,6 +586,7 @@ class TestWalletServiceRefund:
     ):
         """Create RefundRequest"""
         from microservices.wallet_service.models import RefundRequest
+
         return RefundRequest(
             original_transaction_id=original_transaction_id,
             amount=amount,
@@ -553,19 +596,24 @@ class TestWalletServiceRefund:
     @pytest.mark.asyncio
     async def test_refund_success(self):
         """GOLDEN: Valid refund succeeds"""
-        from microservices.wallet_service.models import WalletTransaction, TransactionType
+        from microservices.wallet_service.models import (
+            WalletTransaction,
+            TransactionType,
+        )
 
         mock_repo = AsyncMock()
-        mock_repo.refund = AsyncMock(return_value=WalletTransaction(
-            transaction_id="txn_refund_456",
-            wallet_id="wallet_123",
-            user_id="user_789",
-            transaction_type=TransactionType.REFUND,
-            amount=Decimal("50"),
-            balance_before=Decimal("400"),
-            balance_after=Decimal("450"),
-            created_at=datetime.now(timezone.utc),
-        ))
+        mock_repo.refund = AsyncMock(
+            return_value=WalletTransaction(
+                transaction_id="txn_refund_456",
+                wallet_id="wallet_123",
+                user_id="user_789",
+                transaction_type=TransactionType.REFUND,
+                amount=Decimal("50"),
+                balance_before=Decimal("400"),
+                balance_after=Decimal("450"),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
 
         service = self._create_service(repository=mock_repo)
         request = self._create_refund_request()
@@ -597,6 +645,7 @@ class TestWalletServiceBalance:
     def _create_service(self, repository=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(repository=repository or MagicMock())
 
     @pytest.mark.asyncio
@@ -605,16 +654,18 @@ class TestWalletServiceBalance:
         from microservices.wallet_service.models import WalletBalance, WalletType
 
         mock_repo = AsyncMock()
-        mock_repo.get_wallet = AsyncMock(return_value=WalletBalance(
-            wallet_id="wallet_123",
-            user_id="user_456",
-            balance=Decimal("1000"),
-            locked_balance=Decimal("50"),
-            available_balance=Decimal("950"),
-            currency="CREDIT",
-            wallet_type=WalletType.FIAT,
-            last_updated=datetime.now(timezone.utc),
-        ))
+        mock_repo.get_wallet = AsyncMock(
+            return_value=WalletBalance(
+                wallet_id="wallet_123",
+                user_id="user_456",
+                balance=Decimal("1000"),
+                locked_balance=Decimal("50"),
+                available_balance=Decimal("950"),
+                currency="CREDIT",
+                wallet_type=WalletType.FIAT,
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
 
         service = self._create_service(repository=mock_repo)
 
@@ -643,23 +694,26 @@ class TestWalletServiceBalance:
         from microservices.wallet_service.models import WalletBalance, WalletType
 
         mock_repo = AsyncMock()
-        mock_repo.get_wallet = AsyncMock(return_value=WalletBalance(
-            wallet_id="wallet_123",
-            user_id="user_456",
-            balance=Decimal("1000"),
-            locked_balance=Decimal("50"),
-            available_balance=Decimal("950"),
-            currency="CREDIT",
-            wallet_type=WalletType.FIAT,
-            last_updated=datetime.now(timezone.utc),
-        ))
+        mock_repo.get_wallet = AsyncMock(
+            return_value=WalletBalance(
+                wallet_id="wallet_123",
+                user_id="user_456",
+                balance=Decimal("1000"),
+                locked_balance=Decimal("50"),
+                available_balance=Decimal("950"),
+                currency="CREDIT",
+                wallet_type=WalletType.FIAT,
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
 
         service = self._create_service(repository=mock_repo)
 
         result = await service.get_balance("wallet_123")
 
         assert result.success is True
-        assert result.balance == Decimal("1000")
+        assert result.balance == Decimal("950")
+        assert result.data["balance"] == 1000.0
 
     @pytest.mark.asyncio
     async def test_get_balance_not_found(self):
@@ -722,6 +776,7 @@ class TestWalletServiceTransactions:
     def _create_service(self, repository=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(repository=repository or MagicMock())
 
     @pytest.mark.asyncio
@@ -792,6 +847,7 @@ class TestWalletServiceStatistics:
     def _create_service(self, repository=None):
         """Create WalletService with mock dependencies"""
         from microservices.wallet_service.wallet_service import WalletService
+
         return WalletService(repository=repository or MagicMock())
 
     @pytest.mark.asyncio
@@ -800,18 +856,20 @@ class TestWalletServiceStatistics:
         from microservices.wallet_service.models import WalletStatistics
 
         mock_repo = AsyncMock()
-        mock_repo.get_wallet_statistics = AsyncMock(return_value=WalletStatistics(
-            wallet_id="wallet_123",
-            user_id="user_456",
-            current_balance=Decimal("1000"),
-            total_deposits=Decimal("5000"),
-            total_withdrawals=Decimal("2000"),
-            total_consumed=Decimal("1500"),
-            total_refunded=Decimal("500"),
-            total_transfers_in=Decimal("1000"),
-            total_transfers_out=Decimal("2000"),
-            transaction_count=47,
-        ))
+        mock_repo.get_statistics = AsyncMock(
+            return_value=WalletStatistics(
+                wallet_id="wallet_123",
+                user_id="user_456",
+                current_balance=Decimal("1000"),
+                total_deposits=Decimal("5000"),
+                total_withdrawals=Decimal("2000"),
+                total_consumed=Decimal("1500"),
+                total_refunded=Decimal("500"),
+                total_transfers_in=Decimal("1000"),
+                total_transfers_out=Decimal("2000"),
+                transaction_count=47,
+            )
+        )
 
         service = self._create_service(repository=mock_repo)
 
@@ -825,7 +883,7 @@ class TestWalletServiceStatistics:
     async def test_get_statistics_not_found(self):
         """GOLDEN: Get statistics for non-existent wallet returns None"""
         mock_repo = AsyncMock()
-        mock_repo.get_wallet_statistics = AsyncMock(return_value=None)
+        mock_repo.get_statistics = AsyncMock(return_value=None)
 
         service = self._create_service(repository=mock_repo)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,7 @@ class AsyncHealthyDB:
 
 class AsyncUnhealthyDB:
     async def health_check(self):
-        return False
+        return None
 
 
 @pytest.mark.asyncio
@@ -26,8 +27,11 @@ async def test_health_check_awaits_async_database_health():
     finally:
         billing_main.repository = original_repository
 
-    assert response.status == "healthy"
-    assert response.dependencies["database"] == "healthy"
+    body = json.loads(response.body)
+    assert response.status_code == 200
+    assert body["status"] == "degraded"
+    assert body["dependencies"]["postgres"]["status"] == "healthy"
+    assert body["dependencies"]["nats"]["status"] == "unhealthy"
 
 
 @pytest.mark.asyncio
@@ -39,5 +43,7 @@ async def test_health_check_reports_unhealthy_when_async_database_fails():
     finally:
         billing_main.repository = original_repository
 
-    assert response.status == "degraded"
-    assert response.dependencies["database"] == "unhealthy"
+    body = json.loads(response.body)
+    assert response.status_code == 503
+    assert body["status"] == "unhealthy"
+    assert body["dependencies"]["postgres"]["status"] == "unhealthy"
