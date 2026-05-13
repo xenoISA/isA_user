@@ -88,6 +88,7 @@ def mock_session_client():
             "session_id": "sess-1",
             "user_id": "user-1",
             "status": "active",
+            "organization_id": "org-1",
             "session_summary": "Test session",
             "created_at": "2026-01-01T00:00:00Z",
             "last_activity": "2026-01-01T00:00:00Z",
@@ -103,11 +104,24 @@ def mock_session_client():
 
 
 @pytest.fixture
-def sharing_service(mock_share_repo, mock_event_bus, mock_session_client):
+def mock_share_policy_provider():
+    provider = AsyncMock()
+    provider.get_share_policy = AsyncMock(return_value=None)
+    return provider
+
+
+@pytest.fixture
+def sharing_service(
+    mock_share_repo,
+    mock_event_bus,
+    mock_session_client,
+    mock_share_policy_provider,
+):
     return create_sharing_service_for_testing(
         share_repo=mock_share_repo,
         event_bus=mock_event_bus,
         session_client=mock_session_client,
+        share_policy_provider=mock_share_policy_provider,
     )
 
 
@@ -144,6 +158,82 @@ class TestCreateShare:
 
         call_args = mock_share_repo.create_share.call_args[0][0]
         assert call_args["permissions"] == "can_edit"
+
+    @pytest.mark.asyncio
+    async def test_create_share_checks_org_policy_from_session(
+        self, sharing_service, mock_share_policy_provider
+    ):
+        request = ShareCreateRequest(expires_in_hours=24)
+
+        await sharing_service.create_share("sess-1", "user-1", request)
+
+        mock_share_policy_provider.get_share_policy.assert_awaited_once_with("org-1")
+
+    @pytest.mark.asyncio
+    async def test_create_share_rejects_mismatched_request_org(self, sharing_service):
+        request = ShareCreateRequest(organization_id="org-other")
+
+        with pytest.raises(SharePermissionError, match="does not match"):
+            await sharing_service.create_share("sess-1", "user-1", request)
+
+    @pytest.mark.asyncio
+    async def test_create_share_blocks_when_org_disables_public_links(
+        self, sharing_service, mock_share_policy_provider
+    ):
+        mock_share_policy_provider.get_share_policy.return_value = {
+            "public_links_enabled": False
+        }
+
+        with pytest.raises(SharePermissionError, match="disabled"):
+            await sharing_service.create_share("sess-1", "user-1", ShareCreateRequest())
+
+    @pytest.mark.asyncio
+    async def test_create_share_requires_expiry_when_policy_requires_it(
+        self, sharing_service, mock_share_policy_provider
+    ):
+        mock_share_policy_provider.get_share_policy.return_value = {
+            "require_expiry": True
+        }
+
+        with pytest.raises(ShareValidationError, match="requires"):
+            await sharing_service.create_share("sess-1", "user-1", ShareCreateRequest())
+
+    @pytest.mark.asyncio
+    async def test_create_share_rejects_expiry_above_policy_max(
+        self, sharing_service, mock_share_policy_provider
+    ):
+        mock_share_policy_provider.get_share_policy.return_value = {
+            "max_expiry_hours": 24
+        }
+        request = ShareCreateRequest(expires_in_hours=48)
+
+        with pytest.raises(ShareValidationError, match="maximum"):
+            await sharing_service.create_share("sess-1", "user-1", request)
+
+    @pytest.mark.asyncio
+    async def test_create_share_allows_recipient_domain_when_policy_matches(
+        self, sharing_service, mock_share_policy_provider, mock_share_repo
+    ):
+        mock_share_policy_provider.get_share_policy.return_value = {
+            "allowed_domains": ["example.com"]
+        }
+        request = ShareCreateRequest(recipient_email="teammate@example.com")
+
+        await sharing_service.create_share("sess-1", "user-1", request)
+
+        mock_share_repo.create_share.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_share_rejects_recipient_domain_when_policy_blocks_it(
+        self, sharing_service, mock_share_policy_provider
+    ):
+        mock_share_policy_provider.get_share_policy.return_value = {
+            "allowed_domains": ["example.com"]
+        }
+        request = ShareCreateRequest(recipient_email="external@other.com")
+
+        with pytest.raises(SharePermissionError, match="domain"):
+            await sharing_service.create_share("sess-1", "user-1", request)
 
     @pytest.mark.asyncio
     async def test_create_share_captures_immutable_snapshot(

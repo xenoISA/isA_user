@@ -17,26 +17,31 @@ from .models import Share
 
 class ShareNotFoundError(Exception):
     """Share not found"""
+
     pass
 
 
 class ShareExpiredError(Exception):
     """Share link has expired"""
+
     pass
 
 
 class ShareServiceError(Exception):
     """Base exception for sharing service errors"""
+
     pass
 
 
 class ShareValidationError(ShareServiceError):
     """Validation error"""
+
     pass
 
 
 class SharePermissionError(ShareServiceError):
     """Permission denied"""
+
     pass
 
 
@@ -61,9 +66,7 @@ class ShareRepositoryProtocol(Protocol):
         """Get share by ID"""
         ...
 
-    async def get_session_shares(
-        self, session_id: str, owner_id: str
-    ) -> List[Share]:
+    async def get_session_shares(self, session_id: str, owner_id: str) -> List[Share]:
         """Get all active shares for a session owned by a user"""
         ...
 
@@ -102,4 +105,13 @@ class SessionClientProtocol(Protocol):
         self, session_id: str, limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Get session messages"""
+        ...
+
+
+@runtime_checkable
+class SharePolicyProviderProtocol(Protocol):
+    """Interface for organization-level sharing policy lookup."""
+
+    async def get_share_policy(self, organization_id: str) -> Optional[Dict[str, Any]]:
+        """Get sharing policy for an organization, or None for no policy."""
         ...

@@ -27,6 +27,15 @@ class ShareCapabilities(BaseModel):
     can_edit: bool = False
 
 
+class SharePolicy(BaseModel):
+    """Organization-level controls for public session sharing."""
+
+    public_links_enabled: bool = True
+    require_expiry: bool = False
+    max_expiry_hours: Optional[int] = Field(None, ge=1, le=8760)
+    allowed_domains: List[str] = Field(default_factory=list)
+
+
 # ============================================================================
 # Domain Models
 # ============================================================================
@@ -82,6 +91,14 @@ class ShareCreateRequest(BaseModel):
     share_until_message_id: Optional[str] = Field(
         None,
         description="Optional message ID; snapshot includes messages through this message",
+    )
+    organization_id: Optional[str] = Field(
+        None,
+        description="Optional organization context for policy enforcement",
+    )
+    recipient_email: Optional[str] = Field(
+        None,
+        description="Optional targeted recipient email for domain policy checks",
     )
 
 

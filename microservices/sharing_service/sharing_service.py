@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from .models import (
     Share,
+    SharePolicy,
     ShareCreateRequest,
     ShareListResponse,
     ShareResponse,
@@ -29,6 +30,7 @@ from .protocols import (
     ShareExpiredError,
     ShareNotFoundError,
     SharePermissionError,
+    SharePolicyProviderProtocol,
     ShareRepositoryProtocol,
     ShareServiceError,
     ShareValidationError,
@@ -57,11 +59,13 @@ class SharingService:
         share_repo: Optional[ShareRepositoryProtocol] = None,
         event_bus: Optional[EventBusProtocol] = None,
         session_client: Optional[SessionClientProtocol] = None,
+        share_policy_provider: Optional[SharePolicyProviderProtocol] = None,
         config=None,
     ):
         self._share_repo = share_repo
         self.event_bus = event_bus
         self._session_client = session_client
+        self._share_policy_provider = share_policy_provider
         self._config = config
         self._repos_initialized = False
 
@@ -123,6 +127,8 @@ class SharingService:
                 raise ShareValidationError(f"Session not found: {session_id}")
             if session.get("user_id") != owner_id:
                 raise SharePermissionError("You can only share your own sessions")
+            organization_id = self._resolve_organization_id(session, request)
+            await self._enforce_share_policy(organization_id, request)
 
             messages = await self.session_client.get_session_messages(session_id)
             messages_snapshot = self._build_messages_snapshot(
@@ -432,6 +438,60 @@ class SharingService:
         if permission == "can_comment":
             return {"can_view": True, "can_comment": True, "can_edit": False}
         return {"can_view": True, "can_comment": False, "can_edit": False}
+
+    def _resolve_organization_id(
+        self,
+        session: Dict[str, Any],
+        request: ShareCreateRequest,
+    ) -> Optional[str]:
+        """Resolve org context and reject mismatched explicit request context."""
+        session_org_id = session.get("organization_id") or session.get("org_id")
+        if request.organization_id and session_org_id:
+            if request.organization_id != session_org_id:
+                raise SharePermissionError(
+                    "Share organization_id does not match the session organization"
+                )
+        return request.organization_id or session_org_id
+
+    async def _enforce_share_policy(
+        self,
+        organization_id: Optional[str],
+        request: ShareCreateRequest,
+    ) -> None:
+        """Apply organization-level controls when a policy provider is configured."""
+        if not organization_id or self._share_policy_provider is None:
+            return
+
+        policy_data = await self._share_policy_provider.get_share_policy(
+            organization_id
+        )
+        if not policy_data:
+            return
+        policy = SharePolicy.model_validate(policy_data)
+
+        if not policy.public_links_enabled:
+            raise SharePermissionError(
+                "Public session sharing is disabled for this organization"
+            )
+        if policy.require_expiry and request.expires_in_hours is None:
+            raise ShareValidationError(
+                "This organization requires share links to expire"
+            )
+        if (
+            policy.max_expiry_hours is not None
+            and request.expires_in_hours is not None
+            and request.expires_in_hours > policy.max_expiry_hours
+        ):
+            raise ShareValidationError(
+                f"Share expiry exceeds organization maximum of {policy.max_expiry_hours} hours"
+            )
+        if policy.allowed_domains and request.recipient_email:
+            recipient_domain = request.recipient_email.rsplit("@", 1)[-1].lower()
+            allowed_domains = {domain.lower() for domain in policy.allowed_domains}
+            if recipient_domain not in allowed_domains:
+                raise SharePermissionError(
+                    "Recipient email domain is not allowed by organization policy"
+                )
 
     def _build_session_snapshot(
         self,
