@@ -66,6 +66,7 @@ def _make_event(
     event_id: str = "evt_001",
     handled: bool = False,
     idempotency_key: str | None = None,
+    extra_data: dict | None = None,
 ):
     event = MagicMock()
     event.id = event_id
@@ -94,6 +95,8 @@ def _make_event(
         "credits_used": 84,
         "cost_usd": "0.0042",
     }
+    if extra_data:
+        event.data.update(extra_data)
     return event
 
 
@@ -212,6 +215,60 @@ class TestUsageEventHandler:
 
         billing_service.record_usage_and_bill.assert_called_once()
         billing_service.record_usage_with_external_billing.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_preserves_dedicated_local_gpu_endpoint_attribution(self):
+        billing_service = AsyncMock()
+        billing_service.record_usage_with_external_billing = AsyncMock(
+            return_value=ProcessBillingResponse(
+                success=True,
+                message="ok",
+                billing_record_id="bill_gpu_endpoint_123",
+                amount_charged=Decimal("0.648"),
+                billing_method_used=BillingMethod.CREDIT_CONSUMPTION,
+            )
+        )
+        billing_service.record_usage_and_bill = AsyncMock()
+        event_bus = AsyncMock()
+
+        await billing_handlers.handle_usage_recorded(
+            _make_event(
+                event_id="evt_gpu_endpoint_001",
+                handled=True,
+                extra_data={
+                    "product_id": "local-gpu-dedicated-endpoint",
+                    "service_type": "model_inference",
+                    "operation_type": "provisioned_gpu_seconds",
+                    "resource_name": "endpoint_local_gpu_001",
+                    "usage_amount": "3600",
+                    "unit_type": "second",
+                    "usage_details": {
+                        "endpoint_id": "endpoint_local_gpu_001",
+                        "deployment_id": "deploy_local_gpu_001",
+                        "model": "qwen2.5-coder",
+                        "gpu_type": "NVIDIA L4",
+                        "gpu_count": 1,
+                    },
+                },
+            ),
+            billing_service,
+            event_bus,
+        )
+
+        billing_service.record_usage_with_external_billing.assert_called_once()
+        billing_service.record_usage_and_bill.assert_not_called()
+        request_arg = billing_service.record_usage_with_external_billing.call_args.args[
+            0
+        ]
+        assert request_arg.product_id == "local-gpu-dedicated-endpoint"
+        assert request_arg.service_type == ServiceType.MODEL_INFERENCE
+        assert request_arg.operation_type == "provisioned_gpu_seconds"
+        assert request_arg.resource_name == "endpoint_local_gpu_001"
+        assert request_arg.unit_type == "second"
+        assert request_arg.usage_details["endpoint_id"] == "endpoint_local_gpu_001"
+        assert request_arg.usage_details["deployment_id"] == "deploy_local_gpu_001"
+        assert request_arg.usage_details["gpu_type"] == "NVIDIA L4"
+        assert request_arg.usage_details["gpu_count"] == 1
 
     @pytest.mark.asyncio
     async def test_skips_when_idempotency_key_was_already_processed(self):
