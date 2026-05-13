@@ -336,6 +336,11 @@ async def get_service_info():
             "agent_execution",
             "storage_minio",
             "api_gateway",
+            "web_service",
+            "browser_pool",
+            "python_repl",
+            "data_service",
+            "vector_storage",
         ],
         "supported_pricing_types": [
             "freemium",

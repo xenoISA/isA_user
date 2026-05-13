@@ -445,6 +445,7 @@ async def download_file(
     - **user_id**: 用户ID
     """
     file_info = await storage_service.get_file_info(file_id, user_id)
+    await storage_service.record_file_download_usage(file_info, user_id)
     return {
         "file_id": file_id,
         "file_name": file_info.file_name,

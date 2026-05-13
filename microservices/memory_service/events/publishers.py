@@ -17,7 +17,7 @@ from .models import (
     EpisodicMemoryStoredEvent,
     ProceduralMemoryStoredEvent,
     SemanticMemoryStoredEvent,
-    SessionMemoryDeactivatedEvent
+    SessionMemoryDeactivatedEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ async def publish_memory_created(
     importance_score: Optional[float] = None,
     tags: Optional[List[str]] = None,
     metadata: Optional[Dict[str, Any]] = None,
-    memory_data: Optional[Dict[str, Any]] = None
+    memory_data: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Publish memory.created event
@@ -61,13 +61,13 @@ async def publish_memory_created(
             tags=tags,
             metadata=metadata,
             memory_data=memory_data,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="memory.created",
             source="memory_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -80,11 +80,7 @@ async def publish_memory_created(
 
 
 async def publish_memory_updated(
-    event_bus,
-    memory_id: str,
-    memory_type: str,
-    user_id: str,
-    updated_fields: List[str]
+    event_bus, memory_id: str, memory_type: str, user_id: str, updated_fields: List[str]
 ) -> bool:
     """
     Publish memory.updated event
@@ -105,13 +101,13 @@ async def publish_memory_updated(
             memory_type=memory_type,
             user_id=user_id,
             updated_fields=updated_fields,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="memory.updated",
             source="memory_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -124,10 +120,7 @@ async def publish_memory_updated(
 
 
 async def publish_memory_deleted(
-    event_bus,
-    memory_id: str,
-    memory_type: str,
-    user_id: str
+    event_bus, memory_id: str, memory_type: str, user_id: str
 ) -> bool:
     """
     Publish memory.deleted event
@@ -146,13 +139,13 @@ async def publish_memory_deleted(
             memory_id=memory_id,
             memory_type=memory_type,
             user_id=user_id,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="memory.deleted",
             source="memory_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
@@ -164,12 +157,73 @@ async def publish_memory_deleted(
         return False
 
 
-async def publish_factual_memory_stored(
+async def publish_billing_usage_recorded(
     event_bus,
+    *,
     user_id: str,
-    count: int,
-    importance_score: float,
-    source: str = "dialog"
+    product_id: str,
+    usage_amount: int,
+    unit_type: str,
+    operation_type: str,
+    resource_name: Optional[str] = None,
+    usage_details: Optional[Dict[str, Any]] = None,
+    idempotency_key: Optional[str] = None,
+) -> bool:
+    """Publish canonical billing usage for memory/vector operations."""
+    try:
+        component_type = (
+            "storage" if operation_type == "vector_storage_bytes" else "runtime"
+        )
+        provider = "falkordb" if operation_type == "graph_query" else "qdrant"
+        event = Event(
+            event_type=f"billing.usage.recorded.{operation_type}",
+            source="memory_service",
+            data={
+                "user_id": user_id,
+                "product_id": product_id,
+                "service_type": "vector_storage",
+                "operation_type": operation_type,
+                "source_service": "memory_service",
+                "resource_name": resource_name,
+                "usage_amount": usage_amount,
+                "unit_type": unit_type,
+                "usage_details": usage_details or {},
+                "billing_surface": "abstract_service",
+                "cost_components": [
+                    {
+                        "component_id": operation_type,
+                        "component_type": component_type,
+                        "provider": provider,
+                        "meter_type": operation_type,
+                        "unit_type": unit_type,
+                        "usage_amount": usage_amount,
+                    }
+                ],
+                "schema_version": "billing-usage/v1",
+                "meter_type": operation_type,
+                "credit_consumption_handled": False,
+                "idempotency_key": idempotency_key,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        await event_bus.publish_event(event)
+        logger.info(
+            "Published memory billing usage: user=%s product=%s operation=%s amount=%s",
+            user_id,
+            product_id,
+            operation_type,
+            usage_amount,
+        )
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to publish memory billing usage event: {e}")
+        return False
+
+
+async def publish_factual_memory_stored(
+    event_bus, user_id: str, count: int, importance_score: float, source: str = "dialog"
 ) -> bool:
     """
     Publish factual_memory.stored event
@@ -190,17 +244,19 @@ async def publish_factual_memory_stored(
             count=count,
             importance_score=importance_score,
             source=source,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="memory.factual.stored",
             source="memory_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
-        logger.info(f"Published factual_memory.stored event for user {user_id}: {count} memories")
+        logger.info(
+            f"Published factual_memory.stored event for user {user_id}: {count} memories"
+        )
         return True
 
     except Exception as e:
@@ -209,11 +265,7 @@ async def publish_factual_memory_stored(
 
 
 async def publish_episodic_memory_stored(
-    event_bus,
-    user_id: str,
-    count: int,
-    importance_score: float,
-    source: str = "dialog"
+    event_bus, user_id: str, count: int, importance_score: float, source: str = "dialog"
 ) -> bool:
     """
     Publish episodic_memory.stored event
@@ -234,17 +286,19 @@ async def publish_episodic_memory_stored(
             count=count,
             importance_score=importance_score,
             source=source,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="memory.episodic.stored",
             source="memory_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
-        logger.info(f"Published episodic_memory.stored event for user {user_id}: {count} memories")
+        logger.info(
+            f"Published episodic_memory.stored event for user {user_id}: {count} memories"
+        )
         return True
 
     except Exception as e:
@@ -253,11 +307,7 @@ async def publish_episodic_memory_stored(
 
 
 async def publish_procedural_memory_stored(
-    event_bus,
-    user_id: str,
-    count: int,
-    importance_score: float,
-    source: str = "dialog"
+    event_bus, user_id: str, count: int, importance_score: float, source: str = "dialog"
 ) -> bool:
     """
     Publish procedural_memory.stored event
@@ -278,17 +328,19 @@ async def publish_procedural_memory_stored(
             count=count,
             importance_score=importance_score,
             source=source,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="memory.procedural.stored",
             source="memory_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
-        logger.info(f"Published procedural_memory.stored event for user {user_id}: {count} memories")
+        logger.info(
+            f"Published procedural_memory.stored event for user {user_id}: {count} memories"
+        )
         return True
 
     except Exception as e:
@@ -297,11 +349,7 @@ async def publish_procedural_memory_stored(
 
 
 async def publish_semantic_memory_stored(
-    event_bus,
-    user_id: str,
-    count: int,
-    importance_score: float,
-    source: str = "dialog"
+    event_bus, user_id: str, count: int, importance_score: float, source: str = "dialog"
 ) -> bool:
     """
     Publish semantic_memory.stored event
@@ -322,17 +370,19 @@ async def publish_semantic_memory_stored(
             count=count,
             importance_score=importance_score,
             source=source,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="memory.semantic.stored",
             source="memory_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
-        logger.info(f"Published semantic_memory.stored event for user {user_id}: {count} memories")
+        logger.info(
+            f"Published semantic_memory.stored event for user {user_id}: {count} memories"
+        )
         return True
 
     except Exception as e:
@@ -345,7 +395,7 @@ async def publish_session_memory_deactivated(
     user_id: str,
     session_id: str,
     duration_seconds: Optional[int] = None,
-    message_count: Optional[int] = None
+    message_count: Optional[int] = None,
 ) -> bool:
     """
     Publish session_memory.deactivated event
@@ -366,17 +416,19 @@ async def publish_session_memory_deactivated(
             session_id=session_id,
             duration_seconds=duration_seconds,
             message_count=message_count,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         event = Event(
             event_type="memory.session.deactivated",
             source="memory_service",
-            data=event_data.model_dump(mode='json')
+            data=event_data.model_dump(mode="json"),
         )
 
         await event_bus.publish_event(event)
-        logger.info(f"Published session_memory.deactivated event for session {session_id}")
+        logger.info(
+            f"Published session_memory.deactivated event for session {session_id}"
+        )
         return True
 
     except Exception as e:
