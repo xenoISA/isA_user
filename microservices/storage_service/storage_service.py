@@ -381,6 +381,23 @@ class StorageService:
                         bucket_name=full_bucket_name,
                         object_name=object_name,
                     )
+                    await self.event_publisher.publish_billing_usage_recorded(
+                        user_id=request.user_id,
+                        organization_id=request.organization_id,
+                        product_id="minio_storage",
+                        usage_amount=file_size,
+                        unit_type="byte",
+                        operation_type="storage_bytes_written",
+                        resource_name=file_id,
+                        usage_details={
+                            "file_id": file_id,
+                            "file_name": file.filename,
+                            "bucket_name": full_bucket_name,
+                            "object_name": object_name,
+                            "content_type": content_type,
+                        },
+                        idempotency_key=f"storage:upload:{file_id}",
+                    )
                 except Exception as e:
                     logger.error(
                         f"Failed to publish file upload event: {e}", exc_info=True
@@ -508,6 +525,35 @@ class StorageService:
             )
 
         return response
+
+    async def record_file_download_usage(
+        self, file_info: FileInfoResponse, user_id: str
+    ) -> None:
+        """Record canonical billing usage when a download URL is issued."""
+        if not self.event_publisher:
+            return
+        try:
+            await self.event_publisher.publish_billing_usage_recorded(
+                user_id=user_id,
+                organization_id=None,
+                product_id="minio_storage",
+                usage_amount=file_info.file_size,
+                unit_type="byte",
+                operation_type="egress_bytes",
+                resource_name=file_info.file_id,
+                usage_details={
+                    "file_id": file_info.file_id,
+                    "file_name": file_info.file_name,
+                    "content_type": file_info.content_type,
+                    "download_url_issued": True,
+                },
+                idempotency_key=(
+                    f"storage:download:{file_info.file_id}:"
+                    f"{datetime.now(timezone.utc).isoformat()}"
+                ),
+            )
+        except Exception as e:
+            logger.error("Failed to publish file download billing usage: %s", e)
 
     async def delete_file(
         self, file_id: str, user_id: str, permanent: bool = False

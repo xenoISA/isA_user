@@ -1,0 +1,143 @@
+-- 025_add_memory_vector_and_pool_products.sql
+-- Completes platform billing taxonomy for browser pool compute, memory vectors,
+-- memory graph retrieval, and generic knowledge-base consumption.
+
+INSERT INTO product.products (
+    product_id, product_name, product_code, description,
+    category, product_type, base_price, currency, billing_interval,
+    features, quota_limits, is_active, metadata,
+    product_kind, fulfillment_type, inventory_policy, requires_shipping, tax_category
+) VALUES
+('browser_pool_session', 'Browser Pool Session', 'WEB-BROWSER-POOL',
+ 'Browser/session pool orchestration used by web automation surfaces',
+ 'web_services', 'computation', 0.0015, 'USD', 'per_second',
+ '["browser", "pool", "session", "compute"]'::jsonb,
+ '{"free_tier_seconds": 3600}'::jsonb,
+ TRUE,
+ '{"provider":"internal","service_type":"browser_pool","operation_type":"session_seconds","unit":"second"}'::jsonb,
+ 'digital', 'digital', 'infinite', FALSE, 'digital_goods'),
+
+('memory_vector_storage', 'Memory Vector Storage', 'MEMORY-VECTOR-STORE',
+ 'Qdrant-backed memory embedding storage growth',
+ 'memory_services', 'data_processing', 0.00000002, 'USD', 'per_byte',
+ '["memory", "vector", "qdrant", "storage"]'::jsonb,
+ '{"free_tier_bytes": 1073741824}'::jsonb,
+ TRUE,
+ '{"provider":"qdrant","service_type":"vector_storage","operation_type":"vector_storage_bytes","unit":"byte"}'::jsonb,
+ 'digital', 'digital', 'infinite', FALSE, 'digital_goods'),
+
+('memory_vector_query', 'Memory Vector Query', 'MEMORY-VECTOR-QUERY',
+ 'Qdrant vector retrieval/search request for user memory',
+ 'memory_services', 'data_processing', 0.0020, 'USD', 'per_request',
+ '["memory", "vector", "query", "retrieval"]'::jsonb,
+ '{"free_tier_requests": 1000}'::jsonb,
+ TRUE,
+ '{"provider":"qdrant","service_type":"vector_storage","operation_type":"vector_query","unit":"request"}'::jsonb,
+ 'digital', 'digital', 'infinite', FALSE, 'digital_goods'),
+
+('memory_graph_query', 'Memory Graph Query', 'MEMORY-GRAPH-QUERY',
+ 'FalkorDB graph retrieval/search request for user memory',
+ 'memory_services', 'data_processing', 0.0030, 'USD', 'per_request',
+ '["memory", "graph", "falkordb", "retrieval"]'::jsonb,
+ '{"free_tier_requests": 1000}'::jsonb,
+ TRUE,
+ '{"provider":"falkordb","service_type":"vector_storage","operation_type":"graph_query","unit":"request"}'::jsonb,
+ 'digital', 'digital', 'infinite', FALSE, 'digital_goods'),
+
+('knowledge_base_lookup', 'Knowledge Base Lookup', 'KB-LOOKUP',
+ 'Knowledge-base lookup for kb:* data products and RAG retrieval',
+ 'knowledge_products', 'data_processing', 0.0040, 'USD', 'per_request',
+ '["knowledge-base", "lookup", "retrieval"]'::jsonb,
+ '{"free_tier_requests": 500}'::jsonb,
+ TRUE,
+ '{"provider":"internal","service_type":"data_service","operation_type":"knowledge_base_lookup","unit":"request","product_namespace":"kb:*"}'::jsonb,
+ 'digital', 'digital', 'infinite', FALSE, 'digital_goods')
+ON CONFLICT (product_id) DO UPDATE SET
+    product_name = EXCLUDED.product_name,
+    product_code = EXCLUDED.product_code,
+    description = EXCLUDED.description,
+    category = EXCLUDED.category,
+    product_type = EXCLUDED.product_type,
+    base_price = EXCLUDED.base_price,
+    billing_interval = EXCLUDED.billing_interval,
+    features = EXCLUDED.features,
+    quota_limits = EXCLUDED.quota_limits,
+    is_active = EXCLUDED.is_active,
+    metadata = EXCLUDED.metadata,
+    product_kind = EXCLUDED.product_kind,
+    fulfillment_type = EXCLUDED.fulfillment_type,
+    inventory_policy = EXCLUDED.inventory_policy,
+    requires_shipping = EXCLUDED.requires_shipping,
+    tax_category = EXCLUDED.tax_category,
+    updated_at = NOW();
+
+INSERT INTO product.product_pricing (
+    pricing_id, product_id, tier_name,
+    min_quantity, max_quantity,
+    unit_price, currency, metadata
+) VALUES
+('pricing_browser_pool_session_default', 'browser_pool_session', 'default', 0, NULL, 0.0015, 'USD',
+ '{"unit":"second","billing_type":"usage_based"}'::jsonb),
+('pricing_memory_vector_storage_default', 'memory_vector_storage', 'default', 0, NULL, 0.00000002, 'USD',
+ '{"unit":"byte","billing_type":"usage_based"}'::jsonb),
+('pricing_memory_vector_query_default', 'memory_vector_query', 'default', 0, NULL, 0.0020, 'USD',
+ '{"unit":"request","billing_type":"usage_based"}'::jsonb),
+('pricing_memory_graph_query_default', 'memory_graph_query', 'default', 0, NULL, 0.0030, 'USD',
+ '{"unit":"request","billing_type":"usage_based"}'::jsonb),
+('pricing_knowledge_base_lookup_default', 'knowledge_base_lookup', 'default', 0, NULL, 0.0040, 'USD',
+ '{"unit":"request","billing_type":"usage_based"}'::jsonb)
+ON CONFLICT (pricing_id) DO UPDATE SET
+    product_id = EXCLUDED.product_id,
+    tier_name = EXCLUDED.tier_name,
+    min_quantity = EXCLUDED.min_quantity,
+    max_quantity = EXCLUDED.max_quantity,
+    unit_price = EXCLUDED.unit_price,
+    currency = EXCLUDED.currency,
+    metadata = EXCLUDED.metadata,
+    updated_at = NOW();
+
+INSERT INTO product.cost_definitions (
+    cost_id, product_id, service_type, provider, model_name, operation_type,
+    cost_per_unit, unit_type, unit_size,
+    original_cost_usd, margin_percentage,
+    effective_from, effective_until,
+    free_tier_limit, free_tier_period,
+    is_active, description, metadata,
+    created_at, updated_at
+) VALUES
+('cost_browser_pool_session_seconds', 'browser_pool_session', 'browser_pool', 'internal', NULL, 'session_seconds',
+ 2, 'second', 1, 0.000015, 30.0, NOW(), NULL, 3600, 'monthly', TRUE,
+ 'Browser pool session orchestration (per second)',
+ '{"component_type":"runtime","billing_surface":"abstract_service"}'::jsonb, NOW(), NOW()),
+('cost_memory_vector_storage_bytes', 'memory_vector_storage', 'vector_storage', 'qdrant', NULL, 'vector_storage_bytes',
+ 1, 'byte', 1048576, 0.00002, 30.0, NOW(), NULL, 1073741824, 'monthly', TRUE,
+ 'Memory vector storage growth in Qdrant (per MiB)',
+ '{"component_type":"storage","billing_surface":"abstract_service"}'::jsonb, NOW(), NOW()),
+('cost_memory_vector_query', 'memory_vector_query', 'vector_storage', 'qdrant', NULL, 'vector_query',
+ 2, 'request', 1, 0.0020, 30.0, NOW(), NULL, 1000, 'monthly', TRUE,
+ 'Memory vector query/retrieval request',
+ '{"component_type":"runtime","billing_surface":"abstract_service"}'::jsonb, NOW(), NOW()),
+('cost_memory_graph_query', 'memory_graph_query', 'vector_storage', 'falkordb', NULL, 'graph_query',
+ 3, 'request', 1, 0.0030, 30.0, NOW(), NULL, 1000, 'monthly', TRUE,
+ 'Memory graph retrieval request in FalkorDB',
+ '{"component_type":"runtime","billing_surface":"abstract_service"}'::jsonb, NOW(), NOW()),
+('cost_knowledge_base_lookup', 'knowledge_base_lookup', 'data_service', 'internal', NULL, 'knowledge_base_lookup',
+ 4, 'request', 1, 0.0040, 30.0, NOW(), NULL, 500, 'monthly', TRUE,
+ 'Knowledge-base lookup for kb:* product namespace',
+ '{"component_type":"external_api","billing_surface":"abstract_service","product_namespace":"kb:*"}'::jsonb, NOW(), NOW())
+ON CONFLICT (cost_id) DO UPDATE SET
+    product_id = EXCLUDED.product_id,
+    service_type = EXCLUDED.service_type,
+    provider = EXCLUDED.provider,
+    operation_type = EXCLUDED.operation_type,
+    cost_per_unit = EXCLUDED.cost_per_unit,
+    unit_type = EXCLUDED.unit_type,
+    unit_size = EXCLUDED.unit_size,
+    original_cost_usd = EXCLUDED.original_cost_usd,
+    margin_percentage = EXCLUDED.margin_percentage,
+    free_tier_limit = EXCLUDED.free_tier_limit,
+    free_tier_period = EXCLUDED.free_tier_period,
+    is_active = EXCLUDED.is_active,
+    description = EXCLUDED.description,
+    metadata = EXCLUDED.metadata,
+    updated_at = NOW();

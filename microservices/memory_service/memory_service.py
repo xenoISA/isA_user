@@ -145,6 +145,7 @@ class MemoryService:
                     publish_procedural_memory_stored,
                     publish_semantic_memory_stored,
                     publish_session_memory_deactivated,
+                    publish_billing_usage_recorded,
                 )
 
                 self._publish_memory_created = publish_memory_created
@@ -159,6 +160,7 @@ class MemoryService:
                 self._publish_session_memory_deactivated = (
                     publish_session_memory_deactivated
                 )
+                self._publish_billing_usage_recorded = publish_billing_usage_recorded
             except ImportError:
                 logger.warning("Event publishers not available")
                 self._publish_memory_created = None
@@ -169,7 +171,66 @@ class MemoryService:
                 self._publish_procedural_memory_stored = None
                 self._publish_semantic_memory_stored = None
                 self._publish_session_memory_deactivated = None
+                self._publish_billing_usage_recorded = None
             self._event_publishers_loaded = True
+
+    async def _publish_vector_billing_usage(
+        self,
+        *,
+        user_id: str,
+        product_id: str,
+        operation_type: str,
+        usage_amount: int,
+        unit_type: str,
+        resource_name: Optional[str] = None,
+        usage_details: Optional[Dict[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> None:
+        if not self.event_bus:
+            return
+        try:
+            self._lazy_load_event_publishers()
+            if self._publish_billing_usage_recorded:
+                await self._publish_billing_usage_recorded(
+                    event_bus=self.event_bus,
+                    user_id=user_id,
+                    product_id=product_id,
+                    usage_amount=usage_amount,
+                    unit_type=unit_type,
+                    operation_type=operation_type,
+                    resource_name=resource_name,
+                    usage_details=usage_details,
+                    idempotency_key=idempotency_key,
+                )
+        except Exception as e:
+            logger.error("Failed to publish memory billing usage event: %s", e)
+
+    async def _publish_vector_search_billing_usage(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        memory_type: str,
+        limit: int,
+        result_count: int,
+        resource_name: Optional[str] = None,
+    ) -> None:
+        await self._publish_vector_billing_usage(
+            user_id=user_id,
+            product_id="memory_vector_query",
+            usage_amount=1,
+            unit_type="request",
+            operation_type="vector_query",
+            resource_name=resource_name or memory_type,
+            usage_details={
+                "memory_type": memory_type,
+                "query_length": len(query),
+                "limit": limit,
+                "result_count": result_count,
+                "storage_backend": "qdrant",
+            },
+            idempotency_key=None,
+        )
 
     def _get_service(self, memory_type: MemoryType):
         """Get service for specified memory type"""
@@ -322,6 +383,22 @@ class MemoryService:
                             )
                     except Exception as e:
                         logger.error(f"Failed to publish memory.created event: {e}")
+
+                await self._publish_vector_billing_usage(
+                    user_id=request.user_id,
+                    product_id="memory_vector_storage",
+                    usage_amount=len((request.content or "").encode("utf-8")),
+                    unit_type="byte",
+                    operation_type="vector_storage_bytes",
+                    resource_name=result["id"],
+                    usage_details={
+                        "memory_id": result["id"],
+                        "memory_type": request.memory_type.value,
+                        "content_bytes": len((request.content or "").encode("utf-8")),
+                        "storage_backend": "qdrant",
+                    },
+                    idempotency_key=f"memory:create:{request.memory_type.value}:{result['id']}",
+                )
 
                 return MemoryOperationResult(
                     success=True,
@@ -702,6 +779,23 @@ class MemoryService:
             except Exception as e:
                 logger.error(f"Failed to publish memory.factual.stored event: {e}")
 
+        if result.success:
+            await self._publish_vector_billing_usage(
+                user_id=user_id,
+                product_id="memory_vector_storage",
+                usage_amount=len(dialog_content.encode("utf-8")),
+                unit_type="byte",
+                operation_type="vector_storage_bytes",
+                resource_name="factual",
+                usage_details={
+                    "memory_type": "factual",
+                    "stored_count": result.count,
+                    "content_bytes": len(dialog_content.encode("utf-8")),
+                    "storage_backend": "qdrant",
+                },
+                idempotency_key=f"memory:store:factual:{','.join(result.data.get('memory_ids', [])) if result.data else user_id}",
+            )
+
         return result
 
     async def store_episodic_memory(
@@ -734,6 +828,23 @@ class MemoryService:
                     )
             except Exception as e:
                 logger.error(f"Failed to publish memory.episodic.stored event: {e}")
+
+        if result.success:
+            await self._publish_vector_billing_usage(
+                user_id=user_id,
+                product_id="memory_vector_storage",
+                usage_amount=len(dialog_content.encode("utf-8")),
+                unit_type="byte",
+                operation_type="vector_storage_bytes",
+                resource_name="episodic",
+                usage_details={
+                    "memory_type": "episodic",
+                    "stored_count": result.count,
+                    "content_bytes": len(dialog_content.encode("utf-8")),
+                    "storage_backend": "qdrant",
+                },
+                idempotency_key=f"memory:store:episodic:{','.join(result.data.get('memory_ids', [])) if result.data else user_id}",
+            )
 
         return result
 
@@ -768,6 +879,23 @@ class MemoryService:
             except Exception as e:
                 logger.error(f"Failed to publish memory.procedural.stored event: {e}")
 
+        if result.success:
+            await self._publish_vector_billing_usage(
+                user_id=user_id,
+                product_id="memory_vector_storage",
+                usage_amount=len(dialog_content.encode("utf-8")),
+                unit_type="byte",
+                operation_type="vector_storage_bytes",
+                resource_name="procedural",
+                usage_details={
+                    "memory_type": "procedural",
+                    "stored_count": result.count,
+                    "content_bytes": len(dialog_content.encode("utf-8")),
+                    "storage_backend": "qdrant",
+                },
+                idempotency_key=f"memory:store:procedural:{','.join(result.data.get('memory_ids', [])) if result.data else user_id}",
+            )
+
         return result
 
     async def store_semantic_memory(
@@ -800,6 +928,23 @@ class MemoryService:
                     )
             except Exception as e:
                 logger.error(f"Failed to publish memory.semantic.stored event: {e}")
+
+        if result.success:
+            await self._publish_vector_billing_usage(
+                user_id=user_id,
+                product_id="memory_vector_storage",
+                usage_amount=len(dialog_content.encode("utf-8")),
+                unit_type="byte",
+                operation_type="vector_storage_bytes",
+                resource_name="semantic",
+                usage_details={
+                    "memory_type": "semantic",
+                    "stored_count": result.count,
+                    "content_bytes": len(dialog_content.encode("utf-8")),
+                    "storage_backend": "qdrant",
+                },
+                idempotency_key=f"memory:store:semantic:{','.join(result.data.get('memory_ids', [])) if result.data else user_id}",
+            )
 
         return result
 
@@ -844,7 +989,7 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.factual_service.vector_search(
+        results = await self.factual_service.vector_search(
             user_id,
             query,
             limit,
@@ -852,6 +997,14 @@ class MemoryService:
             query_embedding=query_embedding,
             with_vectors=with_vectors,
         )
+        await self._publish_vector_search_billing_usage(
+            user_id=user_id,
+            query=query,
+            memory_type="factual",
+            limit=limit,
+            result_count=len(results),
+        )
+        return results
 
     async def vector_search_episodic(
         self,
@@ -876,7 +1029,7 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.episodic_service.vector_search(
+        results = await self.episodic_service.vector_search(
             user_id,
             query,
             limit,
@@ -884,6 +1037,14 @@ class MemoryService:
             query_embedding=query_embedding,
             with_vectors=with_vectors,
         )
+        await self._publish_vector_search_billing_usage(
+            user_id=user_id,
+            query=query,
+            memory_type="episodic",
+            limit=limit,
+            result_count=len(results),
+        )
+        return results
 
     async def vector_search_procedural(
         self,
@@ -908,7 +1069,7 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.procedural_service.vector_search(
+        results = await self.procedural_service.vector_search(
             user_id,
             query,
             limit,
@@ -916,6 +1077,14 @@ class MemoryService:
             query_embedding=query_embedding,
             with_vectors=with_vectors,
         )
+        await self._publish_vector_search_billing_usage(
+            user_id=user_id,
+            query=query,
+            memory_type="procedural",
+            limit=limit,
+            result_count=len(results),
+        )
+        return results
 
     async def vector_search_semantic(
         self,
@@ -940,7 +1109,7 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.semantic_service.vector_search(
+        results = await self.semantic_service.vector_search(
             user_id,
             query,
             limit,
@@ -948,6 +1117,14 @@ class MemoryService:
             query_embedding=query_embedding,
             with_vectors=with_vectors,
         )
+        await self._publish_vector_search_billing_usage(
+            user_id=user_id,
+            query=query,
+            memory_type="semantic",
+            limit=limit,
+            result_count=len(results),
+        )
+        return results
 
     async def vector_search_working(
         self,
@@ -974,7 +1151,7 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.working_service.vector_search(
+        results = await self.working_service.vector_search(
             user_id,
             query,
             limit,
@@ -983,6 +1160,14 @@ class MemoryService:
             query_embedding=query_embedding,
             with_vectors=with_vectors,
         )
+        await self._publish_vector_search_billing_usage(
+            user_id=user_id,
+            query=query,
+            memory_type="working",
+            limit=limit,
+            result_count=len(results),
+        )
+        return results
 
     async def vector_search_session(
         self,
@@ -1009,7 +1194,7 @@ class MemoryService:
         Returns:
             List of matching memories with similarity scores
         """
-        return await self.session_service.vector_search(
+        results = await self.session_service.vector_search(
             user_id,
             query,
             limit,
@@ -1018,6 +1203,15 @@ class MemoryService:
             query_embedding=query_embedding,
             with_vectors=with_vectors,
         )
+        await self._publish_vector_search_billing_usage(
+            user_id=user_id,
+            query=query,
+            memory_type="session",
+            limit=limit,
+            result_count=len(results),
+            resource_name=session_id,
+        )
+        return results
 
     # ==================== Procedural Memory Operations ====================
 

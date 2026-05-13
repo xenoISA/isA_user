@@ -30,6 +30,71 @@ class StorageEventPublisher:
     def __init__(self, event_bus):
         self.event_bus = event_bus
 
+    async def publish_billing_usage_recorded(
+        self,
+        *,
+        user_id: str,
+        product_id: str,
+        usage_amount: int,
+        unit_type: str,
+        operation_type: str,
+        organization_id: Optional[str] = None,
+        resource_name: Optional[str] = None,
+        usage_details: Optional[Dict[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> bool:
+        """Publish canonical billing usage from storage operations."""
+        try:
+            event = Event(
+                event_type=f"billing.usage.recorded.{operation_type}",
+                source="storage_service",
+                data={
+                    "user_id": user_id,
+                    "organization_id": organization_id,
+                    "product_id": product_id,
+                    "service_type": "storage_minio",
+                    "operation_type": operation_type,
+                    "source_service": "storage_service",
+                    "resource_name": resource_name,
+                    "usage_amount": usage_amount,
+                    "unit_type": unit_type,
+                    "usage_details": usage_details or {},
+                    "billing_surface": "abstract_service",
+                    "cost_components": [
+                        {
+                            "component_id": "object_storage_capacity"
+                            if operation_type == "storage_bytes_written"
+                            else "storage_egress",
+                            "component_type": "storage"
+                            if operation_type == "storage_bytes_written"
+                            else "network",
+                            "provider": "minio",
+                            "meter_type": operation_type,
+                            "unit_type": unit_type,
+                            "usage_amount": usage_amount,
+                        }
+                    ],
+                    "schema_version": "billing-usage/v1",
+                    "meter_type": operation_type,
+                    "credit_consumption_handled": False,
+                    "idempotency_key": idempotency_key,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+            result = await self.event_bus.publish_event(event)
+            if result:
+                logger.info(
+                    "Published billing usage for storage %s: user=%s amount=%s",
+                    operation_type,
+                    user_id,
+                    usage_amount,
+                )
+            return result
+        except Exception as e:
+            logger.error("Error publishing storage billing usage event: %s", e)
+            return False
+
     async def publish_file_uploaded(
         self,
         file_id: str,

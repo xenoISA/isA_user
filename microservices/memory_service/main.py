@@ -85,6 +85,36 @@ async def _maybe_rerank(results, query, service, rerank, mmr_lambda, limit):
     return results
 
 
+async def _record_graph_billing_usage(
+    *,
+    user_id: str,
+    query: str,
+    operation_type: str,
+    result_count: int,
+    limit: int,
+) -> None:
+    if memory_service is None:
+        return
+    try:
+        await memory_service._publish_vector_billing_usage(
+            user_id=user_id,
+            product_id="memory_graph_query",
+            usage_amount=1,
+            unit_type="request",
+            operation_type=operation_type,
+            resource_name="memory_graph",
+            usage_details={
+                "query_length": len(query),
+                "limit": limit,
+                "result_count": result_count,
+                "graph_backend": "falkordb",
+            },
+            idempotency_key=None,
+        )
+    except Exception as e:
+        logger.error("Failed to publish memory graph billing usage: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
@@ -620,6 +650,13 @@ async def graph_search(
             user_id=user_id,
             limit=limit,
             entity_types=entity_types,
+        )
+        await _record_graph_billing_usage(
+            user_id=user_id,
+            query=query,
+            operation_type="graph_query",
+            result_count=result.get("total", len(result.get("entities", []))),
+            limit=limit,
         )
         return result
     except Exception as e:
@@ -1409,6 +1446,15 @@ async def hybrid_search(
                 graph_available = True
                 entity_resp = await graph_client.search_entities(
                     query=query, user_id=user_id, limit=limit
+                )
+                await _record_graph_billing_usage(
+                    user_id=user_id,
+                    query=query,
+                    operation_type="graph_query",
+                    result_count=entity_resp.get(
+                        "total", len(entity_resp.get("entities", []))
+                    ),
+                    limit=limit,
                 )
                 for entity in entity_resp.get("entities", []):
                     graph_results.append(
