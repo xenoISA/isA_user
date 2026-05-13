@@ -19,6 +19,14 @@ class SharePermission(str, Enum):
     CAN_EDIT = "can_edit"
 
 
+class ShareCapabilities(BaseModel):
+    """Actions allowed for a public shared session."""
+
+    can_view: bool = True
+    can_comment: bool = False
+    can_edit: bool = False
+
+
 # ============================================================================
 # Domain Models
 # ============================================================================
@@ -112,6 +120,7 @@ class SharedSessionResponse(BaseModel):
     session_id: str
     session_summary: str = ""
     permissions: str
+    capabilities: ShareCapabilities = Field(default_factory=ShareCapabilities)
     messages: List[Dict[str, Any]] = Field(default_factory=list)
     message_count: int = 0
     created_at: Optional[datetime] = None

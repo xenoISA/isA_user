@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from microservices.sharing_service.models import (
     Share,
+    ShareCapabilities,
     ShareCreateRequest,
     ShareListResponse,
     SharePermission,
@@ -122,6 +123,7 @@ class TestSharedSessionResponse:
         assert resp.messages == []
         assert resp.message_count == 0
         assert resp.permissions == "view_only"
+        assert resp.capabilities == ShareCapabilities()
 
     def test_with_messages(self):
         resp = SharedSessionResponse(
@@ -131,6 +133,16 @@ class TestSharedSessionResponse:
             message_count=1,
         )
         assert len(resp.messages) == 1
+
+    def test_with_capabilities(self):
+        resp = SharedSessionResponse(
+            session_id="sess-1",
+            permissions="can_comment",
+            capabilities={"can_view": True, "can_comment": True, "can_edit": False},
+        )
+        assert resp.capabilities.can_view is True
+        assert resp.capabilities.can_comment is True
+        assert resp.capabilities.can_edit is False
 
 
 class TestShareListResponse:
