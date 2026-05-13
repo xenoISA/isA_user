@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from microservices.subscription_service.subscription_repository import SubscriptionRepository
+from microservices.subscription_service.subscription_repository import (
+    SubscriptionRepository,
+)
 
 
 class FakeDB:
