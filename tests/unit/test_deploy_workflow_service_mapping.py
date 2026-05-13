@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from core.deployment_targets import (
+    MICROSERVICES_DIR,
     list_service_directories,
     normalize_requested_services,
     resolve_deploy_target,
@@ -37,10 +38,16 @@ def test_normalize_requested_services_accepts_directory_and_short_names():
 @pytest.mark.unit
 def test_list_service_directories_only_returns_configured_services():
     service_dirs = list_service_directories()
+    all_service_dirs = sorted(
+        path.name
+        for path in MICROSERVICES_DIR.iterdir()
+        if path.is_dir() and path.name.endswith("_service")
+    )
 
     assert "auth_service" in service_dirs
     assert "sharing_service" in service_dirs
-    assert "project_service" not in service_dirs
+    assert "project_service" in service_dirs
+    assert service_dirs == all_service_dirs
 
 
 @pytest.mark.unit
@@ -54,6 +61,11 @@ def test_deploy_workflow_uses_resolver_and_rollout_validation():
     workflow_text = WORKFLOW_PATH.read_text()
 
     assert "core/deployment_targets.py --normalize-list" in workflow_text
+    assert "service_matrix=" in workflow_text
+    assert "fromJSON(needs.prepare.outputs.service_matrix)" in workflow_text
     assert 'python core/deployment_targets.py "$1" --format env' in workflow_text
     assert "Validate rollout target" in workflow_text
+    assert "kubectl argo rollouts set image" in workflow_text
+    assert "kubectl argo rollouts status" in workflow_text
+    assert "kubectl set image deployment/${TARGET_DEPLOYMENT_NAME}" in workflow_text
     assert "${service%-service}" not in workflow_text
