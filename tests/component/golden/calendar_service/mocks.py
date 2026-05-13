@@ -3,8 +3,11 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import uuid
 
-from microservices.calendar_service.models import EventResponse, EventCategory, RecurrenceType
-from microservices.calendar_service.protocols import CalendarEventRepositoryProtocol
+from microservices.calendar_service.models import (
+    EventCategory,
+    EventResponse,
+    RecurrenceType,
+)
 
 
 class MockCalendarRepository:
@@ -27,20 +30,20 @@ class MockCalendarRepository:
         # Ensure required fields have defaults
         event = EventResponse(
             event_id=event_id,
-            user_id=kwargs.get('user_id', 'test_user'),
-            title=kwargs.get('title', 'Test Event'),
-            description=kwargs.get('description'),
-            location=kwargs.get('location'),
-            start_time=kwargs.get('start_time', now),
-            end_time=kwargs.get('end_time', now),
-            all_day=kwargs.get('all_day', False),
-            category=kwargs.get('category', EventCategory.OTHER),
-            color=kwargs.get('color'),
-            recurrence_type=kwargs.get('recurrence_type', RecurrenceType.NONE),
-            reminders=kwargs.get('reminders', []),
-            is_shared=kwargs.get('is_shared', False),
-            created_at=kwargs.get('created_at', now),
-            updated_at=kwargs.get('updated_at'),
+            user_id=kwargs.get("user_id", "test_user"),
+            title=kwargs.get("title", "Test Event"),
+            description=kwargs.get("description"),
+            location=kwargs.get("location"),
+            start_time=kwargs.get("start_time", now),
+            end_time=kwargs.get("end_time", now),
+            all_day=kwargs.get("all_day", False),
+            category=kwargs.get("category", EventCategory.OTHER),
+            color=kwargs.get("color"),
+            recurrence_type=kwargs.get("recurrence_type", RecurrenceType.NONE),
+            reminders=kwargs.get("reminders", []),
+            is_shared=kwargs.get("is_shared", False),
+            created_at=kwargs.get("created_at", now),
+            updated_at=kwargs.get("updated_at"),
         )
         self._events[event_id] = event
         return event
@@ -67,20 +70,20 @@ class MockCalendarRepository:
 
         event = EventResponse(
             event_id=event_id,
-            user_id=event_data.get('user_id'),
-            title=event_data.get('title'),
-            description=event_data.get('description'),
-            location=event_data.get('location'),
-            start_time=event_data.get('start_time'),
-            end_time=event_data.get('end_time'),
-            all_day=event_data.get('all_day', False),
-            category=event_data.get('category', EventCategory.OTHER),
-            color=event_data.get('color'),
-            recurrence_type=event_data.get('recurrence_type', RecurrenceType.NONE),
-            recurrence_end_date=event_data.get('recurrence_end_date'),
-            recurrence_rule=event_data.get('recurrence_rule'),
-            reminders=event_data.get('reminders', []),
-            is_shared=event_data.get('is_shared', False),
+            user_id=event_data.get("user_id"),
+            title=event_data.get("title"),
+            description=event_data.get("description"),
+            location=event_data.get("location"),
+            start_time=event_data.get("start_time"),
+            end_time=event_data.get("end_time"),
+            all_day=event_data.get("all_day", False),
+            category=event_data.get("category", EventCategory.OTHER),
+            color=event_data.get("color"),
+            recurrence_type=event_data.get("recurrence_type", RecurrenceType.NONE),
+            recurrence_end_date=event_data.get("recurrence_end_date"),
+            recurrence_rule=event_data.get("recurrence_rule"),
+            reminders=event_data.get("reminders", []),
+            is_shared=event_data.get("is_shared", False),
             created_at=now,
             updated_at=now,
         )
@@ -132,7 +135,7 @@ class MockCalendarRepository:
         events.sort(key=lambda x: x.start_time)
 
         # Apply pagination
-        return events[offset:offset + limit]
+        return events[offset : offset + limit]
 
     async def get_upcoming_events(
         self, user_id: str, days: int = 7
@@ -142,12 +145,11 @@ class MockCalendarRepository:
             raise Exception(self._fail_message)
 
         from datetime import timedelta
+
         now = datetime.now(timezone.utc)
         end_date = now + timedelta(days=days)
 
-        return await self.get_events_by_user(
-            user_id, start_date=now, end_date=end_date
-        )
+        return await self.get_events_by_user(user_id, start_date=now, end_date=end_date)
 
     async def get_today_events(self, user_id: str) -> List[EventResponse]:
         if self._should_fail:
@@ -176,7 +178,7 @@ class MockCalendarRepository:
         # Create updated event
         updated_data = event.dict()
         updated_data.update(updates)
-        updated_data['updated_at'] = datetime.now(timezone.utc)
+        updated_data["updated_at"] = datetime.now(timezone.utc)
 
         updated_event = EventResponse(**updated_data)
         self._events[event_id] = updated_event
@@ -205,6 +207,7 @@ class MockCalendarRepository:
         status: str,
         synced_count: int = 0,
         error_message: str = None,
+        sync_token: str = None,
     ) -> bool:
         if self._should_fail:
             self._should_fail = False
@@ -217,6 +220,7 @@ class MockCalendarRepository:
             "status": status,
             "synced_events_count": synced_count,
             "error_message": error_message,
+            "sync_token": sync_token,
             "last_sync_time": datetime.now(timezone.utc),
         }
         return True
@@ -234,8 +238,7 @@ class MockCalendarRepository:
         else:
             # Return all sync statuses for user
             return [
-                v for k, v in self._sync_status.items()
-                if k.startswith(f"{user_id}:")
+                v for k, v in self._sync_status.items() if k.startswith(f"{user_id}:")
             ]
 
     async def delete_user_data(self, user_id: str) -> int:
@@ -245,7 +248,8 @@ class MockCalendarRepository:
 
         # Delete all events for user
         events_to_delete = [
-            event_id for event_id, event in self._events.items()
+            event_id
+            for event_id, event in self._events.items()
             if event.user_id == user_id
         ]
 
@@ -254,11 +258,57 @@ class MockCalendarRepository:
 
         # Delete sync status for user
         sync_to_delete = [
-            key for key in self._sync_status.keys()
-            if key.startswith(f"{user_id}:")
+            key for key in self._sync_status.keys() if key.startswith(f"{user_id}:")
         ]
 
         for key in sync_to_delete:
             del self._sync_status[key]
 
         return len(events_to_delete) + len(sync_to_delete)
+
+    async def upsert_external_event(
+        self, event_data: Dict[str, Any]
+    ) -> Optional[EventResponse]:
+        if self._should_fail:
+            self._should_fail = False
+            raise Exception(self._fail_message)
+
+        provider = event_data["sync_provider"]
+        external_event_id = event_data["external_event_id"]
+        existing_id = None
+        for event_id, event in self._events.items():
+            if (
+                event.user_id == event_data["user_id"]
+                and event.sync_provider == provider
+                and event.external_event_id == external_event_id
+            ):
+                existing_id = event_id
+                break
+
+        now = datetime.now(timezone.utc)
+        event_id = existing_id or f"evt_{uuid.uuid4().hex[:16]}"
+        existing = self._events.get(event_id)
+        created_at = existing.created_at if existing else now
+        event = EventResponse(
+            event_id=event_id,
+            user_id=event_data["user_id"],
+            title=event_data["title"],
+            description=event_data.get("description"),
+            location=event_data.get("location"),
+            start_time=event_data["start_time"],
+            end_time=event_data["end_time"],
+            all_day=event_data.get("all_day", False),
+            category=event_data.get("category", EventCategory.OTHER),
+            color=event_data.get("color"),
+            recurrence_type=event_data.get("recurrence_type", RecurrenceType.NONE),
+            recurrence_rule=event_data.get("recurrence_rule"),
+            reminders=event_data.get("reminders", []),
+            sync_provider=provider,
+            external_event_id=external_event_id,
+            last_synced_at=now,
+            is_shared=event_data.get("is_shared", False),
+            created_at=created_at,
+            updated_at=now,
+        )
+        self._events[event_id] = event
+        return event

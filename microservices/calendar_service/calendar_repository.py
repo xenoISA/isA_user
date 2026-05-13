@@ -333,6 +333,7 @@ class CalendarRepository:
         status: str,
         synced_count: int = 0,
         error_message: str = None,
+        sync_token: str = None,
     ) -> bool:
         """更新同步状态"""
         try:
@@ -341,13 +342,14 @@ class CalendarRepository:
             query = f"""
                 INSERT INTO {self.schema}.{self.sync_table} (
                     user_id, provider, last_sync_time, synced_events_count,
-                    status, error_message, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    status, error_message, sync_token, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (user_id, provider) DO UPDATE
                 SET last_sync_time = EXCLUDED.last_sync_time,
                     synced_events_count = EXCLUDED.synced_events_count,
                     status = EXCLUDED.status,
                     error_message = EXCLUDED.error_message,
+                    sync_token = COALESCE(EXCLUDED.sync_token, {self.schema}.{self.sync_table}.sync_token),
                     updated_at = EXCLUDED.updated_at
             """
 
@@ -358,6 +360,7 @@ class CalendarRepository:
                 synced_count,
                 status,
                 error_message,
+                sync_token,
                 now,
                 now,
             ]
@@ -400,6 +403,91 @@ class CalendarRepository:
 
         except Exception as e:
             logger.error(f"Failed to get sync status: {e}")
+            return None
+
+    async def upsert_external_event(
+        self, event_data: Dict[str, Any]
+    ) -> Optional[EventResponse]:
+        """Insert/update an externally synced event by provider external id."""
+        try:
+            event_id = event_data.get("event_id") or f"evt_{uuid.uuid4().hex[:16]}"
+            now = datetime.now(timezone.utc)
+
+            start_time = event_data["start_time"]
+            if isinstance(start_time, str):
+                start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+
+            end_time = event_data["end_time"]
+            if isinstance(end_time, str):
+                end_time = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+
+            query = f"""
+                INSERT INTO {self.schema}.{self.table_name} (
+                    event_id, user_id, organization_id, title, description, location,
+                    start_time, end_time, all_day, timezone, category, color,
+                    recurrence_type, recurrence_rule, reminders, sync_provider,
+                    external_event_id, last_synced_at, is_shared, shared_with, metadata,
+                    created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+                )
+                ON CONFLICT (user_id, sync_provider, external_event_id)
+                    WHERE external_event_id IS NOT NULL
+                DO UPDATE SET
+                    title = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    location = EXCLUDED.location,
+                    start_time = EXCLUDED.start_time,
+                    end_time = EXCLUDED.end_time,
+                    all_day = EXCLUDED.all_day,
+                    timezone = EXCLUDED.timezone,
+                    category = EXCLUDED.category,
+                    color = EXCLUDED.color,
+                    recurrence_type = EXCLUDED.recurrence_type,
+                    recurrence_rule = EXCLUDED.recurrence_rule,
+                    reminders = EXCLUDED.reminders,
+                    last_synced_at = EXCLUDED.last_synced_at,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING *
+            """
+
+            params = [
+                event_id,
+                event_data["user_id"],
+                event_data.get("organization_id"),
+                event_data["title"],
+                event_data.get("description"),
+                event_data.get("location"),
+                start_time,
+                end_time,
+                event_data.get("all_day", False),
+                event_data.get("timezone", "UTC"),
+                event_data.get("category", EventCategory.OTHER.value),
+                event_data.get("color"),
+                event_data.get("recurrence_type", RecurrenceType.NONE.value),
+                event_data.get("recurrence_rule"),
+                event_data.get("reminders", []),
+                event_data["sync_provider"],
+                event_data["external_event_id"],
+                now,
+                event_data.get("is_shared", False),
+                event_data.get("shared_with", []),
+                event_data.get("metadata", {}),
+                now,
+                now,
+            ]
+
+            async with self.db:
+                results = await self.db.query(query, params=params)
+
+            if results and len(results) > 0:
+                return EventResponse(**results[0])
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to upsert external calendar event: {e}")
             return None
 
     # ====================

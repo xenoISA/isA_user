@@ -57,6 +57,7 @@ class CalendarService:
         self,
         repository: Optional[CalendarEventRepositoryProtocol] = None,
         event_bus=None,
+        provider_clients: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize service with injected dependencies.
@@ -67,6 +68,7 @@ class CalendarService:
         """
         self.repository = repository  # Will be set by factory if None
         self.event_bus = event_bus
+        self.provider_clients = provider_clients or {}
         self._event_publishers_loaded = False
         self._event_publisher = None
 
@@ -268,14 +270,20 @@ class CalendarService:
         try:
             logger.info(f"Starting {provider} sync for user {user_id}")
 
-            synced_count = 0
+            sync_token = None
 
             if provider == SyncProvider.GOOGLE.value:
-                synced_count = await self._sync_google_calendar(user_id, credentials)
+                synced_count, sync_token = await self._sync_google_calendar(
+                    user_id, credentials
+                )
             elif provider == SyncProvider.APPLE.value:
-                synced_count = await self._sync_apple_calendar(user_id, credentials)
+                synced_count, sync_token = await self._sync_apple_calendar(
+                    user_id, credentials
+                )
             elif provider == SyncProvider.OUTLOOK.value:
-                synced_count = await self._sync_outlook_calendar(user_id, credentials)
+                synced_count, sync_token = await self._sync_outlook_calendar(
+                    user_id, credentials
+                )
             else:
                 raise ValueError(f"Unsupported provider: {provider}")
 
@@ -285,6 +293,7 @@ class CalendarService:
                 provider=provider,
                 status="active",
                 synced_count=synced_count,
+                sync_token=sync_token,
             )
 
             return SyncStatusResponse(
@@ -293,6 +302,7 @@ class CalendarService:
                 synced_events=synced_count,
                 status="success",
                 message=f"Successfully synced {synced_count} events",
+                sync_token=sync_token,
             )
 
         except Exception as e:
@@ -325,6 +335,7 @@ class CalendarService:
                     synced_events=status.get("synced_events_count", 0),
                     status=status.get("status", "unknown"),
                     message=status.get("error_message"),
+                    sync_token=status.get("sync_token"),
                 )
             return None
 
@@ -336,39 +347,82 @@ class CalendarService:
 
     async def _sync_google_calendar(
         self, user_id: str, credentials: Dict[str, Any]
-    ) -> int:
+    ) -> tuple[int, Optional[str]]:
         """同步 Google Calendar"""
-        # TODO: Implement Google Calendar API integration
-        # Requirements:
-        # 1. pip install google-auth google-auth-oauthlib google-api-python-client
-        # 2. Use OAuth2 credentials
-        # 3. Fetch events from primary calendar
-        # 4. Insert/update events in local database
+        client = self.provider_clients.get(SyncProvider.GOOGLE.value)
+        if client is None:
+            from .clients.google_calendar_client import GoogleCalendarClient
 
-        logger.warning("Google Calendar sync not fully implemented yet")
-        return 0
+            client = GoogleCalendarClient()
+        return await self._sync_provider_events(
+            user_id=user_id,
+            provider=SyncProvider.GOOGLE.value,
+            credentials=credentials,
+            client=client,
+        )
 
     async def _sync_apple_calendar(
         self, user_id: str, credentials: Dict[str, Any]
-    ) -> int:
+    ) -> tuple[int, Optional[str]]:
         """同步 Apple iCloud Calendar"""
-        # TODO: Implement Apple iCloud Calendar integration
-        # Use CalDAV protocol
-
-        logger.warning("Apple Calendar sync not fully implemented yet")
-        return 0
+        raise NotImplementedError(
+            "Apple Calendar sync requires CalDAV app-specific-password support; "
+            "see docs/runbooks/calendar-provider-sync.md"
+        )
 
     async def _sync_outlook_calendar(
         self, user_id: str, credentials: Dict[str, Any]
-    ) -> int:
+    ) -> tuple[int, Optional[str]]:
         """同步 Microsoft Outlook Calendar"""
-        # TODO: Implement Microsoft Graph API integration
-        # Requirements:
-        # 1. pip install msal requests
-        # 2. Use Microsoft Graph API
+        client = self.provider_clients.get(SyncProvider.OUTLOOK.value)
+        if client is None:
+            from .clients.outlook_calendar_client import OutlookCalendarClient
 
-        logger.warning("Outlook Calendar sync not fully implemented yet")
-        return 0
+            client = OutlookCalendarClient()
+        return await self._sync_provider_events(
+            user_id=user_id,
+            provider=SyncProvider.OUTLOOK.value,
+            credentials=credentials,
+            client=client,
+        )
+
+    async def _sync_provider_events(
+        self,
+        *,
+        user_id: str,
+        provider: str,
+        credentials: Dict[str, Any],
+        client: Any,
+    ) -> tuple[int, Optional[str]]:
+        status = await self.repository.get_sync_status(user_id, provider)
+        sync_token = status.get("sync_token") if status else None
+        result = await client.list_events(credentials, sync_token=sync_token)
+
+        synced_count = 0
+        for event in result.events:
+            upserted = await self.repository.upsert_external_event(
+                {
+                    "user_id": user_id,
+                    "title": event.title,
+                    "description": event.description,
+                    "location": event.location,
+                    "start_time": event.start_time,
+                    "end_time": event.end_time,
+                    "all_day": event.all_day,
+                    "timezone": event.timezone,
+                    "category": "other",
+                    "recurrence_type": "none",
+                    "recurrence_rule": event.recurrence_rule,
+                    "reminders": [],
+                    "sync_provider": provider,
+                    "external_event_id": event.external_event_id,
+                    "metadata": event.metadata,
+                }
+            )
+            if upserted is not None:
+                synced_count += 1
+
+        return synced_count, result.sync_token
 
 
 __all__ = ["CalendarService"]
