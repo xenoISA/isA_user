@@ -7,6 +7,7 @@ import pytest
 from microservices.subscription_service.models import (
     BillingAccountType,
     BillingCycle,
+    ConsumeCreditsRequest,
     CreditReservation,
     ReleaseReservationRequest,
     ReservationStatus,
@@ -42,6 +43,7 @@ class FakeReservationRepository:
         self.subscription = _make_subscription(organization_id=organization_id)
         self.reservations: dict[str, CreditReservation] = {}
         self.request_index: dict[str, str] = {}
+        self.history = []
 
     async def get_user_subscription(
         self,
@@ -64,6 +66,19 @@ class FakeReservationRepository:
         if self.subscription.user_id != (billing_account_id or user_id):
             return None
         return self.subscription
+
+    async def consume_credits(self, subscription_id: str, credits_to_consume: int):
+        if self.subscription.subscription_id != subscription_id:
+            return None
+        if self.subscription.credits_remaining < credits_to_consume:
+            return None
+        self.subscription.credits_used += credits_to_consume
+        self.subscription.credits_remaining -= credits_to_consume
+        return self.subscription
+
+    async def add_history(self, history):
+        self.history.append(history)
+        return history
 
     async def reserve_credits(
         self,
@@ -110,7 +125,9 @@ class FakeReservationRepository:
             self.request_index[request_id] = reservation_id
         return reservation
 
-    async def reconcile_credit_reservation(self, reservation_id: str, actual_credits: int):
+    async def reconcile_credit_reservation(
+        self, reservation_id: str, actual_credits: int
+    ):
         reservation = self.reservations.get(reservation_id)
         if not reservation:
             return None
@@ -141,7 +158,9 @@ class FakeReservationRepository:
         reservation.actual_credits = actual_credits
         reservation.credits_refunded = refund
         reservation.extra_credits_consumed = extra
-        reservation.credits_remaining_after_finalize = self.subscription.credits_remaining
+        reservation.credits_remaining_after_finalize = (
+            self.subscription.credits_remaining
+        )
 
         return {
             "reservation": reservation,
@@ -164,7 +183,9 @@ class FakeReservationRepository:
         self.subscription.credits_remaining += reservation.estimated_credits
         reservation.status = ReservationStatus.RELEASED
         reservation.credits_refunded = reservation.estimated_credits
-        reservation.credits_remaining_after_finalize = self.subscription.credits_remaining
+        reservation.credits_remaining_after_finalize = (
+            self.subscription.credits_remaining
+        )
 
         return {
             "reservation": reservation,
@@ -298,6 +319,57 @@ async def test_reserve_uses_explicit_org_payer_fields():
     assert stored.billing_account_type == BillingAccountType.ORGANIZATION
     assert stored.billing_account_id == "org_test_001"
     assert stored.actor_user_id == "usr_test_001"
+
+
+@pytest.mark.asyncio
+async def test_consume_uses_explicit_org_payer_fields():
+    repository = FakeReservationRepository(organization_id="org_test_001")
+    service = SubscriptionService(repository=repository, event_bus=None)
+
+    consume = await service.consume_credits(
+        ConsumeCreditsRequest(
+            user_id="usr_test_001",
+            actor_user_id="usr_test_001",
+            billing_account_type=BillingAccountType.ORGANIZATION,
+            billing_account_id="org_test_001",
+            organization_id="org_test_001",
+            credits_to_consume=15,
+            service_type="model_inference",
+            usage_record_id="usage_org_001",
+        )
+    )
+
+    assert consume.success is True
+    assert consume.billing_account_type == BillingAccountType.ORGANIZATION
+    assert consume.billing_account_id == "org_test_001"
+    assert consume.actor_user_id == "usr_test_001"
+    assert consume.credits_consumed == 15
+    assert consume.credits_remaining == 85
+    assert repository.subscription.credits_used == 15
+    assert repository.subscription.credits_remaining == 85
+    assert repository.history[-1].organization_id == "org_test_001"
+
+
+@pytest.mark.asyncio
+async def test_credit_balance_uses_explicit_org_payer_fields():
+    repository = FakeReservationRepository(organization_id="org_test_001")
+    service = SubscriptionService(repository=repository, event_bus=None)
+
+    balance = await service.get_credit_balance(
+        user_id="usr_test_001",
+        actor_user_id="usr_test_001",
+        billing_account_type=BillingAccountType.ORGANIZATION,
+        billing_account_id="org_test_001",
+        organization_id="org_test_001",
+    )
+
+    assert balance.success is True
+    assert balance.billing_account_type == BillingAccountType.ORGANIZATION
+    assert balance.billing_account_id == "org_test_001"
+    assert balance.actor_user_id == "usr_test_001"
+    assert balance.organization_id == "org_test_001"
+    assert balance.subscription_credits_remaining == 100
+    assert balance.total_credits_available == 100
 
 
 @pytest.mark.asyncio
