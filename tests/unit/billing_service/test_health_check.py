@@ -1,10 +1,52 @@
 from __future__ import annotations
 
+import importlib
+import json
+import sys
+from types import ModuleType
 from types import SimpleNamespace
 
 import pytest
 
-from microservices.billing_service import main as billing_main
+
+class _NoopMetric:
+    def labels(self, *args, **kwargs):
+        return self
+
+    def inc(self, *args, **kwargs):
+        return None
+
+    def observe(self, *args, **kwargs):
+        return None
+
+
+def _install_isa_common_observability_stubs():
+    if "isa_common.observability" not in sys.modules:
+        observability = ModuleType("isa_common.observability")
+        observability.setup_observability = lambda *args, **kwargs: {
+            "metrics": False,
+            "logging": False,
+            "tracing": False,
+        }
+        sys.modules["isa_common.observability"] = observability
+
+    if "isa_common.metrics" not in sys.modules:
+        metrics = ModuleType("isa_common.metrics")
+        metrics.setup_metrics = lambda *args, **kwargs: {
+            "metrics": False,
+            "logging": False,
+            "tracing": False,
+        }
+        metrics.create_counter = lambda *args, **kwargs: _NoopMetric()
+        metrics.create_histogram = lambda *args, **kwargs: _NoopMetric()
+        metrics.create_gauge = lambda *args, **kwargs: _NoopMetric()
+        metrics.metrics_text = lambda: b""
+        sys.modules["isa_common.metrics"] = metrics
+
+
+_install_isa_common_observability_stubs()
+
+billing_main = importlib.import_module("microservices.billing_service.main")
 
 
 class AsyncHealthyDB:
@@ -14,7 +56,7 @@ class AsyncHealthyDB:
 
 class AsyncUnhealthyDB:
     async def health_check(self):
-        return False
+        return None
 
 
 @pytest.mark.asyncio
@@ -26,8 +68,11 @@ async def test_health_check_awaits_async_database_health():
     finally:
         billing_main.repository = original_repository
 
-    assert response.status == "healthy"
-    assert response.dependencies["database"] == "healthy"
+    body = json.loads(response.body)
+    assert response.status_code == 200
+    assert body["status"] == "degraded"
+    assert body["dependencies"]["postgres"]["status"] == "healthy"
+    assert body["dependencies"]["nats"]["status"] == "unhealthy"
 
 
 @pytest.mark.asyncio
@@ -39,5 +84,7 @@ async def test_health_check_reports_unhealthy_when_async_database_fails():
     finally:
         billing_main.repository = original_repository
 
-    assert response.status == "degraded"
-    assert response.dependencies["database"] == "unhealthy"
+    body = json.loads(response.body)
+    assert response.status_code == 503
+    assert body["status"] == "unhealthy"
+    assert body["dependencies"]["postgres"]["status"] == "unhealthy"
