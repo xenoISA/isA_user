@@ -125,7 +125,9 @@ class FakeReservationRepository:
             self.request_index[request_id] = reservation_id
         return reservation
 
-    async def reconcile_credit_reservation(self, reservation_id: str, actual_credits: int):
+    async def reconcile_credit_reservation(
+        self, reservation_id: str, actual_credits: int
+    ):
         reservation = self.reservations.get(reservation_id)
         if not reservation:
             return None
@@ -156,7 +158,9 @@ class FakeReservationRepository:
         reservation.actual_credits = actual_credits
         reservation.credits_refunded = refund
         reservation.extra_credits_consumed = extra
-        reservation.credits_remaining_after_finalize = self.subscription.credits_remaining
+        reservation.credits_remaining_after_finalize = (
+            self.subscription.credits_remaining
+        )
 
         return {
             "reservation": reservation,
@@ -179,7 +183,9 @@ class FakeReservationRepository:
         self.subscription.credits_remaining += reservation.estimated_credits
         reservation.status = ReservationStatus.RELEASED
         reservation.credits_refunded = reservation.estimated_credits
-        reservation.credits_remaining_after_finalize = self.subscription.credits_remaining
+        reservation.credits_remaining_after_finalize = (
+            self.subscription.credits_remaining
+        )
 
         return {
             "reservation": reservation,
