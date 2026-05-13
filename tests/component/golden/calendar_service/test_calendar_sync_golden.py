@@ -6,14 +6,14 @@ Uses CalendarTestDataFactory for zero hardcoded data.
 """
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
 
 from microservices.calendar_service.calendar_service import CalendarService
 from microservices.calendar_service.models import SyncProvider
-from tests.contracts.calendar import (
-    CalendarTestDataFactory,
-    SyncProviderContract,
+from microservices.calendar_service.clients.provider_models import (
+    ProviderCalendarEvent,
+    ProviderSyncResult,
 )
+from tests.contracts.calendar import CalendarTestDataFactory
 from tests.component.golden.calendar_service.mocks import MockCalendarRepository
 
 pytestmark = [pytest.mark.component, pytest.mark.golden]
@@ -32,11 +32,30 @@ class TestSyncWithExternalCalendar:
         """Create service with mock repository"""
         return CalendarService(repository=mock_repo)
 
+    @pytest.fixture
+    def provider_event(self):
+        now = datetime.now(timezone.utc)
+        return ProviderCalendarEvent(
+            external_event_id="provider-event-1",
+            title="Provider Event",
+            start_time=now,
+            end_time=now,
+            location="Remote",
+            metadata={"source": "test"},
+        )
+
     @pytest.mark.asyncio
-    async def test_sync_google_calendar(self, service):
+    async def test_sync_google_calendar(self, mock_repo, provider_event):
         """BR-CAL-040: Google Calendar sync"""
         user_id = CalendarTestDataFactory.make_user_id()
         credentials = CalendarTestDataFactory.make_credentials()
+        provider_client = StubProviderClient(
+            ProviderSyncResult(events=[provider_event], sync_token="google-token-1")
+        )
+        service = CalendarService(
+            repository=mock_repo,
+            provider_clients={SyncProvider.GOOGLE.value: provider_client},
+        )
 
         result = await service.sync_with_external_calendar(
             user_id=user_id,
@@ -46,10 +65,18 @@ class TestSyncWithExternalCalendar:
 
         assert result is not None
         assert result.provider == SyncProvider.GOOGLE.value
+        assert result.synced_events == 1
+        assert result.sync_token == "google-token-1"
+        assert provider_client.calls[0]["sync_token"] is None
+
+        events = await mock_repo.get_events_by_user(user_id)
+        assert len(events) == 1
+        assert events[0].sync_provider == SyncProvider.GOOGLE.value
+        assert events[0].external_event_id == provider_event.external_event_id
 
     @pytest.mark.asyncio
     async def test_sync_apple_calendar(self, service):
-        """BR-CAL-040: Apple Calendar sync"""
+        """BR-CAL-040: Apple Calendar is explicitly unsupported for now"""
         user_id = CalendarTestDataFactory.make_user_id()
 
         result = await service.sync_with_external_calendar(
@@ -59,19 +86,88 @@ class TestSyncWithExternalCalendar:
 
         assert result is not None
         assert result.provider == SyncProvider.APPLE.value
+        assert result.status == "error"
+        assert "CalDAV" in result.message
 
     @pytest.mark.asyncio
-    async def test_sync_outlook(self, service):
+    async def test_sync_outlook(self, mock_repo, provider_event):
         """BR-CAL-040: Outlook sync"""
         user_id = CalendarTestDataFactory.make_user_id()
+        provider_client = StubProviderClient(
+            ProviderSyncResult(events=[provider_event], sync_token="outlook-delta-link")
+        )
+        service = CalendarService(
+            repository=mock_repo,
+            provider_clients={SyncProvider.OUTLOOK.value: provider_client},
+        )
 
         result = await service.sync_with_external_calendar(
             user_id=user_id,
             provider=SyncProvider.OUTLOOK.value,
+            credentials=CalendarTestDataFactory.make_credentials(),
         )
 
         assert result is not None
         assert result.provider == SyncProvider.OUTLOOK.value
+        assert result.synced_events == 1
+        assert result.sync_token == "outlook-delta-link"
+
+    @pytest.mark.asyncio
+    async def test_sync_reuses_saved_sync_token(self, mock_repo, provider_event):
+        user_id = CalendarTestDataFactory.make_user_id()
+        await mock_repo.update_sync_status(
+            user_id=user_id,
+            provider=SyncProvider.GOOGLE.value,
+            status="active",
+            synced_count=1,
+            sync_token="saved-token",
+        )
+        provider_client = StubProviderClient(
+            ProviderSyncResult(events=[provider_event], sync_token="next-token")
+        )
+        service = CalendarService(
+            repository=mock_repo,
+            provider_clients={SyncProvider.GOOGLE.value: provider_client},
+        )
+
+        result = await service.sync_with_external_calendar(
+            user_id=user_id,
+            provider=SyncProvider.GOOGLE.value,
+            credentials=CalendarTestDataFactory.make_credentials(),
+        )
+
+        assert result.status == "success"
+        assert provider_client.calls[0]["sync_token"] == "saved-token"
+        status = await service.get_sync_status(user_id, SyncProvider.GOOGLE.value)
+        assert status.sync_token == "next-token"
+
+    @pytest.mark.asyncio
+    async def test_repeated_sync_upserts_existing_external_event(
+        self, mock_repo, provider_event
+    ):
+        user_id = CalendarTestDataFactory.make_user_id()
+        provider_client = StubProviderClient(
+            ProviderSyncResult(events=[provider_event], sync_token="token")
+        )
+        service = CalendarService(
+            repository=mock_repo,
+            provider_clients={SyncProvider.GOOGLE.value: provider_client},
+        )
+
+        await service.sync_with_external_calendar(
+            user_id=user_id,
+            provider=SyncProvider.GOOGLE.value,
+            credentials=CalendarTestDataFactory.make_credentials(),
+        )
+        await service.sync_with_external_calendar(
+            user_id=user_id,
+            provider=SyncProvider.GOOGLE.value,
+            credentials=CalendarTestDataFactory.make_credentials(),
+        )
+
+        events = await mock_repo.get_events_by_user(user_id)
+        assert len(events) == 1
+        assert events[0].external_event_id == provider_event.external_event_id
 
     @pytest.mark.asyncio
     async def test_sync_unsupported_provider(self, service):
@@ -86,6 +182,16 @@ class TestSyncWithExternalCalendar:
         assert result is not None
         assert result.status == "error"
         assert "Unsupported provider" in result.message
+
+
+class StubProviderClient:
+    def __init__(self, result: ProviderSyncResult):
+        self.result = result
+        self.calls = []
+
+    async def list_events(self, credentials, *, sync_token=None):
+        self.calls.append({"credentials": credentials, "sync_token": sync_token})
+        return self.result
 
 
 class TestSyncStatus:
@@ -244,8 +350,12 @@ class TestMultiProviderSync:
             synced_count=15,
         )
 
-        google_status = await service.get_sync_status(user_id, SyncProvider.GOOGLE.value)
-        outlook_status = await service.get_sync_status(user_id, SyncProvider.OUTLOOK.value)
+        google_status = await service.get_sync_status(
+            user_id, SyncProvider.GOOGLE.value
+        )
+        outlook_status = await service.get_sync_status(
+            user_id, SyncProvider.OUTLOOK.value
+        )
 
         assert google_status is not None
         assert google_status.synced_events == 20

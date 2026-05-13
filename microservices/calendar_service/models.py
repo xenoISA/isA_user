@@ -168,6 +168,9 @@ class EventResponse(BaseModel):
     recurrence_end_date: Optional[datetime] = None
     recurrence_rule: Optional[str] = None
     reminders: List[int]
+    sync_provider: SyncProvider = SyncProvider.LOCAL
+    external_event_id: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
     is_shared: bool
     created_at: datetime
     updated_at: Optional[datetime]
@@ -193,6 +196,7 @@ class SyncStatusResponse(BaseModel):
     synced_events: int
     status: str
     message: Optional[str] = None
+    sync_token: Optional[str] = None
 
 
 __all__ = [

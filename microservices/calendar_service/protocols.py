@@ -14,16 +14,19 @@ from .models import EventResponse
 # Custom exceptions - defined here to avoid importing repository
 class CalendarEventNotFoundError(Exception):
     """Calendar event not found"""
+
     pass
 
 
 class DuplicateEventError(Exception):
     """Duplicate event error"""
+
     pass
 
 
 class InvalidDateRangeError(Exception):
     """Invalid date range error"""
+
     pass
 
 
@@ -85,6 +88,7 @@ class CalendarEventRepositoryProtocol(Protocol):
         status: str,
         synced_count: int = 0,
         error_message: str = None,
+        sync_token: str = None,
     ) -> bool:
         """Update external calendar sync status"""
         ...
@@ -93,6 +97,12 @@ class CalendarEventRepositoryProtocol(Protocol):
         self, user_id: str, provider: str = None
     ) -> Optional[Dict[str, Any]]:
         """Get sync status for external calendars"""
+        ...
+
+    async def upsert_external_event(
+        self, event_data: Dict[str, Any]
+    ) -> Optional[EventResponse]:
+        """Insert or update an externally synced calendar event"""
         ...
 
     async def delete_user_data(self, user_id: str) -> int:
