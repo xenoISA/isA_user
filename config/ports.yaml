@@ -400,6 +400,11 @@ microservices:
     k8s_service: "sharing"
     description: "Session share links"
 
+  project_service:
+    port: 8260
+    k8s_service: "project"
+    description: "Project workspace management"
+
 # =============================================================================
 # Port Ranges Summary
 # =============================================================================

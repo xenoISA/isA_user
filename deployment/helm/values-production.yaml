@@ -383,3 +383,11 @@ services:
     name: user-fulfillment-service
     repository: isa/user-fulfillment
     port: 8254
+  sharing:
+    name: user-sharing-service
+    repository: isa/user-sharing
+    port: 8255
+  project:
+    name: user-project-service
+    repository: isa/user-project
+    port: 8260
