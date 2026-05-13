@@ -14,8 +14,11 @@ PROJECT_ROOT = os.path.dirname(
 )
 sys.path.insert(0, PROJECT_ROOT)
 
-from microservices.sharing_service import main as sharing_main
-from microservices.sharing_service.models import ShareResponse, SharedSessionResponse
+from microservices.sharing_service import main as sharing_main  # noqa: E402
+from microservices.sharing_service.models import (  # noqa: E402
+    ShareResponse,
+    SharedSessionResponse,
+)
 
 
 class FakeSharingService:
@@ -36,6 +39,11 @@ class FakeSharingService:
                 session_id="sess-1",
                 session_summary="Frozen summary",
                 permissions="view_only",
+                capabilities={
+                    "can_view": True,
+                    "can_comment": False,
+                    "can_edit": False,
+                },
                 messages=[{"id": "msg-1", "role": "user", "content": "hello"}],
                 message_count=1,
             )
@@ -81,6 +89,11 @@ def test_public_shared_route_alias_returns_read_only_snapshot():
 
     assert response.status_code == 200
     assert response.json()["session_summary"] == "Frozen summary"
+    assert response.json()["capabilities"] == {
+        "can_view": True,
+        "can_comment": False,
+        "can_edit": False,
+    }
     assert response.json()["messages"] == [
         {"id": "msg-1", "role": "user", "content": "hello"}
     ]

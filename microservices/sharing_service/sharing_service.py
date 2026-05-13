@@ -252,6 +252,7 @@ class SharingService:
                 session_id=share.session_id,
                 session_summary=session.get("session_summary", ""),
                 permissions=share.permissions,
+                capabilities=self._share_capabilities(share.permissions),
                 messages=messages,
                 message_count=session.get("message_count") or len(messages),
                 created_at=session.get("created_at"),
@@ -423,6 +424,14 @@ class SharingService:
             access_count=share.access_count,
             created_at=share.created_at,
         )
+
+    def _share_capabilities(self, permission: str) -> Dict[str, bool]:
+        """Map stored share permission level to public response capabilities."""
+        if permission == "can_edit":
+            return {"can_view": True, "can_comment": True, "can_edit": True}
+        if permission == "can_comment":
+            return {"can_view": True, "can_comment": True, "can_edit": False}
+        return {"can_view": True, "can_comment": False, "can_edit": False}
 
     def _build_session_snapshot(
         self,

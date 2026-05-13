@@ -9,25 +9,27 @@ import os
 import sys
 import pytest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 sys.path.insert(0, PROJECT_ROOT)
 
-from microservices.sharing_service.models import (
+from microservices.sharing_service.models import (  # noqa: E402
     Share,
     ShareCreateRequest,
     SharePermission,
 )
-from microservices.sharing_service.protocols import (
+from microservices.sharing_service.protocols import (  # noqa: E402
     ShareExpiredError,
     ShareNotFoundError,
     SharePermissionError,
     ShareValidationError,
 )
-from microservices.sharing_service.factory import create_sharing_service_for_testing
+from microservices.sharing_service.factory import (  # noqa: E402
+    create_sharing_service_for_testing,
+)
 
 pytestmark = pytest.mark.component
 
@@ -231,7 +233,44 @@ class TestAccessShare:
 
         assert result.session_id == "sess-1"
         assert result.permissions == "view_only"
+        assert result.capabilities.can_view is True
+        assert result.capabilities.can_comment is False
+        assert result.capabilities.can_edit is False
         assert result.message_count == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("permission", "can_comment", "can_edit"),
+        [
+            ("view_only", False, False),
+            ("can_comment", True, False),
+            ("can_edit", True, True),
+        ],
+    )
+    async def test_access_share_maps_permission_capabilities(
+        self, sharing_service, mock_share_repo, permission, can_comment, can_edit
+    ):
+        mock_share_repo.get_by_token.return_value = _make_share(
+            permissions=permission,
+        ).model_copy(
+            update={
+                "session_snapshot": {
+                    "session_id": "sess-1",
+                    "session_summary": "Frozen summary",
+                    "message_count": 1,
+                },
+                "messages_snapshot": [
+                    {"id": "msg-1", "role": "user", "content": "frozen"}
+                ],
+            }
+        )
+
+        result = await sharing_service.access_share("test-token-abc")
+
+        assert result.permissions == permission
+        assert result.capabilities.can_view is True
+        assert result.capabilities.can_comment is can_comment
+        assert result.capabilities.can_edit is can_edit
 
     @pytest.mark.asyncio
     async def test_access_share_uses_snapshot_not_live_session(
