@@ -15,13 +15,27 @@ Note: Authorization/permission control is handled by separate Authorization micr
 
 import os
 from contextlib import asynccontextmanager
+from html import escape
 from typing import Optional, Dict, Any, List
+from urllib.parse import urlencode
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, timedelta
 import uvicorn
 
 # FastAPI imports
-from fastapi import FastAPI, HTTPException, Depends, status, Query, Form, Security
+from fastapi import (
+    Cookie,
+    FastAPI,
+    Header,
+    HTTPException,
+    Depends,
+    Request,
+    status,
+    Query,
+    Form,
+    Security,
+)
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # 导入新实现的服务
@@ -774,8 +788,178 @@ class ConsentApprovalRequest(BaseModel):
     code_challenge_method: Optional[str] = Field(None, description="PKCE method (S256)")
 
 
+def _oauth_redirect_url(
+    redirect_uri: str,
+    params: Dict[str, Optional[str]],
+) -> str:
+    """Append OAuth response parameters to the client's redirect URI."""
+    query_params = {
+        key: value for key, value in params.items() if value is not None and value != ""
+    }
+    separator = "&" if "?" in redirect_uri else "?"
+    return f"{redirect_uri}{separator}{urlencode(query_params)}"
+
+
+def _consent_payload(
+    *,
+    client_id: str,
+    client: Dict[str, Any],
+    redirect_uri: str,
+    scope: str,
+    state: str,
+    resource: Optional[str],
+    code_challenge: Optional[str],
+    code_challenge_method: Optional[str],
+) -> Dict[str, Optional[str]]:
+    return {
+        "action": "consent_required",
+        "client_id": client_id,
+        "client_name": client.get("client_name", client_id),
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+        "state": state,
+        "resource": resource,
+        "code_challenge": code_challenge,
+        "code_challenge_method": code_challenge_method,
+    }
+
+
+def _render_consent_html(payload: Dict[str, Optional[str]]) -> HTMLResponse:
+    scopes = [scope for scope in (payload.get("scope") or "").split() if scope]
+    scope_items = "".join(f"<li>{escape(scope)}</li>" for scope in scopes)
+    if not scope_items:
+        scope_items = "<li>No scopes requested</li>"
+
+    def hidden(name: str) -> str:
+        value = payload.get(name)
+        if value is None:
+            return ""
+        return (
+            f'<input type="hidden" name="{escape(name)}" '
+            f'value="{escape(str(value), quote=True)}">'
+        )
+
+    hidden_fields = "\n".join(
+        hidden(name)
+        for name in (
+            "client_id",
+            "redirect_uri",
+            "scope",
+            "state",
+            "resource",
+            "code_challenge",
+            "code_challenge_method",
+        )
+    )
+
+    client_name = escape(str(payload.get("client_name") or payload["client_id"]))
+    resource = escape(str(payload.get("resource") or "Default resource"))
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize {client_name}</title>
+  <style>
+    :root {{ color-scheme: light dark; font-family: Inter, system-ui, sans-serif; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #171717; }}
+    main {{ width: min(560px, calc(100vw - 32px)); background: #fff; border: 1px solid #d9dde3; border-radius: 8px; padding: 28px; box-shadow: 0 12px 40px rgba(15, 23, 42, .08); }}
+    h1 {{ margin: 0 0 12px; font-size: 24px; line-height: 1.2; }}
+    p {{ margin: 0 0 18px; color: #505766; }}
+    ul {{ margin: 0 0 22px; padding-left: 20px; }}
+    li {{ margin: 8px 0; }}
+    .resource {{ padding: 12px; border: 1px solid #d9dde3; border-radius: 6px; background: #f9fafb; word-break: break-word; }}
+    .actions {{ display: flex; gap: 12px; margin-top: 24px; }}
+    button {{ min-height: 40px; border-radius: 6px; padding: 0 16px; border: 1px solid #b8c0cc; font-weight: 600; cursor: pointer; }}
+    .approve {{ background: #111827; color: #fff; border-color: #111827; }}
+    .deny {{ background: #fff; color: #111827; }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ background: #0f1115; color: #f3f4f6; }}
+      main {{ background: #181b22; border-color: #343946; }}
+      p {{ color: #b9c0cc; }}
+      .resource {{ background: #11141a; border-color: #343946; }}
+      .deny {{ background: #181b22; color: #f3f4f6; border-color: #4b5563; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Authorize {client_name}</h1>
+    <p>This application is requesting access to your isA account.</p>
+    <h2>Requested scopes</h2>
+    <ul>{scope_items}</ul>
+    <h2>Resource</h2>
+    <div class="resource">{resource}</div>
+    <div class="actions">
+      <form method="post" action="/oauth/consent-approval/form">
+        {hidden_fields}
+        <button class="approve" type="submit">Approve</button>
+      </form>
+      <form method="post" action="/oauth/consent-denial/form">
+        {hidden_fields}
+        <button class="deny" type="submit">Deny</button>
+      </form>
+    </div>
+  </main>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+
+def _wants_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return "text/html" in accept and "application/json" not in accept
+
+
+async def _validate_oauth_client_redirect(
+    *,
+    client_id: str,
+    redirect_uri: str,
+    oauth_repo: OAuthClientRepository,
+) -> Dict[str, Any]:
+    client = await oauth_repo.get_client(client_id)
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_client: Client not found",
+        )
+
+    allowed_uris = client.get("redirect_uris", [])
+    if allowed_uris and redirect_uri not in allowed_uris:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_request: redirect_uri not registered",
+        )
+    return client
+
+
+async def _caller_from_browser_or_bearer(
+    *,
+    access_token: Optional[str],
+    authorization: Optional[str],
+    auth_service: AuthenticationService,
+) -> Dict[str, Any]:
+    token = access_token
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+        )
+
+    result = await auth_service.verify_access_token_for_resource(token)
+    if not result.get("valid"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=result.get("error", "Invalid token"),
+        )
+    return result
+
+
 @app.get("/oauth/authorize")
 async def oauth_authorize(
+    request: Request,
     response_type: str = Query(..., description="Must be 'code'"),
     client_id: str = Query(..., description="OAuth client ID"),
     redirect_uri: str = Query(..., description="Callback URI"),
@@ -802,21 +986,11 @@ async def oauth_authorize(
             detail="unsupported_response_type: only 'code' is supported",
         )
 
-    # Validate client exists
-    client = await oauth_repo.get_client(client_id)
-    if not client:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid_client: Client not found",
-        )
-
-    # Validate redirect_uri
-    allowed_uris = client.get("redirect_uris", [])
-    if allowed_uris and redirect_uri not in allowed_uris:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid_request: redirect_uri not registered",
-        )
+    client = await _validate_oauth_client_redirect(
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        oauth_repo=oauth_repo,
+    )
 
     # Validate PKCE requirements
     client_type = client.get("client_type", "confidential")
@@ -833,17 +1007,21 @@ async def oauth_authorize(
                 detail="invalid_request: only S256 code_challenge_method supported",
             )
 
-    return {
-        "action": "consent_required",
-        "client_id": client_id,
-        "client_name": client.get("client_name", client_id),
-        "redirect_uri": redirect_uri,
-        "scope": scope,
-        "state": state,
-        "resource": resource,
-        "code_challenge": code_challenge,
-        "code_challenge_method": code_challenge_method,
-    }
+    payload = _consent_payload(
+        client_id=client_id,
+        client=client,
+        redirect_uri=redirect_uri,
+        scope=scope,
+        state=state,
+        resource=resource,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+    )
+
+    if _wants_html(request):
+        return _render_consent_html(payload)
+
+    return payload
 
 
 @app.post("/oauth/consent-approval")
@@ -884,6 +1062,88 @@ async def oauth_consent_approval(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+
+
+@app.post("/oauth/consent-approval/form")
+async def oauth_consent_approval_form(
+    client_id: str = Form(...),
+    redirect_uri: str = Form(...),
+    scope: str = Form(""),
+    state: str = Form(""),
+    resource: Optional[str] = Form(None),
+    code_challenge: Optional[str] = Form(None),
+    code_challenge_method: Optional[str] = Form(None),
+    access_token: Optional[str] = Cookie(None, alias="isa_access_token"),
+    authorization: Optional[str] = Header(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_code_service: AuthorizationCodeService = Depends(
+        get_authorization_code_service
+    ),
+):
+    """Process browser consent approval and redirect back to the OAuth client."""
+    caller = await _caller_from_browser_or_bearer(
+        access_token=access_token,
+        authorization=authorization,
+        auth_service=auth_service,
+    )
+    user_id = caller.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Cannot determine user identity from token",
+        )
+
+    try:
+        result = await authz_code_service.create_authorization_request(
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            scope=scope,
+            state=state,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
+            resource=resource,
+            user_id=user_id,
+            organization_id=caller.get("organization_id"),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    return RedirectResponse(
+        _oauth_redirect_url(
+            result["redirect_uri"],
+            {"code": result["code"], "state": result.get("state")},
+        ),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/oauth/consent-denial/form")
+async def oauth_consent_denial_form(
+    client_id: str = Form(...),
+    redirect_uri: str = Form(...),
+    state: str = Form(""),
+    oauth_repo: OAuthClientRepository = Depends(get_oauth_client_repository),
+):
+    """Process browser consent denial and redirect with OAuth access_denied."""
+    await _validate_oauth_client_redirect(
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        oauth_repo=oauth_repo,
+    )
+    return RedirectResponse(
+        _oauth_redirect_url(
+            redirect_uri,
+            {
+                "error": "access_denied",
+                "error_description": f"User denied access for {client_id}",
+                "state": state,
+            },
+        ),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post("/api/v1/auth/oauth/clients")
