@@ -33,6 +33,13 @@ class _NoopMetric:
 
 
 def _install_isa_common_observability_stubs():
+    if "bcrypt" not in sys.modules:
+        bcrypt = types.ModuleType("bcrypt")
+        bcrypt.gensalt = lambda *args, **kwargs: b"salt"
+        bcrypt.hashpw = lambda password, salt: b"hashed"
+        bcrypt.checkpw = lambda password, hashed: True
+        sys.modules["bcrypt"] = bcrypt
+
     if "isa_common.observability" not in sys.modules:
         observability = types.ModuleType("isa_common.observability")
         observability.setup_observability = lambda *args, **kwargs: {
