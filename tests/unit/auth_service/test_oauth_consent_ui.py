@@ -6,6 +6,7 @@ Covers: xenoISA/isA_user#156
 
 import os
 import sys
+import types
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlparse
 
@@ -18,6 +19,41 @@ PROJECT_ROOT = os.path.dirname(
 sys.path.insert(0, PROJECT_ROOT)
 
 pytestmark = pytest.mark.unit
+
+
+class _NoopMetric:
+    def labels(self, *args, **kwargs):
+        return self
+
+    def inc(self, *args, **kwargs):
+        return None
+
+    def observe(self, *args, **kwargs):
+        return None
+
+
+def _install_isa_common_observability_stubs():
+    if "isa_common.observability" not in sys.modules:
+        observability = types.ModuleType("isa_common.observability")
+        observability.setup_observability = lambda *args, **kwargs: {
+            "metrics": False,
+            "logging": False,
+            "tracing": False,
+        }
+        sys.modules["isa_common.observability"] = observability
+
+    if "isa_common.metrics" not in sys.modules:
+        metrics = types.ModuleType("isa_common.metrics")
+        metrics.setup_metrics = lambda *args, **kwargs: {
+            "metrics": False,
+            "logging": False,
+            "tracing": False,
+        }
+        metrics.create_counter = lambda *args, **kwargs: _NoopMetric()
+        metrics.create_histogram = lambda *args, **kwargs: _NoopMetric()
+        metrics.create_gauge = lambda *args, **kwargs: _NoopMetric()
+        metrics.metrics_text = lambda: b""
+        sys.modules["isa_common.metrics"] = metrics
 
 
 @pytest.fixture
@@ -71,6 +107,8 @@ def auth_service():
 
 @pytest.fixture
 async def client(oauth_repo, auth_code_service, auth_service):
+    _install_isa_common_observability_stubs()
+
     from microservices.auth_service.main import (
         app,
         get_auth_service,
