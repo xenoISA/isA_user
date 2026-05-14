@@ -10,6 +10,7 @@ from microservices.sharing_service.models import (
     ShareCreateRequest,
     ShareListResponse,
     SharePermission,
+    SharePolicy,
     ShareResponse,
     SharedSessionResponse,
     ShareCreatedEventData,
@@ -36,6 +37,8 @@ class TestShareCreateRequest:
         assert req.permissions == SharePermission.VIEW_ONLY
         assert req.expires_in_hours is None
         assert req.share_until_message_id is None
+        assert req.organization_id is None
+        assert req.recipient_email is None
 
     def test_custom_permissions(self):
         req = ShareCreateRequest(permissions=SharePermission.CAN_EDIT)
@@ -60,6 +63,34 @@ class TestShareCreateRequest:
     def test_share_until_message_id(self):
         req = ShareCreateRequest(share_until_message_id="msg-123")
         assert req.share_until_message_id == "msg-123"
+
+    def test_organization_policy_fields(self):
+        req = ShareCreateRequest(
+            organization_id="org-1",
+            recipient_email="teammate@example.com",
+        )
+        assert req.organization_id == "org-1"
+        assert req.recipient_email == "teammate@example.com"
+
+
+class TestSharePolicy:
+    def test_defaults_allow_personal_style_links(self):
+        policy = SharePolicy()
+        assert policy.public_links_enabled is True
+        assert policy.require_expiry is False
+        assert policy.max_expiry_hours is None
+        assert policy.allowed_domains == []
+
+    def test_policy_with_limits(self):
+        policy = SharePolicy(
+            public_links_enabled=True,
+            require_expiry=True,
+            max_expiry_hours=72,
+            allowed_domains=["example.com"],
+        )
+        assert policy.require_expiry is True
+        assert policy.max_expiry_hours == 72
+        assert policy.allowed_domains == ["example.com"]
 
 
 class TestShare:

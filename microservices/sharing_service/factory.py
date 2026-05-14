@@ -16,6 +16,7 @@ def create_sharing_service(
     config: Optional[ConfigManager] = None,
     event_bus=None,
     session_client=None,
+    share_policy_provider=None,
 ) -> SharingService:
     """
     Create SharingService with real dependencies.
@@ -40,6 +41,7 @@ def create_sharing_service(
         share_repo=share_repository,
         event_bus=event_bus,
         session_client=session_client,
+        share_policy_provider=share_policy_provider,
     )
 
 
@@ -47,6 +49,7 @@ def create_sharing_service_for_testing(
     share_repo=None,
     event_bus=None,
     session_client=None,
+    share_policy_provider=None,
 ) -> SharingService:
     """
     Create SharingService with injected dependencies for testing.
@@ -57,4 +60,5 @@ def create_sharing_service_for_testing(
         share_repo=share_repo,
         event_bus=event_bus,
         session_client=session_client,
+        share_policy_provider=share_policy_provider,
     )
