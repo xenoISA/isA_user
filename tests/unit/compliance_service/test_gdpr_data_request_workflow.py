@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 
 import pytest
@@ -335,3 +336,60 @@ async def test_approved_delete_request_publishes_user_deleted_cascade_event():
         completed.metadata["deletion_result"]["cascade_event"]["subject"]
         == "account_service.user.deleted"
     )
+
+
+async def test_gdpr_workflow_emits_privacy_safe_admin_audit_events_and_tombstone():
+    repository = FakeGDPRRepository()
+    repository.checks.append(_check("user-1"))
+    event_bus = FakeEventBus()
+    service = _build_service(repository)
+    service.event_bus = event_bus
+    data_request = await service.create_data_request(
+        GDPRDataRequestCreate(
+            request_type=GDPRDataRequestType.DELETE,
+            user_id="user-1",
+            organization_id="org-1",
+            requested_by="admin-1",
+            reason="right to erasure",
+        )
+    )
+    approved = await service.approve_data_request_deletion(
+        data_request.request_id,
+        GDPRDeletionApprovalRequest(
+            approved_by="privacy-officer-1",
+            confirmation="CONFIRM_DELETE",
+        ),
+    )
+
+    completed = await service.run_data_request(approved.request_id)
+
+    expected_subject_hash = hashlib.sha256(b"user-1").hexdigest()
+    admin_audit_events = [
+        item
+        for item in event_bus.published
+        if item["subject"]
+        and item["subject"].startswith("admin.action.gdpr_data_request.")
+    ]
+    assert [item["subject"] for item in admin_audit_events] == [
+        "admin.action.gdpr_data_request.created",
+        "admin.action.gdpr_data_request.deletion_approved",
+        "admin.action.gdpr_data_request.completed",
+    ]
+
+    completed_audit = admin_audit_events[-1]["event"]
+    assert completed_audit.source == "compliance_service"
+    assert completed_audit.data["admin_user_id"] == "privacy-officer-1"
+    assert completed_audit.data["action"] == "gdpr_data_request.completed"
+    assert completed_audit.data["resource_type"] == "gdpr_data_request"
+    assert completed_audit.data["resource_id"] == data_request.request_id
+    assert (
+        completed_audit.data["metadata"]["subject_user_hash"] == expected_subject_hash
+    )
+    assert "user-1" not in json.dumps(completed_audit.data["metadata"])
+
+    tombstone = completed.metadata["deletion_result"]["tombstone"]
+    assert tombstone["gdpr_request_id"] == data_request.request_id
+    assert tombstone["subject_user_hash"] == expected_subject_hash
+    assert tombstone["records_deleted"]["compliance_service"] == 1
+    assert tombstone["approved_by"] == "privacy-officer-1"
+    assert "user-1" not in json.dumps(tombstone)
