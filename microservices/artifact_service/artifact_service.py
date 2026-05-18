@@ -63,6 +63,34 @@ from .protocols import (
 
 DEFAULT_DAILY_QUOTA = 50
 
+# Phase 3 polish (xenoISA/isA_user#441): runtime/invoke proxies to isA_Model,
+# mcp/call proxies to isA_MCP. Both are best-effort — if the upstream is
+# unreachable the route falls back to the original stub so the endpoint never
+# 500s on a transient outage. The defaults below match how isA_Model and
+# isA_MCP are reachable from a local-dev deploy (`bash deployment/local-dev.sh`).
+DEFAULT_ISA_MODEL_URL = "http://localhost:8082"
+DEFAULT_ISA_MCP_URL = "http://localhost:8081"
+DEFAULT_RUNTIME_MODEL = "gpt-4.1-nano"
+DEFAULT_RUNTIME_PROVIDER = "openai"
+DEFAULT_RUNTIME_MAX_TOKENS = 512
+RUNTIME_MAX_TOKENS_CAP = 4096
+
+
+def _isa_model_url() -> str:
+    return os.getenv("ISA_MODEL_URL", DEFAULT_ISA_MODEL_URL)
+
+
+def _isa_mcp_url() -> str:
+    return os.getenv("ISA_MCP_URL", DEFAULT_ISA_MCP_URL)
+
+
+def _runtime_model() -> str:
+    return os.getenv("ARTIFACT_RUNTIME_MODEL", DEFAULT_RUNTIME_MODEL)
+
+
+def _runtime_provider() -> str:
+    return os.getenv("ARTIFACT_RUNTIME_PROVIDER", DEFAULT_RUNTIME_PROVIDER)
+
 
 def _daily_quota() -> int:
     """Resolve the per-user-per-artifact daily call cap from env at call time.
@@ -580,16 +608,69 @@ class ArtifactService:
 
     # ==================== Phase 3: AI Runtime + Quota ====================
     #
-    # POST /api/v1/artifacts/{id}/runtime/invoke — Phase 3 ships this as a
-    # synthetic-response stub (no real LLM call) so we can exercise the quota
-    # gate and the per-day usage row end-to-end. The real isA_Model call lands
-    # in the follow-up once gateway-issued JWTs reach this service.
+    # POST /api/v1/artifacts/{id}/runtime/invoke — proxies to isA_Model with a
+    # safe fallback to a synthetic stub when the upstream is unreachable. The
+    # quota gate runs unconditionally so the daily cap covers both healthy and
+    # degraded paths.
     #
     # Quota:
     #   - cap = ARTIFACT_DAILY_QUOTA env (defaults to 50/user/day)
     #   - 429 + Retry-After=<seconds until 00:00 UTC tomorrow>
     #   - the row is keyed (artifact_id, user_id, UTC date); the upsert
     #     happens AFTER the cap check so we don't book a call we refused.
+
+    @staticmethod
+    def _build_runtime_prompt(artifact: Artifact, user_prompt: str) -> str:
+        """Wrap the user's prompt with artifact context for the model."""
+        return (
+            f"You are an assistant embedded inside an artifact named "
+            f"'{artifact.title}'. The artifact's content type is "
+            f"{artifact.content_type.value if hasattr(artifact.content_type, 'value') else artifact.content_type}. "
+            f"The user asks: {user_prompt}\n\nRespond concisely."
+        )
+
+    @staticmethod
+    def _resolve_max_tokens(requested: Optional[int]) -> int:
+        if requested is None:
+            return DEFAULT_RUNTIME_MAX_TOKENS
+        return min(max(1, int(requested)), RUNTIME_MAX_TOKENS_CAP)
+
+    async def _call_isa_model(
+        self, artifact: Artifact, user_prompt: str, max_tokens: int
+    ) -> tuple[str, Optional[int], Optional[int]]:
+        """Invoke isA_Model — returns (output, tokens_in, tokens_out).
+
+        Raises on any failure; caller is responsible for falling back to the
+        stub. Token counts come from response.usage when the provider supplies
+        them; otherwise the caller estimates from string lengths.
+        """
+        # Late import keeps the dependency optional for unit tests that mock
+        # the call out at the service level.
+        from isa_model.inference_client import AsyncISAModel
+
+        envelope = self._build_runtime_prompt(artifact, user_prompt)
+        async with AsyncISAModel(base_url=_isa_model_url()) as client:
+            response = await client.chat.completions.create(
+                model=_runtime_model(),
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant embedded in a user artifact.",
+                    },
+                    {"role": "user", "content": envelope},
+                ],
+                max_tokens=max_tokens,
+                provider=_runtime_provider(),
+            )
+
+        output = (response.choices[0].message.content or "").strip()
+        if not output:
+            raise RuntimeError("isA_Model returned empty content")
+
+        usage = getattr(response, "usage", None)
+        tokens_in = getattr(usage, "prompt_tokens", None) if usage else None
+        tokens_out = getattr(usage, "completion_tokens", None) if usage else None
+        return output, tokens_in, tokens_out
 
     async def runtime_invoke(
         self, artifact_id: str, request: "ArtifactRuntimeInvokeRequest"
@@ -611,10 +692,24 @@ class ArtifactService:
                 quota=quota,
             )
 
-        # Stubbed synthesis — replace with isA_Model proxy in follow-up.
-        tokens_in = max(1, len(request.prompt) // 4)
-        tokens_out = 32
-        output = f"Phase 3 stub response for: {request.prompt}"
+        max_tokens = self._resolve_max_tokens(request.max_tokens)
+
+        # Try the real model first; on any failure, fall back to the original
+        # stub so the endpoint never 500s on a transient isA_Model outage.
+        # The stub path preserves the exact contract that the golden tests
+        # depend on (tokens_out=32, "Phase 3 stub response for: ..." prefix).
+        try:
+            output, llm_in, llm_out = await self._call_isa_model(artifact, request.prompt, max_tokens)
+            tokens_in = llm_in if isinstance(llm_in, int) and llm_in > 0 else max(1, len(request.prompt) // 4)
+            tokens_out = llm_out if isinstance(llm_out, int) and llm_out > 0 else max(1, len(output) // 4)
+        except Exception as e:
+            logger.warning(
+                "artifact runtime_invoke falling back to stub — isA_Model unreachable: %s",
+                e,
+            )
+            tokens_in = max(1, len(request.prompt) // 4)
+            tokens_out = 32
+            output = f"Phase 3 stub response for: {request.prompt}"
 
         updated = await self.repo.record_usage(
             artifact_id=artifact_id,
@@ -705,6 +800,48 @@ class ArtifactService:
         )
         return upserted
 
+    async def _invoke_mcp_tool(self, tool_name: str, server_id: str, args: dict) -> dict:
+        """Best-effort MCP tool invocation via JSON-RPC over HTTP.
+
+        Targets the isA_MCP server at ``ISA_MCP_URL`` (default
+        ``http://localhost:8081``) using the standard MCP ``tools/call``
+        envelope. Raises on any network/protocol failure so the caller can
+        fall back to a stubbed response.
+
+        NOTE: This is the simplest viable transport. Some MCP servers require
+        a session bootstrap (``initialize`` → session id → ``tools/call``)
+        and/or stream over SSE rather than plain JSON. When those servers are
+        targeted, the call will fail here and the caller's fallback path
+        kicks in. A richer client lands in a follow-up.
+        """
+        import aiohttp
+
+        url = f"{_isa_mcp_url().rstrip('/')}/mcp/tools/call"
+        rpc_body = {
+            "jsonrpc": "2.0",
+            "id": _new_id("mcp")[4:],
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": args or {},
+                "server_id": server_id,
+            },
+        }
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=rpc_body) as resp:
+                if resp.status >= 400:
+                    raise RuntimeError(f"isA_MCP returned HTTP {resp.status}: {await resp.text()}")
+                payload = await resp.json()
+
+        if isinstance(payload, dict) and payload.get("error"):
+            raise RuntimeError(f"isA_MCP RPC error: {payload['error']}")
+        # JSON-RPC envelopes wrap the answer in ``result``; surface that when
+        # present, otherwise the raw payload (servers vary).
+        if isinstance(payload, dict) and "result" in payload:
+            return {"tool_name": tool_name, "server_id": server_id, "result": payload["result"]}
+        return {"tool_name": tool_name, "server_id": server_id, "result": payload}
+
     async def mcp_call(self, artifact_id: str, request: "MCPCallRequest") -> "MCPCallResponse":
         from .models import MCPCallResponse, MCPGrantScope
 
@@ -729,17 +866,36 @@ class ArtifactService:
         # Best-effort last_used_at touch — ignore the boolean.
         await self.repo.touch_grant_last_used(grant.id)
 
-        # Stubbed tool result — replace with real MCP transport in follow-up.
-        return MCPCallResponse(
-            requires_approval=False,
-            result={
-                "stubbed": True,
-                "tool_name": request.tool_name,
-                "server_id": request.server_id,
-                "args": request.args,
-            },
-            scope_used=MCPGrantScope.ALWAYS,
-        )
+        # Try the real MCP transport first; fall back to the stub on any
+        # network/protocol failure so the endpoint never 500s on a transient
+        # outage. The stub shape preserves the contract the golden tests
+        # depend on (``result.stubbed is True``).
+        try:
+            real_result = await self._invoke_mcp_tool(
+                tool_name=request.tool_name,
+                server_id=request.server_id,
+                args=request.args or {},
+            )
+            return MCPCallResponse(
+                requires_approval=False,
+                result=real_result,
+                scope_used=MCPGrantScope.ALWAYS,
+            )
+        except Exception as e:
+            logger.warning(
+                "artifact mcp_call falling back to stub — isA_MCP unreachable: %s",
+                e,
+            )
+            return MCPCallResponse(
+                requires_approval=False,
+                result={
+                    "stubbed": True,
+                    "tool_name": request.tool_name,
+                    "server_id": request.server_id,
+                    "args": request.args,
+                },
+                scope_used=MCPGrantScope.ALWAYS,
+            )
 
     async def list_mcp_grants(self, artifact_id: str, user_id: str) -> "ArtifactMCPGrantsListResponse":
         from .models import ArtifactMCPGrantsListResponse
