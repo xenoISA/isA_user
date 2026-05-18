@@ -197,6 +197,100 @@ class ArtifactScope(str, Enum):
     SHARED = "shared"
 
 
+# ==================== Phase 2: Shares / Publish / Remix ====================
+
+
+class ArtifactShareVisibility(str, Enum):
+    """Share-link visibility. Only ``public`` and ``org`` ever land in
+    ``artifact_shares.visibility`` per migration 001's CHECK constraint."""
+
+    PUBLIC = "public"
+    ORG = "org"
+
+
+class ArtifactShare(BaseModel):
+    """An ``artifact_shares`` row — public/org share link with optional
+    version pin and expiry."""
+
+    token: str
+    artifact_id: str
+    version_pin: Optional[int] = None
+    visibility: ArtifactShareVisibility
+    org_id: Optional[str] = None
+    created_by: str
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    view_count: int = 0
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PublishArtifactRequest(BaseModel):
+    """POST /api/v1/artifacts/{artifact_id}/publish body."""
+
+    user_id: str
+    visibility: ArtifactShareVisibility
+    version_pin: Optional[int] = Field(None, ge=1)
+    expires_at: Optional[datetime] = None
+    org_id: Optional[str] = None
+
+
+class PublishArtifactResponse(BaseModel):
+    """Returned to the owner after a successful publish."""
+
+    token: str
+    url: str
+    visibility: ArtifactShareVisibility
+    expires_at: Optional[datetime] = None
+    version_pin: Optional[int] = None
+    artifact_id: str
+
+
+class RevokeArtifactRequest(BaseModel):
+    """POST /api/v1/artifacts/{artifact_id}/revoke body.
+
+    When ``token`` is supplied only that share is revoked; otherwise ALL
+    active shares for the artifact are revoked in one shot.
+    """
+
+    user_id: str
+    token: Optional[str] = None
+
+
+class RevokeArtifactResponse(BaseModel):
+    revoked: int
+
+
+class ArtifactSharesListResponse(BaseModel):
+    shares: List[ArtifactShare]
+
+
+class PublicArtifactShareMeta(BaseModel):
+    """Caller-facing share metadata exposed via the public reader."""
+
+    visibility: ArtifactShareVisibility
+    view_count: int
+    expires_at: Optional[datetime] = None
+    version_pin: Optional[int] = None
+
+
+class PublicArtifactResponse(BaseModel):
+    """Payload returned by ``GET /api/v1/shares/artifacts/{token}``."""
+
+    artifact: Artifact
+    version: ArtifactVersion
+    share: PublicArtifactShareMeta
+
+
+class RemixArtifactRequest(BaseModel):
+    """POST /api/v1/artifacts/remix body."""
+
+    token: str
+    user_id: str
+    source_session_id: Optional[str] = None
+
+
 # ==================== Service Status ====================
 
 
@@ -221,4 +315,15 @@ __all__ = [
     "ArtifactListItem",
     "ArtifactListResponse",
     "ArtifactServiceStatus",
+    # Phase 2
+    "ArtifactShare",
+    "ArtifactShareVisibility",
+    "PublishArtifactRequest",
+    "PublishArtifactResponse",
+    "RevokeArtifactRequest",
+    "RevokeArtifactResponse",
+    "ArtifactSharesListResponse",
+    "PublicArtifactResponse",
+    "PublicArtifactShareMeta",
+    "RemixArtifactRequest",
 ]
