@@ -410,6 +410,11 @@ microservices:
     k8s_service: "developer"
     description: "Developer journey cockpit"
 
+  project_sharing_service:
+    port: 8270
+    k8s_service: "project-sharing"
+    description: "Project-level invite/accept/revoke for project collaboration (#442, paired with isA_/#429)"
+
 # =============================================================================
 # Port Ranges Summary
 # =============================================================================
