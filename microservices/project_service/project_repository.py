@@ -65,28 +65,45 @@ class ProjectRepository:
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 org_id TEXT,
+                owner_id TEXT NOT NULL DEFAULT '',
                 name TEXT NOT NULL,
                 description TEXT,
                 custom_instructions TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                starred_at TIMESTAMPTZ NULL,
+                archived_at TIMESTAMPTZ NULL
             )
         """
-        add_projects_org_id_sql = (
-            f"ALTER TABLE {self.schema}.{self.table} "
-            "ADD COLUMN IF NOT EXISTS org_id TEXT"
+        add_projects_org_id_sql = f"ALTER TABLE {self.schema}.{self.table} ADD COLUMN IF NOT EXISTS org_id TEXT"
+        add_projects_owner_id_sql = (
+            f"ALTER TABLE {self.schema}.{self.table} ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT ''"
+        )
+        add_projects_starred_at_sql = (
+            f"ALTER TABLE {self.schema}.{self.table} ADD COLUMN IF NOT EXISTS starred_at TIMESTAMPTZ NULL"
+        )
+        add_projects_archived_at_sql = (
+            f"ALTER TABLE {self.schema}.{self.table} ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ NULL"
         )
         create_projects_user_idx_sql = (
-            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_user_id "
-            f"ON {self.schema}.{self.table}(user_id)"
+            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_user_id ON {self.schema}.{self.table}(user_id)"
         )
         create_projects_org_idx_sql = (
-            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_org_id "
-            f"ON {self.schema}.{self.table}(org_id)"
+            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_org_id ON {self.schema}.{self.table}(org_id)"
         )
         create_projects_updated_idx_sql = (
-            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_updated_at "
-            f"ON {self.schema}.{self.table}(updated_at DESC)"
+            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_updated_at ON {self.schema}.{self.table}(updated_at DESC)"
+        )
+        create_projects_owner_id_idx_sql = (
+            f"CREATE INDEX IF NOT EXISTS idx_project_projects_owner_id ON {self.schema}.{self.table}(owner_id)"
+        )
+        create_projects_owner_active_idx_sql = (
+            f"CREATE INDEX IF NOT EXISTS idx_project_projects_owner_active "
+            f"ON {self.schema}.{self.table}(owner_id) WHERE archived_at IS NULL"
+        )
+        create_projects_starred_idx_sql = (
+            f"CREATE INDEX IF NOT EXISTS idx_project_projects_starred "
+            f"ON {self.schema}.{self.table}(starred_at) WHERE starred_at IS NOT NULL"
         )
         create_project_files_table_sql = f"""
             CREATE TABLE IF NOT EXISTS {self.schema}.{self.files_table} (
@@ -113,9 +130,15 @@ class ProjectRepository:
                 await self.db.execute(create_schema_sql)
                 await self.db.execute(create_projects_table_sql)
                 await self.db.execute(add_projects_org_id_sql)
+                await self.db.execute(add_projects_owner_id_sql)
+                await self.db.execute(add_projects_starred_at_sql)
+                await self.db.execute(add_projects_archived_at_sql)
                 await self.db.execute(create_projects_user_idx_sql)
                 await self.db.execute(create_projects_org_idx_sql)
                 await self.db.execute(create_projects_updated_idx_sql)
+                await self.db.execute(create_projects_owner_id_idx_sql)
+                await self.db.execute(create_projects_owner_active_idx_sql)
+                await self.db.execute(create_projects_starred_idx_sql)
                 await self.db.execute(create_project_files_table_sql)
                 await self.db.execute(create_project_files_project_idx_sql)
                 await self.db.execute(create_project_files_created_idx_sql)
@@ -125,9 +148,7 @@ class ProjectRepository:
         self._tables_initialized = True
 
     @staticmethod
-    def _require_query_result(
-        rows: Optional[List[Dict[str, Any]]], operation: str
-    ) -> List[Dict[str, Any]]:
+    def _require_query_result(rows: Optional[List[Dict[str, Any]]], operation: str) -> List[Dict[str, Any]]:
         if rows is None:
             raise RepositoryError(f"Failed to {operation}")
         return rows
@@ -150,18 +171,21 @@ class ProjectRepository:
         description: str = None,
         custom_instructions: str = None,
         organization_id: str = None,
+        owner_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         await self._ensure_tables()
         project_id = str(uuid.uuid4())
         now = datetime.now(tz=timezone.utc)
+        effective_owner = owner_id or user_id
         try:
             async with self.db:
                 rows_affected = await self.db.execute(
-                    f"INSERT INTO {self.schema}.{self.table} (id, user_id, org_id, name, description, custom_instructions, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    f"INSERT INTO {self.schema}.{self.table} (id, user_id, org_id, owner_id, name, description, custom_instructions, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                     params=[
                         project_id,
                         user_id,
                         organization_id,
+                        effective_owner,
                         name,
                         description,
                         custom_instructions,
@@ -177,11 +201,14 @@ class ProjectRepository:
             "user_id": user_id,
             "org_id": organization_id,
             "organization_id": organization_id,
+            "owner_id": effective_owner,
             "name": name,
             "description": description,
             "custom_instructions": custom_instructions,
             "created_at": now,
             "updated_at": now,
+            "starred_at": None,
+            "archived_at": None,
         }
 
     async def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
@@ -203,28 +230,55 @@ class ProjectRepository:
         limit: int = 50,
         offset: int = 0,
         organization_id: str = None,
+        include_archived: bool = False,
+        starred_only: bool = False,
     ) -> List[Dict[str, Any]]:
+        """List projects scoped to user/org.
+
+        Filters added in story #442 (see xenoISA/isA_#429 §15.3/§15.6):
+        - include_archived=False (default) hides rows with archived_at set.
+        - starred_only=True restricts to rows with starred_at set.
+        """
         await self._ensure_tables()
+        if organization_id:
+            base_clause = "org_id = $1"
+            params: List[Any] = [organization_id]
+        else:
+            base_clause = "user_id = $1"
+            params = [user_id]
+
+        filters: List[str] = []
+        if not include_archived:
+            filters.append("archived_at IS NULL")
+        if starred_only:
+            filters.append("starred_at IS NOT NULL")
+
+        where_sql = base_clause
+        if filters:
+            where_sql = f"{base_clause} AND " + " AND ".join(filters)
+
+        order_clause = "starred_at DESC NULLS LAST, updated_at DESC" if starred_only else "updated_at DESC"
+
+        params.extend([limit, offset])
+        limit_idx = len(params) - 1
+        offset_idx = len(params)
+
+        sql = (
+            f"SELECT * FROM {self.schema}.{self.table} "
+            f"WHERE {where_sql} "
+            f"ORDER BY {order_clause} "
+            f"LIMIT ${limit_idx} OFFSET ${offset_idx}"
+        )
+
         try:
             async with self.db:
-                if organization_id:
-                    rows = await self.db.query(
-                        f"SELECT * FROM {self.schema}.{self.table} WHERE org_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
-                        params=[organization_id, limit, offset],
-                    )
-                else:
-                    rows = await self.db.query(
-                        f"SELECT * FROM {self.schema}.{self.table} WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
-                        params=[user_id, limit, offset],
-                    )
+                rows = await self.db.query(sql, params=params)
             rows = self._require_query_result(rows, "list projects")
             return [self._shape_project(r) for r in rows]
         except Exception as e:
             raise RepositoryError("Failed to list projects", cause=e) from e
 
-    async def update_project(
-        self, project_id: str, **updates
-    ) -> Optional[Dict[str, Any]]:
+    async def update_project(self, project_id: str, **updates) -> Optional[Dict[str, Any]]:
         await self._ensure_tables()
         updates["updated_at"] = datetime.now(tz=timezone.utc)
         set_clauses = []
@@ -260,9 +314,43 @@ class ProjectRepository:
             raise RepositoryError("Failed to delete project", cause=e) from e
 
     async def set_instructions(self, project_id: str, instructions: str) -> bool:
-        return bool(
-            await self.update_project(project_id, custom_instructions=instructions)
-        )
+        return bool(await self.update_project(project_id, custom_instructions=instructions))
+
+    # ── Star / Archive (#442, see xenoISA/isA_#429 §15.3, §15.6) ─────────
+
+    async def set_starred(self, project_id: str, starred: bool) -> Optional[Dict[str, Any]]:
+        """Set or clear starred_at for a project. Returns the updated project."""
+        await self._ensure_tables()
+        now = datetime.now(tz=timezone.utc) if starred else None
+        try:
+            async with self.db:
+                rows_affected = await self.db.execute(
+                    f"UPDATE {self.schema}.{self.table} SET starred_at = $1, updated_at = $2 WHERE id = $3",
+                    params=[now, datetime.now(tz=timezone.utc), project_id],
+                )
+            self._require_rows_affected(rows_affected, "update starred flag")
+            return await self.get_project(project_id)
+        except RepositoryError:
+            raise
+        except Exception as e:
+            raise RepositoryError("Failed to update starred flag", cause=e) from e
+
+    async def set_archived(self, project_id: str, archived: bool) -> Optional[Dict[str, Any]]:
+        """Set or clear archived_at for a project. Returns the updated project."""
+        await self._ensure_tables()
+        now = datetime.now(tz=timezone.utc) if archived else None
+        try:
+            async with self.db:
+                rows_affected = await self.db.execute(
+                    f"UPDATE {self.schema}.{self.table} SET archived_at = $1, updated_at = $2 WHERE id = $3",
+                    params=[now, datetime.now(tz=timezone.utc), project_id],
+                )
+            self._require_rows_affected(rows_affected, "update archived flag")
+            return await self.get_project(project_id)
+        except RepositoryError:
+            raise
+        except Exception as e:
+            raise RepositoryError("Failed to update archived flag", cause=e) from e
 
     async def count_projects(self, user_id: str) -> int:
         await self._ensure_tables()

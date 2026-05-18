@@ -52,6 +52,30 @@ PROJECT_SERVICE_ROUTES = [
         "description": "Set instructions",
     },
     {
+        "path": "/api/v1/projects/{project_id}/star",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Star project (#442)",
+    },
+    {
+        "path": "/api/v1/projects/{project_id}/star",
+        "methods": ["DELETE"],
+        "auth_required": True,
+        "description": "Unstar project (#442)",
+    },
+    {
+        "path": "/api/v1/projects/{project_id}/archive",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Archive project + revoke shares (#442)",
+    },
+    {
+        "path": "/api/v1/projects/{project_id}/unarchive",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Unarchive project (#442)",
+    },
+    {
         "path": "/api/v1/projects/{project_id}/files",
         "methods": ["GET"],
         "auth_required": True,
@@ -76,7 +100,12 @@ SERVICE_METADATA = {
     "port": 8260,
     "version": "1.0.0",
     "tags": ["v1", "user-microservice", "projects"],
-    "capabilities": ["project_crud", "knowledge_base", "custom_instructions"],
+    "capabilities": [
+        "project_crud",
+        "knowledge_base",
+        "custom_instructions",
+        "star_archive",
+    ],
     "health_check_path": "/health",
     "health_check_interval": "10s",
 }
@@ -87,12 +116,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "route_count": str(len(PROJECT_SERVICE_ROUTES)),
         "base_path": "/api/v1/projects",
         "methods": "GET,POST,PUT,DELETE",
-        "public_count": str(
-            sum(1 for r in PROJECT_SERVICE_ROUTES if not r["auth_required"])
-        ),
-        "protected_count": str(
-            sum(1 for r in PROJECT_SERVICE_ROUTES if r["auth_required"])
-        ),
+        "public_count": str(sum(1 for r in PROJECT_SERVICE_ROUTES if not r["auth_required"])),
+        "protected_count": str(sum(1 for r in PROJECT_SERVICE_ROUTES if r["auth_required"])),
     }
 
 

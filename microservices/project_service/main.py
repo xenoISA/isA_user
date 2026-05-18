@@ -2,6 +2,7 @@
 Project Microservice — CRUD for project workspaces (#258, #294)
 Port: 8260
 """
+
 from contextlib import asynccontextmanager
 
 from fastapi import (
@@ -201,10 +202,7 @@ async def get_authenticated_caller(request: Request) -> str:
 
     x_internal_service = request.headers.get("X-Internal-Service")
     x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
-    if (
-        x_internal_service == "true"
-        and x_internal_service_secret == INTERNAL_SERVICE_SECRET
-    ):
+    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
         return "internal-service"
 
     authorization = request.headers.get("authorization")
@@ -229,9 +227,7 @@ async def get_authenticated_caller(request: Request) -> str:
 # Health
 # =============================================================================
 
-health = HealthCheck(
-    "project_service", version="1.0.0", shutdown_manager=shutdown_manager
-)
+health = HealthCheck("project_service", version="1.0.0", shutdown_manager=shutdown_manager)
 
 
 @app.get("/api/v1/projects/health")
@@ -272,13 +268,22 @@ async def list_projects(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     organization_id: str = Query(None, min_length=1),
+    include_archived: bool = Query(False, description="Include archived projects (default: hide)"),
+    starred_only: bool = Query(False, description="Only return projects with starred_at set"),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
     kwargs = {}
     if organization_id:
         kwargs["organization_id"] = organization_id
-    projects = await svc.list_projects(caller_id, limit, offset, **kwargs)
+    projects = await svc.list_projects(
+        caller_id,
+        limit,
+        offset,
+        include_archived=include_archived,
+        starred_only=starred_only,
+        **kwargs,
+    )
     return {"projects": projects, "total": len(projects)}
 
 
@@ -337,6 +342,67 @@ async def set_instructions(
     return {"message": "Instructions updated"}
 
 
+# =============================================================================
+# Star / Archive (Story #442, see xenoISA/isA_#429 §15.3, §15.6)
+# =============================================================================
+
+
+@app.post("/api/v1/projects/{project_id}/star", response_model=ProjectResponse)
+async def star_project(
+    project_id: str,
+    organization_id: str = Query(None, min_length=1),
+    svc=Depends(get_service),
+    caller_id: str = Depends(get_authenticated_caller),
+):
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    return await svc.star_project(project_id, caller_id, **kwargs)
+
+
+@app.delete("/api/v1/projects/{project_id}/star", response_model=ProjectResponse)
+async def unstar_project(
+    project_id: str,
+    organization_id: str = Query(None, min_length=1),
+    svc=Depends(get_service),
+    caller_id: str = Depends(get_authenticated_caller),
+):
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    return await svc.unstar_project(project_id, caller_id, **kwargs)
+
+
+@app.post("/api/v1/projects/{project_id}/archive", response_model=ProjectResponse)
+async def archive_project(
+    project_id: str,
+    organization_id: str = Query(None, min_length=1),
+    svc=Depends(get_service),
+    caller_id: str = Depends(get_authenticated_caller),
+):
+    """Archive a project. Fires best-effort share revocation; the archive
+    flag is the source of truth even if revocation fails."""
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    return await svc.archive_project(project_id, caller_id, **kwargs)
+
+
+@app.post("/api/v1/projects/{project_id}/unarchive", response_model=ProjectResponse)
+async def unarchive_project(
+    project_id: str,
+    organization_id: str = Query(None, min_length=1),
+    svc=Depends(get_service),
+    caller_id: str = Depends(get_authenticated_caller),
+):
+    """Unarchive a project. Does NOT restore previously revoked shares
+    (per design §15.6 — owner must re-invite)."""
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    return await svc.unarchive_project(project_id, caller_id, **kwargs)
+
+
 @app.get("/api/v1/projects/{project_id}/files", response_model=ProjectFileListResponse)
 async def list_project_files(
     project_id: str,
@@ -391,6 +457,4 @@ async def delete_project_file(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(
-        "microservices.project_service.main:app", host="0.0.0.0", port=8260, reload=True
-    )
+    uvicorn.run("microservices.project_service.main:app", host="0.0.0.0", port=8260, reload=True)
