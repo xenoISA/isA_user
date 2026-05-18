@@ -23,7 +23,16 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import uvicorn
 
 # FastAPI imports
-from fastapi import FastAPI, HTTPException, Depends, status, Query, Form, Security, Request
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Depends,
+    status,
+    Query,
+    Form,
+    Security,
+    Request,
+)
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -1126,9 +1135,7 @@ async def oauth_consent(
     state: str = Form("", description="Opaque state for CSRF protection"),
     resource: Optional[str] = Form(None, description="RFC 8707 resource indicator"),
     code_challenge: Optional[str] = Form(None, description="PKCE code challenge"),
-    code_challenge_method: Optional[str] = Form(
-        None, description="PKCE method (S256)"
-    ),
+    code_challenge_method: Optional[str] = Form(None, description="PKCE method (S256)"),
     caller: Dict[str, Any] = Depends(get_current_caller),
     authz_code_service: AuthorizationCodeService = Depends(
         get_authorization_code_service

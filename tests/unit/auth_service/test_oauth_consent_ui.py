@@ -52,8 +52,12 @@ def authz_code_service():
 
 @pytest.fixture(autouse=True)
 def dependency_overrides(authz_code_service):
-    auth_main.app.dependency_overrides[auth_main.get_oauth_client_repository] = lambda: FakeOAuthClientRepository()
-    auth_main.app.dependency_overrides[auth_main.get_authorization_code_service] = lambda: authz_code_service
+    auth_main.app.dependency_overrides[
+        auth_main.get_oauth_client_repository
+    ] = lambda: FakeOAuthClientRepository()
+    auth_main.app.dependency_overrides[
+        auth_main.get_authorization_code_service
+    ] = lambda: authz_code_service
     auth_main.app.dependency_overrides[auth_main.get_current_caller] = _caller
     yield
     auth_main.app.dependency_overrides.clear()
@@ -114,7 +118,9 @@ async def test_authorize_keeps_json_payload_for_api_clients():
     }
 
 
-async def test_consent_approve_redirects_back_with_authorization_code(authz_code_service):
+async def test_consent_approve_redirects_back_with_authorization_code(
+    authz_code_service,
+):
     async with _client() as client:
         response = await client.post(
             "/oauth/consent",
@@ -126,7 +132,9 @@ async def test_consent_approve_redirects_back_with_authorization_code(authz_code
         )
 
     assert response.status_code == 303
-    assert response.headers["location"] == ("https://app.example/callback?code=auth-code-123&state=csrf-state")
+    assert response.headers["location"] == (
+        "https://app.example/callback?code=auth-code-123&state=csrf-state"
+    )
     authz_code_service.create_authorization_request.assert_awaited_once_with(
         client_id="client-1",
         redirect_uri="https://app.example/callback",
@@ -152,7 +160,9 @@ async def test_consent_deny_redirects_back_with_access_denied(authz_code_service
         )
 
     assert response.status_code == 303
-    assert response.headers["location"] == ("https://app.example/callback?error=access_denied&state=csrf-state")
+    assert response.headers["location"] == (
+        "https://app.example/callback?error=access_denied&state=csrf-state"
+    )
     authz_code_service.create_authorization_request.assert_not_awaited()
 
 
