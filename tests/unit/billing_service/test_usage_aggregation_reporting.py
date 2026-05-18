@@ -72,10 +72,72 @@ class TestUsageAggregationReporting:
         assert aggregation.total_usage_amount == Decimal("42")
         assert aggregation.total_cost == Decimal("0.0142")
         assert (
-            aggregation.service_breakdown["model_inference"]["products"]["gpt-4o-mini"]["usage_count"]
+            aggregation.service_breakdown["model_inference"]["products"]["gpt-4o-mini"][
+                "usage_count"
+            ]
             == 1
         )
         assert (
-            aggregation.service_breakdown["mcp_service"]["products"]["tool:web_search"]["usage_amount"]
+            aggregation.service_breakdown["mcp_service"]["products"]["tool:web_search"][
+                "usage_amount"
+            ]
             == 2.0
         )
+
+    @pytest.mark.asyncio
+    async def test_aggregations_filter_and_preserve_project_key_model_attribution(self):
+        period_start = datetime(2026, 4, 8, 0, 0, tzinfo=timezone.utc)
+        repo = object.__new__(BillingRepository)
+        repo.schema = "billing"
+        repo.billing_records_table = "billing_records"
+        repo.db = _FakeDB(
+            [
+                {
+                    "period_start": period_start,
+                    "service_type": "model_inference",
+                    "product_id": "gpt-4.1-nano",
+                    "project_id": "project-1",
+                    "api_key_id": "key-1",
+                    "model": "gpt-4.1-nano",
+                    "total_usage_count": 2,
+                    "total_usage_amount": 120,
+                    "total_cost": 0.0300,
+                }
+            ]
+        )
+
+        aggregations = await BillingRepository.get_usage_aggregations(
+            repo,
+            user_id="user_123",
+            organization_id="org_123",
+            project_id="project-1",
+            api_key_id="key-1",
+            model="gpt-4.1-nano",
+            period_type="daily",
+            limit=10,
+        )
+
+        query = repo.db.query.call_args.args[0]
+        params = repo.db.query.call_args.kwargs["params"]
+
+        assert "billing_metadata #>> '{usage_details,project_id}'" in query
+        assert "billing_metadata #>> '{usage_details,api_key_id}'" in query
+        assert "billing_metadata #>> '{usage_details,model_id}'" in query
+        assert params == [
+            "user_123",
+            "org_123",
+            "project-1",
+            "key-1",
+            "gpt-4.1-nano",
+        ]
+
+        aggregation = aggregations[0]
+        assert aggregation.project_id == "project-1"
+        assert aggregation.api_key_id == "key-1"
+        assert aggregation.model == "gpt-4.1-nano"
+        service = aggregation.service_breakdown["model_inference"]
+        assert service["projects"]["project-1"]["usage_count"] == 2
+        assert service["api_keys"]["key-1"]["usage_amount"] == 120.0
+        assert service["models"]["gpt-4.1-nano"]["total_cost"] == 0.03
+        product = service["products"]["gpt-4.1-nano"]
+        assert product["projects"]["project-1"]["usage_count"] == 2

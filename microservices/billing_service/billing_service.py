@@ -1197,6 +1197,9 @@ class BillingService:
         user_id: str,
         period_days: int = 30,
         organization_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        api_key_id: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Cross-service usage overview for the console Usage page.
 
@@ -1216,6 +1219,9 @@ class BillingService:
             aggregations = await self.repository.get_usage_aggregations(
                 user_id=user_id,
                 organization_id=organization_id,
+                project_id=project_id,
+                api_key_id=api_key_id,
+                model=model,
                 period_start=period_start,
                 period_end=period_end,
                 period_type="daily",
@@ -1274,6 +1280,11 @@ class BillingService:
         return {
             "user_id": user_id,
             "organization_id": organization_id,
+            "filters": {
+                "project_id": project_id,
+                "api_key_id": api_key_id,
+                "model": model,
+            },
             "period": {
                 "start": period_start.isoformat(),
                 "end": period_end.isoformat(),

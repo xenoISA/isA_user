@@ -10,22 +10,54 @@ Covers:
   - Story #241: /api/v1/billing/invoices endpoint
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+import sys
+from types import ModuleType
+from unittest.mock import AsyncMock
 
 import pytest
 
 from microservices.billing_service.billing_service import BillingService
 from microservices.billing_service.models import (
     BillingRecord,
-    BillingStatus,
     BillingMethod,
     ServiceType,
-    Currency,
     UsageAggregation,
 )
+
+
+class _NoopMetric:
+    def labels(self, *args, **kwargs):
+        return self
+
+    def inc(self, *args, **kwargs):
+        return None
+
+    def observe(self, *args, **kwargs):
+        return None
+
+
+def _install_isa_common_observability_stubs():
+    if "isa_common.observability" not in sys.modules:
+        observability = ModuleType("isa_common.observability")
+        observability.setup_observability = lambda *args, **kwargs: {
+            "metrics": False,
+            "logging": False,
+            "tracing": False,
+        }
+        sys.modules["isa_common.observability"] = observability
+
+    if "isa_common.metrics" not in sys.modules:
+        metrics = ModuleType("isa_common.metrics")
+        metrics.create_counter = lambda *args, **kwargs: _NoopMetric()
+        metrics.create_histogram = lambda *args, **kwargs: _NoopMetric()
+        metrics.create_gauge = lambda *args, **kwargs: _NoopMetric()
+        metrics.metrics_text = lambda: b""
+        sys.modules["isa_common.metrics"] = metrics
+
+
+_install_isa_common_observability_stubs()
 
 
 # ---------------------------------------------------------------------------
@@ -38,18 +70,20 @@ def _make_mock_repository(**overrides):
     repo.get_usage_aggregations = AsyncMock(return_value=[])
     repo.list_billing_records = AsyncMock(return_value=([], 0))
     repo.get_user_billing_records = AsyncMock(return_value=[])
-    repo.get_billing_stats = AsyncMock(return_value={
-        "total_billing_records": 0,
-        "pending_billing_records": 0,
-        "completed_billing_records": 0,
-        "failed_billing_records": 0,
-        "total_revenue": 0,
-        "revenue_by_service": {},
-        "revenue_by_method": {},
-        "active_users": 0,
-        "period_start": datetime(2026, 4, 1, tzinfo=timezone.utc),
-        "period_end": datetime(2026, 4, 30, tzinfo=timezone.utc),
-    })
+    repo.get_billing_stats = AsyncMock(
+        return_value={
+            "total_billing_records": 0,
+            "pending_billing_records": 0,
+            "completed_billing_records": 0,
+            "failed_billing_records": 0,
+            "total_revenue": 0,
+            "revenue_by_service": {},
+            "revenue_by_method": {},
+            "active_users": 0,
+            "period_start": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            "period_end": datetime(2026, 4, 30, tzinfo=timezone.utc),
+        }
+    )
     for k, v in overrides.items():
         setattr(repo, k, v)
     return repo
@@ -83,33 +117,39 @@ class TestGetUserBillingStatus:
     @pytest.mark.asyncio
     async def test_returns_unified_billing_status(self):
         sub_client = AsyncMock()
-        sub_client.get_user_subscription = AsyncMock(return_value={
-            "tier_code": "pro",
-            "credits_remaining": 5000,
-            "credits_limit": 10000,
-            "next_billing_date": "2026-05-01T00:00:00Z",
-            "payment_status": "active",
-            "subscription_id": "sub_123",
-        })
-        sub_client.get_credit_balance = AsyncMock(return_value={
-            "success": True,
-            "subscription_credits_remaining": 5000,
-            "subscription_id": "sub_123",
-        })
+        sub_client.get_user_subscription = AsyncMock(
+            return_value={
+                "tier_code": "pro",
+                "credits_remaining": 5000,
+                "credits_limit": 10000,
+                "next_billing_date": "2026-05-01T00:00:00Z",
+                "payment_status": "active",
+                "subscription_id": "sub_123",
+            }
+        )
+        sub_client.get_credit_balance = AsyncMock(
+            return_value={
+                "success": True,
+                "subscription_credits_remaining": 5000,
+                "subscription_id": "sub_123",
+            }
+        )
 
         repo = _make_mock_repository()
-        repo.get_usage_aggregations = AsyncMock(return_value=[
-            UsageAggregation(
-                aggregation_id="agg_1",
-                period_start=datetime(2026, 4, 1, tzinfo=timezone.utc),
-                period_end=datetime(2026, 5, 1, tzinfo=timezone.utc),
-                period_type="monthly",
-                total_usage_count=100,
-                total_usage_amount=Decimal("5000"),
-                total_cost=Decimal("25.50"),
-                service_breakdown={},
-            )
-        ])
+        repo.get_usage_aggregations = AsyncMock(
+            return_value=[
+                UsageAggregation(
+                    aggregation_id="agg_1",
+                    period_start=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                    period_end=datetime(2026, 5, 1, tzinfo=timezone.utc),
+                    period_type="monthly",
+                    total_usage_count=100,
+                    total_usage_amount=Decimal("5000"),
+                    total_cost=Decimal("25.50"),
+                    service_breakdown={},
+                )
+            ]
+        )
 
         svc = _make_service(repository=repo, subscription_client=sub_client)
         result = await svc.get_user_billing_status("user_123")
@@ -142,18 +182,22 @@ class TestGetUserBillingStatus:
     @pytest.mark.asyncio
     async def test_caching_returns_same_result_within_ttl(self):
         sub_client = AsyncMock()
-        sub_client.get_user_subscription = AsyncMock(return_value={
-            "tier_code": "max",
-            "credits_remaining": 9000,
-            "credits_limit": 20000,
-            "next_billing_date": "2026-06-01T00:00:00Z",
-            "payment_status": "active",
-            "subscription_id": "sub_456",
-        })
-        sub_client.get_credit_balance = AsyncMock(return_value={
-            "success": True,
-            "subscription_credits_remaining": 9000,
-        })
+        sub_client.get_user_subscription = AsyncMock(
+            return_value={
+                "tier_code": "max",
+                "credits_remaining": 9000,
+                "credits_limit": 20000,
+                "next_billing_date": "2026-06-01T00:00:00Z",
+                "payment_status": "active",
+                "subscription_id": "sub_456",
+            }
+        )
+        sub_client.get_credit_balance = AsyncMock(
+            return_value={
+                "success": True,
+                "subscription_credits_remaining": 9000,
+            }
+        )
 
         repo = _make_mock_repository()
         repo.get_usage_aggregations = AsyncMock(return_value=[])
@@ -190,21 +234,26 @@ class TestBillingStatusEndpoint:
         from microservices.billing_service import main as billing_main
 
         mock_svc = AsyncMock()
-        mock_svc.get_user_billing_status = AsyncMock(return_value={
-            "subscription_tier": "pro",
-            "credits_remaining": 5000,
-            "credits_limit": 10000,
-            "next_billing_date": "2026-05-01T00:00:00Z",
-            "payment_status": "active",
-            "current_period_usage": {"requests": 10, "tokens": 500, "cost": 1.5},
-        })
+        mock_svc.get_user_billing_status = AsyncMock(
+            return_value={
+                "subscription_tier": "pro",
+                "credits_remaining": 5000,
+                "credits_limit": 10000,
+                "next_billing_date": "2026-05-01T00:00:00Z",
+                "payment_status": "active",
+                "current_period_usage": {"requests": 10, "tokens": 500, "cost": 1.5},
+            }
+        )
 
         original = billing_main.billing_service
         billing_main.billing_service = mock_svc
         try:
             from httpx import AsyncClient, ASGITransport
+
             transport = ASGITransport(app=billing_main.app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.get(
                     "/api/v1/billing/user/status",
                     headers={"X-User-Id": "user_123"},
@@ -227,7 +276,6 @@ class TestGroupByAgentAggregations:
 
     @pytest.mark.asyncio
     async def test_group_by_agent_id_queries_repository(self):
-        from microservices.billing_service import main as billing_main
         from microservices.billing_service.billing_repository import BillingRepository
 
         period_start = datetime(2026, 4, 8, 0, 0, tzinfo=timezone.utc)
@@ -245,24 +293,26 @@ class TestGroupByAgentAggregations:
         repo = object.__new__(BillingRepository)
         repo.schema = "billing"
         repo.billing_records_table = "billing_records"
-        repo.db = _FakeDB([
-            {
-                "agent_id": "agent_A",
-                "total_tokens": 1500,
-                "input_tokens": 1000,
-                "output_tokens": 500,
-                "request_count": 5,
-                "total_cost_usd": 0.15,
-            },
-            {
-                "agent_id": "agent_B",
-                "total_tokens": 3000,
-                "input_tokens": 2000,
-                "output_tokens": 1000,
-                "request_count": 10,
-                "total_cost_usd": 0.30,
-            },
-        ])
+        repo.db = _FakeDB(
+            [
+                {
+                    "agent_id": "agent_A",
+                    "total_tokens": 1500,
+                    "input_tokens": 1000,
+                    "output_tokens": 500,
+                    "request_count": 5,
+                    "total_cost_usd": 0.15,
+                },
+                {
+                    "agent_id": "agent_B",
+                    "total_tokens": 3000,
+                    "input_tokens": 2000,
+                    "output_tokens": 1000,
+                    "request_count": 10,
+                    "total_cost_usd": 0.30,
+                },
+            ]
+        )
 
         result = await repo.get_agent_usage_aggregations(user_id="user_123")
         assert len(result) == 2
@@ -275,18 +325,29 @@ class TestGroupByAgentAggregations:
 
         mock_svc = AsyncMock()
         mock_svc.repository = AsyncMock()
-        mock_svc.repository.get_agent_usage_aggregations = AsyncMock(return_value=[
-            {"agent_id": "agent_A", "total_tokens": 1500, "input_tokens": 1000,
-             "output_tokens": 500, "request_count": 5, "total_cost_usd": 0.15},
-        ])
+        mock_svc.repository.get_agent_usage_aggregations = AsyncMock(
+            return_value=[
+                {
+                    "agent_id": "agent_A",
+                    "total_tokens": 1500,
+                    "input_tokens": 1000,
+                    "output_tokens": 500,
+                    "request_count": 5,
+                    "total_cost_usd": 0.15,
+                },
+            ]
+        )
         mock_svc.repository.get_usage_aggregations = AsyncMock(return_value=[])
 
         original = billing_main.billing_service
         billing_main.billing_service = mock_svc
         try:
             from httpx import AsyncClient, ASGITransport
+
             transport = ASGITransport(app=billing_main.app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.get(
                     "/api/v1/billing/usage/aggregations",
                     params={"user_id": "user_123", "group_by": "agent_id"},
@@ -313,27 +374,32 @@ class TestAgentIdFiltering:
 
         mock_svc = AsyncMock()
         mock_svc.repository = AsyncMock()
-        mock_svc.repository.get_user_billing_records = AsyncMock(return_value=[
-            BillingRecord(
-                billing_id="bill_1",
-                user_id="user_123",
-                agent_id="agent_A",
-                usage_record_id="ur_1",
-                product_id="gpt-4o",
-                service_type=ServiceType.MODEL_INFERENCE,
-                usage_amount=Decimal("100"),
-                unit_price=Decimal("0.01"),
-                total_amount=Decimal("1.0"),
-                billing_method=BillingMethod.CREDIT_CONSUMPTION,
-            )
-        ])
+        mock_svc.repository.get_user_billing_records = AsyncMock(
+            return_value=[
+                BillingRecord(
+                    billing_id="bill_1",
+                    user_id="user_123",
+                    agent_id="agent_A",
+                    usage_record_id="ur_1",
+                    product_id="gpt-4o",
+                    service_type=ServiceType.MODEL_INFERENCE,
+                    usage_amount=Decimal("100"),
+                    unit_price=Decimal("0.01"),
+                    total_amount=Decimal("1.0"),
+                    billing_method=BillingMethod.CREDIT_CONSUMPTION,
+                )
+            ]
+        )
 
         original = billing_main.billing_service
         billing_main.billing_service = mock_svc
         try:
             from httpx import AsyncClient, ASGITransport
+
             transport = ASGITransport(app=billing_main.app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.get(
                     "/api/v1/billing/records/user/user_123",
                     params={"agent_id": "agent_A"},
@@ -372,20 +438,22 @@ class TestGroupByServiceType:
         repo = object.__new__(BillingRepository)
         repo.schema = "billing"
         repo.billing_records_table = "billing_records"
-        repo.db = _FakeDB([
-            {
-                "service_type": "model_inference",
-                "request_count": 100,
-                "total_tokens": 50000,
-                "total_cost_usd": 5.0,
-            },
-            {
-                "service_type": "mcp_service",
-                "request_count": 20,
-                "total_tokens": 1000,
-                "total_cost_usd": 0.5,
-            },
-        ])
+        repo.db = _FakeDB(
+            [
+                {
+                    "service_type": "model_inference",
+                    "request_count": 100,
+                    "total_tokens": 50000,
+                    "total_cost_usd": 5.0,
+                },
+                {
+                    "service_type": "mcp_service",
+                    "request_count": 20,
+                    "total_tokens": 1000,
+                    "total_cost_usd": 0.5,
+                },
+            ]
+        )
 
         result = await repo.get_service_usage_aggregations(user_id="user_123")
         assert len(result) == 2
@@ -397,18 +465,27 @@ class TestGroupByServiceType:
 
         mock_svc = AsyncMock()
         mock_svc.repository = AsyncMock()
-        mock_svc.repository.get_service_usage_aggregations = AsyncMock(return_value=[
-            {"service_type": "model_inference", "request_count": 100,
-             "total_tokens": 50000, "total_cost_usd": 5.0},
-        ])
+        mock_svc.repository.get_service_usage_aggregations = AsyncMock(
+            return_value=[
+                {
+                    "service_type": "model_inference",
+                    "request_count": 100,
+                    "total_tokens": 50000,
+                    "total_cost_usd": 5.0,
+                },
+            ]
+        )
         mock_svc.repository.get_usage_aggregations = AsyncMock(return_value=[])
 
         original = billing_main.billing_service
         billing_main.billing_service = mock_svc
         try:
             from httpx import AsyncClient, ASGITransport
+
             transport = ASGITransport(app=billing_main.app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.get(
                     "/api/v1/billing/usage/aggregations",
                     params={"user_id": "user_123", "group_by": "service_type"},
@@ -416,6 +493,171 @@ class TestGroupByServiceType:
             assert resp.status_code == 200
             data = resp.json()
             assert "service_aggregations" in data
+        finally:
+            billing_main.billing_service = original
+
+
+# ===========================================================================
+# Story #429: project/API-key/model usage filters
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestProjectApiKeyUsageFilters:
+    """Story #429 - project/API-key/model filters for usage endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_usage_overview_endpoint_passes_project_key_and_model_filters(self):
+        from microservices.billing_service import main as billing_main
+
+        mock_svc = AsyncMock()
+        mock_svc.get_usage_overview = AsyncMock(
+            return_value={
+                "user_id": "user_123",
+                "organization_id": "org_123",
+                "filters": {
+                    "project_id": "project-1",
+                    "api_key_id": "key-1",
+                    "model": "gpt-4.1-nano",
+                },
+                "period": {},
+                "totals": {
+                    "requests": 0,
+                    "tokens": 0,
+                    "cost": 0.0,
+                    "currency": "USD",
+                },
+                "counts": {},
+                "daily": [],
+                "warnings": [],
+            }
+        )
+
+        original = billing_main.billing_service
+        billing_main.billing_service = mock_svc
+        try:
+            from httpx import ASGITransport, AsyncClient
+
+            transport = ASGITransport(app=billing_main.app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                resp = await client.get(
+                    "/api/v1/billing/usage/overview",
+                    params={
+                        "user_id": "user_123",
+                        "organization_id": "org_123",
+                        "project_id": "project-1",
+                        "api_key_id": "key-1",
+                        "model": "gpt-4.1-nano",
+                    },
+                )
+            assert resp.status_code == 200
+            kwargs = mock_svc.get_usage_overview.await_args.kwargs
+            assert kwargs["project_id"] == "project-1"
+            assert kwargs["api_key_id"] == "key-1"
+            assert kwargs["model"] == "gpt-4.1-nano"
+        finally:
+            billing_main.billing_service = original
+
+    @pytest.mark.asyncio
+    async def test_aggregations_endpoint_passes_project_key_and_model_filters(self):
+        from microservices.billing_service import main as billing_main
+
+        mock_svc = AsyncMock()
+        mock_svc.repository = AsyncMock()
+        mock_svc.repository.get_usage_aggregations = AsyncMock(
+            return_value=[
+                UsageAggregation(
+                    aggregation_id="agg_1",
+                    user_id="user_123",
+                    organization_id="org_123",
+                    project_id="project-1",
+                    api_key_id="key-1",
+                    model="gpt-4.1-nano",
+                    period_start=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                    period_end=datetime(2026, 4, 2, tzinfo=timezone.utc),
+                    period_type="daily",
+                )
+            ]
+        )
+
+        original = billing_main.billing_service
+        billing_main.billing_service = mock_svc
+        try:
+            from httpx import ASGITransport, AsyncClient
+
+            transport = ASGITransport(app=billing_main.app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                resp = await client.get(
+                    "/api/v1/billing/usage/aggregations",
+                    params={
+                        "user_id": "user_123",
+                        "organization_id": "org_123",
+                        "project_id": "project-1",
+                        "api_key_id": "key-1",
+                        "model": "gpt-4.1-nano",
+                    },
+                )
+            assert resp.status_code == 200
+            kwargs = mock_svc.repository.get_usage_aggregations.await_args.kwargs
+            assert kwargs["project_id"] == "project-1"
+            assert kwargs["api_key_id"] == "key-1"
+            assert kwargs["model"] == "gpt-4.1-nano"
+            assert resp.json()["filters"]["project_id"] == "project-1"
+        finally:
+            billing_main.billing_service = original
+
+    @pytest.mark.asyncio
+    async def test_project_filter_without_org_returns_forbidden_not_empty_usage(self):
+        from microservices.billing_service import main as billing_main
+
+        mock_svc = AsyncMock()
+        mock_svc.repository = AsyncMock()
+        mock_svc.repository.get_usage_aggregations = AsyncMock(return_value=[])
+
+        original = billing_main.billing_service
+        billing_main.billing_service = mock_svc
+        try:
+            from httpx import ASGITransport, AsyncClient
+
+            transport = ASGITransport(app=billing_main.app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                resp = await client.get(
+                    "/api/v1/billing/usage/aggregations",
+                    params={"user_id": "user_123", "project_id": "project-1"},
+                )
+            assert resp.status_code == 403
+            mock_svc.repository.get_usage_aggregations.assert_not_called()
+        finally:
+            billing_main.billing_service = original
+
+    @pytest.mark.asyncio
+    async def test_overview_project_filter_without_org_returns_forbidden(self):
+        from microservices.billing_service import main as billing_main
+
+        mock_svc = AsyncMock()
+        mock_svc.get_usage_overview = AsyncMock(return_value={})
+
+        original = billing_main.billing_service
+        billing_main.billing_service = mock_svc
+        try:
+            from httpx import ASGITransport, AsyncClient
+
+            transport = ASGITransport(app=billing_main.app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                resp = await client.get(
+                    "/api/v1/billing/usage/overview",
+                    params={"user_id": "user_123", "project_id": "project-1"},
+                )
+            assert resp.status_code == 403
+            mock_svc.get_usage_overview.assert_not_called()
         finally:
             billing_main.billing_service = original
 
@@ -435,28 +677,33 @@ class TestInvoiceAPI:
 
         mock_svc = AsyncMock()
         mock_svc.repository = AsyncMock()
-        mock_svc.repository.get_invoices = AsyncMock(return_value={
-            "invoices": [
-                {
-                    "period_start": "2026-03-01T00:00:00Z",
-                    "period_end": "2026-04-01T00:00:00Z",
-                    "total_credits_used": 5000,
-                    "total_cost_usd": 12.50,
-                    "tier": "pro",
-                    "payment_status": "paid",
-                },
-            ],
-            "total": 1,
-            "page": 1,
-            "page_size": 20,
-        })
+        mock_svc.repository.get_invoices = AsyncMock(
+            return_value={
+                "invoices": [
+                    {
+                        "period_start": "2026-03-01T00:00:00Z",
+                        "period_end": "2026-04-01T00:00:00Z",
+                        "total_credits_used": 5000,
+                        "total_cost_usd": 12.50,
+                        "tier": "pro",
+                        "payment_status": "paid",
+                    },
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+            }
+        )
 
         original = billing_main.billing_service
         billing_main.billing_service = mock_svc
         try:
             from httpx import AsyncClient, ASGITransport
+
             transport = ASGITransport(app=billing_main.app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.get(
                     "/api/v1/billing/invoices",
                     params={"user_id": "user_123"},
@@ -474,19 +721,24 @@ class TestInvoiceAPI:
 
         mock_svc = AsyncMock()
         mock_svc.repository = AsyncMock()
-        mock_svc.repository.get_invoices = AsyncMock(return_value={
-            "invoices": [],
-            "total": 0,
-            "page": 1,
-            "page_size": 20,
-        })
+        mock_svc.repository.get_invoices = AsyncMock(
+            return_value={
+                "invoices": [],
+                "total": 0,
+                "page": 1,
+                "page_size": 20,
+            }
+        )
 
         original = billing_main.billing_service
         billing_main.billing_service = mock_svc
         try:
             from httpx import AsyncClient, ASGITransport
+
             transport = ASGITransport(app=billing_main.app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.get(
                     "/api/v1/billing/invoices",
                     params={

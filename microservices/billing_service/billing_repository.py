@@ -741,6 +741,9 @@ class BillingRepository:
         billing_account_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         subscription_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        api_key_id: Optional[str] = None,
+        model: Optional[str] = None,
         service_type: Optional[ServiceType] = None,
         product_id: Optional[str] = None,
         period_start: Optional[datetime] = None,
@@ -756,6 +759,22 @@ class BillingRepository:
             conditions = []
             params = []
             param_count = 0
+            project_expr = (
+                "COALESCE(billing_metadata->>'project_id', "
+                "billing_metadata #>> '{usage_details,project_id}')"
+            )
+            api_key_expr = (
+                "COALESCE(billing_metadata->>'api_key_id', "
+                "billing_metadata #>> '{usage_details,api_key_id}', "
+                "billing_metadata #>> '{usage_details,key_id}')"
+            )
+            model_expr = (
+                "COALESCE(billing_metadata->>'model', "
+                "billing_metadata->>'model_id', "
+                "billing_metadata #>> '{usage_details,model}', "
+                "billing_metadata #>> '{usage_details,model_id}', "
+                "product_id)"
+            )
 
             if user_id:
                 param_count += 1
@@ -787,6 +806,21 @@ class BillingRepository:
                 conditions.append(f"subscription_id = ${param_count}")
                 params.append(subscription_id)
 
+            if project_id:
+                param_count += 1
+                conditions.append(f"{project_expr} = ${param_count}")
+                params.append(project_id)
+
+            if api_key_id:
+                param_count += 1
+                conditions.append(f"{api_key_expr} = ${param_count}")
+                params.append(api_key_id)
+
+            if model:
+                param_count += 1
+                conditions.append(f"{model_expr} = ${param_count}")
+                params.append(model)
+
             if service_type:
                 param_count += 1
                 conditions.append(f"service_type = ${param_count}")
@@ -814,13 +848,16 @@ class BillingRepository:
                     date_trunc('{granularity}', created_at) AS period_start,
                     service_type,
                     product_id,
+                    {project_expr} AS project_id,
+                    {api_key_expr} AS api_key_id,
+                    {model_expr} AS model,
                     COUNT(*) AS total_usage_count,
                     COALESCE(SUM(usage_amount), 0) AS total_usage_amount,
                     COALESCE(SUM(total_amount), 0) AS total_cost
                 FROM {self.schema}.{self.billing_records_table}
                 {where_clause}
-                GROUP BY 1, service_type, product_id
-                ORDER BY period_start DESC, service_type, product_id
+                GROUP BY 1, service_type, product_id, project_id, api_key_id, model
+                ORDER BY period_start DESC, service_type, product_id, project_id, api_key_id
             """
 
             async with self.db:
@@ -848,6 +885,9 @@ class BillingRepository:
                 total_cost = Decimal(str(row.get("total_cost") or 0))
                 row_service_type = row.get("service_type") or ServiceType.OTHER.value
                 row_product_id = row.get("product_id")
+                row_project_id = row.get("project_id")
+                row_api_key_id = row.get("api_key_id")
+                row_model = row.get("model")
 
                 bucket["total_usage_count"] += usage_count
                 bucket["total_usage_amount"] += usage_amount
@@ -860,6 +900,9 @@ class BillingRepository:
                         "usage_amount": 0.0,
                         "total_cost": 0.0,
                         "products": {},
+                        "projects": {},
+                        "api_keys": {},
+                        "models": {},
                     },
                 )
                 service_bucket["usage_count"] += usage_count
@@ -873,11 +916,58 @@ class BillingRepository:
                             "usage_count": 0,
                             "usage_amount": 0.0,
                             "total_cost": 0.0,
+                            "projects": {},
+                            "api_keys": {},
+                            "models": {},
                         },
                     )
                     product_bucket["usage_count"] += usage_count
                     product_bucket["usage_amount"] += float(usage_amount)
                     product_bucket["total_cost"] += float(total_cost)
+
+                    self._add_attribution_bucket(
+                        product_bucket["projects"],
+                        row_project_id,
+                        usage_count,
+                        usage_amount,
+                        total_cost,
+                    )
+                    self._add_attribution_bucket(
+                        product_bucket["api_keys"],
+                        row_api_key_id,
+                        usage_count,
+                        usage_amount,
+                        total_cost,
+                    )
+                    self._add_attribution_bucket(
+                        product_bucket["models"],
+                        row_model,
+                        usage_count,
+                        usage_amount,
+                        total_cost,
+                    )
+
+                self._add_attribution_bucket(
+                    service_bucket["projects"],
+                    row_project_id,
+                    usage_count,
+                    usage_amount,
+                    total_cost,
+                )
+                self._add_attribution_bucket(
+                    service_bucket["api_keys"],
+                    row_api_key_id,
+                    usage_count,
+                    usage_amount,
+                    total_cost,
+                )
+                self._add_attribution_bucket(
+                    service_bucket["models"],
+                    row_model,
+                    usage_count,
+                    usage_amount,
+                    total_cost,
+                )
 
             aggregations = []
             aggregation_account_type = None
@@ -901,6 +991,9 @@ class BillingRepository:
                         billing_account_id=billing_account_id,
                         agent_id=agent_id,
                         subscription_id=subscription_id,
+                        project_id=project_id,
+                        api_key_id=api_key_id,
+                        model=model,
                         service_type=service_type,
                         product_id=product_id,
                         period_start=current_period_start,
@@ -922,6 +1015,28 @@ class BillingRepository:
         except Exception as e:
             logger.error(f"Error getting usage aggregations: {e}")
             return []
+
+    def _add_attribution_bucket(
+        self,
+        target: Dict[str, Any],
+        key: Optional[str],
+        usage_count: int,
+        usage_amount: Decimal,
+        total_cost: Decimal,
+    ) -> None:
+        if not key:
+            return
+        bucket = target.setdefault(
+            key,
+            {
+                "usage_count": 0,
+                "usage_amount": 0.0,
+                "total_cost": 0.0,
+            },
+        )
+        bucket["usage_count"] += usage_count
+        bucket["usage_amount"] += float(usage_amount)
+        bucket["total_cost"] += float(total_cost)
 
     # ====================
     # Agent / Service grouped aggregations (Stories #242, #240)
