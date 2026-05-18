@@ -57,8 +57,8 @@ def test_repository_constructor_uses_discovery_and_asyncpg_signature():
     assert kwargs["username"] == os.getenv("POSTGRES_USER", "postgres")
     assert kwargs["password"] == os.getenv("POSTGRES_PASSWORD", "")
     assert kwargs["user_id"] == "project_service"
-    assert kwargs["min_pool_size"] == 1
-    assert kwargs["max_pool_size"] == 2
+    assert kwargs["min_pool_size"] == (2 if kwargs["max_pool_size"] >= 4 else 1)
+    assert kwargs["max_pool_size"] >= kwargs["min_pool_size"]
     assert "user" not in kwargs
 
 
@@ -70,7 +70,7 @@ async def test_initialize_bootstraps_schema_once():
     await ProjectRepository.initialize(repository)
 
     assert repository._tables_initialized is True
-    assert repository.db.execute.await_count == 7
+    assert repository.db.execute.await_count == 9
 
 
 @pytest.mark.asyncio

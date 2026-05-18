@@ -33,6 +33,8 @@ class MockProjectRepository:
         project = {
             "id": project_id,
             "user_id": user_id,
+            "org_id": kwargs.get("organization_id", kwargs.get("org_id")),
+            "organization_id": kwargs.get("organization_id", kwargs.get("org_id")),
             "name": name,
             "description": kwargs.get("description"),
             "custom_instructions": kwargs.get("custom_instructions"),
@@ -48,6 +50,7 @@ class MockProjectRepository:
         name: str,
         description: str = None,
         custom_instructions: str = None,
+        organization_id: str = None,
     ) -> Dict[str, Any]:
         if self._should_fail:
             raise self._should_fail
@@ -56,6 +59,8 @@ class MockProjectRepository:
         project = {
             "id": project_id,
             "user_id": user_id,
+            "org_id": organization_id,
+            "organization_id": organization_id,
             "name": name,
             "description": description,
             "custom_instructions": custom_instructions,
@@ -71,11 +76,25 @@ class MockProjectRepository:
         return self._projects.get(project_id)
 
     async def list_projects(
-        self, user_id: str, limit: int = 50, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        organization_id: str = None,
     ) -> List[Dict[str, Any]]:
         if self._should_fail:
             raise self._should_fail
-        user_projects = [p for p in self._projects.values() if p["user_id"] == user_id]
+        if organization_id:
+            user_projects = [
+                p
+                for p in self._projects.values()
+                if p.get("organization_id") == organization_id
+                or p.get("org_id") == organization_id
+            ]
+        else:
+            user_projects = [
+                p for p in self._projects.values() if p["user_id"] == user_id
+            ]
         user_projects.sort(key=lambda p: p["updated_at"], reverse=True)
         return user_projects[offset : offset + limit]
 

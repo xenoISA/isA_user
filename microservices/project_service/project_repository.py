@@ -72,9 +72,17 @@ class ProjectRepository:
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """
+        add_projects_org_id_sql = (
+            f"ALTER TABLE {self.schema}.{self.table} "
+            "ADD COLUMN IF NOT EXISTS org_id TEXT"
+        )
         create_projects_user_idx_sql = (
             f"CREATE INDEX IF NOT EXISTS idx_{self.table}_user_id "
             f"ON {self.schema}.{self.table}(user_id)"
+        )
+        create_projects_org_idx_sql = (
+            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_org_id "
+            f"ON {self.schema}.{self.table}(org_id)"
         )
         create_projects_updated_idx_sql = (
             f"CREATE INDEX IF NOT EXISTS idx_{self.table}_updated_at "
@@ -104,7 +112,9 @@ class ProjectRepository:
             async with self.db:
                 await self.db.execute(create_schema_sql)
                 await self.db.execute(create_projects_table_sql)
+                await self.db.execute(add_projects_org_id_sql)
                 await self.db.execute(create_projects_user_idx_sql)
+                await self.db.execute(create_projects_org_idx_sql)
                 await self.db.execute(create_projects_updated_idx_sql)
                 await self.db.execute(create_project_files_table_sql)
                 await self.db.execute(create_project_files_project_idx_sql)
@@ -127,12 +137,19 @@ class ProjectRepository:
         if rows_affected is None or rows_affected < 1:
             raise RepositoryError(f"Failed to {operation}")
 
+    @staticmethod
+    def _shape_project(row: Dict[str, Any]) -> Dict[str, Any]:
+        project = dict(row)
+        project["organization_id"] = project.get("org_id")
+        return project
+
     async def create_project(
         self,
         user_id: str,
         name: str,
         description: str = None,
         custom_instructions: str = None,
+        organization_id: str = None,
     ) -> Dict[str, Any]:
         await self._ensure_tables()
         project_id = str(uuid.uuid4())
@@ -140,10 +157,11 @@ class ProjectRepository:
         try:
             async with self.db:
                 rows_affected = await self.db.execute(
-                    f"INSERT INTO {self.schema}.{self.table} (id, user_id, name, description, custom_instructions, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    f"INSERT INTO {self.schema}.{self.table} (id, user_id, org_id, name, description, custom_instructions, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     params=[
                         project_id,
                         user_id,
+                        organization_id,
                         name,
                         description,
                         custom_instructions,
@@ -157,6 +175,8 @@ class ProjectRepository:
         return {
             "id": project_id,
             "user_id": user_id,
+            "org_id": organization_id,
+            "organization_id": organization_id,
             "name": name,
             "description": description,
             "custom_instructions": custom_instructions,
@@ -173,22 +193,32 @@ class ProjectRepository:
                     params=[project_id],
                 )
             rows = self._require_query_result(rows, "fetch project")
-            return dict(rows[0]) if rows else None
+            return self._shape_project(rows[0]) if rows else None
         except Exception as e:
             raise RepositoryError("Failed to fetch project", cause=e) from e
 
     async def list_projects(
-        self, user_id: str, limit: int = 50, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        organization_id: str = None,
     ) -> List[Dict[str, Any]]:
         await self._ensure_tables()
         try:
             async with self.db:
-                rows = await self.db.query(
-                    f"SELECT * FROM {self.schema}.{self.table} WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
-                    params=[user_id, limit, offset],
-                )
+                if organization_id:
+                    rows = await self.db.query(
+                        f"SELECT * FROM {self.schema}.{self.table} WHERE org_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
+                        params=[organization_id, limit, offset],
+                    )
+                else:
+                    rows = await self.db.query(
+                        f"SELECT * FROM {self.schema}.{self.table} WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
+                        params=[user_id, limit, offset],
+                    )
             rows = self._require_query_result(rows, "list projects")
-            return [dict(r) for r in rows]
+            return [self._shape_project(r) for r in rows]
         except Exception as e:
             raise RepositoryError("Failed to list projects", cause=e) from e
 

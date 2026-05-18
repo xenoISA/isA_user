@@ -19,6 +19,7 @@ class CreateProjectRequest(BaseModel):
     name: str = Field(..., max_length=255)
     description: Optional[str] = None
     custom_instructions: Optional[str] = Field(None, max_length=8000)
+    organization_id: Optional[str] = Field(None, max_length=255)
 
 
 class UpdateProjectRequest(BaseModel):
@@ -37,6 +38,7 @@ class ProjectResponse(BaseModel):
     id: str
     user_id: str
     org_id: Optional[str] = None
+    organization_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     custom_instructions: Optional[str] = None
