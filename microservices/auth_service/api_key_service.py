@@ -40,11 +40,13 @@ class ApiKeyService:
         self,
         repository: ApiKeyRepository,
         organization_service_client=None,
+        project_access_client=None,
         request_rate_limiter: Optional[RequestRateLimiter] = None,
         billing_http_client: Optional[httpx.AsyncClient] = None,
     ):
         self.repository = repository
         self.organization_service_client = organization_service_client
+        self.project_access_client = project_access_client
         self.request_rate_limiter = request_rate_limiter or RequestRateLimiter()
         self.billing_base_url = (
             os.getenv("BILLING_SERVICE_URL")
@@ -67,43 +69,128 @@ class ApiKeyService:
         name: str,
         permissions: List[str] = None,
         expires_days: Optional[int] = None,
+        expires_at: Optional[datetime] = None,
         created_by: str = None,
+        project_id: Optional[str] = None,
+        owner_type: str = "organization",
+        service_account_id: Optional[str] = None,
+        scopes: Optional[List[str]] = None,
+        ip_allowlist: Optional[List[str]] = None,
+        rate_limits: Optional[Dict[str, Any]] = None,
+        spend_limit: Optional[float] = None,
+        auth_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create new API key"""
         try:
+            if expires_days and expires_at:
+                return {
+                    "success": False,
+                    "error": "Use either expires_days or expires_at, not both",
+                }
+
+            owner_type = owner_type or "organization"
+            if owner_type not in {"organization", "service_account"}:
+                return {
+                    "success": False,
+                    "error": f"Unsupported owner_type: {owner_type}",
+                }
+            if owner_type == "service_account" and not service_account_id:
+                return {
+                    "success": False,
+                    "error": "service_account_id is required for service-account keys",
+                }
+
+            if project_id:
+                if not self.project_access_client:
+                    return {
+                        "success": False,
+                        "error": "Project access validation is unavailable",
+                    }
+                allowed = await self.project_access_client.validate_project_access(
+                    organization_id=organization_id,
+                    project_id=project_id,
+                    user_id=created_by,
+                    auth_token=auth_token,
+                )
+                if not allowed:
+                    return {
+                        "success": False,
+                        "error": "Caller is not authorized for the requested project",
+                    }
+
             # Calculate expiration time
-            expires_at = None
             if expires_days:
                 expires_at = datetime.now(tz=timezone.utc) + timedelta(
                     days=expires_days
                 )
 
             # Create API key using repository
-            result_data = await self.repository.create_api_key(
-                organization_id=organization_id,
-                name=name,
-                permissions=permissions or [],
-                expires_at=expires_at,
-                created_by=created_by,
-            )
+            repo_kwargs = {
+                "organization_id": organization_id,
+                "name": name,
+                "permissions": permissions or [],
+                "expires_at": expires_at,
+                "created_by": created_by,
+            }
+            if any(
+                [
+                    project_id,
+                    owner_type != "organization",
+                    service_account_id,
+                    scopes,
+                    ip_allowlist,
+                    rate_limits,
+                    spend_limit is not None,
+                ]
+            ):
+                repo_kwargs.update(
+                    {
+                        "project_id": project_id,
+                        "owner_type": owner_type,
+                        "service_account_id": service_account_id,
+                        "scopes": scopes or [],
+                        "ip_allowlist": ip_allowlist or [],
+                        "rate_limits": rate_limits or {},
+                        "spend_limit": spend_limit,
+                    }
+                )
+
+            result_data = await self.repository.create_api_key(**repo_kwargs)
 
             return {
                 "success": True,
                 "api_key": result_data["api_key"],  # Only returned during creation
                 "key_id": result_data["key_id"],
                 "name": name,
-                "expires_at": expires_at,
+                "expires_at": result_data.get("expires_at", expires_at),
+                "project_id": result_data.get("project_id"),
+                "owner_type": result_data.get("owner_type", "organization"),
+                "service_account_id": result_data.get("service_account_id"),
+                "scopes": result_data.get("scopes", []),
+                "ip_allowlist": result_data.get("ip_allowlist", []),
+                "rate_limits": result_data.get("rate_limits", {}),
+                "spend_limit": result_data.get("spend_limit"),
             }
 
         except Exception as e:
             logger.error(f"Failed to create API key: {e}")
             return {"success": False, "error": str(e)}
 
-    async def verify_api_key(self, api_key: str) -> Dict[str, Any]:
+    async def verify_api_key(
+        self,
+        api_key: str,
+        project_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Verify API key"""
         try:
             # Use repository validation method
-            result = await self.repository.validate_api_key(api_key)
+            if project_id or ip_address:
+                result = await self.repository.validate_api_key(
+                    api_key, project_id=project_id, ip_address=ip_address
+                )
+            else:
+                result = await self.repository.validate_api_key(api_key)
 
             if result.get("valid"):
                 (
@@ -135,6 +222,14 @@ class ApiKeyService:
                     "permissions": result.get("permissions", []),
                     "created_at": result.get("created_at"),
                     "last_used": result.get("last_used"),
+                    "project_id": result.get("project_id"),
+                    "owner_type": result.get("owner_type", "organization"),
+                    "service_account_id": result.get("service_account_id"),
+                    "scopes": result.get("scopes", []),
+                    "expires_at": result.get("expires_at"),
+                    "ip_allowlist": result.get("ip_allowlist", []),
+                    "rate_limits": result.get("rate_limits", {}),
+                    "spend_limit": result.get("spend_limit"),
                     "effective_rate_limits": effective_limits,
                     "rate_limit_sources": field_sources,
                 }
@@ -173,10 +268,17 @@ class ApiKeyService:
             logger.error(f"Failed to revoke API key: {e}")
             return {"success": False, "error": str(e)}
 
-    async def list_api_keys(self, organization_id: str) -> Dict[str, Any]:
+    async def list_api_keys(
+        self, organization_id: str, project_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """List all API keys for organization"""
         try:
-            keys = await self.repository.get_organization_api_keys(organization_id)
+            if project_id is None:
+                keys = await self.repository.get_organization_api_keys(organization_id)
+            else:
+                keys = await self.repository.get_organization_api_keys(
+                    organization_id, project_id=project_id
+                )
 
             return {"success": True, "api_keys": keys, "total": len(keys)}
 
@@ -288,11 +390,15 @@ class ApiKeyService:
         key_id: Optional[str],
     ) -> tuple[Dict[str, Optional[int]], Dict[str, str]]:
         org_limits = await self._get_org_rate_limits(organization_id)
+        if not isinstance(org_limits, dict):
+            org_limits = {}
         key_limits: Optional[Dict[str, Any]] = {}
         if organization_id and key_id:
             key_limits = await self.repository.get_api_key_rate_limits(
                 organization_id, key_id
             )
+        if not isinstance(key_limits, dict):
+            key_limits = {}
         return merge_rate_limits(org_limits, key_limits)
 
     async def _get_org_rate_limits(

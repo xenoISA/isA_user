@@ -10,6 +10,7 @@ import json
 import uuid
 import hashlib
 import secrets
+import ipaddress
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 import sys
@@ -37,6 +38,112 @@ def _pg_min_pool() -> int:
 
 
 logger = logging.getLogger(__name__)
+
+
+API_KEY_OWNER_TYPES = {"organization", "service_account"}
+
+
+def _as_list(value: Any) -> List[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _as_dict(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return None
+
+
+def _ip_matches_allowlist(ip_address: str, allowlist: List[str]) -> bool:
+    try:
+        parsed_ip = ipaddress.ip_address(ip_address)
+    except ValueError:
+        parsed_ip = None
+
+    for entry in allowlist:
+        if entry == ip_address:
+            return True
+        if parsed_ip is None:
+            continue
+        try:
+            if parsed_ip in ipaddress.ip_network(entry, strict=False):
+                return True
+        except ValueError:
+            continue
+
+    return False
+
+
+def build_api_key_metadata(key_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return project/service-account metadata with legacy org-key defaults."""
+    owner_type = key_data.get("owner_type") or "organization"
+    if owner_type not in API_KEY_OWNER_TYPES:
+        owner_type = "organization"
+
+    scopes = key_data.get("scopes")
+    if scopes is None:
+        scopes = key_data.get("permissions", [])
+
+    return {
+        "project_id": key_data.get("project_id"),
+        "owner_type": owner_type,
+        "service_account_id": key_data.get("service_account_id"),
+        "scopes": _as_list(scopes),
+        "ip_allowlist": _as_list(key_data.get("ip_allowlist")),
+        "rate_limits": _as_dict(key_data.get("rate_limits")),
+        "spend_limit": key_data.get("spend_limit"),
+        "created_by": key_data.get("created_by"),
+        "expires_at": key_data.get("expires_at"),
+    }
+
+
+def api_key_matches_project(
+    key_data: Dict[str, Any], project_id: Optional[str] = None
+) -> bool:
+    if project_id is None:
+        return True
+    return key_data.get("project_id") == project_id
+
+
+def clean_api_key_for_listing(key_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Shape an API-key record for list responses without secret material."""
+    metadata = build_api_key_metadata(key_data)
+    cleaned_key = {
+        "key_id": key_data.get("key_id"),
+        "name": key_data.get("name"),
+        "permissions": key_data.get("permissions", []),
+        "created_at": key_data.get("created_at"),
+        "created_by": metadata["created_by"],
+        "expires_at": metadata["expires_at"],
+        "is_active": key_data.get("is_active", False),
+        "last_used": key_data.get("last_used"),
+        "key_preview": f"isa_...{key_data.get('key_hash', '')[-8:]}"
+        if key_data.get("key_hash")
+        else None,
+    }
+    cleaned_key.update(metadata)
+    return cleaned_key
 
 
 class ApiKeyRepository:
@@ -104,9 +211,24 @@ class ApiKeyRepository:
         permissions: List[str] = None,
         expires_at: Optional[datetime] = None,
         created_by: str = None,
+        project_id: Optional[str] = None,
+        owner_type: str = "organization",
+        service_account_id: Optional[str] = None,
+        scopes: Optional[List[str]] = None,
+        ip_allowlist: Optional[List[str]] = None,
+        rate_limits: Optional[Dict[str, Any]] = None,
+        spend_limit: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Create a new API key for an organization"""
         try:
+            owner_type = owner_type or "organization"
+            if owner_type not in API_KEY_OWNER_TYPES:
+                raise ValueError(f"Unsupported API key owner_type: {owner_type}")
+            if owner_type == "service_account" and not service_account_id:
+                raise ValueError(
+                    "service_account_id is required for service-account keys"
+                )
+
             api_key = self._generate_api_key("isa")
             key_hash = self._hash_api_key(api_key)
 
@@ -121,6 +243,13 @@ class ApiKeyRepository:
                 "expires_at": expires_at.isoformat() if expires_at else None,
                 "is_active": True,
                 "last_used": None,
+                "project_id": project_id,
+                "owner_type": owner_type,
+                "service_account_id": service_account_id,
+                "scopes": scopes or [],
+                "ip_allowlist": ip_allowlist or [],
+                "rate_limits": rate_limits or {},
+                "spend_limit": spend_limit,
             }
 
             # Verify organization exists via organization_service (soft check)
@@ -180,7 +309,12 @@ class ApiKeyRepository:
             logger.error(f"Failed to create API key: {e}")
             raise
 
-    async def validate_api_key(self, api_key: str) -> Dict[str, Any]:
+    async def validate_api_key(
+        self,
+        api_key: str,
+        project_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Validate an API key and return organization/permissions"""
         try:
             key_hash = self._hash_api_key(api_key)
@@ -201,13 +335,34 @@ class ApiKeyRepository:
                     if key_data.get("key_hash") == key_hash and key_data.get(
                         "is_active", False
                     ):
+                        metadata = build_api_key_metadata(key_data)
+
+                        if (
+                            project_id
+                            and metadata.get("project_id")
+                            and metadata["project_id"] != project_id
+                        ):
+                            return {
+                                "valid": False,
+                                "error": f"API key is not scoped to project {project_id}",
+                            }
+
+                        if (
+                            ip_address
+                            and metadata.get("ip_allowlist")
+                            and not _ip_matches_allowlist(
+                                ip_address, metadata["ip_allowlist"]
+                            )
+                        ):
+                            return {
+                                "valid": False,
+                                "error": "IP address is not allowed for this API key",
+                            }
+
                         # Check expiration
                         expires_at = key_data.get("expires_at")
                         if expires_at:
-                            if isinstance(expires_at, str):
-                                expiry_time = datetime.fromisoformat(expires_at)
-                            else:
-                                expiry_time = expires_at
+                            expiry_time = _parse_datetime(expires_at)
 
                             if expiry_time.tzinfo is None:
                                 current_time = datetime.utcnow().replace(tzinfo=None)
@@ -226,7 +381,7 @@ class ApiKeyRepository:
                                 params=[api_keys, row["organization_id"]],
                             )
 
-                        return {
+                        result = {
                             "valid": True,
                             "organization_id": row["organization_id"],
                             "key_id": key_data.get("key_id"),
@@ -235,6 +390,8 @@ class ApiKeyRepository:
                             "created_at": key_data.get("created_at"),
                             "last_used": key_data.get("last_used"),
                         }
+                        result.update(metadata)
+                        return result
 
             return {"valid": False, "error": "Invalid API key"}
 
@@ -243,7 +400,7 @@ class ApiKeyRepository:
             return {"valid": False, "error": f"Failed to validate API key: {str(e)}"}
 
     async def get_organization_api_keys(
-        self, organization_id: str
+        self, organization_id: str, project_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get all API keys for an organization (without plain key values)"""
         try:
@@ -262,20 +419,9 @@ class ApiKeyRepository:
             # Remove sensitive data from response
             cleaned_keys = []
             for key_data in api_keys:
-                cleaned_key = {
-                    "key_id": key_data.get("key_id"),
-                    "name": key_data.get("name"),
-                    "permissions": key_data.get("permissions", []),
-                    "created_at": key_data.get("created_at"),
-                    "created_by": key_data.get("created_by"),
-                    "expires_at": key_data.get("expires_at"),
-                    "is_active": key_data.get("is_active", False),
-                    "last_used": key_data.get("last_used"),
-                    "key_preview": f"isa_...{key_data.get('key_hash', '')[-8:]}"
-                    if key_data.get("key_hash")
-                    else None,
-                }
-                cleaned_keys.append(cleaned_key)
+                if not api_key_matches_project(key_data, project_id):
+                    continue
+                cleaned_keys.append(clean_api_key_for_listing(key_data))
 
             return cleaned_keys
 
