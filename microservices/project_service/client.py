@@ -60,6 +60,7 @@ class ProjectServiceClient:
         name: str,
         description: str = None,
         custom_instructions: str = None,
+        organization_id: str = None,
     ) -> Optional[Dict[str, Any]]:
         try:
             payload: Dict[str, Any] = {"name": name}
@@ -67,6 +68,8 @@ class ProjectServiceClient:
                 payload["description"] = description
             if custom_instructions is not None:
                 payload["custom_instructions"] = custom_instructions
+            if organization_id is not None:
+                payload["organization_id"] = organization_id
             resp = await self.client.post(
                 f"{self.base_url}/api/v1/projects",
                 json=payload,
@@ -82,11 +85,18 @@ class ProjectServiceClient:
             return None
 
     async def get_project(
-        self, auth_token: str, project_id: str
+        self,
+        auth_token: str,
+        project_id: str,
+        organization_id: str = None,
     ) -> Optional[Dict[str, Any]]:
         try:
+            params = {}
+            if organization_id:
+                params["organization_id"] = organization_id
             resp = await self.client.get(
                 f"{self.base_url}/api/v1/projects/{project_id}",
+                params=params,
                 headers=self._headers(auth_token),
             )
             resp.raise_for_status()
@@ -103,11 +113,15 @@ class ProjectServiceClient:
         auth_token: str,
         limit: int = 50,
         offset: int = 0,
+        organization_id: str = None,
     ) -> Optional[List[Dict[str, Any]]]:
         try:
+            params = {"limit": limit, "offset": offset}
+            if organization_id:
+                params["organization_id"] = organization_id
             resp = await self.client.get(
                 f"{self.base_url}/api/v1/projects",
-                params={"limit": limit, "offset": offset},
+                params=params,
                 headers=self._headers(auth_token),
             )
             resp.raise_for_status()
@@ -123,11 +137,16 @@ class ProjectServiceClient:
         self,
         auth_token: str,
         project_id: str,
+        organization_id: str = None,
         **updates,
     ) -> Optional[Dict[str, Any]]:
         try:
+            params = {}
+            if organization_id:
+                params["organization_id"] = organization_id
             resp = await self.client.put(
                 f"{self.base_url}/api/v1/projects/{project_id}",
+                params=params,
                 json=updates,
                 headers=self._headers(auth_token),
             )
@@ -140,10 +159,16 @@ class ProjectServiceClient:
             logger.error("update_project error: %s", e)
             return None
 
-    async def delete_project(self, auth_token: str, project_id: str) -> bool:
+    async def delete_project(
+        self, auth_token: str, project_id: str, organization_id: str = None
+    ) -> bool:
         try:
+            params = {}
+            if organization_id:
+                params["organization_id"] = organization_id
             resp = await self.client.delete(
                 f"{self.base_url}/api/v1/projects/{project_id}",
+                params=params,
                 headers=self._headers(auth_token),
             )
             resp.raise_for_status()

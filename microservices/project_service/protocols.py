@@ -77,6 +77,7 @@ class ProjectRepositoryProtocol(Protocol):
         name: str,
         description: str = None,
         custom_instructions: str = None,
+        organization_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         ...
 
@@ -84,7 +85,11 @@ class ProjectRepositoryProtocol(Protocol):
         ...
 
     async def list_projects(
-        self, user_id: str, limit: int = 50, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        organization_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         ...
 
@@ -145,6 +150,17 @@ class EventBusProtocol(Protocol):
     """Interface for Event Bus — no I/O imports."""
 
     async def publish_event(self, event: Any) -> None:
+        ...
+
+
+@runtime_checkable
+class OrganizationAccessProtocol(Protocol):
+    """Interface for validating organization access before sharing projects."""
+
+    async def check_user_access(self, organization_id: str, user_id: str) -> bool:
+        ...
+
+    async def check_admin_access(self, organization_id: str, user_id: str) -> bool:
         ...
 
 

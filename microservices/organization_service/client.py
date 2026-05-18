@@ -242,6 +242,51 @@ class OrganizationServiceClient:
             logger.error(f"Error getting org rate limits for {organization_id}: {e}")
             return None
 
+    async def _get_member_role(
+        self, organization_id: str, user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Return a member row for service-to-service access checks."""
+        try:
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/organization/organizations/{organization_id}/members",
+                params={"limit": 1000, "offset": 0},
+            )
+            response.raise_for_status()
+            members = response.json().get("members", [])
+            for member in members:
+                member_user_id = member.get("user_id") or member.get("member_user_id")
+                if member_user_id == user_id:
+                    return member
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "Failed to get org member role for %s/%s: %s",
+                organization_id,
+                user_id,
+                e.response.status_code,
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                "Error getting org member role for %s/%s: %s",
+                organization_id,
+                user_id,
+                e,
+            )
+            return None
+
+    async def check_user_access(self, organization_id: str, user_id: str) -> bool:
+        member = await self._get_member_role(organization_id, user_id)
+        return member is not None and member.get("status") == "active"
+
+    async def check_admin_access(self, organization_id: str, user_id: str) -> bool:
+        member = await self._get_member_role(organization_id, user_id)
+        return (
+            member is not None
+            and member.get("status") == "active"
+            and member.get("role") in {"owner", "admin"}
+        )
+
     # =============================================================================
     # Organization Members
     # =============================================================================

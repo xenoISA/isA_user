@@ -255,8 +255,15 @@ async def create_project(
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
+    kwargs = {}
+    if request.organization_id:
+        kwargs["organization_id"] = request.organization_id
     return await svc.create_project(
-        caller_id, request.name, request.description, request.custom_instructions
+        caller_id,
+        request.name,
+        request.description,
+        request.custom_instructions,
+        **kwargs,
     )
 
 
@@ -264,50 +271,69 @@ async def create_project(
 async def list_projects(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    organization_id: str = Query(None, min_length=1),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
-    projects = await svc.list_projects(caller_id, limit, offset)
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    projects = await svc.list_projects(caller_id, limit, offset, **kwargs)
     return {"projects": projects, "total": len(projects)}
 
 
 @app.get("/api/v1/projects/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: str,
+    organization_id: str = Query(None, min_length=1),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
-    return await svc.get_project(project_id, caller_id)
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    return await svc.get_project(project_id, caller_id, **kwargs)
 
 
 @app.put("/api/v1/projects/{project_id}", response_model=ProjectResponse)
 async def update_project(
     project_id: str,
     request: UpdateProjectRequest,
+    organization_id: str = Query(None, min_length=1),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
     updates = request.model_dump(exclude_unset=True)
+    if organization_id:
+        updates["organization_id"] = organization_id
     return await svc.update_project(project_id, caller_id, **updates)
 
 
 @app.delete("/api/v1/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     project_id: str,
+    organization_id: str = Query(None, min_length=1),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
-    await svc.delete_project(project_id, caller_id)
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    await svc.delete_project(project_id, caller_id, **kwargs)
 
 
 @app.put("/api/v1/projects/{project_id}/instructions")
 async def set_instructions(
     project_id: str,
     request: SetInstructionsRequest,
+    organization_id: str = Query(None, min_length=1),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
-    await svc.set_instructions(project_id, caller_id, request.instructions)
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    await svc.set_instructions(project_id, caller_id, request.instructions, **kwargs)
     return {"message": "Instructions updated"}
 
 
@@ -316,10 +342,14 @@ async def list_project_files(
     project_id: str,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    organization_id: str = Query(None, min_length=1),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
-    files = await svc.list_project_files(project_id, caller_id, limit, offset)
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    files = await svc.list_project_files(project_id, caller_id, limit, offset, **kwargs)
     return {"files": files, "total": len(files)}
 
 
@@ -331,10 +361,14 @@ async def list_project_files(
 async def upload_project_file(
     project_id: str,
     file: UploadFile = File(...),
+    organization_id: str = Query(None, min_length=1),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
-    return await svc.upload_project_file(project_id, caller_id, file)
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    return await svc.upload_project_file(project_id, caller_id, file, **kwargs)
 
 
 @app.delete(
@@ -344,10 +378,14 @@ async def upload_project_file(
 async def delete_project_file(
     project_id: str,
     file_id: str,
+    organization_id: str = Query(None, min_length=1),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
-    await svc.delete_project_file(project_id, file_id, caller_id)
+    kwargs = {}
+    if organization_id:
+        kwargs["organization_id"] = organization_id
+    await svc.delete_project_file(project_id, file_id, caller_id, **kwargs)
 
 
 if __name__ == "__main__":

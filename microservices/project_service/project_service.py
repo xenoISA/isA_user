@@ -9,6 +9,7 @@ from fastapi import UploadFile
 from .protocols import (
     ProjectRepositoryProtocol,
     EventBusProtocol,
+    OrganizationAccessProtocol,
     StorageServiceProtocol,
     ProjectNotFoundError,
     ProjectPermissionError,
@@ -28,10 +29,12 @@ class ProjectService:
         repository: ProjectRepositoryProtocol,
         storage_client: Optional[StorageServiceProtocol] = None,
         event_bus: Optional[EventBusProtocol] = None,
+        organization_access: Optional[OrganizationAccessProtocol] = None,
     ):
         self.repository = repository
         self.storage_client = storage_client
         self.event_bus = event_bus
+        self.organization_access = organization_access
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -64,10 +67,56 @@ class ProjectService:
         except Exception as exc:
             logger.warning("Failed to publish audit event: %s", exc)
 
-    async def _verify_ownership(self, project_id: str, user_id: str) -> Dict[str, Any]:
+    @staticmethod
+    def _project_org_id(project: Dict[str, Any]) -> Optional[str]:
+        return project.get("organization_id") or project.get("org_id")
+
+    async def _has_org_access(
+        self, organization_id: str, user_id: str, write: bool = False
+    ) -> bool:
+        if user_id == "internal-service":
+            return True
+        if self.organization_access is None:
+            return False
+
+        if write:
+            return bool(
+                await self.organization_access.check_admin_access(
+                    organization_id, user_id
+                )
+            )
+        return bool(
+            await self.organization_access.check_user_access(organization_id, user_id)
+        )
+
+    async def _require_org_access(
+        self, organization_id: str, user_id: str, write: bool = False
+    ) -> None:
+        if not await self._has_org_access(organization_id, user_id, write=write):
+            raise ProjectPermissionError("Not authorized to access this organization")
+
+    async def _verify_access(
+        self,
+        project_id: str,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        write: bool = False,
+    ) -> Dict[str, Any]:
         project = await self.repository.get_project(project_id)
         if not project:
             raise ProjectNotFoundError(f"Project {project_id} not found")
+
+        project_org_id = self._project_org_id(project)
+        if organization_id and project_org_id != organization_id:
+            raise ProjectPermissionError("Project does not belong to organization")
+
+        if project_org_id:
+            if project["user_id"] == user_id:
+                return project
+            if await self._has_org_access(project_org_id, user_id, write=write):
+                return project
+            raise ProjectPermissionError("Not authorized to access this project")
+
         if project["user_id"] != user_id:
             raise ProjectPermissionError("Not authorized to access this project")
         return project
@@ -80,48 +129,75 @@ class ProjectService:
         name: str,
         description: str = None,
         custom_instructions: str = None,
+        organization_id: str = None,
     ) -> Dict[str, Any]:
+        if organization_id:
+            await self._require_org_access(organization_id, user_id)
+
         count = await self.repository.count_projects(user_id)
         if count >= MAX_PROJECTS_PER_USER:
             raise ProjectLimitExceeded(
                 f"User has reached the {MAX_PROJECTS_PER_USER}-project limit"
             )
         result = await self.repository.create_project(
-            user_id, name, description, custom_instructions
+            user_id, name, description, custom_instructions, organization_id
         )
         await self._publish("create", user_id, result["id"], success=True)
         return result
 
-    async def get_project(self, project_id: str, user_id: str) -> Dict[str, Any]:
-        project = await self._verify_ownership(project_id, user_id)
+    async def get_project(
+        self,
+        project_id: str,
+        user_id: str,
+        organization_id: str = None,
+    ) -> Dict[str, Any]:
+        project = await self._verify_access(project_id, user_id, organization_id)
         await self._publish("read", user_id, project_id, success=True)
         return project
 
     async def list_projects(
-        self, user_id: str, limit: int = 50, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        organization_id: str = None,
     ) -> List[Dict[str, Any]]:
-        return await self.repository.list_projects(user_id, limit, offset)
+        if organization_id:
+            await self._require_org_access(organization_id, user_id)
+        return await self.repository.list_projects(
+            user_id, limit, offset, organization_id
+        )
 
     async def update_project(
-        self, project_id: str, user_id: str, **updates
+        self,
+        project_id: str,
+        user_id: str,
+        organization_id: str = None,
+        **updates,
     ) -> Dict[str, Any]:
         if not updates:
             raise InvalidProjectUpdate("No fields to update")
-        await self._verify_ownership(project_id, user_id)
+        await self._verify_access(project_id, user_id, organization_id, write=True)
         result = await self.repository.update_project(project_id, **updates)
         await self._publish("update", user_id, project_id, success=True)
         return result
 
-    async def delete_project(self, project_id: str, user_id: str) -> bool:
-        await self._verify_ownership(project_id, user_id)
+    async def delete_project(
+        self, project_id: str, user_id: str, organization_id: str = None
+    ) -> bool:
+        await self._verify_access(project_id, user_id, organization_id, write=True)
         deleted = await self.repository.delete_project(project_id)
         await self._publish("delete", user_id, project_id, success=True)
         return deleted
 
     async def set_instructions(
-        self, project_id: str, user_id: str, instructions: str
+        self,
+        project_id: str,
+        user_id: str,
+        instructions: str,
+        organization_id: str = None,
     ) -> bool:
-        await self._verify_ownership(project_id, user_id)
+        await self._verify_access(project_id, user_id, organization_id, write=True)
         result = await self.repository.set_instructions(project_id, instructions)
         await self._publish("set_instructions", user_id, project_id, success=True)
         return result
@@ -132,8 +208,9 @@ class ProjectService:
         user_id: str,
         limit: int = 100,
         offset: int = 0,
+        organization_id: str = None,
     ) -> List[Dict[str, Any]]:
-        await self._verify_ownership(project_id, user_id)
+        await self._verify_access(project_id, user_id, organization_id)
         return await self.repository.list_project_files(project_id, limit, offset)
 
     async def upload_project_file(
@@ -141,17 +218,20 @@ class ProjectService:
         project_id: str,
         user_id: str,
         file: UploadFile,
+        organization_id: str = None,
     ) -> Dict[str, Any]:
         if self.storage_client is None:
             raise ProjectStorageError("Storage client is not configured")
 
-        project = await self._verify_ownership(project_id, user_id)
+        project = await self._verify_access(
+            project_id, user_id, organization_id, write=True
+        )
         file_content = await file.read()
         upload_result = await self.storage_client.upload_file(
             file_content=file_content,
             filename=file.filename or "upload.bin",
             user_id=user_id,
-            organization_id=project.get("org_id"),
+            organization_id=self._project_org_id(project),
             access_level="private",
             content_type=file.content_type,
             metadata={"project_id": project_id},
@@ -179,11 +259,12 @@ class ProjectService:
         project_id: str,
         file_id: str,
         user_id: str,
+        organization_id: str = None,
     ) -> bool:
         if self.storage_client is None:
             raise ProjectStorageError("Storage client is not configured")
 
-        await self._verify_ownership(project_id, user_id)
+        await self._verify_access(project_id, user_id, organization_id, write=True)
         project_file = await self.repository.get_project_file(project_id, file_id)
         if not project_file:
             raise ProjectNotFoundError(f"Project file {file_id} not found")
