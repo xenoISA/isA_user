@@ -334,6 +334,11 @@ microservices:
     k8s_service: "memory"
     description: "Memory (semantic, episodic, etc.)"
 
+  artifact_service:
+    port: 8291
+    k8s_service: "artifact"
+    description: "Artifact library (versioned AI-generated artifacts + shares) — xenoISA/isA_user#441"
+
   location_service:
     port: 8224
     k8s_service: "location"
