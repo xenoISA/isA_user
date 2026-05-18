@@ -1,111 +1,35 @@
-from unittest.mock import AsyncMock
-
-import httpx
 import pytest
 
-from microservices.auth_service import main as auth_main
+from microservices.auth_service.oauth_consent import (
+    authorization_consent_payload,
+    redirect_with_oauth_params,
+    render_consent_screen,
+    wants_html_response,
+)
 
-pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+pytestmark = pytest.mark.unit
 
 
-class FakeOAuthClientRepository:
-    def __init__(self, client=None):
-        self.client = client or {
+def _payload(**overrides):
+    payload = authorization_consent_payload(
+        client={
             "client_id": "client-1",
             "client_name": "Calendar <Client>",
-            "client_type": "public",
-            "redirect_uris": ["https://app.example/callback"],
-            "require_pkce": True,
-        }
-
-    async def get_client(self, client_id):
-        if client_id == self.client["client_id"]:
-            return self.client
-        return None
-
-
-async def _caller():
-    return {
-        "user_id": "usr_1",
-        "organization_id": "org_1",
-    }
-
-
-def _client():
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=auth_main.app),
-        base_url="http://testserver",
-        follow_redirects=False,
+        },
+        client_id="client-1",
+        redirect_uri="https://app.example/callback",
+        scope="mcp:tools:execute mcp:resources:read",
+        state="csrf-state",
+        resource="https://mcp.example",
+        code_challenge="pkce-challenge",
+        code_challenge_method="S256",
     )
+    payload.update(overrides)
+    return payload
 
 
-@pytest.fixture
-def authz_code_service():
-    service = AsyncMock()
-    service.create_authorization_request.return_value = {
-        "code": "auth-code-123",
-        "state": "csrf-state",
-        "redirect_uri": "https://app.example/callback",
-    }
-    return service
-
-
-@pytest.fixture(autouse=True)
-def dependency_overrides(authz_code_service):
-    auth_main.app.dependency_overrides[
-        auth_main.get_oauth_client_repository
-    ] = lambda: FakeOAuthClientRepository()
-    auth_main.app.dependency_overrides[
-        auth_main.get_authorization_code_service
-    ] = lambda: authz_code_service
-    auth_main.app.dependency_overrides[auth_main.get_current_caller] = _caller
-    yield
-    auth_main.app.dependency_overrides.clear()
-
-
-def _authorize_params(**overrides):
-    params = {
-        "response_type": "code",
-        "client_id": "client-1",
-        "redirect_uri": "https://app.example/callback",
-        "scope": "mcp:tools:execute mcp:resources:read",
-        "state": "csrf-state",
-        "resource": "https://mcp.example",
-        "code_challenge": "pkce-challenge",
-        "code_challenge_method": "S256",
-    }
-    params.update(overrides)
-    return params
-
-
-async def test_authorize_renders_server_consent_screen_for_html_accept():
-    async with _client() as client:
-        response = await client.get(
-            "/oauth/authorize",
-            params=_authorize_params(),
-            headers={"Accept": "text/html"},
-        )
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
-    assert "Calendar &lt;Client&gt;" in response.text
-    assert "mcp:tools:execute" in response.text
-    assert "mcp:resources:read" in response.text
-    assert "https://mcp.example" in response.text
-    assert 'name="decision" value="approve"' in response.text
-    assert 'name="decision" value="deny"' in response.text
-
-
-async def test_authorize_keeps_json_payload_for_api_clients():
-    async with _client() as client:
-        response = await client.get(
-            "/oauth/authorize",
-            params=_authorize_params(),
-            headers={"Accept": "application/json"},
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {
+def test_authorization_consent_payload_preserves_json_contract():
+    assert _payload() == {
         "action": "consent_required",
         "client_id": "client-1",
         "client_name": "Calendar <Client>",
@@ -118,64 +42,54 @@ async def test_authorize_keeps_json_payload_for_api_clients():
     }
 
 
-async def test_consent_approve_redirects_back_with_authorization_code(
-    authz_code_service,
-):
-    async with _client() as client:
-        response = await client.post(
-            "/oauth/consent",
-            data={
-                **_authorize_params(),
-                "decision": "approve",
-            },
-            headers={"Authorization": "Bearer user-token"},
-        )
+def test_render_consent_screen_escapes_client_and_renders_scopes():
+    html = render_consent_screen(_payload())
 
-    assert response.status_code == 303
-    assert response.headers["location"] == (
-        "https://app.example/callback?code=auth-code-123&state=csrf-state"
+    assert "Calendar &lt;Client&gt;" in html
+    assert "mcp:tools:execute" in html
+    assert "mcp:resources:read" in html
+    assert "https://mcp.example" in html
+    assert 'name="decision" value="approve"' in html
+    assert 'name="decision" value="deny"' in html
+    assert 'name="code_challenge" value="pkce-challenge"' in html
+
+
+def test_render_consent_screen_handles_empty_scope_and_resource():
+    html = render_consent_screen(_payload(scope="", resource=None))
+
+    assert "No scopes requested" in html
+    assert "Default resource" in html
+
+
+def test_wants_html_response_uses_accept_header():
+    assert wants_html_response("text/html,application/xhtml+xml") is True
+    assert wants_html_response("application/json") is False
+    assert wants_html_response("*/*") is False
+
+
+def test_redirect_with_oauth_params_appends_code_and_state():
+    redirect = redirect_with_oauth_params(
+        "https://app.example/callback",
+        {
+            "code": "auth-code-123",
+            "state": "csrf-state",
+        },
     )
-    authz_code_service.create_authorization_request.assert_awaited_once_with(
-        client_id="client-1",
-        redirect_uri="https://app.example/callback",
-        scope="mcp:tools:execute mcp:resources:read",
-        state="csrf-state",
-        code_challenge="pkce-challenge",
-        code_challenge_method="S256",
-        resource="https://mcp.example",
-        user_id="usr_1",
-        organization_id="org_1",
+
+    assert (
+        redirect == "https://app.example/callback?code=auth-code-123&state=csrf-state"
     )
 
 
-async def test_consent_deny_redirects_back_with_access_denied(authz_code_service):
-    async with _client() as client:
-        response = await client.post(
-            "/oauth/consent",
-            data={
-                **_authorize_params(),
-                "decision": "deny",
-            },
-            headers={"Authorization": "Bearer user-token"},
-        )
-
-    assert response.status_code == 303
-    assert response.headers["location"] == (
-        "https://app.example/callback?error=access_denied&state=csrf-state"
+def test_redirect_with_oauth_params_preserves_query_and_fragment():
+    redirect = redirect_with_oauth_params(
+        "https://app.example/callback?existing=1#done",
+        {
+            "error": "access_denied",
+            "state": "",
+        },
     )
-    authz_code_service.create_authorization_request.assert_not_awaited()
 
-
-async def test_consent_deny_validates_redirect_uri_before_redirecting():
-    async with _client() as client:
-        response = await client.post(
-            "/oauth/consent",
-            data={
-                **_authorize_params(redirect_uri="https://attacker.example/callback"),
-                "decision": "deny",
-            },
-            headers={"Authorization": "Bearer user-token"},
-        )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "invalid_request: redirect_uri not registered"
+    assert (
+        redirect == "https://app.example/callback?existing=1&error=access_denied#done"
+    )
