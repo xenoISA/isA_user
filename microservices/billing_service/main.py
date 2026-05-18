@@ -586,6 +586,9 @@ async def get_usage_overview(
     request: Request,
     user_id: Optional[str] = None,
     organization_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    api_key_id: Optional[str] = None,
+    model: Optional[str] = None,
     period_days: int = Query(30, ge=1, le=365),
     service: BillingService = Depends(get_billing_service),
 ):
@@ -602,13 +605,23 @@ async def get_usage_overview(
             detail="Authentication required: X-User-Id header or user_id param",
         )
     resolved_org_id = organization_id or request.headers.get("X-Organization-Id")
+    if (project_id or api_key_id) and not resolved_org_id:
+        raise HTTPException(
+            status_code=403,
+            detail="organization_id is required when filtering usage by project_id or api_key_id",
+        )
 
     try:
         return await service.get_usage_overview(
             user_id=resolved_user_id,
             period_days=period_days,
             organization_id=resolved_org_id,
+            project_id=project_id,
+            api_key_id=api_key_id,
+            model=model,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting usage overview: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -616,12 +629,16 @@ async def get_usage_overview(
 
 @app.get("/api/v1/billing/usage/aggregations")
 async def get_usage_aggregations(
+    request: Request,
     user_id: Optional[str] = None,
     organization_id: Optional[str] = None,
     billing_account_type: Optional[str] = None,
     billing_account_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     subscription_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    api_key_id: Optional[str] = None,
+    model: Optional[str] = None,
     service_type: Optional[str] = None,
     product_id: Optional[str] = None,
     period_start: Optional[datetime] = None,
@@ -642,10 +659,18 @@ async def get_usage_aggregations(
     try:
         from .models import ServiceType
 
+        resolved_user_id = user_id or request.headers.get("X-User-Id")
+        resolved_org_id = organization_id or request.headers.get("X-Organization-Id")
+        if (project_id or api_key_id) and not resolved_org_id:
+            raise HTTPException(
+                status_code=403,
+                detail="organization_id is required when filtering usage by project_id or api_key_id",
+            )
+
         billing_service_type = ServiceType(service_type) if service_type else None
 
         # Handle group_by for agent_id (Story #242) and service_type (Story #240)
-        if group_by:
+        if group_by and not (project_id or api_key_id or model):
             group_fields = [g.strip() for g in group_by.split(",")]
 
             if "agent_id" in group_fields:
@@ -654,8 +679,8 @@ async def get_usage_aggregations(
                     None,
                 )
                 agent_aggs = await service.repository.get_agent_usage_aggregations(
-                    user_id=user_id,
-                    organization_id=organization_id,
+                    user_id=resolved_user_id,
+                    organization_id=resolved_org_id,
                     agent_id=agent_id,
                     service_type=billing_service_type,
                     period_start=period_start,
@@ -668,8 +693,8 @@ async def get_usage_aggregations(
                     "total_count": len(agent_aggs),
                     "group_by": group_by,
                     "filters": {
-                        "user_id": user_id,
-                        "organization_id": organization_id,
+                        "user_id": resolved_user_id,
+                        "organization_id": resolved_org_id,
                         "agent_id": agent_id,
                         "service_type": service_type,
                         "period_start": period_start,
@@ -683,8 +708,8 @@ async def get_usage_aggregations(
                     None,
                 )
                 service_aggs = await service.repository.get_service_usage_aggregations(
-                    user_id=user_id,
-                    organization_id=organization_id,
+                    user_id=resolved_user_id,
+                    organization_id=resolved_org_id,
                     agent_id=agent_id,
                     period_start=period_start,
                     period_end=period_end,
@@ -696,8 +721,8 @@ async def get_usage_aggregations(
                     "total_count": len(service_aggs),
                     "group_by": group_by,
                     "filters": {
-                        "user_id": user_id,
-                        "organization_id": organization_id,
+                        "user_id": resolved_user_id,
+                        "organization_id": resolved_org_id,
                         "agent_id": agent_id,
                         "period_start": period_start,
                         "period_end": period_end,
@@ -706,12 +731,15 @@ async def get_usage_aggregations(
 
         # Default: existing aggregation logic
         aggregations = await service.repository.get_usage_aggregations(
-            user_id=user_id,
-            organization_id=organization_id,
+            user_id=resolved_user_id,
+            organization_id=resolved_org_id,
             billing_account_type=billing_account_type,
             billing_account_id=billing_account_id,
             agent_id=agent_id,
             subscription_id=subscription_id,
+            project_id=project_id,
+            api_key_id=api_key_id,
+            model=model,
             service_type=billing_service_type,
             product_id=product_id,
             period_start=period_start,
@@ -724,12 +752,15 @@ async def get_usage_aggregations(
             "aggregations": [agg.model_dump() for agg in aggregations],
             "total_count": len(aggregations),
             "filters": {
-                "user_id": user_id,
-                "organization_id": organization_id,
+                "user_id": resolved_user_id,
+                "organization_id": resolved_org_id,
                 "billing_account_type": billing_account_type,
                 "billing_account_id": billing_account_id,
                 "agent_id": agent_id,
                 "subscription_id": subscription_id,
+                "project_id": project_id,
+                "api_key_id": api_key_id,
+                "model": model,
                 "service_type": service_type,
                 "product_id": product_id,
                 "period_start": period_start,
@@ -740,6 +771,8 @@ async def get_usage_aggregations(
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid parameter: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting usage aggregations: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

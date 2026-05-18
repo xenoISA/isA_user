@@ -120,7 +120,9 @@ class TestUsageOverview:
         service = BillingService(repository=repository, agent_client=agent_client)
 
         before = datetime.utcnow()
-        await service.get_usage_overview(user_id="u1", period_days=7, organization_id="o1")
+        await service.get_usage_overview(
+            user_id="u1", period_days=7, organization_id="o1"
+        )
         after = datetime.utcnow()
 
         repository.get_usage_aggregations.assert_awaited_once()
@@ -132,7 +134,56 @@ class TestUsageOverview:
         # period_start should be ~7 days before period_end, both within the test window
         delta = kwargs["period_end"] - kwargs["period_start"]
         assert abs(delta - timedelta(days=7)) < timedelta(seconds=2)
-        assert before - timedelta(seconds=2) <= kwargs["period_end"] <= after + timedelta(seconds=2)
+        assert (
+            before - timedelta(seconds=2)
+            <= kwargs["period_end"]
+            <= after + timedelta(seconds=2)
+        )
+
+    async def test_project_api_key_and_model_filters_passed_through_to_repo(self):
+        repository = AsyncMock()
+        repository.get_usage_aggregations.return_value = []
+        agent_client = AsyncMock()
+        agent_client.count_agents.return_value = 0
+        service = BillingService(repository=repository, agent_client=agent_client)
+
+        result = await service.get_usage_overview(
+            user_id="u1",
+            organization_id="o1",
+            project_id="project-1",
+            api_key_id="key-1",
+            model="gpt-4.1-nano",
+            period_days=7,
+        )
+
+        kwargs = repository.get_usage_aggregations.await_args.kwargs
+        assert kwargs["project_id"] == "project-1"
+        assert kwargs["api_key_id"] == "key-1"
+        assert kwargs["model"] == "gpt-4.1-nano"
+        assert result["filters"] == {
+            "project_id": "project-1",
+            "api_key_id": "key-1",
+            "model": "gpt-4.1-nano",
+        }
+
+    async def test_no_data_filtered_overview_returns_zero_usage(self):
+        service = _make_service(aggregations=[], agent_count=0)
+
+        result = await service.get_usage_overview(
+            user_id="u1",
+            organization_id="o1",
+            project_id="project-empty",
+            api_key_id="key-empty",
+            model="gpt-4.1-nano",
+        )
+
+        assert result["totals"] == {
+            "requests": 0,
+            "tokens": 0,
+            "cost": 0.0,
+            "currency": "USD",
+        }
+        assert result["daily"] == []
 
     async def test_optional_counts_default_null(self):
         service = _make_service(aggregations=[], agent_count=0)

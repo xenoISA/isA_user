@@ -186,6 +186,9 @@ class UsageAggregation(BaseModel):
     organization_id: Optional[str] = None
     agent_id: Optional[str] = None
     subscription_id: Optional[str] = None
+    project_id: Optional[str] = None
+    api_key_id: Optional[str] = None
+    model: Optional[str] = None
     service_type: Optional[ServiceType] = None
     product_id: Optional[str] = None
 
