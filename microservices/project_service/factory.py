@@ -1,12 +1,13 @@
-"""Project Service Factory (#258, #295, #298)"""
+"""Project Service Factory (#258, #295, #298, #442)"""
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from core.config_manager import ConfigManager
 
 from microservices.storage_service.client import StorageServiceClient
 
+from .clients import ProjectSharingClient
 from .protocols import (
     ProjectRepositoryProtocol,
     EventBusProtocol,
@@ -25,6 +26,7 @@ def create_project_service(
     storage_client: Optional[StorageServiceProtocol] = None,
     event_bus: Optional[EventBusProtocol] = None,
     organization_access: Optional[OrganizationAccessProtocol] = None,
+    project_sharing_client: Optional[Any] = None,
 ) -> ProjectService:
     repo = repository or ProjectRepository(config_manager=config_manager)
     storage = storage_client or StorageServiceClient()
@@ -32,9 +34,11 @@ def create_project_service(
         from microservices.organization_service.client import OrganizationServiceClient
 
         organization_access = OrganizationServiceClient()
+    sharing_client = project_sharing_client or ProjectSharingClient()
     return ProjectService(
         repository=repo,
         storage_client=storage,
         event_bus=event_bus,
         organization_access=organization_access,
+        project_sharing_client=sharing_client,
     )

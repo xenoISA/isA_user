@@ -30,11 +30,16 @@ class ProjectService:
         storage_client: Optional[StorageServiceProtocol] = None,
         event_bus: Optional[EventBusProtocol] = None,
         organization_access: Optional[OrganizationAccessProtocol] = None,
+        project_sharing_client: Optional[Any] = None,
     ):
         self.repository = repository
         self.storage_client = storage_client
         self.event_bus = event_bus
         self.organization_access = organization_access
+        # project_sharing_client is best-effort; if not provided, archive
+        # still succeeds and share revocation falls to a reconcile job
+        # (see microservices/project_service/clients/project_sharing_client.py).
+        self.project_sharing_client = project_sharing_client
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -71,27 +76,17 @@ class ProjectService:
     def _project_org_id(project: Dict[str, Any]) -> Optional[str]:
         return project.get("organization_id") or project.get("org_id")
 
-    async def _has_org_access(
-        self, organization_id: str, user_id: str, write: bool = False
-    ) -> bool:
+    async def _has_org_access(self, organization_id: str, user_id: str, write: bool = False) -> bool:
         if user_id == "internal-service":
             return True
         if self.organization_access is None:
             return False
 
         if write:
-            return bool(
-                await self.organization_access.check_admin_access(
-                    organization_id, user_id
-                )
-            )
-        return bool(
-            await self.organization_access.check_user_access(organization_id, user_id)
-        )
+            return bool(await self.organization_access.check_admin_access(organization_id, user_id))
+        return bool(await self.organization_access.check_user_access(organization_id, user_id))
 
-    async def _require_org_access(
-        self, organization_id: str, user_id: str, write: bool = False
-    ) -> None:
+    async def _require_org_access(self, organization_id: str, user_id: str, write: bool = False) -> None:
         if not await self._has_org_access(organization_id, user_id, write=write):
             raise ProjectPermissionError("Not authorized to access this organization")
 
@@ -136,12 +131,8 @@ class ProjectService:
 
         count = await self.repository.count_projects(user_id)
         if count >= MAX_PROJECTS_PER_USER:
-            raise ProjectLimitExceeded(
-                f"User has reached the {MAX_PROJECTS_PER_USER}-project limit"
-            )
-        result = await self.repository.create_project(
-            user_id, name, description, custom_instructions, organization_id
-        )
+            raise ProjectLimitExceeded(f"User has reached the {MAX_PROJECTS_PER_USER}-project limit")
+        result = await self.repository.create_project(user_id, name, description, custom_instructions, organization_id)
         await self._publish("create", user_id, result["id"], success=True)
         return result
 
@@ -161,11 +152,18 @@ class ProjectService:
         limit: int = 50,
         offset: int = 0,
         organization_id: str = None,
+        include_archived: bool = False,
+        starred_only: bool = False,
     ) -> List[Dict[str, Any]]:
         if organization_id:
             await self._require_org_access(organization_id, user_id)
         return await self.repository.list_projects(
-            user_id, limit, offset, organization_id
+            user_id,
+            limit,
+            offset,
+            organization_id,
+            include_archived=include_archived,
+            starred_only=starred_only,
         )
 
     async def update_project(
@@ -182,9 +180,7 @@ class ProjectService:
         await self._publish("update", user_id, project_id, success=True)
         return result
 
-    async def delete_project(
-        self, project_id: str, user_id: str, organization_id: str = None
-    ) -> bool:
+    async def delete_project(self, project_id: str, user_id: str, organization_id: str = None) -> bool:
         await self._verify_access(project_id, user_id, organization_id, write=True)
         deleted = await self.repository.delete_project(project_id)
         await self._publish("delete", user_id, project_id, success=True)
@@ -200,6 +196,80 @@ class ProjectService:
         await self._verify_access(project_id, user_id, organization_id, write=True)
         result = await self.repository.set_instructions(project_id, instructions)
         await self._publish("set_instructions", user_id, project_id, success=True)
+        return result
+
+    # ── Star / Archive (#442, see xenoISA/isA_#429 §15.3, §15.6) ─────────
+
+    async def star_project(
+        self,
+        project_id: str,
+        user_id: str,
+        organization_id: str = None,
+    ) -> Dict[str, Any]:
+        await self._verify_access(project_id, user_id, organization_id, write=True)
+        result = await self.repository.set_starred(project_id, True)
+        await self._publish("star", user_id, project_id, success=True)
+        return result
+
+    async def unstar_project(
+        self,
+        project_id: str,
+        user_id: str,
+        organization_id: str = None,
+    ) -> Dict[str, Any]:
+        await self._verify_access(project_id, user_id, organization_id, write=True)
+        result = await self.repository.set_starred(project_id, False)
+        await self._publish("unstar", user_id, project_id, success=True)
+        return result
+
+    async def archive_project(
+        self,
+        project_id: str,
+        user_id: str,
+        organization_id: str = None,
+    ) -> Dict[str, Any]:
+        """Archive a project and best-effort revoke all of its shares.
+
+        Per design (xenoISA/isA_#429 §15.6) the archived_at flag is the
+        source of truth — if project_sharing_service is unreachable we still
+        return success and let a reconcile job clean up shares later.
+        """
+        await self._verify_access(project_id, user_id, organization_id, write=True)
+        result = await self.repository.set_archived(project_id, True)
+        # Fire-and-forget share revocation. Never raises.
+        if self.project_sharing_client is not None:
+            try:
+                revoked = await self.project_sharing_client.revoke_all_shares(project_id)
+                if not revoked:
+                    logger.info(
+                        "project %s archived; share revocation deferred to reconcile job",
+                        project_id,
+                    )
+            except Exception as exc:  # extra belt-and-suspenders
+                logger.warning(
+                    "project_sharing_client raised during archive of %s: %s",
+                    project_id,
+                    exc,
+                )
+        else:
+            logger.debug(
+                "project_sharing_client not configured; skipping share revocation for %s",
+                project_id,
+            )
+        await self._publish("archive", user_id, project_id, success=True)
+        return result
+
+    async def unarchive_project(
+        self,
+        project_id: str,
+        user_id: str,
+        organization_id: str = None,
+    ) -> Dict[str, Any]:
+        """Unarchive — clears archived_at. Does NOT restore previously revoked
+        shares (matches Claude / design §15.6 — must re-invite)."""
+        await self._verify_access(project_id, user_id, organization_id, write=True)
+        result = await self.repository.set_archived(project_id, False)
+        await self._publish("unarchive", user_id, project_id, success=True)
         return result
 
     async def list_project_files(
@@ -223,9 +293,7 @@ class ProjectService:
         if self.storage_client is None:
             raise ProjectStorageError("Storage client is not configured")
 
-        project = await self._verify_access(
-            project_id, user_id, organization_id, write=True
-        )
+        project = await self._verify_access(project_id, user_id, organization_id, write=True)
         file_content = await file.read()
         upload_result = await self.storage_client.upload_file(
             file_content=file_content,
@@ -249,9 +317,7 @@ class ProjectService:
             file_type=upload_result.get("content_type") or file.content_type,
             file_size=upload_result.get("file_size") or len(file_content),
         )
-        await self._publish(
-            "upload_file", user_id, project_id, success=True, detail=persisted["id"]
-        )
+        await self._publish("upload_file", user_id, project_id, success=True, detail=persisted["id"])
         return persisted
 
     async def delete_project_file(
@@ -269,14 +335,10 @@ class ProjectService:
         if not project_file:
             raise ProjectNotFoundError(f"Project file {file_id} not found")
 
-        deleted = await self.storage_client.delete_file(
-            file_id, user_id, permanent=True
-        )
+        deleted = await self.storage_client.delete_file(file_id, user_id, permanent=True)
         if not deleted:
             raise ProjectStorageError(f"Failed to delete storage file {file_id}")
 
         await self.repository.delete_project_file(project_id, file_id)
-        await self._publish(
-            "delete_file", user_id, project_id, success=True, detail=file_id
-        )
+        await self._publish("delete_file", user_id, project_id, success=True, detail=file_id)
         return True

@@ -39,11 +39,14 @@ class ProjectResponse(BaseModel):
     user_id: str
     org_id: Optional[str] = None
     organization_id: Optional[str] = None
+    owner_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     custom_instructions: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    starred_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
 
 
 class ProjectFileResponse(BaseModel):
