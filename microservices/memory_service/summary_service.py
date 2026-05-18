@@ -12,6 +12,7 @@ shape correctness even when isA_Model or Qdrant are unreachable.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -22,7 +23,8 @@ from isa_common import AsyncPostgresClient
 logger = logging.getLogger(__name__)
 
 # Pulled in lazily so import failures (e.g. isa_model not installed in the test
-# environment) don't break the rest of the service.
+# environment) don't break the rest of the service. We keep the symbol exported
+# at module scope so tests can patch `summary_service.AsyncISAModel`.
 try:
     from isa_model.inference_client import AsyncISAModel  # type: ignore
 
@@ -31,6 +33,11 @@ except Exception as e:  # pragma: no cover - exercised via fallback path
     logger.warning(f"isa_model unavailable, summary/past-chats will use fallback: {e}")
     AsyncISAModel = None  # type: ignore
     _ISA_MODEL_AVAILABLE = False
+
+# Cap input memories so we don't blow the context window on power-user accounts.
+# Top-50 by importance_score (or most recent when score is absent) is the sweet
+# spot for "gpt-5-nano / claude-haiku" class models.
+_MAX_MEMORIES_FOR_SYNTHESIS = 50
 
 
 def _model_url() -> str:
@@ -45,17 +52,59 @@ def _excerpt(content: Optional[str], max_len: int = 240) -> str:
     return text if len(text) <= max_len else text[: max_len - 1].rstrip() + "…"
 
 
+def _memory_line(m: Dict[str, Any]) -> str:
+    """Render a single memory row as `[{type}] {content}` for the prompt."""
+    content = m.get("content") or ""
+    if not content:
+        # Compose a synthetic line for type-specific shapes (factual is the
+        # main offender — it stores subject/predicate/object_value separately).
+        subject = m.get("subject")
+        predicate = m.get("predicate")
+        obj = m.get("object_value")
+        if subject and predicate:
+            content = f"{subject} {predicate} {obj or ''}".strip()
+        else:
+            content = m.get("event_type") or m.get("definition") or m.get("skill_type") or ""
+    mtype = m.get("memory_type") or m.get("type") or "memory"
+    return f"- [{mtype}] {content.strip()}" if content else ""
+
+
+def _rank_memories(memories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Trim to top-N by importance_score. When importance is missing we fall back
+    to most-recent ordering (rows usually come pre-sorted DESC by created_at
+    from list_memories, so a stable sort preserves that).
+    """
+
+    def key(m: Dict[str, Any]) -> float:
+        score = m.get("importance_score")
+        if isinstance(score, (int, float)):
+            return float(score)
+        return 0.0
+
+    # Stable sort: rows with the same score keep their incoming (recent-first)
+    # order so the "no importance set" case degrades to "most recent N".
+    ranked = sorted(memories, key=key, reverse=True)
+    return ranked[:_MAX_MEMORIES_FOR_SYNTHESIS]
+
+
 async def synthesize_summary(memories: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Build a 3-paragraph narrative + 5 highlights from a list of memories.
+    Build a 3-paragraph narrative + 5 highlights from a list of memories via
+    the isA_Model gateway.
 
-    Returns: {content: str, highlights: list[str], source_counts: dict, fallback: bool}
+    Returns: {content: str, highlights: list[str], fallback: bool}
 
-    Fallback path (when isA_Model is unreachable) returns a synthetic "Summary
-    of N memories" so the endpoint still returns a valid MemorySummary shape.
+    Fallback path (when isA_Model is unreachable, returns an error, or emits
+    un-parseable output) returns a synthetic "Summary of N memories" so the
+    endpoint still produces a valid MemorySummary row.
+
+    NOTE: Input memories are capped at top-50 by importance_score (most recent
+    when score is absent) to keep the prompt inside the gpt-5-nano /
+    claude-haiku context budget.
     """
     n = len(memories)
-    fallback_payload = {
+    fallback_payload: Dict[str, Any] = {
         "content": f"Summary of {n} memories (LLM synthesis unavailable — fallback summary).",
         "highlights": [f"{n} memories on record"] if n else ["No memories yet."],
         "fallback": True,
@@ -64,35 +113,24 @@ async def synthesize_summary(memories: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not _ISA_MODEL_AVAILABLE or n == 0:
         return fallback_payload
 
-    # Build the bulleted prompt — cap at 80 memories so we don't blow the
-    # context window on power-user accounts.
-    bullets = []
-    for m in memories[:80]:
-        content = m.get("content") or ""
-        if not content:
-            # Compose a synthetic line for type-specific shapes (factual is the
-            # main offender — it stores subject/predicate/object_value separately).
-            subject = m.get("subject")
-            predicate = m.get("predicate")
-            obj = m.get("object_value")
-            if subject and predicate:
-                content = f"{subject} {predicate} {obj or ''}".strip()
-            else:
-                content = m.get("event_type") or m.get("definition") or m.get("skill_type") or ""
-        if content:
-            bullets.append(f"- {content.strip()}")
-
+    # Rank + cap so power-user accounts don't blow the context window.
+    top_memories = _rank_memories(memories)
+    bullets = [line for line in (_memory_line(m) for m in top_memories) if line]
     if not bullets:
         return fallback_payload
 
     bulleted = "\n".join(bullets)
-    prompt = (
-        f"Here are {len(bullets)} memories about the user:\n\n{bulleted}\n\n"
-        "Write a 3-paragraph narrative summary highlighting their preferences, "
-        "recurring themes, and key context. Be concise and specific — no hedging.\n\n"
-        "Then on a new line write `HIGHLIGHTS:` followed by exactly 5 bullet "
-        "highlights, one per line, each starting with `- `. Use only what's in "
-        "the memories above; do not invent facts."
+    system_prompt = (
+        "You write factual user summaries from memory rows. "
+        "Respond with valid JSON only. Do not invent facts beyond the supplied memories."
+    )
+    user_prompt = (
+        "Synthesize a 3-paragraph narrative summary highlighting the user's "
+        "preferences, recurring themes, and key context, based on these memories. "
+        "Then list exactly 5 bullet highlights.\n\n"
+        f"Memories ({len(bullets)}):\n{bulleted}\n\n"
+        'Return JSON: {"content": "<markdown narrative>", '
+        '"highlights": ["...", "...", "...", "...", "..."]}'
     )
 
     try:
@@ -100,43 +138,59 @@ async def synthesize_summary(memories: List[Dict[str, Any]]) -> Dict[str, Any]:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano",
                 messages=[
-                    {"role": "system", "content": "You write factual user summaries from memory rows."},
-                    {"role": "user", "content": prompt},
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
                 ],
+                response_format={"type": "json_object"},
                 provider="openai",
             )
-        text = (response.choices[0].message.content or "").strip()
-        if not text:
+
+        # Token accounting — log usage when the SDK surfaces it (no schema change).
+        try:
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                prompt_tok = getattr(usage, "prompt_tokens", None)
+                completion_tok = getattr(usage, "completion_tokens", None)
+                total_tok = getattr(usage, "total_tokens", None)
+                logger.info(
+                    "summary synthesis tokens: prompt=%s completion=%s total=%s (memories_in=%d, memories_used=%d)",
+                    prompt_tok,
+                    completion_tok,
+                    total_tok,
+                    n,
+                    len(bullets),
+                )
+        except Exception:  # pragma: no cover - usage logging must never break the path
+            pass
+
+        raw = (response.choices[0].message.content or "").strip()
+        if not raw:
             logger.warning("LLM returned empty content; using fallback summary.")
             return fallback_payload
 
-        # Split on the HIGHLIGHTS sentinel — be lenient about casing/whitespace.
-        narrative = text
-        highlights: List[str] = []
-        marker = None
-        for candidate in ("HIGHLIGHTS:", "Highlights:", "highlights:"):
-            if candidate in text:
-                marker = candidate
-                break
-        if marker:
-            head, _, tail = text.partition(marker)
-            narrative = head.strip()
-            for line in tail.splitlines():
-                line = line.strip()
-                if line.startswith("- "):
-                    highlights.append(line[2:].strip())
-                elif line.startswith("* "):
-                    highlights.append(line[2:].strip())
-        # Cap highlights at 5 to match the contract.
-        highlights = [h for h in highlights if h][:5]
-        if not highlights:
-            highlights = [f"{n} memories synthesized"]
+        parsed = json.loads(raw)
+        narrative = (parsed.get("content") or "").strip()
+        highlights_in = parsed.get("highlights") or []
+        if not isinstance(highlights_in, list):
+            highlights_in = []
+        highlights = [str(h).strip() for h in highlights_in if str(h).strip()][:5]
+
+        if not narrative or not highlights:
+            logger.warning(
+                "LLM JSON missing fields (content=%s, highlights=%d); using fallback.",
+                bool(narrative),
+                len(highlights),
+            )
+            return fallback_payload
 
         return {
-            "content": narrative or fallback_payload["content"],
+            "content": narrative,
             "highlights": highlights,
             "fallback": False,
         }
+    except json.JSONDecodeError as e:
+        logger.warning(f"LLM synthesis returned non-JSON, using fallback: {e}")
+        return fallback_payload
     except Exception as e:
         logger.warning(f"LLM synthesis failed, using fallback summary: {e}")
         return fallback_payload
