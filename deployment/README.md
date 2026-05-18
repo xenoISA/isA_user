@@ -185,6 +185,7 @@ Reserved ports for new services from `new_features.md`:
 | 8253 | tax | ✅ Deployed | Tax calculation |
 | 8254 | fulfillment | ✅ Deployed | Order fulfillment |
 | 8260 | project | ✅ Deployed | Project workspaces, custom instructions |
+| 8261 | developer | ✅ Deployed | Developer journey cockpit |
 
 > **Note**: Infrastructure services use 50xxx range (gRPC), no conflict with 82xx range.
 

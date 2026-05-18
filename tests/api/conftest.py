@@ -14,7 +14,7 @@ Usage:
 
 import os
 import sys
-from typing import AsyncGenerator, Dict, Optional
+from typing import AsyncGenerator
 
 import httpx
 import pytest
@@ -71,6 +71,15 @@ class APITestConfig:
         "subscription": 8228,
         "credit": 8229,
         "event": 8230,
+        # Extended services (8250+)
+        "membership": 8250,
+        "campaign": 8251,
+        "inventory": 8252,
+        "tax": 8253,
+        "fulfillment": 8254,
+        "sharing": 8255,
+        "project": 8260,
+        "developer": 8261,
     }
 
     # Test mode: "gateway" or "direct"
@@ -249,16 +258,17 @@ class APIAssertions:
     @staticmethod
     def assert_success(response: httpx.Response, expected_status: int = 200):
         """Assert response is successful"""
-        assert response.status_code == expected_status, (
-            f"Expected {expected_status}, got {response.status_code}: {response.text}"
-        )
+        assert (
+            response.status_code == expected_status
+        ), f"Expected {expected_status}, got {response.status_code}: {response.text}"
 
     @staticmethod
     def assert_created(response: httpx.Response):
         """Assert resource was created"""
-        assert response.status_code in [200, 201], (
-            f"Expected 200/201, got {response.status_code}: {response.text}"
-        )
+        assert response.status_code in [
+            200,
+            201,
+        ], f"Expected 200/201, got {response.status_code}: {response.text}"
 
     @staticmethod
     def assert_not_found(response: httpx.Response):

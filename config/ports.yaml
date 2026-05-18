@@ -405,6 +405,11 @@ microservices:
     k8s_service: "project"
     description: "Project workspace management"
 
+  developer_service:
+    port: 8261
+    k8s_service: "developer"
+    description: "Developer journey cockpit"
+
 # =============================================================================
 # Port Ranges Summary
 # =============================================================================
