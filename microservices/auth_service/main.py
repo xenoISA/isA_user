@@ -21,7 +21,17 @@ from datetime import datetime, timezone, timedelta
 import uvicorn
 
 # FastAPI imports
-from fastapi import FastAPI, HTTPException, Depends, status, Query, Form, Security
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Depends,
+    status,
+    Query,
+    Form,
+    Security,
+    Request,
+)
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # 导入新实现的服务
@@ -47,6 +57,12 @@ from .device_auth_service import DeviceAuthService
 from .oauth_client_repository import OAuthClientRepository
 from .authorization_code_repository import AuthorizationCodeRepository
 from .authorization_code_service import AuthorizationCodeService
+from .oauth_consent import (
+    authorization_consent_payload,
+    redirect_with_oauth_params,
+    render_consent_screen,
+    wants_html_response,
+)
 from .schemas import OAuthClientCreateRequest
 
 # Import route registry for Consul metadata
@@ -825,35 +841,22 @@ class ConsentApprovalRequest(BaseModel):
     code_challenge_method: Optional[str] = Field(None, description="PKCE method (S256)")
 
 
-@app.get("/oauth/authorize")
-async def oauth_authorize(
-    response_type: str = Query(..., description="Must be 'code'"),
-    client_id: str = Query(..., description="OAuth client ID"),
-    redirect_uri: str = Query(..., description="Callback URI"),
-    scope: str = Query("", description="Space-separated scopes"),
-    state: str = Query("", description="Opaque state for CSRF protection"),
-    code_challenge: Optional[str] = Query(None, description="PKCE code challenge"),
-    code_challenge_method: Optional[str] = Query(
-        None, description="PKCE method (S256)"
-    ),
-    resource: Optional[str] = Query(None, description="RFC 8707 resource indicator"),
-    authz_code_service: AuthorizationCodeService = Depends(
-        get_authorization_code_service
-    ),
-    oauth_repo: OAuthClientRepository = Depends(get_oauth_client_repository),
-):
-    """OAuth 2.0 Authorization endpoint (RFC 6749 / RFC 7636).
-
-    Validates all parameters and returns a JSON payload for the consent UI to display.
-    The consent UI should call POST /oauth/consent-approval after user approval.
-    """
+async def _validate_oauth_authorization_request(
+    *,
+    response_type: str,
+    client_id: str,
+    redirect_uri: str,
+    code_challenge: Optional[str],
+    code_challenge_method: Optional[str],
+    oauth_repo: OAuthClientRepository,
+) -> Dict[str, Any]:
+    """Validate an OAuth authorization request before rendering or redirecting."""
     if response_type != "code":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="unsupported_response_type: only 'code' is supported",
         )
 
-    # Validate client exists
     client = await oauth_repo.get_client(client_id)
     if not client:
         raise HTTPException(
@@ -861,7 +864,6 @@ async def oauth_authorize(
             detail="invalid_client: Client not found",
         )
 
-    # Validate redirect_uri
     allowed_uris = client.get("redirect_uris", [])
     if allowed_uris and redirect_uri not in allowed_uris:
         raise HTTPException(
@@ -869,7 +871,6 @@ async def oauth_authorize(
             detail="invalid_request: redirect_uri not registered",
         )
 
-    # Validate PKCE requirements
     client_type = client.get("client_type", "confidential")
     require_pkce = client.get("require_pkce", True)
     if client_type == "public" or require_pkce:
@@ -884,17 +885,129 @@ async def oauth_authorize(
                 detail="invalid_request: only S256 code_challenge_method supported",
             )
 
-    return {
-        "action": "consent_required",
-        "client_id": client_id,
-        "client_name": client.get("client_name", client_id),
-        "redirect_uri": redirect_uri,
-        "scope": scope,
-        "state": state,
-        "resource": resource,
-        "code_challenge": code_challenge,
-        "code_challenge_method": code_challenge_method,
-    }
+    return client
+
+
+@app.get("/oauth/authorize")
+async def oauth_authorize(
+    request: Request,
+    response_type: str = Query(..., description="Must be 'code'"),
+    client_id: str = Query(..., description="OAuth client ID"),
+    redirect_uri: str = Query(..., description="Callback URI"),
+    scope: str = Query("", description="Space-separated scopes"),
+    state: str = Query("", description="Opaque state for CSRF protection"),
+    code_challenge: Optional[str] = Query(None, description="PKCE code challenge"),
+    code_challenge_method: Optional[str] = Query(
+        None, description="PKCE method (S256)"
+    ),
+    resource: Optional[str] = Query(None, description="RFC 8707 resource indicator"),
+    oauth_repo: OAuthClientRepository = Depends(get_oauth_client_repository),
+):
+    """OAuth 2.0 Authorization endpoint (RFC 6749 / RFC 7636).
+
+    Validates all parameters and returns JSON for API clients or a server-rendered
+    consent screen for browser clients.
+    """
+    client = await _validate_oauth_authorization_request(
+        response_type=response_type,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+        oauth_repo=oauth_repo,
+    )
+    payload = authorization_consent_payload(
+        client=client,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        scope=scope,
+        state=state,
+        resource=resource,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+    )
+    if wants_html_response(request.headers.get("accept", "")):
+        return HTMLResponse(render_consent_screen(payload))
+    return payload
+
+
+@app.post("/oauth/consent")
+async def oauth_consent(
+    decision: str = Form(..., description="Consent decision: approve or deny"),
+    response_type: str = Form("code", description="OAuth response type"),
+    client_id: str = Form(..., description="OAuth client ID"),
+    redirect_uri: str = Form(..., description="Callback URI"),
+    scope: str = Form("", description="Space-separated approved scopes"),
+    state: str = Form("", description="Opaque state for CSRF protection"),
+    resource: Optional[str] = Form(None, description="RFC 8707 resource indicator"),
+    code_challenge: Optional[str] = Form(None, description="PKCE code challenge"),
+    code_challenge_method: Optional[str] = Form(None, description="PKCE method (S256)"),
+    caller: Dict[str, Any] = Depends(get_current_caller),
+    authz_code_service: AuthorizationCodeService = Depends(
+        get_authorization_code_service
+    ),
+    oauth_repo: OAuthClientRepository = Depends(get_oauth_client_repository),
+):
+    """Process browser consent and redirect back to the registered client."""
+    await _validate_oauth_authorization_request(
+        response_type=response_type,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+        oauth_repo=oauth_repo,
+    )
+
+    normalized_decision = decision.lower()
+    if normalized_decision == "deny":
+        redirect_target = redirect_with_oauth_params(
+            redirect_uri,
+            {
+                "error": "access_denied",
+                "state": state,
+            },
+        )
+        return RedirectResponse(redirect_target, status_code=status.HTTP_303_SEE_OTHER)
+
+    if normalized_decision != "approve":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_request: unsupported consent decision",
+        )
+
+    user_id = caller.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Cannot determine user identity from token",
+        )
+
+    try:
+        result = await authz_code_service.create_authorization_request(
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            scope=scope,
+            state=state,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
+            resource=resource,
+            user_id=user_id,
+            organization_id=caller.get("organization_id"),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    redirect_target = redirect_with_oauth_params(
+        result.get("redirect_uri", redirect_uri),
+        {
+            "code": result["code"],
+            "state": result.get("state", state),
+        },
+    )
+    return RedirectResponse(redirect_target, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/oauth/consent-approval")

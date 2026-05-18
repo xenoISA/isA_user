@@ -14,13 +14,48 @@ Usage:
 
 import logging
 
-from isa_common.observability import setup_observability
-from isa_common.metrics import create_counter, create_histogram
-
 logger = logging.getLogger(__name__)
 
+try:
+    from isa_common.metrics import create_counter, create_histogram
+except ModuleNotFoundError:
+
+    class _NoopMetric:
+        """Drop-in metric object for environments without isa_common metrics."""
+
+        def labels(self, *args, **kwargs):
+            return self
+
+        def inc(self, *args, **kwargs):
+            return None
+
+        def observe(self, *args, **kwargs):
+            return None
+
+    def create_counter(*args, **kwargs):
+        return _NoopMetric()
+
+    def create_histogram(*args, **kwargs):
+        return _NoopMetric()
+
+
+try:
+    from isa_common.observability import setup_observability
+except ModuleNotFoundError:
+
+    def setup_observability(app, service_name: str, version: str = "unknown"):
+        """Fallback for isa_common versions that do not package observability."""
+        logger.warning(
+            "isa_common.observability unavailable; metrics middleware disabled for %s",
+            service_name,
+        )
+        return {"metrics": False, "logging": False, "tracing": False}
+
+
 # Paths excluded from metrics instrumentation (handled by isa_common)
-EXCLUDED_PATHS = frozenset({"/health", "/health/detailed", "/metrics", "/ready", "/live"})
+EXCLUDED_PATHS = frozenset(
+    {"/health", "/health/detailed", "/metrics", "/ready", "/live"}
+)
 
 # Domain-specific metrics (re-created with standardized naming via isa_common)
 AUTH_FAILURES = create_counter(

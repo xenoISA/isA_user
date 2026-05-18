@@ -64,6 +64,24 @@ AUTH_SERVICE_ROUTES = [
         "description": "OAuth2 client credentials token endpoint",
     },
     {
+        "path": "/oauth/authorize",
+        "methods": ["GET"],
+        "auth_required": False,
+        "description": "OAuth2 authorization endpoint and consent screen",
+    },
+    {
+        "path": "/oauth/consent",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "OAuth2 browser consent decision endpoint",
+    },
+    {
+        "path": "/oauth/consent-approval",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "OAuth2 JSON consent approval endpoint",
+    },
+    {
         "path": "/api/v1/auth/refresh",
         "methods": ["POST"],
         "auth_required": False,
@@ -221,6 +239,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
     token_routes = []
     registration_routes = []
     api_key_routes = []
+    oauth_routes = []
     device_routes = []
     for route in AUTH_SERVICE_ROUTES:
         path = route["path"]
@@ -243,6 +262,8 @@ def get_routes_for_consul() -> Dict[str, Any]:
             registration_routes.append(compact_path)
         elif "api-key" in path or "oauth/clients" in path:
             api_key_routes.append(compact_path)
+        elif path.startswith("/oauth/"):
+            oauth_routes.append(compact_path)
         elif "device" in path:
             device_routes.append(compact_path)
     # Create compact route representation for meta
@@ -255,6 +276,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "token": ",".join(token_routes),  # verify-token,dev-token,etc
         "registration": ",".join(registration_routes),
         "api_key": ",".join(api_key_routes),
+        "oauth": ",".join(oauth_routes),
         "device": ",".join(device_routes),
         # Methods and auth summary
         "methods": "GET,POST,DELETE",
@@ -290,6 +312,7 @@ def get_routes_by_category() -> Dict[str, List[Dict[str, Any]]]:
         "token_management": [],
         "user_registration": [],
         "api_key_management": [],
+        "oauth_authorization": [],
         "device_authentication": [],
     }
     for route in AUTH_SERVICE_ROUTES:
@@ -307,6 +330,8 @@ def get_routes_by_category() -> Dict[str, List[Dict[str, Any]]]:
             categories["user_registration"].append(route)
         elif "api-key" in path or "oauth/clients" in path:
             categories["api_key_management"].append(route)
+        elif path.startswith("/oauth/"):
+            categories["oauth_authorization"].append(route)
         elif "device" in path:
             categories["device_authentication"].append(route)
     return categories
