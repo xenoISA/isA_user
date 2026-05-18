@@ -29,6 +29,13 @@ from .models import (
     ContentType,
     PIIType,
     CompliancePolicy,
+    GDPRDataRequest,
+    GDPRDataRequestCreate,
+    GDPRDataRequestListResponse,
+    GDPRDataRequestRunRequest,
+    GDPRDataRequestStatus,
+    GDPRDataRequestType,
+    GDPRDeletionApprovalRequest,
 )
 from .events.publishers import (
     publish_compliance_check_performed,
@@ -68,6 +75,265 @@ class ComplianceService:
 
         # 统计
         self._stats = {"total_checks": 0, "blocked_content": 0, "flagged_content": 0}
+
+    # ====================
+    # GDPR 数据请求工作流
+    # ====================
+
+    async def create_data_request(
+        self, request: GDPRDataRequestCreate
+    ) -> GDPRDataRequest:
+        """Enqueue a GDPR data export/delete request for admin processing."""
+        now = datetime.utcnow()
+        data_request = GDPRDataRequest(
+            request_id=f"gdpr_req_{uuid.uuid4().hex}",
+            request_type=request.request_type,
+            user_id=request.user_id,
+            organization_id=request.organization_id,
+            status=GDPRDataRequestStatus.PENDING,
+            requested_by=request.requested_by,
+            reason=request.reason,
+            per_service_status={},
+            metadata=request.metadata or {},
+            created_at=now,
+            updated_at=now,
+        )
+
+        created = await self.repository.create_data_request(data_request)
+        if not created:
+            raise RuntimeError("Failed to create GDPR data request")
+
+        await self._publish_data_request_event(
+            "compliance.gdpr_request.created", created
+        )
+        return created
+
+    async def list_data_requests(
+        self,
+        *,
+        status: Optional[GDPRDataRequestStatus] = None,
+        request_type: Optional[GDPRDataRequestType] = None,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> GDPRDataRequestListResponse:
+        """List queued GDPR requests for the admin compliance queue."""
+        items, total = await self.repository.list_data_requests(
+            status=status,
+            request_type=request_type,
+            user_id=user_id,
+            organization_id=organization_id,
+            limit=limit,
+            offset=offset,
+        )
+        return GDPRDataRequestListResponse(
+            items=items, total=total, limit=limit, offset=offset
+        )
+
+    async def get_data_request(self, request_id: str) -> Optional[GDPRDataRequest]:
+        """Get a single GDPR data request."""
+        return await self.repository.get_data_request(request_id)
+
+    async def approve_data_request_deletion(
+        self, request_id: str, approval: GDPRDeletionApprovalRequest
+    ) -> Optional[GDPRDataRequest]:
+        """Approve a destructive GDPR deletion request before it can run."""
+        if approval.confirmation != "CONFIRM_DELETE":
+            raise ValueError("Deletion confirmation must be CONFIRM_DELETE")
+
+        current = await self.repository.get_data_request(request_id)
+        if not current:
+            return None
+        if current.request_type != GDPRDataRequestType.DELETE:
+            raise ValueError("Only delete requests can be approved")
+        if current.status not in {
+            GDPRDataRequestStatus.PENDING,
+            GDPRDataRequestStatus.FAILED,
+        }:
+            raise ValueError("Only pending or failed delete requests can be approved")
+
+        metadata = dict(current.metadata or {})
+        metadata["deletion_approval"] = {
+            "approved_by": approval.approved_by,
+            "notes": approval.notes,
+            "approved_at": datetime.utcnow().isoformat(),
+        }
+
+        updated = await self.repository.update_data_request(
+            request_id,
+            approved_by=approval.approved_by,
+            approved_at=datetime.utcnow(),
+            metadata=metadata,
+        )
+        if updated:
+            await self._publish_data_request_event(
+                "compliance.gdpr_request.deletion_approved", updated
+            )
+        return updated
+
+    async def run_data_request(
+        self,
+        request_id: str,
+        run_options: Optional[GDPRDataRequestRunRequest] = None,
+    ) -> Optional[GDPRDataRequest]:
+        """Run a queued GDPR export/delete request and persist per-service status."""
+        current = await self.repository.get_data_request(request_id)
+        if not current:
+            return None
+        if current.status == GDPRDataRequestStatus.COMPLETED:
+            return current
+        if (
+            current.request_type == GDPRDataRequestType.DELETE
+            and not current.approved_by
+        ):
+            raise ValueError("Delete request must be approved before it can run")
+
+        await self.repository.update_data_request(
+            request_id, status=GDPRDataRequestStatus.IN_PROGRESS
+        )
+
+        try:
+            service_names = self._gdpr_service_names(run_options)
+            if current.request_type == GDPRDataRequestType.EXPORT:
+                result = await self._run_export_data_request(current, service_names)
+            else:
+                result = await self._run_delete_data_request(current, service_names)
+
+            completed = await self.repository.update_data_request(
+                request_id,
+                status=GDPRDataRequestStatus.COMPLETED,
+                artifact_uri=result.get("artifact_uri"),
+                per_service_status=result["per_service_status"],
+                metadata=result["metadata"],
+                completed_at=datetime.utcnow(),
+            )
+            if completed:
+                await self._publish_data_request_event(
+                    "compliance.gdpr_request.completed", completed
+                )
+            return completed
+
+        except Exception as exc:
+            failed = await self.repository.update_data_request(
+                request_id,
+                status=GDPRDataRequestStatus.FAILED,
+                failure_reason=str(exc),
+                completed_at=datetime.utcnow(),
+            )
+            if failed:
+                await self._publish_data_request_event(
+                    "compliance.gdpr_request.failed", failed
+                )
+            raise
+
+    def _gdpr_service_names(
+        self, run_options: Optional[GDPRDataRequestRunRequest]
+    ) -> List[str]:
+        if run_options and run_options.service_names:
+            return run_options.service_names
+        return ["compliance_service"]
+
+    async def _run_export_data_request(
+        self, data_request: GDPRDataRequest, service_names: List[str]
+    ) -> Dict[str, Any]:
+        checks = await self.repository.get_checks_by_user(
+            user_id=data_request.user_id,
+            limit=10000,
+        )
+        artifact_uri = f"compliance://gdpr-exports/{data_request.request_id}.json"
+        per_service_status = self._empty_service_status(service_names)
+        per_service_status["compliance_service"] = {
+            "status": "completed",
+            "records_exported": len(checks),
+            "records_deleted": 0,
+            "artifact_uri": artifact_uri,
+            "completed_at": datetime.utcnow().isoformat(),
+        }
+
+        metadata = dict(data_request.metadata or {})
+        metadata["export_manifest"] = {
+            "request_id": data_request.request_id,
+            "user_id": data_request.user_id,
+            "organization_id": data_request.organization_id,
+            "generated_at": datetime.utcnow().isoformat(),
+            "artifact_uri": artifact_uri,
+            "services": {
+                "compliance_service": {
+                    "records": len(checks),
+                    "checks": [check.model_dump(mode="json") for check in checks],
+                }
+            },
+        }
+        return {
+            "artifact_uri": artifact_uri,
+            "per_service_status": per_service_status,
+            "metadata": metadata,
+        }
+
+    async def _run_delete_data_request(
+        self, data_request: GDPRDataRequest, service_names: List[str]
+    ) -> Dict[str, Any]:
+        deleted_count = await self.repository.delete_user_data(data_request.user_id)
+        per_service_status = self._empty_service_status(service_names)
+        per_service_status["compliance_service"] = {
+            "status": "completed",
+            "records_exported": 0,
+            "records_deleted": deleted_count,
+            "completed_at": datetime.utcnow().isoformat(),
+        }
+
+        metadata = dict(data_request.metadata or {})
+        metadata["deletion_result"] = {
+            "request_id": data_request.request_id,
+            "user_id": data_request.user_id,
+            "organization_id": data_request.organization_id,
+            "deleted_at": datetime.utcnow().isoformat(),
+            "services": {"compliance_service": {"records_deleted": deleted_count}},
+        }
+        return {
+            "artifact_uri": data_request.artifact_uri,
+            "per_service_status": per_service_status,
+            "metadata": metadata,
+        }
+
+    def _empty_service_status(self, service_names: List[str]) -> Dict[str, Any]:
+        return {
+            service_name: {
+                "status": "not_configured",
+                "records_exported": 0,
+                "records_deleted": 0,
+                "error": "adapter_not_configured",
+            }
+            for service_name in service_names
+            if service_name != "compliance_service"
+        }
+
+    async def _publish_data_request_event(
+        self, event_type: str, data_request: GDPRDataRequest
+    ) -> None:
+        if not self.event_bus:
+            return
+
+        try:
+            from core.nats_client import Event
+
+            event = Event(
+                event_type=event_type,
+                source="compliance_service",
+                data={
+                    "request_id": data_request.request_id,
+                    "request_type": data_request.request_type.value,
+                    "status": data_request.status.value,
+                    "user_id": data_request.user_id,
+                    "organization_id": data_request.organization_id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+                metadata=data_request.metadata or {},
+            )
+            await self.event_bus.publish_event(event)
+        except Exception as exc:
+            logger.warning("Failed to publish GDPR data request event: %s", exc)
 
     # ====================
     # 核心检查方法

@@ -121,6 +121,30 @@ SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Get audit log (GDPR)",
     },
+    {
+        "path": "/api/v1/compliance/data-requests",
+        "methods": ["GET", "POST"],
+        "auth_required": True,
+        "description": "List/create GDPR data requests",
+    },
+    {
+        "path": "/api/v1/compliance/data-requests/{request_id}",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get GDPR data request",
+    },
+    {
+        "path": "/api/v1/compliance/data-requests/{request_id}/approve-deletion",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Approve GDPR deletion request",
+    },
+    {
+        "path": "/api/v1/compliance/data-requests/{request_id}/run",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Run GDPR data request",
+    },
     # PCI-DSS compliance
     {
         "path": "/api/v1/compliance/pci/card-data-check",
@@ -154,7 +178,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
             policy_routes.append(
                 path.split("/")[-1] if "{" not in path.split("/")[-1] else "*"
             )
-        elif "/user/" in path and "/pci/" not in path:
+        elif ("/user/" in path or "/data-requests" in path) and "/pci/" not in path:
             gdpr_routes.append(path.split("/")[-1])
         elif "/pci/" in path:
             pci_routes.append(path.split("/")[-1])

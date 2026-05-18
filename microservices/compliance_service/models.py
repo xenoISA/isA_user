@@ -92,6 +92,23 @@ class PIIType(str, Enum):
     MEDICAL_INFO = "medical_info"
 
 
+class GDPRDataRequestType(str, Enum):
+    """GDPR 数据请求类型"""
+
+    EXPORT = "export"
+    DELETE = "delete"
+
+
+class GDPRDataRequestStatus(str, Enum):
+    """GDPR 数据请求工作流状态"""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 # ====================
 # 核心数据模型
 # ====================
@@ -403,6 +420,66 @@ class CompliancePolicyRequest(BaseModel):
     notification_enabled: bool = True
 
 
+class GDPRDataRequestCreate(BaseModel):
+    """创建 GDPR 数据请求"""
+
+    request_type: GDPRDataRequestType
+    user_id: str = Field(..., min_length=1, description="数据主体用户ID")
+    organization_id: Optional[str] = None
+    requested_by: str = Field(..., min_length=1, description="发起请求的管理员或系统主体")
+    reason: Optional[str] = Field(None, max_length=2000)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class GDPRDeletionApprovalRequest(BaseModel):
+    """GDPR 删除请求审批"""
+
+    approved_by: str = Field(..., min_length=1, description="审批删除的管理员")
+    confirmation: str = Field(..., description="必须为 CONFIRM_DELETE")
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
+class GDPRDataRequestRunRequest(BaseModel):
+    """运行 GDPR 数据请求"""
+
+    worker_id: Optional[str] = None
+    service_names: Optional[List[str]] = None
+
+
+class GDPRDataRequest(BaseModel):
+    """持久化 GDPR 数据请求工作流记录"""
+
+    id: Optional[int] = None
+    request_id: str
+    request_type: GDPRDataRequestType
+    user_id: str
+    organization_id: Optional[str] = None
+    status: GDPRDataRequestStatus = GDPRDataRequestStatus.PENDING
+    requested_by: str
+    approved_by: Optional[str] = None
+    reason: Optional[str] = None
+    artifact_uri: Optional[str] = None
+    per_service_status: Dict[str, Any] = Field(default_factory=dict)
+    failure_reason: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    approved_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class GDPRDataRequestListResponse(BaseModel):
+    """GDPR 数据请求列表响应"""
+
+    items: List[GDPRDataRequest]
+    total: int
+    limit: int
+    offset: int
+
+
 # ====================
 # 系统模型
 # ====================
@@ -460,6 +537,8 @@ __all__ = [
     "RiskLevel",
     "ModerationCategory",
     "PIIType",
+    "GDPRDataRequestType",
+    "GDPRDataRequestStatus",
     # Core Models
     "ComplianceCheck",
     "CompliancePolicy",
@@ -474,6 +553,11 @@ __all__ = [
     "ComplianceReportRequest",
     "ComplianceReportResponse",
     "CompliancePolicyRequest",
+    "GDPRDataRequestCreate",
+    "GDPRDeletionApprovalRequest",
+    "GDPRDataRequestRunRequest",
+    "GDPRDataRequest",
+    "GDPRDataRequestListResponse",
     # System Models
     "ComplianceServiceStatus",
     "ComplianceStats",

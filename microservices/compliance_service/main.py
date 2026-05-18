@@ -45,6 +45,13 @@ from .models import (
     ComplianceServiceStatus,
     ComplianceStats,
     ComplianceStatus,
+    GDPRDataRequest,
+    GDPRDataRequestCreate,
+    GDPRDataRequestListResponse,
+    GDPRDataRequestRunRequest,
+    GDPRDataRequestStatus,
+    GDPRDataRequestType,
+    GDPRDeletionApprovalRequest,
     RiskLevel,
 )
 
@@ -653,6 +660,122 @@ async def get_statistics(
 # ====================
 # GDPR / Data Privacy Endpoints
 # ====================
+
+
+@app.post(
+    "/api/v1/compliance/data-requests",
+    response_model=GDPRDataRequest,
+    status_code=201,
+)
+async def create_gdpr_data_request(
+    request: GDPRDataRequestCreate,
+    service: ComplianceService = Depends(get_compliance_service),
+):
+    """Queue a GDPR export/delete request for admin-managed processing."""
+    try:
+        return await service.create_data_request(request)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating GDPR data request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/compliance/data-requests",
+    response_model=GDPRDataRequestListResponse,
+)
+async def list_gdpr_data_requests(
+    status: Optional[GDPRDataRequestStatus] = Query(None),
+    request_type: Optional[GDPRDataRequestType] = Query(None),
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    service: ComplianceService = Depends(get_compliance_service),
+):
+    """List GDPR data requests for the admin compliance queue."""
+    try:
+        return await service.list_data_requests(
+            status=status,
+            request_type=request_type,
+            user_id=user_id,
+            organization_id=organization_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as e:
+        logger.error(f"Error listing GDPR data requests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/compliance/data-requests/{request_id}",
+    response_model=GDPRDataRequest,
+)
+async def get_gdpr_data_request(
+    request_id: str,
+    service: ComplianceService = Depends(get_compliance_service),
+):
+    """Get a queued GDPR data request with per-service status."""
+    try:
+        data_request = await service.get_data_request(request_id)
+        if not data_request:
+            raise HTTPException(status_code=404, detail="GDPR data request not found")
+        return data_request
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting GDPR data request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/api/v1/compliance/data-requests/{request_id}/approve-deletion",
+    response_model=GDPRDataRequest,
+)
+async def approve_gdpr_data_request_deletion(
+    request_id: str,
+    approval: GDPRDeletionApprovalRequest,
+    service: ComplianceService = Depends(get_compliance_service),
+):
+    """Approve a destructive GDPR deletion request before execution."""
+    try:
+        data_request = await service.approve_data_request_deletion(request_id, approval)
+        if not data_request:
+            raise HTTPException(status_code=404, detail="GDPR data request not found")
+        return data_request
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error approving GDPR deletion request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/api/v1/compliance/data-requests/{request_id}/run",
+    response_model=GDPRDataRequest,
+)
+async def run_gdpr_data_request(
+    request_id: str,
+    run_options: Optional[GDPRDataRequestRunRequest] = None,
+    service: ComplianceService = Depends(get_compliance_service),
+):
+    """Run a queued GDPR request and return status for the Console/Admin result panel."""
+    try:
+        data_request = await service.run_data_request(request_id, run_options)
+        if not data_request:
+            raise HTTPException(status_code=404, detail="GDPR data request not found")
+        return data_request
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error running GDPR data request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/v1/compliance/user/{user_id}/data-export")
