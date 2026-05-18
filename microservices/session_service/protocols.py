@@ -4,6 +4,7 @@ Session Service Protocols (Interfaces)
 These interfaces define contracts for dependency injection.
 NO import-time I/O dependencies - safe to import anywhere.
 """
+
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 # Import only models (no I/O dependencies)
@@ -17,31 +18,37 @@ from .models import Session, SessionMessage
 
 class SessionNotFoundError(Exception):
     """Session not found error - defined here to avoid importing repository"""
+
     pass
 
 
 class MessageNotFoundError(Exception):
     """Message not found error - defined here to avoid importing repository"""
+
     pass
 
 
 class MemoryNotFoundError(Exception):
     """Memory not found error - defined here to avoid importing repository"""
+
     pass
 
 
 class SessionServiceError(Exception):
     """Base exception for session service errors"""
+
     pass
 
 
 class SessionValidationError(SessionServiceError):
     """Session validation error"""
+
     pass
 
 
 class DuplicateSessionError(SessionServiceError):
     """Duplicate session error"""
+
     pass
 
 
@@ -68,11 +75,7 @@ class SessionRepositoryProtocol(Protocol):
         ...
 
     async def get_user_sessions(
-        self,
-        user_id: str,
-        active_only: bool = False,
-        limit: int = 50,
-        offset: int = 0
+        self, user_id: str, active_only: bool = False, limit: int = 50, offset: int = 0
     ) -> List[Session]:
         """Get sessions for a user with pagination"""
         ...
@@ -85,17 +88,16 @@ class SessionRepositoryProtocol(Protocol):
         """Update session last activity timestamp"""
         ...
 
-    async def increment_message_count(
-        self,
-        session_id: str,
-        tokens_used: int = 0,
-        cost_usd: float = 0.0
-    ) -> bool:
+    async def increment_message_count(self, session_id: str, tokens_used: int = 0, cost_usd: float = 0.0) -> bool:
         """Increment message count and update metrics"""
         ...
 
     async def expire_old_sessions(self, hours_old: int = 24) -> int:
         """Expire sessions older than specified hours"""
+        ...
+
+    async def set_metadata_project_id(self, session_id: str, project_id: Optional[str]) -> bool:
+        """Set or remove metadata.project_id on the session row (Story 8)."""
         ...
 
     async def star_session(self, session_id: str) -> bool:
@@ -106,9 +108,7 @@ class SessionRepositoryProtocol(Protocol):
         """Set is_starred=False and starred_at=null"""
         ...
 
-    async def get_starred_sessions(
-        self, user_id: str, limit: int = 50, offset: int = 0
-    ) -> List[Session]:
+    async def get_starred_sessions(self, user_id: str, limit: int = 50, offset: int = 0) -> List[Session]:
         """Get starred sessions for a user, ordered by starred_at desc"""
         ...
 
@@ -126,12 +126,7 @@ class SessionMessageRepositoryProtocol(Protocol):
         """Create a new message"""
         ...
 
-    async def get_session_messages(
-        self,
-        session_id: str,
-        limit: int = 100,
-        offset: int = 0
-    ) -> List[SessionMessage]:
+    async def get_session_messages(self, session_id: str, limit: int = 100, offset: int = 0) -> List[SessionMessage]:
         """Get messages for a session with pagination"""
         ...
 
@@ -187,19 +182,11 @@ class MemoryClientProtocol(Protocol):
     """Interface for Memory Service Client"""
 
     async def create_session_memory(
-        self,
-        session_id: str,
-        user_id: str,
-        content: str,
-        memory_type: str
+        self, session_id: str, user_id: str, content: str, memory_type: str
     ) -> Optional[Dict[str, Any]]:
         """Create session memory"""
         ...
 
-    async def get_session_memory(
-        self,
-        session_id: str,
-        memory_type: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    async def get_session_memory(self, session_id: str, memory_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get session memory"""
         ...

@@ -34,13 +34,9 @@ class Session(BaseModel):
 
     session_id: str = Field(..., description="Session ID")
     user_id: str = Field(..., description="User ID")
-    conversation_data: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Conversation data"
-    )
+    conversation_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Conversation data")
     status: str = Field(default="active", description="Session status")
-    metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Session metadata"
-    )
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Session metadata")
     is_active: bool = Field(default=True, description="Is session active")
     is_starred: bool = Field(default=False, description="Is session starred")
     starred_at: Optional[datetime] = Field(None, description="When session was starred")
@@ -66,9 +62,7 @@ class SessionMessage(BaseModel):
     role: str = Field(..., description="Message role (user/assistant/system)")
     content: str = Field(..., description="Message content")
     message_type: str = Field(default="chat", description="Message type")
-    metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Message metadata"
-    )
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Message metadata")
     tokens_used: int = Field(default=0, description="Tokens used")
     cost_usd: float = Field(default=0.0, description="Cost in USD")
     created_at: Optional[datetime] = None
@@ -85,9 +79,7 @@ class SessionMemory(BaseModel):
     user_id: str = Field(..., description="User ID")
     memory_type: str = Field(..., description="Memory type")
     content: str = Field(..., description="Memory content")
-    metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Memory metadata"
-    )
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Memory metadata")
     created_at: Optional[datetime] = None
 
     class Config:
@@ -101,25 +93,37 @@ class SessionCreateRequest(BaseModel):
     """Session create request"""
 
     user_id: str = Field(..., description="User ID")
-    session_id: Optional[str] = Field(
-        None, description="Optional session ID (auto-generated if not provided)"
-    )
-    conversation_data: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Initial conversation data"
-    )
-    metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Session metadata"
-    )
+    session_id: Optional[str] = Field(None, description="Optional session ID (auto-generated if not provided)")
+    conversation_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Initial conversation data")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Session metadata")
 
 
 class SessionUpdateRequest(BaseModel):
     """Session update request"""
 
     status: Optional[str] = Field(None, description="Session status")
-    conversation_data: Optional[Dict[str, Any]] = Field(
-        None, description="Updated conversation data"
-    )
+    conversation_data: Optional[Dict[str, Any]] = Field(None, description="Updated conversation data")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Updated metadata")
+
+
+class SessionMoveRequest(BaseModel):
+    """
+    Move a chat session into / out of a project.
+
+    Body for PATCH /api/v1/sessions/{session_id}. Updates the
+    ``metadata.project_id`` JSONB path on the session row.
+
+    - ``project_id`` may be a string (move into that project) or
+      explicitly ``null`` (remove from any project).
+    - ``user_id`` is required so the service can scope the mutation
+      to the calling user without leaking session existence.
+    """
+
+    user_id: str = Field(..., description="Owning user (auth scope)")
+    project_id: Optional[str] = Field(
+        None,
+        description="Target project id, or null to remove the session from any project",
+    )
 
 
 class MessageCreateRequest(BaseModel):
@@ -128,9 +132,7 @@ class MessageCreateRequest(BaseModel):
     role: str = Field(..., description="Message role (user/assistant/system)")
     content: str = Field(..., description="Message content")
     message_type: str = Field(default="chat", description="Message type")
-    metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Message metadata"
-    )
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Message metadata")
     tokens_used: int = Field(default=0, description="Tokens used")
     cost_usd: float = Field(default=0.0, description="Cost in USD")
 
@@ -140,18 +142,14 @@ class MemoryCreateRequest(BaseModel):
 
     memory_type: str = Field(..., description="Memory type")
     content: str = Field(..., description="Memory content")
-    metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Memory metadata"
-    )
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Memory metadata")
 
 
 class MemoryUpdateRequest(BaseModel):
     """Memory update request"""
 
     content: Optional[str] = Field(None, description="Updated memory content")
-    metadata: Optional[Dict[str, Any]] = Field(
-        None, description="Updated memory metadata"
-    )
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Updated memory metadata")
 
 
 # Session Service Specific Response Models
@@ -279,9 +277,7 @@ class SearchResultSession(BaseModel):
     message_count: int = 0
     created_at: Optional[datetime] = None
     last_activity: Optional[datetime] = None
-    hits: List[SearchHit] = Field(
-        default_factory=list, description="Matching messages in this session"
-    )
+    hits: List[SearchHit] = Field(default_factory=list, description="Matching messages in this session")
 
     class Config:
         from_attributes = True
@@ -293,9 +289,7 @@ class SessionSearchResponse(BaseModel):
     query: str
     results: List[SearchResultSession] = Field(default_factory=list)
     total_hits: int = 0
-    next_cursor: Optional[str] = Field(
-        None, description="Cursor for next page, null if no more results"
-    )
+    next_cursor: Optional[str] = Field(None, description="Cursor for next page, null if no more results")
 
 
 # Service Status Models
@@ -317,9 +311,7 @@ class ErrorResponse(BaseModel):
 
     error: str = Field(..., description="Error message")
     detail: Optional[str] = Field(None, description="Error details")
-    timestamp: datetime = Field(
-        default_factory=datetime.utcnow, description="Error timestamp"
-    )
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp")
 
 
 # Export all models
@@ -331,6 +323,7 @@ __all__ = [
     "SessionMemory",
     "SessionCreateRequest",
     "SessionUpdateRequest",
+    "SessionMoveRequest",
     "MessageCreateRequest",
     "MemoryCreateRequest",
     "MemoryUpdateRequest",

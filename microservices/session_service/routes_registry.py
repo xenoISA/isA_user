@@ -2,6 +2,7 @@
 Session Service Routes Registry
 Defines all API routes for Consul service registration
 """
+
 from typing import Dict, Any
 
 # Define all routes
@@ -49,6 +50,12 @@ SERVICE_ROUTES = [
         "methods": ["DELETE"],
         "auth_required": True,
         "description": "Delete session",
+    },
+    {
+        "path": "/api/v1/sessions/{session_id}",
+        "methods": ["PATCH"],
+        "auth_required": True,
+        "description": "Move session into/out of a project (Story 8)",
     },
     {
         "path": "/api/v1/sessions",
@@ -133,7 +140,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "session": ",".join(session_routes[:5]),  # Limit to avoid 512 char limit
         "message": ",".join(message_routes),
         "stats": ",".join(stats_routes),
-        "methods": "GET,POST,PUT,DELETE",
+        "methods": "GET,POST,PUT,PATCH,DELETE",
         "public_count": str(sum(1 for r in SERVICE_ROUTES if not r["auth_required"])),
         "protected_count": str(sum(1 for r in SERVICE_ROUTES if r["auth_required"])),
     }

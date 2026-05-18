@@ -33,6 +33,7 @@ from .models import (
     MessageResponse,
     SessionCreateRequest,
     SessionListResponse,
+    SessionMoveRequest,
     SessionResponse,
     SessionSearchResponse,
     SessionStatsResponse,
@@ -115,9 +116,7 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("session_service")
         logger.info("✅ Event bus initialized successfully")
     except Exception as e:
-        logger.warning(
-            f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
-        )
+        logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
         event_bus = None
 
     # Initialize microservice with event bus
@@ -133,14 +132,10 @@ async def lifespan(app: FastAPI):
 
             for event_pattern, handler_func in handler_map.items():
                 # Subscribe to each event pattern
-                await event_bus.subscribe_to_events(
-                    pattern=event_pattern, handler=handler_func
-                )
+                await event_bus.subscribe_to_events(pattern=event_pattern, handler=handler_func)
                 logger.info(f"Subscribed to {event_pattern} events")
 
-            logger.info(
-                f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types"
-            )
+            logger.info(f"✅ Event handlers registered successfully - Subscribed to {len(handler_map)} event types")
         except Exception as e:
             logger.warning(f"⚠️  Failed to subscribe to events: {e}")
 
@@ -168,9 +163,7 @@ async def lifespan(app: FastAPI):
             )
             session_microservice.consul_registry.register()
             session_microservice.consul_registry.start_maintenance()  # Start TTL heartbeat
-            logger.info(
-                f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
-            )
+            logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
         except Exception as e:
             logger.warning(f"⚠️  Failed to register with Consul: {e}")
             session_microservice.consul_registry = None
@@ -209,15 +202,15 @@ def get_session_service() -> SessionService:
 
 
 # Health check endpoints
-health = HealthCheck(
-    "session_service", version="1.0.0", shutdown_manager=shutdown_manager
-)
+health = HealthCheck("session_service", version="1.0.0", shutdown_manager=shutdown_manager)
 health.add_postgres(
-    lambda: session_microservice.session_service.session_repo.db
-    if session_microservice.session_service
-    and hasattr(session_microservice.session_service, "session_repo")
-    and session_microservice.session_service.session_repo
-    else None
+    lambda: (
+        session_microservice.session_service.session_repo.db
+        if session_microservice.session_service
+        and hasattr(session_microservice.session_service, "session_repo")
+        and session_microservice.session_service.session_repo
+        else None
+    )
 )
 
 
@@ -241,9 +234,7 @@ async def create_session(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except SessionServiceError as e:
         logger.error(f"Session service error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error creating session: {e}", exc_info=True)
         raise HTTPException(
@@ -261,9 +252,7 @@ async def get_session_stats(
     try:
         return await session_service.get_service_stats()
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/api/v1/sessions/search", response_model=SessionSearchResponse)
@@ -271,9 +260,7 @@ async def search_sessions(
     q: str = Query(..., min_length=1, description="Search query"),
     user_id: str = Query(..., description="User ID (auth-scoped)"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
-    cursor: Optional[str] = Query(
-        None, description="Pagination cursor from previous response"
-    ),
+    cursor: Optional[str] = Query(None, description="Pagination cursor from previous response"),
     session_service: SessionService = Depends(get_session_service),
 ):
     """
@@ -292,9 +279,7 @@ async def search_sessions(
     except SessionValidationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/api/v1/sessions/{session_id}", response_model=SessionResponse)
@@ -309,9 +294,7 @@ async def get_session(
     except SessionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.put("/api/v1/sessions/{session_id}", response_model=SessionResponse)
@@ -329,9 +312,36 @@ async def update_session(
     except SessionValidationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.patch("/api/v1/sessions/{session_id}", response_model=SessionResponse)
+async def move_session_to_project(
+    session_id: str,
+    request: SessionMoveRequest,
+    session_service: SessionService = Depends(get_session_service),
+):
+    """
+    Move a chat session into / out of / between projects (Story 8).
+
+    Body: ``{ user_id: str, project_id: str | null }``.
+
+    Updates ``metadata.project_id`` on the session row. Pass
+    ``project_id=null`` to remove the session from any project. Returns
+    the full updated session.
+    """
+    try:
+        return await session_service.move_session_to_project(
+            session_id=session_id,
+            user_id=request.user_id,
+            project_id=request.project_id,
         )
+    except SessionNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except SessionValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except SessionServiceError as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.delete("/api/v1/sessions/{session_id}")
@@ -353,9 +363,7 @@ async def end_session(
     except SessionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/api/v1/sessions", response_model=SessionListResponse)
@@ -368,13 +376,9 @@ async def get_user_sessions(
 ):
     """Get user sessions (filtered by user_id query parameter)"""
     try:
-        return await session_service.get_user_sessions(
-            user_id, active_only, page, page_size
-        )
+        return await session_service.get_user_sessions(user_id, active_only, page, page_size)
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/api/v1/sessions/{session_id}/summary", response_model=SessionSummaryResponse)
@@ -389,9 +393,7 @@ async def get_session_summary(
     except SessionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 # Star management endpoints
@@ -409,9 +411,7 @@ async def star_session(
     except SessionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.delete("/api/v1/sessions/{session_id}/star", response_model=SessionResponse)
@@ -426,9 +426,7 @@ async def unstar_session(
     except SessionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/api/v1/sessions/starred", response_model=SessionListResponse)
@@ -442,9 +440,7 @@ async def get_starred_sessions(
     try:
         return await session_service.get_starred_sessions(user_id, page, page_size)
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 # Message management endpoints
@@ -465,9 +461,7 @@ async def add_message(
     except SessionValidationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/api/v1/sessions/{session_id}/messages", response_model=MessageListResponse)
@@ -480,15 +474,11 @@ async def get_session_messages(
 ):
     """Get session messages"""
     try:
-        return await session_service.get_session_messages(
-            session_id, page, page_size, user_id
-        )
+        return await session_service.get_session_messages(session_id, page, page_size, user_id)
     except SessionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except SessionServiceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 # ============ Session Memory Proxy Routes ============
@@ -589,9 +579,7 @@ async def not_found_error_handler(request, exc):
 
 @app.exception_handler(SessionServiceError)
 async def service_error_handler(request, exc):
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
-    )
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
 if __name__ == "__main__":
