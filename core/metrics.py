@@ -14,9 +14,30 @@ Usage:
 
 import logging
 
-from isa_common.metrics import create_counter, create_histogram
-
 logger = logging.getLogger(__name__)
+
+try:
+    from isa_common.metrics import create_counter, create_histogram
+except ModuleNotFoundError:
+
+    class _NoopMetric:
+        """Drop-in metric object for environments without isa_common metrics."""
+
+        def labels(self, *args, **kwargs):
+            return self
+
+        def inc(self, *args, **kwargs):
+            return None
+
+        def observe(self, *args, **kwargs):
+            return None
+
+    def create_counter(*args, **kwargs):
+        return _NoopMetric()
+
+    def create_histogram(*args, **kwargs):
+        return _NoopMetric()
+
 
 try:
     from isa_common.observability import setup_observability
