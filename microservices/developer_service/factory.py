@@ -3,6 +3,7 @@
 from .clients import (
     BillingOverviewClient,
     CredentialOverviewClient,
+    ModelFirstCallClient,
     OrganizationOverviewClient,
     ProjectOverviewClient,
 )
@@ -15,4 +16,5 @@ def create_developer_service() -> DeveloperOverviewService:
         project_client=ProjectOverviewClient(),
         credential_client=CredentialOverviewClient(),
         billing_client=BillingOverviewClient(),
+        model_client=ModelFirstCallClient(),
     )

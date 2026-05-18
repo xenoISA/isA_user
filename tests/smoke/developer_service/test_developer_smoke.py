@@ -11,5 +11,7 @@ def test_developer_service_imports_with_expected_contract_routes():
     registry_paths = {route["path"] for route in get_all_routes()}
 
     assert "/api/v1/developer/overview" in route_paths
+    assert "/api/v1/developer/first-call" in route_paths
     assert "/api/v1/developer/health" in route_paths
     assert "/api/v1/developer/overview" in registry_paths
+    assert "/api/v1/developer/first-call" in registry_paths

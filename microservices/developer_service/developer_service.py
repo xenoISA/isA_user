@@ -8,7 +8,11 @@ from .models import (
     CredentialSummary,
     DeveloperHealthResponse,
     DeveloperOverviewResponse,
+    FirstCallRemediation,
+    FirstCallRequest,
+    FirstCallResponse,
     FirstCallSummary,
+    FirstCallUsage,
     NextAction,
     OrganizationContext,
     ProjectSummary,
@@ -44,6 +48,7 @@ class DeveloperOverviewService:
         project_client: Optional[Any] = None,
         credential_client: Optional[Any] = None,
         billing_client: Optional[Any] = None,
+        model_client: Optional[Any] = None,
         trace_client: Optional[Any] = None,
         evaluation_client: Optional[Any] = None,
     ):
@@ -51,6 +56,7 @@ class DeveloperOverviewService:
         self.project_client = project_client
         self.credential_client = credential_client
         self.billing_client = billing_client
+        self.model_client = model_client
         self.trace_client = trace_client
         self.evaluation_client = evaluation_client
 
@@ -164,12 +170,110 @@ class DeveloperOverviewService:
             warnings=warnings,
         )
 
+    async def run_first_call(
+        self,
+        *,
+        user_id: str,
+        request: FirstCallRequest,
+        auth_token: Optional[str] = None,
+    ) -> FirstCallResponse:
+        warnings: List[WarningInfo] = []
+
+        project_valid, project_warning = await self._validate_first_call_project(
+            user_id=user_id,
+            organization_id=request.organization_id,
+            project_id=request.project_id,
+            auth_token=auth_token,
+        )
+        if project_warning:
+            warnings.append(project_warning)
+        if project_valid is False:
+            return self._first_call_failure(
+                request=request,
+                status="missing_project",
+                remediation=FirstCallRemediation(
+                    code="project_not_found",
+                    message="Select or create a project before running the first API call.",
+                    href="/dashboard/projects",
+                    field="project_id",
+                ),
+                warnings=warnings,
+            )
+
+        (
+            credential_valid,
+            credential_result,
+            credential_warning,
+        ) = await self._validate_first_call_credential(
+            request=request,
+            auth_token=auth_token,
+        )
+        if credential_warning:
+            warnings.append(credential_warning)
+        if not credential_valid:
+            return self._first_call_failure(
+                request=request,
+                status="invalid_key",
+                remediation=FirstCallRemediation(
+                    code="credential_unavailable",
+                    message="Create or select an active project API key before running the first call.",
+                    href="/dashboard/developer/api-keys",
+                    field="api_key_id",
+                ),
+                warnings=warnings,
+            )
+
+        if not self.model_client:
+            return self._first_call_failure(
+                request=request,
+                status="model_unavailable",
+                remediation=FirstCallRemediation(
+                    code="model_service_not_configured",
+                    message="Model execution is not configured for Developer first-call verification.",
+                    href="/dashboard/developer",
+                ),
+                warnings=warnings,
+            )
+
+        try:
+            started = datetime.now(tz=timezone.utc)
+            model_result = await self._execute_model_first_call(
+                user_id=user_id,
+                request=request,
+                credential_result=credential_result,
+                auth_token=auth_token,
+            )
+            response = self._normalize_first_call_success(
+                request=request,
+                payload=model_result,
+                started_at=started,
+                warnings=warnings,
+            )
+        except Exception:
+            return self._first_call_failure(
+                request=request,
+                status="model_failed",
+                remediation=FirstCallRemediation(
+                    code="model_call_failed",
+                    message="The model call failed. Check the selected model and credential scope.",
+                    href="/dashboard/developer",
+                    field="model",
+                ),
+                warnings=warnings,
+            )
+
+        trace_warning = await self._enrich_first_call_trace(response)
+        if trace_warning:
+            response.warnings.append(trace_warning)
+        return response
+
     async def get_dependency_health(self) -> Dict[str, str]:
         clients = {
             "organization_service": self.organization_client,
             "project_service": self.project_client,
             "auth_service": self.credential_client,
             "billing_service": self.billing_client,
+            "model_service": self.model_client,
             "trace_service": self.trace_client,
             "evaluation_service": self.evaluation_client,
         }
@@ -217,6 +321,7 @@ class DeveloperOverviewService:
             self.project_client,
             self.credential_client,
             self.billing_client,
+            self.model_client,
             self.trace_client,
             self.evaluation_client,
         ):
@@ -412,6 +517,190 @@ class DeveloperOverviewService:
             ],
         )
         return self._as_dict(payload) if payload is not None else None
+
+    async def _validate_first_call_project(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+        project_id: str,
+        auth_token: Optional[str],
+    ) -> Tuple[Optional[bool], Optional[WarningInfo]]:
+        if not self.project_client:
+            return None, dependency_warning("project_service", "not_configured")
+        result, warning = await self._load_source(
+            "project_service",
+            self.project_client,
+            lambda: self._fetch_projects(
+                user_id=user_id,
+                organization_id=organization_id,
+                auth_token=auth_token,
+            ),
+        )
+        if warning:
+            return None, warning
+        projects = result or []
+        return any(project.id == project_id for project in projects), None
+
+    async def _validate_first_call_credential(
+        self,
+        *,
+        request: FirstCallRequest,
+        auth_token: Optional[str],
+    ) -> Tuple[bool, Dict[str, Any], Optional[WarningInfo]]:
+        if not self.credential_client:
+            return (
+                False,
+                {},
+                dependency_warning("auth_service", "not_configured"),
+            )
+
+        if request.api_key:
+            verify_method = getattr(self.credential_client, "verify_api_key", None)
+            if verify_method is None:
+                return (
+                    False,
+                    {},
+                    WarningInfo(
+                        source="auth_service",
+                        code="dependency_unavailable",
+                        message="auth_service cannot verify plaintext API keys for first-call.",
+                    ),
+                )
+            try:
+                result = await self._invoke(
+                    verify_method,
+                    [
+                        (
+                            (),
+                            {
+                                "api_key": request.api_key,
+                                "project_id": request.project_id,
+                            },
+                        ),
+                        ((request.api_key,), {"project_id": request.project_id}),
+                        ((request.api_key, request.project_id), {}),
+                    ],
+                )
+            except Exception as exc:
+                return (
+                    False,
+                    {},
+                    WarningInfo(
+                        source="auth_service",
+                        code="dependency_timeout"
+                        if self._is_timeout(exc)
+                        else "dependency_unavailable",
+                        message="auth_service could not verify the API key.",
+                    ),
+                )
+            result_data = self._as_dict(result)
+            if not result_data.get("valid"):
+                return False, result_data, None
+            return True, result_data, None
+
+        result, warning = await self._load_source(
+            "auth_service",
+            self.credential_client,
+            lambda: self._fetch_credentials(
+                organization_id=request.organization_id,
+                auth_token=auth_token,
+            ),
+        )
+        if warning:
+            return False, {}, warning
+        for key in result or []:
+            if request.api_key_id and key.get("key_id") != request.api_key_id:
+                continue
+            if (
+                request.service_account_id
+                and key.get("service_account_id") != request.service_account_id
+            ):
+                continue
+            if self._is_active_key(key) and self._key_matches_project(
+                key, request.project_id
+            ):
+                return True, key, None
+        return False, {}, None
+
+    async def _execute_model_first_call(
+        self,
+        *,
+        user_id: str,
+        request: FirstCallRequest,
+        credential_result: Dict[str, Any],
+        auth_token: Optional[str],
+    ) -> Dict[str, Any]:
+        method = (
+            getattr(self.model_client, "run_first_call", None)
+            or getattr(self.model_client, "create_chat_completion", None)
+            or getattr(self.model_client, "chat_completion", None)
+            or getattr(self.model_client, "complete", None)
+        )
+        result = await self._invoke(
+            method,
+            [
+                (
+                    (),
+                    {
+                        "user_id": user_id,
+                        "organization_id": request.organization_id,
+                        "project_id": request.project_id,
+                        "model": request.model,
+                        "prompt": request.prompt,
+                        "api_key": request.api_key,
+                        "api_key_id": request.api_key_id
+                        or credential_result.get("key_id"),
+                        "auth_token": auth_token,
+                        "metadata": request.metadata,
+                    },
+                ),
+                (
+                    (),
+                    {
+                        "organization_id": request.organization_id,
+                        "project_id": request.project_id,
+                        "model": request.model,
+                        "prompt": request.prompt,
+                    },
+                ),
+            ],
+        )
+        return self._as_dict(result)
+
+    async def _enrich_first_call_trace(
+        self, response: FirstCallResponse
+    ) -> Optional[WarningInfo]:
+        if not response.trace_id or not self.trace_client:
+            return None
+        method = (
+            getattr(self.trace_client, "get_trace", None)
+            or getattr(self.trace_client, "lookup_trace", None)
+            or getattr(self.trace_client, "get_trace_summary", None)
+        )
+        if method is None:
+            return None
+        try:
+            payload = await self._invoke(
+                method,
+                [
+                    ((response.trace_id,), {}),
+                    ((), {"trace_id": response.trace_id}),
+                ],
+            )
+            trace = self._as_dict(payload)
+            response.trace_href = (
+                trace.get("href") or trace.get("url") or response.trace_href
+            )
+            if trace.get("duration_ms") and response.latency_ms is None:
+                response.latency_ms = int(trace["duration_ms"])
+            return None
+        except Exception:
+            return WarningInfo(
+                source="trace_service",
+                code="trace_lookup_unavailable",
+                message="Trace lookup failed; first-call result returned model evidence only.",
+            )
 
     def _build_overview(
         self,
@@ -813,6 +1102,92 @@ class DeveloperOverviewService:
             href="/dashboard/developer/usage",
             reason="Developer setup is complete.",
             severity="info",
+        )
+
+    def _normalize_first_call_success(
+        self,
+        *,
+        request: FirstCallRequest,
+        payload: Dict[str, Any],
+        started_at: datetime,
+        warnings: List[WarningInfo],
+    ) -> FirstCallResponse:
+        usage_payload = self._as_dict(
+            payload.get("usage") or payload.get("token_usage")
+        )
+        input_tokens = usage_payload.get("input_tokens") or usage_payload.get(
+            "prompt_tokens"
+        )
+        output_tokens = usage_payload.get("output_tokens") or usage_payload.get(
+            "completion_tokens"
+        )
+        tokens = (
+            payload.get("tokens")
+            or usage_payload.get("tokens")
+            or usage_payload.get("total_tokens")
+            or (int(input_tokens or 0) + int(output_tokens or 0))
+        )
+        cost_usd = (
+            payload.get("cost_usd")
+            if payload.get("cost_usd") is not None
+            else usage_payload.get("cost_usd")
+            if usage_payload.get("cost_usd") is not None
+            else usage_payload.get("cost", 0.0)
+        )
+        timestamp = (
+            self._parse_datetime(payload.get("timestamp") or payload.get("created_at"))
+            or started_at
+        )
+        latency_ms = payload.get("latency_ms") or payload.get("duration_ms")
+        if latency_ms is not None:
+            latency_ms = int(latency_ms)
+        trace_href = (
+            payload.get("trace_href")
+            or payload.get("trace_url")
+            or payload.get("trace_link")
+        )
+
+        return FirstCallResponse(
+            success=True,
+            status="succeeded",
+            organization_id=request.organization_id,
+            project_id=request.project_id,
+            model=request.model,
+            request_id=payload.get("request_id") or payload.get("id"),
+            trace_id=payload.get("trace_id")
+            or self._as_dict(payload.get("metadata")).get("trace_id"),
+            trace_href=trace_href,
+            latency_ms=latency_ms,
+            tokens=int(tokens or 0),
+            cost_usd=float(cost_usd or 0.0),
+            timestamp=timestamp,
+            usage=FirstCallUsage(
+                input_tokens=int(input_tokens) if input_tokens is not None else None,
+                output_tokens=int(output_tokens) if output_tokens is not None else None,
+                tokens=int(tokens or 0),
+                cost_usd=float(cost_usd or 0.0),
+                currency=str(usage_payload.get("currency") or "USD"),
+            ),
+            warnings=list(warnings),
+        )
+
+    def _first_call_failure(
+        self,
+        *,
+        request: FirstCallRequest,
+        status: str,
+        remediation: FirstCallRemediation,
+        warnings: List[WarningInfo],
+    ) -> FirstCallResponse:
+        return FirstCallResponse(
+            success=False,
+            status=status,
+            organization_id=request.organization_id,
+            project_id=request.project_id,
+            model=request.model,
+            timestamp=datetime.now(tz=timezone.utc),
+            remediation=remediation,
+            warnings=list(warnings),
         )
 
     def _select_project(
