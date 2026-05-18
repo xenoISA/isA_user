@@ -588,6 +588,31 @@ async def get_current_caller(
     return result
 
 
+async def get_oauth_consent_caller(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+) -> Dict[str, Any]:
+    """Authenticate browser consent using session cookie or bearer token."""
+    token = request.cookies.get("isa_access_token")
+    if not token and credentials:
+        token = credentials.credentials
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+        )
+
+    result = await auth_service.verify_access_token_for_resource(token)
+    if not result.get("valid"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=result.get("error", "Invalid token"),
+        )
+
+    return result
+
+
 def _is_admin_caller(caller: Dict[str, Any]) -> bool:
     scope = (caller.get("scope") or "").lower()
     permissions = set(caller.get("permissions") or [])
@@ -942,7 +967,7 @@ async def oauth_consent(
     resource: Optional[str] = Form(None, description="RFC 8707 resource indicator"),
     code_challenge: Optional[str] = Form(None, description="PKCE code challenge"),
     code_challenge_method: Optional[str] = Form(None, description="PKCE method (S256)"),
-    caller: Dict[str, Any] = Depends(get_current_caller),
+    caller: Dict[str, Any] = Depends(get_oauth_consent_caller),
     authz_code_service: AuthorizationCodeService = Depends(
         get_authorization_code_service
     ),
