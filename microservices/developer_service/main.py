@@ -7,7 +7,8 @@ Port: 8261
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Query, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.auth_dependencies import require_auth_or_internal_service
 from core.config_manager import ConfigManager
@@ -31,9 +32,10 @@ SERVICE_PORT = (
     else int(SERVICE_METADATA["port"])
 )
 
-developer_service: Optional[DeveloperOverviewService] = create_developer_service()
+developer_service: Optional[DeveloperOverviewService] = None
 consul_registry = None
 shutdown_manager = GracefulShutdown("developer_service")
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @asynccontextmanager
@@ -74,6 +76,8 @@ async def lifespan(app: FastAPI):
 
     logger.info("Developer Service ready")
     yield
+    if developer_service:
+        await developer_service.close()
     await shutdown_manager.shutdown_with_timeout()
     logger.info("Developer Service shutting down")
 
@@ -83,11 +87,9 @@ app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 
 
 def get_developer_service() -> DeveloperOverviewService:
+    global developer_service
     if developer_service is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Developer service not initialized",
-        )
+        developer_service = create_developer_service()
     return developer_service
 
 
@@ -121,14 +123,17 @@ async def get_developer_overview(
     organization_id: str = Query(..., min_length=1),
     project_id: Optional[str] = Query(None, min_length=1),
     period_days: int = Query(7, ge=1, le=90),
-    svc: DeveloperOverviewService = Depends(get_developer_service),
     caller_id: str = Depends(get_authenticated_caller),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    svc: DeveloperOverviewService = Depends(get_developer_service),
 ):
+    auth_token = f"Bearer {credentials.credentials}" if credentials else None
     return await svc.get_overview(
         user_id=caller_id,
         organization_id=organization_id,
         project_id=project_id,
         period_days=period_days,
+        auth_token=auth_token,
     )
 
 

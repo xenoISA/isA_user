@@ -1,13 +1,37 @@
 """Developer Journey overview aggregation service."""
 
-from typing import Any, Dict, Optional
+import asyncio
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .models import (
+    CredentialSummary,
     DeveloperHealthResponse,
     DeveloperOverviewResponse,
+    FirstCallSummary,
+    NextAction,
+    OrganizationContext,
+    ProjectSummary,
+    SetupProgress,
+    SetupStep,
+    SetupStepStatus,
+    TraceSummary,
+    UsageDailyPoint,
+    UsagePeriod,
+    UsageSummary,
+    WarningInfo,
     build_empty_overview,
     dependency_warning,
 )
+
+CREATE_API_KEY_PERMISSIONS = {
+    "auth.api_keys.create",
+    "api_keys:create",
+    "api_key:create",
+    "keys:create",
+}
+WRITE_ROLES = {"owner", "admin"}
+READ_ONLY_ROLES = {"viewer", "read_only", "readonly", "guest"}
 
 
 class DeveloperOverviewService:
@@ -37,18 +61,106 @@ class DeveloperOverviewService:
         organization_id: str,
         project_id: Optional[str] = None,
         period_days: int = 7,
+        auth_token: Optional[str] = None,
     ) -> DeveloperOverviewResponse:
-        dependency_health = await self.get_dependency_health()
+        if not any(
+            [
+                self.organization_client,
+                self.project_client,
+                self.credential_client,
+                self.billing_client,
+            ]
+        ):
+            dependency_health = await self.get_dependency_health()
+            warnings = [
+                dependency_warning(source, status)
+                for source, status in dependency_health.items()
+                if status != "healthy"
+            ]
+            return build_empty_overview(
+                user_id=user_id,
+                organization_id=organization_id,
+                project_id=project_id,
+                period_days=period_days,
+                warnings=warnings,
+            )
+
+        (
+            organization_result,
+            projects_result,
+            credentials_result,
+            usage_result,
+        ) = await asyncio.gather(
+            self._load_source(
+                "organization_service",
+                self.organization_client,
+                lambda: self._fetch_organization_context(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                ),
+            ),
+            self._load_source(
+                "project_service",
+                self.project_client,
+                lambda: self._fetch_projects(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    auth_token=auth_token,
+                ),
+            ),
+            self._load_source(
+                "auth_service",
+                self.credential_client,
+                lambda: self._fetch_credentials(
+                    organization_id=organization_id,
+                    auth_token=auth_token,
+                ),
+            ),
+            self._load_source(
+                "billing_service",
+                self.billing_client,
+                lambda: self._fetch_usage(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    project_id=project_id,
+                    period_days=period_days,
+                ),
+            ),
+        )
+
         warnings = [
-            dependency_warning(source, status)
-            for source, status in dependency_health.items()
-            if status != "healthy"
+            warning
+            for _, warning in (
+                organization_result,
+                projects_result,
+                credentials_result,
+                usage_result,
+            )
+            if warning is not None
         ]
-        return build_empty_overview(
+
+        organization_payload = organization_result[0] or {
+            "context": OrganizationContext(id=organization_id),
+            "found": None,
+        }
+        projects = projects_result[0] or []
+        credential_keys = credentials_result[0] or []
+        usage_payload = usage_result[0]
+
+        warning_from_usage = self._warning_from_usage_payload(usage_payload)
+        if warning_from_usage:
+            warnings.extend(warning_from_usage)
+
+        return self._build_overview(
             user_id=user_id,
             organization_id=organization_id,
             project_id=project_id,
             period_days=period_days,
+            organization_context=organization_payload["context"],
+            organization_found=organization_payload["found"],
+            projects=projects,
+            credential_keys=credential_keys,
+            usage_payload=usage_payload,
             warnings=warnings,
         )
 
@@ -61,10 +173,10 @@ class DeveloperOverviewService:
             "trace_service": self.trace_client,
             "evaluation_service": self.evaluation_client,
         }
-        return {
-            source: await self._client_health(client)
-            for source, client in clients.items()
-        }
+        statuses = await asyncio.gather(
+            *(self._client_health(client) for client in clients.values())
+        )
+        return dict(zip(clients.keys(), statuses))
 
     async def health_response(self, *, version: str) -> DeveloperHealthResponse:
         dependencies = await self.get_dependency_health()
@@ -98,3 +210,773 @@ class DeveloperOverviewService:
             return "healthy" if result else "unhealthy"
         except Exception:
             return "unhealthy"
+
+    async def close(self) -> None:
+        for client in (
+            self.organization_client,
+            self.project_client,
+            self.credential_client,
+            self.billing_client,
+            self.trace_client,
+            self.evaluation_client,
+        ):
+            if client is None:
+                continue
+            close = getattr(client, "close", None)
+            if close is None:
+                continue
+            result = close()
+            if hasattr(result, "__await__"):
+                await result
+
+    async def _load_source(
+        self,
+        source: str,
+        client: Optional[Any],
+        awaitable_factory,
+    ) -> Tuple[Optional[Any], Optional[WarningInfo]]:
+        if client is None:
+            return None, dependency_warning(source, "not_configured")
+
+        try:
+            return await awaitable_factory(), None
+        except Exception as exc:
+            code = (
+                "dependency_timeout"
+                if self._is_timeout(exc)
+                else "dependency_unavailable"
+            )
+            return (
+                None,
+                WarningInfo(
+                    source=source,
+                    code=code,
+                    message=f"{source} is unavailable; Developer overview is returning partial data.",
+                ),
+            )
+
+    async def _fetch_organization_context(
+        self, *, user_id: str, organization_id: str
+    ) -> Dict[str, Any]:
+        client = self.organization_client
+        context_method = getattr(client, "get_organization_context", None)
+        if context_method:
+            payload = await self._invoke(
+                context_method,
+                [
+                    ((), {"user_id": user_id, "organization_id": organization_id}),
+                    ((user_id, organization_id), {}),
+                    ((organization_id, user_id), {}),
+                ],
+            )
+            return self._normalize_organization_payload(
+                payload, organization_id=organization_id, user_id=user_id
+            )
+
+        organization = None
+        member = None
+        get_organization = getattr(client, "get_organization", None)
+        if get_organization:
+            organization = await self._invoke(
+                get_organization,
+                [
+                    ((organization_id, user_id), {}),
+                    ((), {"organization_id": organization_id, "user_id": user_id}),
+                    ((organization_id,), {}),
+                ],
+            )
+
+        member_method = getattr(client, "get_member_role", None) or getattr(
+            client, "_get_member_role", None
+        )
+        if member_method:
+            member = await self._invoke(
+                member_method,
+                [
+                    ((organization_id, user_id), {}),
+                    ((), {"organization_id": organization_id, "user_id": user_id}),
+                ],
+            )
+        else:
+            members_method = getattr(client, "get_members", None)
+            if members_method:
+                members = await self._invoke(
+                    members_method,
+                    [
+                        ((organization_id, user_id), {}),
+                        ((), {"organization_id": organization_id, "user_id": user_id}),
+                    ],
+                )
+                member = self._find_member_for_user(members, user_id)
+
+        return self._normalize_organization_payload(
+            {"organization": organization, "member": member},
+            organization_id=organization_id,
+            user_id=user_id,
+        )
+
+    async def _fetch_projects(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+        auth_token: Optional[str],
+    ) -> List[ProjectSummary]:
+        list_projects = getattr(self.project_client, "list_projects")
+        payload = await self._invoke(
+            list_projects,
+            [
+                (
+                    (),
+                    {
+                        "user_id": user_id,
+                        "organization_id": organization_id,
+                        "auth_token": auth_token,
+                        "limit": 50,
+                        "offset": 0,
+                    },
+                ),
+                (
+                    (auth_token or "",),
+                    {"organization_id": organization_id, "limit": 50, "offset": 0},
+                ),
+                ((auth_token or "", 50, 0, organization_id), {}),
+                ((user_id, organization_id), {}),
+            ],
+        )
+        return [
+            self._normalize_project(project)
+            for project in self._extract_list(payload, "projects")
+        ]
+
+    async def _fetch_credentials(
+        self,
+        *,
+        organization_id: str,
+        auth_token: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        list_api_keys = getattr(self.credential_client, "list_api_keys")
+        payload = await self._invoke(
+            list_api_keys,
+            [
+                (
+                    (),
+                    {
+                        "organization_id": organization_id,
+                        "auth_token": auth_token,
+                        "project_id": None,
+                    },
+                ),
+                ((organization_id,), {"auth_token": auth_token, "project_id": None}),
+                ((organization_id, auth_token), {}),
+                ((organization_id,), {}),
+            ],
+        )
+        return [self._as_dict(item) for item in self._extract_list(payload, "api_keys")]
+
+    async def _fetch_usage(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+        project_id: Optional[str],
+        period_days: int,
+    ) -> Optional[Dict[str, Any]]:
+        method = (
+            getattr(self.billing_client, "get_developer_usage", None)
+            or getattr(self.billing_client, "get_usage_overview", None)
+            or getattr(self.billing_client, "get_usage_aggregations", None)
+        )
+        payload = await self._invoke(
+            method,
+            [
+                (
+                    (),
+                    {
+                        "user_id": user_id,
+                        "organization_id": organization_id,
+                        "project_id": project_id,
+                        "period_days": period_days,
+                    },
+                ),
+                (
+                    (),
+                    {
+                        "user_id": user_id,
+                        "organization_id": organization_id,
+                        "period_days": period_days,
+                    },
+                ),
+                ((user_id, period_days, organization_id), {}),
+                ((user_id, organization_id, period_days), {}),
+            ],
+        )
+        return self._as_dict(payload) if payload is not None else None
+
+    def _build_overview(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+        project_id: Optional[str],
+        period_days: int,
+        organization_context: OrganizationContext,
+        organization_found: Optional[bool],
+        projects: List[ProjectSummary],
+        credential_keys: List[Dict[str, Any]],
+        usage_payload: Optional[Dict[str, Any]],
+        warnings: List[WarningInfo],
+    ) -> DeveloperOverviewResponse:
+        selected_project = self._select_project(projects, project_id)
+        credentials = self._summarize_credentials(
+            credential_keys=credential_keys,
+            selected_project_id=selected_project.id if selected_project else None,
+            organization=organization_context,
+            organization_found=organization_found,
+        )
+        usage = self._normalize_usage(usage_payload, period_days=period_days)
+
+        has_usage = usage.requests > 0 or usage.tokens > 0 or usage.cost_usd > 0
+        steps = self._build_setup_steps(
+            organization_found=organization_found,
+            selected_project=selected_project,
+            has_active_credential=credentials.has_active_credential,
+            can_create_credentials=credentials.can_create,
+            has_usage=has_usage,
+        )
+        setup = SetupProgress(
+            completed=sum(
+                1 for step in steps if step.status == SetupStepStatus.COMPLETE
+            ),
+            total=len(steps),
+            steps=steps,
+        )
+        first_call_status = steps[-1].status
+        first_call = FirstCallSummary(
+            status=first_call_status,
+            tokens=usage.tokens if has_usage else None,
+            cost_usd=usage.cost_usd if has_usage else None,
+            source="billing_service" if has_usage else None,
+        )
+
+        return DeveloperOverviewResponse(
+            user_id=user_id,
+            organization=organization_context,
+            selected_project=selected_project,
+            projects=projects,
+            setup=setup,
+            credentials=credentials,
+            first_call=first_call,
+            usage=usage,
+            traces=self._normalize_traces(usage_payload),
+            eval_failures=[],
+            next_action=self._next_action(steps),
+            warnings=warnings,
+        )
+
+    def _normalize_organization_payload(
+        self,
+        payload: Any,
+        *,
+        organization_id: str,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        if payload is None:
+            return {
+                "context": OrganizationContext(id=organization_id, status="missing"),
+                "found": False,
+            }
+
+        payload = self._as_dict(payload)
+        if not payload:
+            return {
+                "context": OrganizationContext(id=organization_id, status="missing"),
+                "found": False,
+            }
+        organization = self._as_dict(payload.get("organization") or payload)
+        member = self._as_dict(payload.get("member") or payload.get("membership"))
+        if not member:
+            member = self._find_member_for_user(payload.get("members"), user_id)
+
+        organization_id_value = (
+            organization.get("id")
+            or organization.get("organization_id")
+            or payload.get("organization_id")
+            or organization_id
+        )
+        role = member.get("role") or organization.get("role") or payload.get("role")
+        permissions = self._normalize_permissions(
+            member.get("permissions")
+            or organization.get("permissions")
+            or payload.get("permissions")
+        )
+
+        context = OrganizationContext(
+            id=str(organization_id_value),
+            name=organization.get("name") or organization.get("org_name"),
+            role=role,
+            permissions=permissions,
+            status=member.get("status") or organization.get("status"),
+            access_level=member.get("access_level")
+            or organization.get("access_level")
+            or role,
+        )
+        return {"context": context, "found": True}
+
+    def _normalize_project(self, payload: Any) -> ProjectSummary:
+        data = self._as_dict(payload)
+        return ProjectSummary(
+            id=str(data.get("id") or data.get("project_id")),
+            name=data.get("name") or data.get("project_name"),
+            status=data.get("status"),
+            is_default=bool(data.get("is_default") or data.get("default")),
+            updated_at=self._parse_datetime(data.get("updated_at")),
+        )
+
+    def _normalize_usage(
+        self, payload: Optional[Dict[str, Any]], *, period_days: int
+    ) -> UsageSummary:
+        now = datetime.now(tz=timezone.utc)
+        if not payload:
+            return UsageSummary(
+                period=UsagePeriod(
+                    start=now - timedelta(days=period_days),
+                    end=now,
+                    days=period_days,
+                )
+            )
+
+        period_payload = self._as_dict(payload.get("period"))
+        period_start = self._parse_datetime(period_payload.get("start")) or (
+            now - timedelta(days=period_days)
+        )
+        period_end = self._parse_datetime(period_payload.get("end")) or now
+        days = int(period_payload.get("days") or period_days)
+
+        totals = self._as_dict(payload.get("totals") or payload)
+        daily = [
+            UsageDailyPoint(
+                date=str(point.get("date") or point.get("period") or ""),
+                requests=int(point.get("requests") or point.get("count") or 0),
+                tokens=int(point.get("tokens") or point.get("total_usage_amount") or 0),
+                cost_usd=float(
+                    point.get("cost_usd")
+                    if point.get("cost_usd") is not None
+                    else point.get("cost", 0.0)
+                ),
+            )
+            for point in (self._extract_list(payload, "daily") or [])
+        ]
+
+        return UsageSummary(
+            period=UsagePeriod(start=period_start, end=period_end, days=days),
+            requests=int(totals.get("requests") or totals.get("total_count") or 0),
+            tokens=int(totals.get("tokens") or totals.get("total_usage_amount") or 0),
+            cost_usd=float(
+                totals.get("cost_usd")
+                if totals.get("cost_usd") is not None
+                else totals.get("cost", 0.0)
+            ),
+            currency=str(totals.get("currency") or "USD"),
+            daily=daily,
+        )
+
+    def _summarize_credentials(
+        self,
+        *,
+        credential_keys: List[Dict[str, Any]],
+        selected_project_id: Optional[str],
+        organization: OrganizationContext,
+        organization_found: Optional[bool],
+    ) -> CredentialSummary:
+        active_keys = [key for key in credential_keys if self._is_active_key(key)]
+        project_active_keys = [
+            key
+            for key in active_keys
+            if self._key_matches_project(key, selected_project_id)
+        ]
+        can_create = self._can_create_credentials(
+            organization, assume_allowed=organization_found is None
+        )
+        service_account_ids = {
+            str(key.get("service_account_id"))
+            for key in credential_keys
+            if key.get("service_account_id")
+        }
+        service_account_count = len(service_account_ids) + sum(
+            1 for key in credential_keys if key.get("owner_type") == "service_account"
+        )
+        last_used_values = [
+            parsed
+            for parsed in (
+                self._parse_datetime(key.get("last_used_at") or key.get("last_used"))
+                for key in active_keys
+            )
+            if parsed is not None
+        ]
+        read_only_reason = None
+        if not can_create:
+            read_only_reason = (
+                "Caller lacks permission to create Developer credentials."
+            )
+
+        return CredentialSummary(
+            api_key_count=len(credential_keys),
+            service_account_count=service_account_count,
+            has_active_credential=bool(project_active_keys),
+            last_used_at=max(last_used_values) if last_used_values else None,
+            can_create=can_create,
+            read_only_reason=read_only_reason,
+        )
+
+    def _build_setup_steps(
+        self,
+        *,
+        organization_found: Optional[bool],
+        selected_project: Optional[ProjectSummary],
+        has_active_credential: bool,
+        can_create_credentials: bool,
+        has_usage: bool,
+    ) -> List[SetupStep]:
+        organization_status = (
+            SetupStepStatus.TODO
+            if organization_found is False
+            else SetupStepStatus.COMPLETE
+        )
+        project_status = (
+            SetupStepStatus.BLOCKED
+            if organization_status != SetupStepStatus.COMPLETE
+            else SetupStepStatus.COMPLETE
+            if selected_project
+            else SetupStepStatus.TODO
+        )
+        credential_status = self._credential_step_status(
+            project_status=project_status,
+            has_active_credential=has_active_credential,
+            can_create_credentials=can_create_credentials,
+        )
+        first_call_status = self._first_call_step_status(
+            selected_project=selected_project,
+            credential_status=credential_status,
+            has_usage=has_usage,
+        )
+
+        return [
+            SetupStep(
+                id="organization",
+                label="Select organization",
+                status=organization_status,
+                href="/dashboard/settings/organization",
+                blocked_reason=(
+                    "Choose an organization before creating Developer resources."
+                    if organization_status == SetupStepStatus.TODO
+                    else None
+                ),
+            ),
+            SetupStep(
+                id="project",
+                label="Create or select project",
+                status=project_status,
+                href="/dashboard/projects",
+                blocked_reason=(
+                    "Select an organization before creating a project."
+                    if project_status == SetupStepStatus.BLOCKED
+                    else None
+                ),
+            ),
+            SetupStep(
+                id="credential",
+                label="Create project API key",
+                status=credential_status,
+                href="/dashboard/developer/api-keys",
+                blocked_reason=self._credential_blocked_reason(
+                    project_status, credential_status
+                ),
+            ),
+            SetupStep(
+                id="first_call",
+                label="Run first API call",
+                status=first_call_status,
+                href="/dashboard/developer",
+                blocked_reason=self._first_call_blocked_reason(
+                    selected_project, credential_status, first_call_status
+                ),
+            ),
+        ]
+
+    def _credential_step_status(
+        self,
+        *,
+        project_status: SetupStepStatus,
+        has_active_credential: bool,
+        can_create_credentials: bool,
+    ) -> SetupStepStatus:
+        if project_status != SetupStepStatus.COMPLETE:
+            return SetupStepStatus.BLOCKED
+        if has_active_credential:
+            return SetupStepStatus.COMPLETE
+        if not can_create_credentials:
+            return SetupStepStatus.READ_ONLY
+        return SetupStepStatus.TODO
+
+    def _first_call_step_status(
+        self,
+        *,
+        selected_project: Optional[ProjectSummary],
+        credential_status: SetupStepStatus,
+        has_usage: bool,
+    ) -> SetupStepStatus:
+        if has_usage:
+            return SetupStepStatus.COMPLETE
+        if not selected_project:
+            return SetupStepStatus.BLOCKED
+        if credential_status == SetupStepStatus.COMPLETE:
+            return SetupStepStatus.TODO
+        if credential_status == SetupStepStatus.READ_ONLY:
+            return SetupStepStatus.READ_ONLY
+        return SetupStepStatus.BLOCKED
+
+    def _credential_blocked_reason(
+        self, project_status: SetupStepStatus, credential_status: SetupStepStatus
+    ) -> Optional[str]:
+        if credential_status == SetupStepStatus.BLOCKED:
+            return (
+                "Select or create a project first."
+                if project_status != SetupStepStatus.BLOCKED
+                else "Select an organization and project first."
+            )
+        if credential_status == SetupStepStatus.READ_ONLY:
+            return "Caller lacks permission to create API keys."
+        return None
+
+    def _first_call_blocked_reason(
+        self,
+        selected_project: Optional[ProjectSummary],
+        credential_status: SetupStepStatus,
+        first_call_status: SetupStepStatus,
+    ) -> Optional[str]:
+        if first_call_status in {SetupStepStatus.COMPLETE, SetupStepStatus.TODO}:
+            return None
+        if not selected_project:
+            return "Select or create a project first."
+        if credential_status == SetupStepStatus.READ_ONLY:
+            return "Ask an organization admin to create a project credential."
+        return "Create an active project credential first."
+
+    def _next_action(self, steps: List[SetupStep]) -> NextAction:
+        for step in steps:
+            if step.status == SetupStepStatus.COMPLETE:
+                continue
+            if step.id == "organization":
+                return NextAction(
+                    id="select_organization",
+                    label="Select organization",
+                    href="/dashboard/settings/organization",
+                    reason="Developer setup needs an organization context.",
+                    severity="warning",
+                )
+            if step.id == "project":
+                return NextAction(
+                    id="create_project",
+                    label="Create project",
+                    href="/dashboard/projects",
+                    reason="Developer setup needs a project before credentials and usage can be attributed.",
+                    severity="warning",
+                )
+            if step.id == "credential" and step.status == SetupStepStatus.READ_ONLY:
+                return NextAction(
+                    id="request_api_key_access",
+                    label="Request API key access",
+                    href="/dashboard/settings/organization",
+                    reason="This user can inspect Developer setup but cannot create credentials.",
+                    severity="info",
+                )
+            if step.id == "credential":
+                return NextAction(
+                    id="create_credential",
+                    label="Create API key",
+                    href="/dashboard/developer/api-keys",
+                    reason="A selected project needs an active credential before the first API call.",
+                    severity="warning",
+                )
+            if step.id == "first_call":
+                return NextAction(
+                    id="run_first_call",
+                    label="Run first API call",
+                    href="/dashboard/developer",
+                    reason="An active credential is ready; run a first call to verify traces and usage.",
+                    severity="info",
+                )
+        return NextAction(
+            id="view_usage",
+            label="View usage",
+            href="/dashboard/developer/usage",
+            reason="Developer setup is complete.",
+            severity="info",
+        )
+
+    def _select_project(
+        self, projects: List[ProjectSummary], project_id: Optional[str]
+    ) -> Optional[ProjectSummary]:
+        if project_id:
+            for project in projects:
+                if project.id == project_id:
+                    return project
+            return ProjectSummary(id=project_id, status="selected")
+        for project in projects:
+            if project.is_default:
+                return project
+        return projects[0] if projects else None
+
+    def _normalize_traces(
+        self, usage_payload: Optional[Dict[str, Any]]
+    ) -> List[TraceSummary]:
+        if not usage_payload:
+            return []
+        return [
+            TraceSummary(
+                trace_id=str(trace.get("trace_id")),
+                status=trace.get("status"),
+                started_at=self._parse_datetime(trace.get("started_at")),
+                duration_ms=trace.get("duration_ms"),
+                tokens=trace.get("tokens"),
+                cost_usd=trace.get("cost_usd"),
+                href=trace.get("href"),
+            )
+            for trace in self._extract_list(usage_payload, "traces")
+            if trace.get("trace_id")
+        ]
+
+    def _warning_from_usage_payload(
+        self, usage_payload: Optional[Dict[str, Any]]
+    ) -> List[WarningInfo]:
+        if not usage_payload:
+            return []
+        warnings: List[WarningInfo] = []
+        for raw_warning in usage_payload.get("warnings") or []:
+            code = str(raw_warning)
+            warnings.append(
+                WarningInfo(
+                    source="billing_service",
+                    code=code,
+                    message=f"Billing usage source reported {code}.",
+                )
+            )
+        return warnings
+
+    async def _invoke(self, method: Any, attempts: Iterable[Tuple[Tuple, Dict]]) -> Any:
+        last_error: Optional[Exception] = None
+        for args, kwargs in attempts:
+            try:
+                result = method(
+                    *args, **{k: v for k, v in kwargs.items() if v is not None}
+                )
+                if hasattr(result, "__await__"):
+                    result = await result
+                return result
+            except TypeError as exc:
+                last_error = exc
+                continue
+        if last_error:
+            raise last_error
+        raise TypeError("No invocation attempts were provided")
+
+    def _find_member_for_user(self, members: Any, user_id: str) -> Dict[str, Any]:
+        for member in self._extract_list(members, "members"):
+            data = self._as_dict(member)
+            member_user_id = data.get("user_id") or data.get("member_user_id")
+            if member_user_id == user_id:
+                return data
+        return {}
+
+    def _extract_list(self, payload: Any, key: str) -> List[Dict[str, Any]]:
+        payload = self._as_dict(payload)
+        if not payload:
+            return []
+        if isinstance(payload, list):
+            return [self._as_dict(item) for item in payload]
+        value = payload.get(key)
+        if value is None:
+            value = (
+                payload.get("items") or payload.get("results") or payload.get("data")
+            )
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [self._as_dict(item) for item in value]
+        return []
+
+    def _as_dict(self, payload: Any) -> Dict[str, Any]:
+        if payload is None:
+            return {}
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, list):
+            return payload  # type: ignore[return-value]
+        model_dump = getattr(payload, "model_dump", None)
+        if model_dump:
+            return model_dump()
+        dict_method = getattr(payload, "dict", None)
+        if dict_method:
+            return dict_method()
+        return {}
+
+    def _normalize_permissions(self, permissions: Any) -> List[str]:
+        if permissions is None:
+            return []
+        if isinstance(permissions, str):
+            return [item for item in permissions.split() if item]
+        if isinstance(permissions, list):
+            return [str(item) for item in permissions]
+        return []
+
+    def _can_create_credentials(
+        self, organization: OrganizationContext, *, assume_allowed: bool = False
+    ) -> bool:
+        role = (organization.role or "").lower()
+        if role in WRITE_ROLES:
+            return True
+        if role in READ_ONLY_ROLES:
+            return False
+        permissions = {permission.lower() for permission in organization.permissions}
+        if permissions & CREATE_API_KEY_PERMISSIONS:
+            return True
+        return assume_allowed
+
+    def _is_active_key(self, key: Dict[str, Any]) -> bool:
+        if key.get("is_active") is False:
+            return False
+        expires_at = self._parse_datetime(key.get("expires_at"))
+        if expires_at and expires_at < datetime.now(tz=timezone.utc):
+            return False
+        return True
+
+    def _key_matches_project(
+        self, key: Dict[str, Any], selected_project_id: Optional[str]
+    ) -> bool:
+        if selected_project_id is None:
+            return True
+        key_project_id = key.get("project_id")
+        owner_type = key.get("owner_type") or "organization"
+        return key_project_id == selected_project_id or (
+            owner_type == "organization" and not key_project_id
+        )
+
+    def _parse_datetime(self, value: Any) -> Optional[datetime]:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            except ValueError:
+                return None
+        return None
+
+    def _is_timeout(self, exc: Exception) -> bool:
+        return (
+            isinstance(exc, asyncio.TimeoutError)
+            or "timeout" in exc.__class__.__name__.lower()
+        )
