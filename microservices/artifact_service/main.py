@@ -20,7 +20,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from core.config_manager import ConfigManager
@@ -153,6 +153,24 @@ def _raise_for_artifact_error(e: Exception) -> None:
         raise HTTPException(status_code=403, detail=str(e))
     if isinstance(e, ArtifactValidationError):
         raise HTTPException(status_code=400, detail=str(e))
+
+
+def _extract_bearer_token(request: Request) -> Optional[str]:
+    """Return the bearer token from the ``Authorization`` header (if any).
+
+    Phase 3 polish (xenoISA/isA_user#441 follow-up): the artifact service
+    forwards the caller's JWT to upstream services (isA_Model, isA_MCP) so
+    user-level rate limits + audit apply to the proxied call. If no header
+    is present (e.g. dev/no-auth path) we return ``None`` and the upstream
+    keeps using its existing default auth.
+    """
+    authorization = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not authorization:
+        return None
+    parts = authorization.strip().split(None, 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
+        return parts[1].strip()
+    return None
 
 
 class CreateArtifactBody(BaseModel):
@@ -386,6 +404,7 @@ async def runtime_invoke(
     artifact_id: str,
     body: ArtifactRuntimeInvokeRequest,
     response: Response,
+    request: Request,
 ):
     """Invoke the artifact's AI runtime + book usage against quota.
 
@@ -394,9 +413,13 @@ async def runtime_invoke(
     429 + Retry-After when the per-user daily call cap is hit. The quota
     check + usage upsert run inside the service layer so we never book a
     call we refused.
+
+    The caller's bearer token (when present) is forwarded to isA_Model so
+    user-level rate limits + audit apply to the upstream call.
     """
     try:
-        return await artifact_service.runtime_invoke(artifact_id, body)
+        auth_token = _extract_bearer_token(request)
+        return await artifact_service.runtime_invoke(artifact_id, body, auth_token=auth_token)
     except ArtifactQuotaExceededError as e:
         response.headers["Retry-After"] = str(e.retry_after)
         raise HTTPException(
@@ -456,16 +479,21 @@ async def mcp_approve(artifact_id: str, body: MCPApproveRequest):
     "/api/v1/artifacts/{artifact_id}/mcp/call",
     response_model=MCPCallResponse,
 )
-async def mcp_call(artifact_id: str, body: MCPCallRequest):
+async def mcp_call(artifact_id: str, body: MCPCallRequest, request: Request):
     """MCP tool call — gated by an active ``allow``+``always`` grant.
 
     First call (no grant) returns ``{requires_approval: true, prompt}``. After
     POSTing /mcp/approve with scope=always, the same body proxies to isA_MCP
-    over JSON-RPC and returns the tool's result. If isA_MCP is unreachable
-    the response falls back to a stub body so the endpoint never 500s.
+    over the session-aware streamable-HTTP transport and returns the tool's
+    result. If isA_MCP is unreachable the response falls back to a stub body
+    so the endpoint never 500s.
+
+    The caller's bearer token (when present) is forwarded to isA_MCP so
+    user-level rate limits + audit apply to the upstream call.
     """
     try:
-        return await artifact_service.mcp_call(artifact_id, body)
+        auth_token = _extract_bearer_token(request)
+        return await artifact_service.mcp_call(artifact_id, body, auth_token=auth_token)
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"mcp_call failed: {e}")
