@@ -1,5 +1,6 @@
 """HTTP clients used by developer_service aggregation."""
 
+import os
 from typing import Any, Dict, Optional
 
 import httpx
@@ -9,6 +10,10 @@ from core.service_discovery import get_service_discovery
 
 
 def _resolve_service_url(service_name: str, default_port: int) -> str:
+    if service_name == "model_service":
+        env_url = os.getenv("ISA_MODEL_URL") or os.getenv("MODEL_SERVICE_URL")
+        if env_url:
+            return env_url.rstrip("/")
     try:
         service_discovery = get_service_discovery()
         return service_discovery.get_service_url(service_name).rstrip("/")
@@ -141,6 +146,25 @@ class CredentialOverviewClient(DeveloperHttpClient):
         response.raise_for_status()
         return response.json()
 
+    async def verify_api_key(
+        self,
+        *,
+        api_key: str,
+        project_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"api_key": api_key}
+        if project_id:
+            payload["project_id"] = project_id
+        if ip_address:
+            payload["ip_address"] = ip_address
+        response = await self.client.post(
+            f"{self.base_url}/api/v1/auth/verify-api-key",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
 
 class BillingOverviewClient(DeveloperHttpClient):
     def __init__(self, timeout: float = 2.0):
@@ -171,3 +195,71 @@ class BillingOverviewClient(DeveloperHttpClient):
         )
         response.raise_for_status()
         return response.json()
+
+
+class ModelFirstCallClient(DeveloperHttpClient):
+    def __init__(self, timeout: float = 15.0):
+        super().__init__(
+            service_name="model_service",
+            default_port=8082,
+            timeout=timeout,
+        )
+
+    async def run_first_call(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+        project_id: str,
+        model: str,
+        prompt: str,
+        api_key: Optional[str] = None,
+        api_key_id: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        headers = self._auth_headers(auth_token)
+        if api_key:
+            headers["X-API-Key"] = api_key
+            if not auth_token:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+        request_metadata = {
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "project_id": project_id,
+            "api_key_id": api_key_id,
+            "source": "developer_service_first_call",
+            **(metadata or {}),
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            "metadata": request_metadata,
+            "max_tokens": 64,
+            "temperature": 0,
+        }
+        last_response: Optional[httpx.Response] = None
+        for path in (
+            "/v1/chat/completions",
+            "/api/v1/chat/completions",
+            "/chat/completions",
+        ):
+            response = await self.client.post(
+                f"{self.base_url}{path}",
+                json=payload,
+                headers=headers,
+            )
+            if response.status_code == 404:
+                last_response = response
+                continue
+            response.raise_for_status()
+            return response.json()
+        if last_response is not None:
+            last_response.raise_for_status()
+        raise RuntimeError("Model service did not return a first-call response")

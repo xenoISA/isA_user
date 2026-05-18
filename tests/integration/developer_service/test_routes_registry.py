@@ -15,6 +15,7 @@ def test_routes_registry_exposes_overview_and_health_routes():
     assert "/health" in paths
     assert "/api/v1/developer/health" in paths
     assert "/api/v1/developer/overview" in paths
+    assert "/api/v1/developer/first-call" in paths
 
 
 def test_consul_route_metadata_is_compact_and_protected():
@@ -23,5 +24,5 @@ def test_consul_route_metadata_is_compact_and_protected():
     assert SERVICE_METADATA["service_name"] == "developer_service"
     assert route_meta["base_path"] == "/api/v1/developer"
     assert route_meta["route_count"] == str(len(DEVELOPER_SERVICE_ROUTES))
-    assert route_meta["protected_count"] == "1"
+    assert route_meta["protected_count"] == "2"
     assert route_meta["public_count"] == "2"

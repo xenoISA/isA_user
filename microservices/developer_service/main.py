@@ -19,7 +19,12 @@ from isa_common.consul_client import ConsulRegistry
 
 from .developer_service import DeveloperOverviewService
 from .factory import create_developer_service
-from .models import DeveloperHealthResponse, DeveloperOverviewResponse
+from .models import (
+    DeveloperHealthResponse,
+    DeveloperOverviewResponse,
+    FirstCallRequest,
+    FirstCallResponse,
+)
 from .routes_registry import SERVICE_METADATA, get_routes_for_consul
 
 config_manager = ConfigManager("developer_service")
@@ -133,6 +138,21 @@ async def get_developer_overview(
         organization_id=organization_id,
         project_id=project_id,
         period_days=period_days,
+        auth_token=auth_token,
+    )
+
+
+@app.post("/api/v1/developer/first-call", response_model=FirstCallResponse)
+async def run_developer_first_call(
+    request: FirstCallRequest,
+    caller_id: str = Depends(get_authenticated_caller),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    svc: DeveloperOverviewService = Depends(get_developer_service),
+):
+    auth_token = f"Bearer {credentials.credentials}" if credentials else None
+    return await svc.run_first_call(
+        user_id=caller_id,
+        request=request,
         auth_token=auth_token,
     )
 

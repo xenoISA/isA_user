@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -69,6 +69,54 @@ class FirstCallSummary(BaseModel):
     tokens: Optional[int] = None
     cost_usd: Optional[float] = None
     source: Optional[str] = None
+
+
+class FirstCallRequest(BaseModel):
+    organization_id: str = Field(..., min_length=1)
+    project_id: str = Field(..., min_length=1)
+    model: str = Field(default="gpt-4.1-nano", min_length=1)
+    api_key_id: Optional[str] = Field(None, min_length=1)
+    api_key: Optional[str] = Field(None, min_length=1, repr=False)
+    service_account_id: Optional[str] = Field(None, min_length=1)
+    prompt: str = Field(
+        default="Reply with a short JSON object confirming Developer first-call readiness.",
+        min_length=1,
+        max_length=2000,
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FirstCallUsage(BaseModel):
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    tokens: int = 0
+    cost_usd: float = 0.0
+    currency: str = "USD"
+
+
+class FirstCallRemediation(BaseModel):
+    code: str
+    message: str
+    href: Optional[str] = None
+    field: Optional[str] = None
+
+
+class FirstCallResponse(BaseModel):
+    success: bool
+    status: str
+    organization_id: str
+    project_id: str
+    model: str
+    request_id: Optional[str] = None
+    trace_id: Optional[str] = None
+    trace_href: Optional[str] = None
+    latency_ms: Optional[int] = None
+    tokens: int = 0
+    cost_usd: float = 0.0
+    timestamp: datetime
+    usage: FirstCallUsage = Field(default_factory=FirstCallUsage)
+    remediation: Optional[FirstCallRemediation] = None
+    warnings: List[WarningInfo] = Field(default_factory=list)
 
 
 class UsagePeriod(BaseModel):

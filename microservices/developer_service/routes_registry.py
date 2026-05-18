@@ -21,6 +21,12 @@ DEVELOPER_SERVICE_ROUTES = [
         "auth_required": True,
         "description": "Developer Journey overview",
     },
+    {
+        "path": "/api/v1/developer/first-call",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Developer first-call verification",
+    },
 ]
 
 SERVICE_METADATA = {
@@ -38,7 +44,7 @@ def get_routes_for_consul() -> Dict[str, Any]:
     return {
         "route_count": str(len(DEVELOPER_SERVICE_ROUTES)),
         "base_path": "/api/v1/developer",
-        "methods": "GET",
+        "methods": "GET,POST",
         "public_count": str(
             sum(1 for route in DEVELOPER_SERVICE_ROUTES if not route["auth_required"])
         ),
