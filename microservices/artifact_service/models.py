@@ -291,6 +291,150 @@ class RemixArtifactRequest(BaseModel):
     source_session_id: Optional[str] = None
 
 
+# ==================== Phase 3: Runtime / MCP / KV ====================
+#
+# These models back the three Phase 3 features added in the migration trio
+# 002/003/004. They mirror the JSON contracts the BFF (isA_/pages/api/artifacts/*)
+# proxies to the gateway. See isA_/docs/design/427-artifact-flows.md §9-11.
+
+# ----- 1. AI Runtime + daily quota -----
+
+
+class ArtifactRuntimeInvokeRequest(BaseModel):
+    """POST /api/v1/artifacts/{id}/runtime/invoke body.
+
+    Phase 3 ships this as a stub responder (synthesises a response and books
+    the call against the quota). The real LLM proxy lands in a follow-up that
+    wires isA_Model end-to-end via the gateway.
+    """
+
+    user_id: str
+    prompt: str
+    max_tokens: Optional[int] = Field(None, ge=1, le=8192)
+
+
+class ArtifactRuntimeInvokeResponse(BaseModel):
+    output: str
+    tokens_in: int
+    tokens_out: int
+    calls_today: int
+    quota: int
+
+
+class ArtifactRuntimeUsage(BaseModel):
+    """One row in artifact.artifact_runtime_usage."""
+
+    artifact_id: str
+    user_id: str
+    day_bucket: str  # ISO YYYY-MM-DD (UTC)
+    tokens_in: int = 0
+    tokens_out: int = 0
+    calls: int = 0
+
+
+class ArtifactRuntimeUsageResponse(BaseModel):
+    """GET /api/v1/artifacts/{id}/runtime/usage response."""
+
+    artifact_id: str
+    user_id: str
+    day_bucket: str
+    tokens_in: int
+    tokens_out: int
+    calls: int
+    quota: int
+    remaining: int
+
+
+# ----- 2. MCP grants -----
+
+
+class MCPGrantDecision(str, Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+
+
+class MCPGrantScope(str, Enum):
+    ONCE = "once"
+    SESSION = "session"
+    ALWAYS = "always"
+
+
+class ArtifactMCPGrant(BaseModel):
+    id: str
+    artifact_id: str
+    user_id: str
+    tool_name: str
+    server_id: str
+    decision: MCPGrantDecision
+    scope: MCPGrantScope
+    approved_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MCPApproveRequest(BaseModel):
+    user_id: str
+    tool_name: str
+    server_id: str
+    decision: MCPGrantDecision = MCPGrantDecision.ALLOW
+    scope: MCPGrantScope = MCPGrantScope.ALWAYS
+    expires_at: Optional[datetime] = None
+
+
+class MCPCallRequest(BaseModel):
+    user_id: str
+    tool_name: str
+    server_id: str
+    args: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPCallResponse(BaseModel):
+    """Either a stubbed result OR an approval prompt — never both.
+
+    The `requires_approval=True` branch carries `prompt` and `tool_name`+
+    `server_id` so the client UI can pop the existing approval drawer
+    pattern; the success branch carries `result` and `scope_used`.
+    """
+
+    requires_approval: bool = False
+    prompt: Optional[str] = None
+    tool_name: Optional[str] = None
+    server_id: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    scope_used: Optional[MCPGrantScope] = None
+
+
+class ArtifactMCPGrantsListResponse(BaseModel):
+    grants: List[ArtifactMCPGrant]
+
+
+# ----- 3. KV storage -----
+
+
+class ArtifactKVScope(str, Enum):
+    PERSONAL = "personal"
+    SHARED = "shared"
+
+
+class ArtifactKVValueRequest(BaseModel):
+    """PUT body — value is any JSONB-serialisable payload."""
+
+    value: Any
+
+
+class ArtifactKVResponse(BaseModel):
+    artifact_id: str
+    scope: ArtifactKVScope
+    user_id: Optional[str] = None  # null when scope=shared
+    key: str
+    value: Any
+    updated_at: Optional[datetime] = None
+
+
 # ==================== Service Status ====================
 
 
@@ -326,4 +470,21 @@ __all__ = [
     "PublicArtifactResponse",
     "PublicArtifactShareMeta",
     "RemixArtifactRequest",
+    # Phase 3 — runtime
+    "ArtifactRuntimeInvokeRequest",
+    "ArtifactRuntimeInvokeResponse",
+    "ArtifactRuntimeUsage",
+    "ArtifactRuntimeUsageResponse",
+    # Phase 3 — MCP grants
+    "MCPGrantDecision",
+    "MCPGrantScope",
+    "ArtifactMCPGrant",
+    "MCPApproveRequest",
+    "MCPCallRequest",
+    "MCPCallResponse",
+    "ArtifactMCPGrantsListResponse",
+    # Phase 3 — KV
+    "ArtifactKVScope",
+    "ArtifactKVValueRequest",
+    "ArtifactKVResponse",
 ]
