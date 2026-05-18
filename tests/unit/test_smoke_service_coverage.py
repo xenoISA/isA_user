@@ -11,6 +11,7 @@ TARGETED_SMOKE_FILES = {
     "campaign_service": "test_campaign_smoke.py",
     "compliance_service": "test_compliance_smoke.py",
     "device_service": "test_device_smoke.py",
+    "developer_service": "test_developer_smoke.py",
     "invitation_service": "test_invitation_smoke.py",
     "location_service": "test_location_smoke.py",
     "media_service": "test_media_smoke.py",

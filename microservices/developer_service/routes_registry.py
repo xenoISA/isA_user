@@ -29,6 +29,8 @@ DEVELOPER_SERVICE_ROUTES = [
     },
 ]
 
+API_PATH = "/api/v1/developer"
+
 SERVICE_METADATA = {
     "service_name": "developer_service",
     "port": 8261,
@@ -43,7 +45,12 @@ SERVICE_METADATA = {
 def get_routes_for_consul() -> Dict[str, Any]:
     return {
         "route_count": str(len(DEVELOPER_SERVICE_ROUTES)),
-        "base_path": "/api/v1/developer",
+        "base_path": API_PATH,
+        "api_path": API_PATH,
+        # APISIX auth_required controls gateway-level jwt-auth. Existing
+        # user services keep auth in the app layer and expose health publicly.
+        "auth_required": "false",
+        "rate_limit": "100",
         "methods": "GET,POST",
         "public_count": str(
             sum(1 for route in DEVELOPER_SERVICE_ROUTES if not route["auth_required"])

@@ -47,6 +47,7 @@ def test_list_service_directories_only_returns_configured_services():
     assert "auth_service" in service_dirs
     assert "sharing_service" in service_dirs
     assert "project_service" in service_dirs
+    assert "developer_service" in service_dirs
     assert service_dirs == all_service_dirs
 
 

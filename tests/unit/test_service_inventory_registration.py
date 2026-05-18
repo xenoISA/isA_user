@@ -1,4 +1,4 @@
-"""Service inventory registration coverage for project and sharing services."""
+"""Service inventory registration coverage for project, sharing, and developer services."""
 
 from pathlib import Path
 import re
@@ -22,7 +22,7 @@ def _tier_services(tier: int) -> list[str]:
     return match.group(1).split()
 
 
-def test_project_and_sharing_are_in_ports_inventory():
+def test_project_sharing_and_developer_are_in_ports_inventory():
     microservices = _load_yaml("config/ports.yaml")["microservices"]
 
     assert microservices["project_service"] == {
@@ -35,10 +35,16 @@ def test_project_and_sharing_are_in_ports_inventory():
         "k8s_service": "sharing",
         "description": "Session share links",
     }
+    assert microservices["developer_service"] == {
+        "port": 8261,
+        "k8s_service": "developer",
+        "description": "Developer journey cockpit",
+    }
 
 
-def test_project_and_sharing_are_tiered_for_local_dev():
+def test_project_sharing_and_developer_are_tiered_for_local_dev():
     assert "project_service" in _tier_services(2)
+    assert "developer_service" in _tier_services(3)
     assert "sharing_service" in _tier_services(4)
 
     configured = set(_load_yaml("config/ports.yaml")["microservices"])
@@ -46,7 +52,7 @@ def test_project_and_sharing_are_tiered_for_local_dev():
     assert configured - tiered == set()
 
 
-def test_project_and_sharing_are_in_all_helm_values():
+def test_project_sharing_and_developer_are_in_all_helm_values():
     for relative_path in (
         "deployment/helm/values.yaml",
         "deployment/helm/values-staging.yaml",
@@ -63,11 +69,17 @@ def test_project_and_sharing_are_in_all_helm_values():
             "repository": "isa/user-sharing",
             "port": 8255,
         }
+        assert services["developer"] == {
+            "name": "user-developer-service",
+            "repository": "isa/user-developer",
+            "port": 8261,
+        }
 
 
-def test_project_and_sharing_are_deploy_targets():
+def test_project_sharing_and_developer_are_deploy_targets():
     assert "project_service" in list_service_directories()
     assert "sharing_service" in list_service_directories()
+    assert "developer_service" in list_service_directories()
 
     project = resolve_deploy_target("project")
     assert project.service_dir == "project_service"
@@ -78,3 +90,8 @@ def test_project_and_sharing_are_deploy_targets():
     assert sharing.short_name == "sharing"
     assert sharing.release_name == "user-sharing-service"
     assert sharing.port == 8255
+
+    developer = resolve_deploy_target("developer")
+    assert developer.service_dir == "developer_service"
+    assert developer.release_name == "user-developer-service"
+    assert developer.port == 8261

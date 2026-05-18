@@ -55,7 +55,16 @@ get_service_port() {
         compliance_service) echo "8226" ;;
         document_service) echo "8227" ;;
         subscription_service) echo "8228" ;;
+        credit_service) echo "8229" ;;
         event_service) echo "8230" ;;
+        membership_service) echo "8250" ;;
+        campaign_service) echo "8251" ;;
+        inventory_service) echo "8252" ;;
+        tax_service) echo "8253" ;;
+        fulfillment_service) echo "8254" ;;
+        sharing_service) echo "8255" ;;
+        project_service) echo "8260" ;;
+        developer_service) echo "8261" ;;
         *) echo "" ;;
     esac
 }

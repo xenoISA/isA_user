@@ -41,6 +41,10 @@ def test_resolve_service_url_rewrites_health_for_gateway(monkeypatch):
         resolve_service_url("membership_service", "/health", "MEMBERSHIP_BASE_URL")
         == "http://localhost:8000/api/v1/membership/health"
     )
+    assert (
+        resolve_service_url("developer_service", "/health", "DEVELOPER_BASE_URL")
+        == "http://localhost:8000/api/v1/developer/health"
+    )
 
 
 def test_resolve_service_url_preserves_api_paths_in_gateway_mode(monkeypatch):

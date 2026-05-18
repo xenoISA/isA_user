@@ -15,7 +15,8 @@
 #   Tier 1 — Foundation:  auth, account, organization (no internal deps)
 #   Tier 2 — Core Platform: session, authorization, wallet, memory, storage,
 #                            event, audit, notification, project (needed by platform)
-#   Tier 3 — Business:    billing, subscription, product, telemetry, vault
+#   Tier 3 — Business:    billing, subscription, product, telemetry, vault,
+#                          developer
 #                          (needed by isA_Model/Agent SDK/OS)
 #   Tier 4 — Optional:    payment, order, task, calendar, weather, album,
 #                          device, ota, media, location, compliance, document,
@@ -43,6 +44,7 @@ cd "$PROJECT_ROOT"
 #                   payment, wallet, storage, telemetry, memory, task, campaign
 #   isA_OS      → auth, account, billing, telemetry
 #   isA_Data    → auth
+#   isA_Console → auth, account, project, developer
 # =============================================================================
 
 # Tier 1: Foundation — no isA_user deps, everything else depends on these
@@ -51,8 +53,8 @@ TIER1_SERVICES="auth_service account_service organization_service"
 # Tier 2: Core Platform — depends on Tier 1, required by MCP/Agent SDK
 TIER2_SERVICES="session_service authorization_service wallet_service memory_service storage_service event_service audit_service notification_service project_service"
 
-# Tier 3: Business — depends on Tier 1+2, required by Model/Agent SDK/OS
-TIER3_SERVICES="billing_service subscription_service product_service telemetry_service vault_service"
+# Tier 3: Business — depends on Tier 1+2, required by Model/Agent SDK/OS/Console
+TIER3_SERVICES="billing_service subscription_service product_service telemetry_service vault_service developer_service"
 
 # Tier 4: Optional — domain features, not required for core platform
 TIER4_SERVICES="payment_service order_service task_service calendar_service weather_service album_service device_service ota_service media_service location_service compliance_service document_service credit_service invitation_service membership_service campaign_service inventory_service tax_service fulfillment_service sharing_service"

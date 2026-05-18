@@ -245,3 +245,7 @@ services:
     name: user-project-service
     repository: isa/user-project
     port: 8260
+  developer:
+    name: user-developer-service
+    repository: isa/user-developer
+    port: 8261

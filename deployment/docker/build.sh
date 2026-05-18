@@ -52,6 +52,7 @@ SERVICES=(
     "tax_service:8253"
     "fulfillment_service:8254"
     "project_service:8260"
+    "developer_service:8261"
 )
 
 # Parse command line arguments

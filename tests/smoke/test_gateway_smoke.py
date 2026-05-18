@@ -36,6 +36,7 @@ CORE_SERVICES = [
     ("event_service", "/api/v1/events/health"),
     ("telemetry_service", "/api/v1/telemetry/health"),
     ("memory_service", "/api/v1/memory/health"),
+    ("developer_service", "/api/v1/developer/health"),
 ]
 
 

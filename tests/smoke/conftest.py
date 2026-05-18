@@ -54,6 +54,7 @@ SERVICE_ROUTING = {
     "inventory_service": (8252, "inventory"),
     "tax_service": (8253, "tax"),
     "fulfillment_service": (8254, "fulfillment"),
+    "developer_service": (8261, "developer"),
 }
 
 GATEWAY_PORT = int(os.getenv("GATEWAY_PORT", "8000"))
