@@ -92,6 +92,8 @@ class ApiKeyVerificationRequest(BaseModel):
     """API key verification request"""
 
     api_key: str = Field(..., description="API key")
+    project_id: Optional[str] = Field(None, description="Expected project scope")
+    ip_address: Optional[str] = Field(None, description="Caller IP address")
 
 
 class ApiKeyVerificationResponse(BaseModel):
@@ -101,7 +103,15 @@ class ApiKeyVerificationResponse(BaseModel):
     key_id: Optional[str] = None
     organization_id: Optional[str] = None
     name: Optional[str] = None
-    permissions: Optional[List[str]] = []
+    permissions: Optional[List[str]] = Field(default_factory=list)
+    project_id: Optional[str] = None
+    owner_type: Optional[str] = "organization"
+    service_account_id: Optional[str] = None
+    scopes: Optional[List[str]] = Field(default_factory=list)
+    expires_at: Optional[datetime] = None
+    ip_allowlist: Optional[List[str]] = Field(default_factory=list)
+    rate_limits: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    spend_limit: Optional[float] = None
     effective_rate_limits: Optional[Dict[str, Optional[int]]] = None
     error: Optional[str] = None
 
@@ -148,8 +158,20 @@ class ApiKeyCreateRequest(BaseModel):
 
     organization_id: str = Field(..., description="Organization ID")
     name: str = Field(..., description="Key name")
-    permissions: List[str] = Field(default=[], description="Permission list")
+    permissions: List[str] = Field(default_factory=list, description="Permission list")
     expires_days: Optional[int] = Field(None, description="Expiration days")
+    expires_at: Optional[datetime] = Field(None, description="Absolute expiration")
+    project_id: Optional[str] = Field(None, description="Project scope")
+    owner_type: str = Field("organization", description="Key owner type")
+    service_account_id: Optional[str] = Field(None, description="Service account ID")
+    scopes: List[str] = Field(default_factory=list, description="API key scopes")
+    ip_allowlist: List[str] = Field(
+        default_factory=list, description="Allowed source IPs/CIDRs"
+    )
+    rate_limits: Dict[str, Any] = Field(
+        default_factory=dict, description="Per-key rate limits"
+    )
+    spend_limit: Optional[float] = Field(None, ge=0, description="Spend limit")
 
 
 class RateLimitsRequest(BaseModel):
@@ -309,6 +331,7 @@ class AuthMicroservice:
         self.authorization_code_service = None
         self.event_bus: Optional[NATSEventBus] = None
         self.organization_service_client = None
+        self.project_access_client = None
         self.consul_registry: Optional[ConsulRegistry] = None
 
     async def initialize(self):
@@ -375,6 +398,15 @@ class AuthMicroservice:
                 logger.warning(f"Failed to initialize organization service client: {e}")
                 self.organization_service_client = None
 
+            try:
+                from .clients import ProjectAccessClient
+
+                self.project_access_client = ProjectAccessClient()
+                logger.info("Project access client initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize project access client: {e}")
+                self.project_access_client = None
+
             # 初始化repository (they now handle their own connections with service discovery)
             self.api_key_repository = ApiKeyRepository(
                 organization_service_client=self.organization_service_client,
@@ -401,6 +433,7 @@ class AuthMicroservice:
             self.api_key_service = ApiKeyService(
                 self.api_key_repository,
                 organization_service_client=self.organization_service_client,
+                project_access_client=self.project_access_client,
             )
             self.device_auth_service = DeviceAuthService(
                 self.device_auth_repository, event_bus=self.event_bus
@@ -434,6 +467,8 @@ class AuthMicroservice:
             await self.event_bus.close()
         if self.organization_service_client:
             await self.organization_service_client.close()
+        if self.project_access_client:
+            await self.project_access_client.close()
         if self.api_key_service:
             await self.api_key_service.close()
         logger.info("Authentication microservice shutdown completed")
@@ -541,6 +576,22 @@ def _is_admin_caller(caller: Dict[str, Any]) -> bool:
     scope = (caller.get("scope") or "").lower()
     permissions = set(caller.get("permissions") or [])
     return scope == "admin" or "auth.admin" in permissions
+
+
+def _can_create_api_keys(caller: Dict[str, Any]) -> bool:
+    if _is_admin_caller(caller):
+        return True
+    permissions = {str(item).lower() for item in (caller.get("permissions") or [])}
+    scope_values = {
+        item.lower() for item in str(caller.get("scope") or "").split() if item
+    }
+    allowed = {
+        "auth.api_keys.create",
+        "api_keys:create",
+        "api_key:create",
+        "keys:create",
+    }
+    return bool((permissions | scope_values) & allowed)
 
 
 async def require_admin_caller(
@@ -1468,7 +1519,11 @@ async def verify_api_key(
 ):
     """Verify API key"""
     try:
-        result = await api_key_service.verify_api_key(request.api_key)
+        result = await api_key_service.verify_api_key(
+            request.api_key,
+            project_id=request.project_id,
+            ip_address=request.ip_address,
+        )
         raise_api_key_rate_limit_if_present(result)
 
         return ApiKeyVerificationResponse(
@@ -1477,6 +1532,14 @@ async def verify_api_key(
             organization_id=result.get("organization_id"),
             name=result.get("name"),
             permissions=result.get("permissions", []),
+            project_id=result.get("project_id"),
+            owner_type=result.get("owner_type", "organization"),
+            service_account_id=result.get("service_account_id"),
+            scopes=result.get("scopes", []),
+            expires_at=result.get("expires_at"),
+            ip_allowlist=result.get("ip_allowlist", []),
+            rate_limits=result.get("rate_limits", {}),
+            spend_limit=result.get("spend_limit"),
             effective_rate_limits=result.get("effective_rate_limits"),
             error=result.get("error") if not result.get("valid") else None,
         )
@@ -1495,22 +1558,46 @@ async def create_api_key(
     request: ApiKeyCreateRequest,
     api_key_service: ApiKeyService = Depends(get_api_key_service),
     caller: Dict[str, Any] = Depends(get_current_caller),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
 ):
     """Create API key (authenticated users for own org, admins for any org)"""
+    if not _can_create_api_keys(caller):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API key creation permission required",
+        )
+
     # Authorize: admins can create for any org, users only for their own
     if not _is_admin_caller(caller):
         caller_org = caller.get("organization_id")
-        if caller_org and caller_org != request.organization_id:
+        if caller_org != request.organization_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only create API keys for your own organization",
             )
+    if request.expires_days and request.expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use either expires_days or expires_at, not both",
+        )
+
+    auth_token = f"Bearer {credentials.credentials}" if credentials else None
     try:
         result = await api_key_service.create_api_key(
             organization_id=request.organization_id,
             name=request.name,
             permissions=request.permissions,
             expires_days=request.expires_days,
+            expires_at=request.expires_at,
+            created_by=caller.get("user_id"),
+            project_id=request.project_id,
+            owner_type=request.owner_type,
+            service_account_id=request.service_account_id,
+            scopes=request.scopes,
+            ip_allowlist=request.ip_allowlist,
+            rate_limits=request.rate_limits,
+            spend_limit=request.spend_limit,
+            auth_token=auth_token,
         )
 
         if not result.get("success"):
@@ -1525,6 +1612,13 @@ async def create_api_key(
             "key_id": result["key_id"],
             "name": result["name"],
             "expires_at": result["expires_at"],
+            "project_id": result.get("project_id"),
+            "owner_type": result.get("owner_type", "organization"),
+            "service_account_id": result.get("service_account_id"),
+            "scopes": result.get("scopes", []),
+            "ip_allowlist": result.get("ip_allowlist", []),
+            "rate_limits": result.get("rate_limits", {}),
+            "spend_limit": result.get("spend_limit"),
         }
 
     except HTTPException:
@@ -1540,6 +1634,7 @@ async def create_api_key(
 @app.get("/api/v1/auth/api-keys/{organization_id}")
 async def list_api_keys(
     organization_id: str,
+    project_id: Optional[str] = Query(None, description="Filter by project ID"),
     api_key_service: ApiKeyService = Depends(get_api_key_service),
     caller: Dict[str, Any] = Depends(get_current_caller),
 ):
@@ -1553,7 +1648,9 @@ async def list_api_keys(
                 detail="You can only view API keys for your own organization",
             )
     try:
-        result = await api_key_service.list_api_keys(organization_id)
+        result = await api_key_service.list_api_keys(
+            organization_id, project_id=project_id
+        )
 
         if not result.get("success"):
             raise HTTPException(
