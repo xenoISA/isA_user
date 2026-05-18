@@ -23,8 +23,9 @@ What's intentionally NOT here (Phase 2+):
 from __future__ import annotations
 
 import logging
+import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from core.nats_client import Event
@@ -32,6 +33,8 @@ from core.nats_client import Event
 from .models import (
     Artifact,
     ArtifactCreateRequest,
+    ArtifactListItem,
+    ArtifactListResponse,
     ArtifactScope,
     ArtifactShare,
     ArtifactShareVisibility,
@@ -40,8 +43,6 @@ from .models import (
     ArtifactVersion,
     ArtifactVersionCreateRequest,
     ArtifactVisibility,
-    ArtifactListItem,
-    ArtifactListResponse,
     PublicArtifactResponse,
     PublicArtifactShareMeta,
     PublishArtifactRequest,
@@ -58,6 +59,50 @@ from .protocols import (
     ArtifactValidationError,
     EventBusProtocol,
 )
+
+
+DEFAULT_DAILY_QUOTA = 50
+
+
+def _daily_quota() -> int:
+    """Resolve the per-user-per-artifact daily call cap from env at call time.
+
+    Looked up dynamically so tests can override ARTIFACT_DAILY_QUOTA without
+    needing to re-import the module.
+    """
+    raw = os.getenv("ARTIFACT_DAILY_QUOTA")
+    if not raw:
+        return DEFAULT_DAILY_QUOTA
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_DAILY_QUOTA
+
+
+def _seconds_until_midnight_utc() -> int:
+    """Seconds remaining until 00:00 UTC tomorrow — drives Retry-After."""
+    now = datetime.now(timezone.utc)
+    tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # bump to next day
+    from datetime import timedelta
+
+    tomorrow = tomorrow + timedelta(days=1)
+    delta = tomorrow - now
+    return max(1, int(delta.total_seconds()))
+
+
+class ArtifactQuotaExceededError(Exception):
+    """Raised when a user has already used today's per-artifact quota.
+
+    Carries the Retry-After hint so the route can shape a proper 429.
+    """
+
+    def __init__(self, retry_after: int, calls_today: int, quota: int):
+        super().__init__(f"daily quota of {quota} calls exceeded (today={calls_today})")
+        self.retry_after = retry_after
+        self.calls_today = calls_today
+        self.quota = quota
+
 
 logger = logging.getLogger(__name__)
 
@@ -532,6 +577,320 @@ class ArtifactService:
             },
         )
         return new_artifact
+
+    # ==================== Phase 3: AI Runtime + Quota ====================
+    #
+    # POST /api/v1/artifacts/{id}/runtime/invoke — Phase 3 ships this as a
+    # synthetic-response stub (no real LLM call) so we can exercise the quota
+    # gate and the per-day usage row end-to-end. The real isA_Model call lands
+    # in the follow-up once gateway-issued JWTs reach this service.
+    #
+    # Quota:
+    #   - cap = ARTIFACT_DAILY_QUOTA env (defaults to 50/user/day)
+    #   - 429 + Retry-After=<seconds until 00:00 UTC tomorrow>
+    #   - the row is keyed (artifact_id, user_id, UTC date); the upsert
+    #     happens AFTER the cap check so we don't book a call we refused.
+
+    async def runtime_invoke(
+        self, artifact_id: str, request: "ArtifactRuntimeInvokeRequest"
+    ) -> "ArtifactRuntimeInvokeResponse":
+        from .models import ArtifactRuntimeInvokeResponse
+
+        artifact = await self.repo.get_artifact(artifact_id)
+        if not artifact:
+            raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
+        if not request.prompt:
+            raise ArtifactValidationError("prompt is required")
+
+        quota = _daily_quota()
+        today = await self.repo.get_today_usage(artifact_id, request.user_id)
+        if today.calls >= quota:
+            raise ArtifactQuotaExceededError(
+                retry_after=_seconds_until_midnight_utc(),
+                calls_today=today.calls,
+                quota=quota,
+            )
+
+        # Stubbed synthesis — replace with isA_Model proxy in follow-up.
+        tokens_in = max(1, len(request.prompt) // 4)
+        tokens_out = 32
+        output = f"Phase 3 stub response for: {request.prompt}"
+
+        updated = await self.repo.record_usage(
+            artifact_id=artifact_id,
+            user_id=request.user_id,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+
+        await self._publish(
+            "artifact.runtime.invoked",
+            {
+                "artifact_id": artifact_id,
+                "user_id": request.user_id,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "calls_today": updated.calls,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+        return ArtifactRuntimeInvokeResponse(
+            output=output,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            calls_today=updated.calls,
+            quota=quota,
+        )
+
+    async def runtime_usage(self, artifact_id: str, user_id: str) -> "ArtifactRuntimeUsageResponse":
+        from .models import ArtifactRuntimeUsageResponse
+
+        artifact = await self.repo.get_artifact(artifact_id)
+        if not artifact:
+            raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
+
+        usage = await self.repo.get_today_usage(artifact_id, user_id)
+        quota = _daily_quota()
+        return ArtifactRuntimeUsageResponse(
+            artifact_id=usage.artifact_id,
+            user_id=usage.user_id,
+            day_bucket=usage.day_bucket,
+            tokens_in=usage.tokens_in,
+            tokens_out=usage.tokens_out,
+            calls=usage.calls,
+            quota=quota,
+            remaining=max(0, quota - usage.calls),
+        )
+
+    # ==================== Phase 3: MCP grants ====================
+    #
+    # POST .../mcp/approve persists the user's decision; POST .../mcp/call
+    # gates the actual (stubbed) tool execution behind a check for an active
+    # ``allow``+``always`` grant. ``once`` and ``session`` scopes intentionally
+    # fall through to the approval prompt every call — Phase 3 only persists
+    # the long-lived approval; richer session-scoped behaviour lands later.
+
+    async def mcp_approve(self, artifact_id: str, request: "MCPApproveRequest") -> "ArtifactMCPGrant":
+        from .models import ArtifactMCPGrant, MCPApproveRequest  # noqa: F401
+
+        artifact = await self.repo.get_artifact(artifact_id)
+        if not artifact:
+            raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
+
+        grant = ArtifactMCPGrant(
+            id=_new_id("grnt"),
+            artifact_id=artifact_id,
+            user_id=request.user_id,
+            tool_name=request.tool_name,
+            server_id=request.server_id,
+            decision=request.decision,
+            scope=request.scope,
+            approved_at=datetime.utcnow(),
+            expires_at=request.expires_at,
+        )
+        upserted = await self.repo.upsert_mcp_grant(grant)
+
+        await self._publish(
+            "artifact.mcp.approved",
+            {
+                "artifact_id": artifact_id,
+                "user_id": request.user_id,
+                "tool_name": request.tool_name,
+                "server_id": request.server_id,
+                "decision": grant.decision.value if hasattr(grant.decision, "value") else grant.decision,
+                "scope": grant.scope.value if hasattr(grant.scope, "value") else grant.scope,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+        return upserted
+
+    async def mcp_call(self, artifact_id: str, request: "MCPCallRequest") -> "MCPCallResponse":
+        from .models import MCPCallResponse, MCPGrantScope
+
+        artifact = await self.repo.get_artifact(artifact_id)
+        if not artifact:
+            raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
+
+        grant = await self.repo.find_always_grant(
+            artifact_id=artifact_id,
+            user_id=request.user_id,
+            tool_name=request.tool_name,
+            server_id=request.server_id,
+        )
+        if grant is None:
+            return MCPCallResponse(
+                requires_approval=True,
+                prompt=f"Allow {request.tool_name} on {request.server_id}?",
+                tool_name=request.tool_name,
+                server_id=request.server_id,
+            )
+
+        # Best-effort last_used_at touch — ignore the boolean.
+        await self.repo.touch_grant_last_used(grant.id)
+
+        # Stubbed tool result — replace with real MCP transport in follow-up.
+        return MCPCallResponse(
+            requires_approval=False,
+            result={
+                "stubbed": True,
+                "tool_name": request.tool_name,
+                "server_id": request.server_id,
+                "args": request.args,
+            },
+            scope_used=MCPGrantScope.ALWAYS,
+        )
+
+    async def list_mcp_grants(self, artifact_id: str, user_id: str) -> "ArtifactMCPGrantsListResponse":
+        from .models import ArtifactMCPGrantsListResponse
+
+        artifact = await self.repo.get_artifact(artifact_id)
+        if not artifact:
+            raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
+        grants = await self.repo.list_grants(artifact_id, user_id)
+        return ArtifactMCPGrantsListResponse(grants=grants)
+
+    # ==================== Phase 3: KV storage ====================
+    #
+    # GET/PUT/DELETE /api/v1/artifacts/{id}/kv/{key}?scope=&user_id=
+    #
+    # Scope rules:
+    #   - scope=personal requires user_id; cross-user reads return 404.
+    #   - scope=shared writes require artifact.storage_scope='shared';
+    #     otherwise the route returns 403 (the artifact owner has not opted
+    #     into shared KV).
+    #
+    # The repo translates user_id <-> '_shared' sentinel; the service only
+    # ever sees the wire-level shape ("user_id" optional when scope=shared).
+
+    def _validate_kv_scope(
+        self,
+        artifact: Artifact,
+        scope: "ArtifactKVScope",
+        user_id: Optional[str],
+        *,
+        is_write: bool,
+    ) -> None:
+        from .models import ArtifactKVScope, ArtifactStorageScope
+
+        if scope == ArtifactKVScope.PERSONAL:
+            if not user_id:
+                raise ArtifactValidationError("scope=personal requires user_id")
+            return
+        # shared
+        if scope == ArtifactKVScope.SHARED:
+            if is_write and artifact.storage_scope != ArtifactStorageScope.SHARED:
+                raise ArtifactPermissionError("artifact.storage_scope must be 'shared' for shared-scope writes")
+            return
+
+    async def kv_get(
+        self,
+        artifact_id: str,
+        key: str,
+        *,
+        scope: "ArtifactKVScope",
+        user_id: Optional[str],
+    ) -> "ArtifactKVResponse":
+        from .models import ArtifactKVResponse, ArtifactKVScope  # noqa: F401
+
+        artifact = await self.repo.get_artifact(artifact_id)
+        if not artifact:
+            raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
+        self._validate_kv_scope(artifact, scope, user_id, is_write=False)
+
+        row = await self.repo.kv_get(
+            artifact_id=artifact_id,
+            scope=scope.value,
+            user_id=user_id,
+            key=key,
+        )
+        if not row:
+            raise ArtifactNotFoundError(f"kv key {key} not found")
+
+        return ArtifactKVResponse(
+            artifact_id=artifact_id,
+            scope=scope,
+            user_id=user_id if scope == ArtifactKVScope.PERSONAL else None,
+            key=key,
+            value=row.get("value"),
+            updated_at=row.get("updated_at"),
+        )
+
+    async def kv_put(
+        self,
+        artifact_id: str,
+        key: str,
+        *,
+        value: object,
+        scope: "ArtifactKVScope",
+        user_id: Optional[str],
+    ) -> "ArtifactKVResponse":
+        from .models import ArtifactKVResponse, ArtifactKVScope  # noqa: F401
+
+        artifact = await self.repo.get_artifact(artifact_id)
+        if not artifact:
+            raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
+        self._validate_kv_scope(artifact, scope, user_id, is_write=True)
+
+        row = await self.repo.kv_put(
+            artifact_id=artifact_id,
+            scope=scope.value,
+            user_id=user_id,
+            key=key,
+            value=value,
+        )
+        await self._publish(
+            "artifact.kv.updated",
+            {
+                "artifact_id": artifact_id,
+                "scope": scope.value,
+                "user_id": user_id,
+                "key": key,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+        return ArtifactKVResponse(
+            artifact_id=artifact_id,
+            scope=scope,
+            user_id=user_id if scope == ArtifactKVScope.PERSONAL else None,
+            key=key,
+            value=row.get("value"),
+            updated_at=row.get("updated_at"),
+        )
+
+    async def kv_delete(
+        self,
+        artifact_id: str,
+        key: str,
+        *,
+        scope: "ArtifactKVScope",
+        user_id: Optional[str],
+    ) -> bool:
+        from .models import ArtifactKVScope  # noqa: F401
+
+        artifact = await self.repo.get_artifact(artifact_id)
+        if not artifact:
+            raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
+        self._validate_kv_scope(artifact, scope, user_id, is_write=True)
+
+        ok = await self.repo.kv_delete(
+            artifact_id=artifact_id,
+            scope=scope.value,
+            user_id=user_id,
+            key=key,
+        )
+        if ok:
+            await self._publish(
+                "artifact.kv.deleted",
+                {
+                    "artifact_id": artifact_id,
+                    "scope": scope.value,
+                    "user_id": user_id,
+                    "key": key,
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            )
+        return ok
 
     # ==================== Health ====================
 

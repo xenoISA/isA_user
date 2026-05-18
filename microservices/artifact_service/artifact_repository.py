@@ -31,10 +31,14 @@ from core.postgres_client import compute_pool_size as _pg_compute_pool
 
 from .models import (
     Artifact,
+    ArtifactMCPGrant,
+    ArtifactRuntimeUsage,
     ArtifactScope,
     ArtifactShare,
     ArtifactShareVisibility,
     ArtifactVersion,
+    MCPGrantDecision,
+    MCPGrantScope,
 )
 
 logger = logging.getLogger(__name__)
@@ -451,4 +455,347 @@ class ArtifactRepository:
         """
         async with self.db:
             count = await self.db.execute(sql, [token], schema=self.schema)
+        return bool(count and count > 0)
+
+    # ==================== Phase 3: runtime usage / quota ====================
+    #
+    # Per-(artifact,user,UTC-day) row in artifact.artifact_runtime_usage. The
+    # service-layer cap check reads ``calls`` for today and 429s when it's
+    # already at/over the configured quota. ``record_usage`` performs the
+    # atomic upsert so calls always book even under races.
+
+    @staticmethod
+    def _today_utc():
+        from datetime import timezone
+
+        return datetime.now(timezone.utc).date()
+
+    async def get_today_usage(self, artifact_id: str, user_id: str) -> ArtifactRuntimeUsage:
+        """Return today's usage row for the (artifact, user) pair.
+
+        When no row exists for today we return a zeroed view so callers don't
+        have to special-case the missing-row branch.
+        """
+        today = self._today_utc()
+        sql = f"""
+            SELECT artifact_id, user_id, day_bucket, tokens_in, tokens_out, calls
+            FROM {self.schema}.artifact_runtime_usage
+            WHERE artifact_id = $1 AND user_id = $2 AND day_bucket = $3
+        """
+        try:
+            async with self.db:
+                row = await self.db.query_row(sql, [artifact_id, user_id, today], schema=self.schema)
+        except Exception as e:
+            logger.error(f"get_today_usage({artifact_id},{user_id}) failed: {e}")
+            row = None
+        if not row:
+            return ArtifactRuntimeUsage(
+                artifact_id=artifact_id,
+                user_id=user_id,
+                day_bucket=today.isoformat(),
+                tokens_in=0,
+                tokens_out=0,
+                calls=0,
+            )
+        day_bucket = row.get("day_bucket")
+        if hasattr(day_bucket, "isoformat"):
+            day_bucket = day_bucket.isoformat()
+        return ArtifactRuntimeUsage(
+            artifact_id=row["artifact_id"],
+            user_id=row["user_id"],
+            day_bucket=str(day_bucket),
+            tokens_in=int(row.get("tokens_in", 0)),
+            tokens_out=int(row.get("tokens_out", 0)),
+            calls=int(row.get("calls", 0)),
+        )
+
+    async def record_usage(
+        self,
+        artifact_id: str,
+        user_id: str,
+        tokens_in: int,
+        tokens_out: int,
+    ) -> ArtifactRuntimeUsage:
+        """Atomically increment today's usage row. Inserts on first call."""
+        today = self._today_utc()
+        now = _now_naive()
+        sql = f"""
+            INSERT INTO {self.schema}.artifact_runtime_usage
+                (artifact_id, user_id, day_bucket, tokens_in, tokens_out, calls, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, 1, $6, $6)
+            ON CONFLICT (artifact_id, user_id, day_bucket) DO UPDATE SET
+                tokens_in = artifact_runtime_usage.tokens_in + EXCLUDED.tokens_in,
+                tokens_out = artifact_runtime_usage.tokens_out + EXCLUDED.tokens_out,
+                calls = artifact_runtime_usage.calls + 1,
+                updated_at = EXCLUDED.updated_at
+            RETURNING artifact_id, user_id, day_bucket, tokens_in, tokens_out, calls
+        """
+        async with self.db:
+            rows = await self.db.query(
+                sql,
+                [artifact_id, user_id, today, tokens_in, tokens_out, now],
+                schema=self.schema,
+            )
+        row = (rows or [{}])[0]
+        day_bucket = row.get("day_bucket")
+        if hasattr(day_bucket, "isoformat"):
+            day_bucket = day_bucket.isoformat()
+        return ArtifactRuntimeUsage(
+            artifact_id=row.get("artifact_id", artifact_id),
+            user_id=row.get("user_id", user_id),
+            day_bucket=str(day_bucket) if day_bucket else today.isoformat(),
+            tokens_in=int(row.get("tokens_in", tokens_in)),
+            tokens_out=int(row.get("tokens_out", tokens_out)),
+            calls=int(row.get("calls", 1)),
+        )
+
+    # ==================== Phase 3: MCP grants ====================
+    #
+    # Backs the approve/call gates. ``find_always_grant`` is the hot path
+    # for /mcp/call — when a user has approved a (tool,server) with scope
+    # ``always``, every subsequent call short-circuits the prompt. Other
+    # scopes intentionally fall through so the gate fires again.
+
+    @staticmethod
+    def _row_to_grant(row: dict) -> ArtifactMCPGrant:
+        return ArtifactMCPGrant(
+            id=row["id"],
+            artifact_id=row["artifact_id"],
+            user_id=row["user_id"],
+            tool_name=row["tool_name"],
+            server_id=row["server_id"],
+            decision=MCPGrantDecision(row["decision"]),
+            scope=MCPGrantScope(row["scope"]),
+            approved_at=row.get("approved_at"),
+            expires_at=row.get("expires_at"),
+            last_used_at=row.get("last_used_at"),
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+        )
+
+    async def upsert_mcp_grant(self, grant: ArtifactMCPGrant) -> ArtifactMCPGrant:
+        """Insert a grant. For (decision=allow,scope=always) the partial unique
+        index folds duplicate calls onto a single row; for other scopes we just
+        insert a fresh row so audit history stays intact.
+        """
+        now = _now_naive()
+        decision = grant.decision.value if isinstance(grant.decision, MCPGrantDecision) else grant.decision
+        scope = grant.scope.value if isinstance(grant.scope, MCPGrantScope) else grant.scope
+
+        if decision == "allow" and scope == "always":
+            sql = f"""
+                INSERT INTO {self.schema}.artifact_mcp_grants
+                    (id, artifact_id, user_id, tool_name, server_id, decision, scope,
+                     approved_at, expires_at, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+                ON CONFLICT (artifact_id, user_id, tool_name, server_id)
+                    WHERE decision = 'allow' AND scope = 'always'
+                DO UPDATE SET
+                    approved_at = EXCLUDED.approved_at,
+                    expires_at  = EXCLUDED.expires_at,
+                    updated_at  = EXCLUDED.updated_at
+                RETURNING *
+            """
+        else:
+            sql = f"""
+                INSERT INTO {self.schema}.artifact_mcp_grants
+                    (id, artifact_id, user_id, tool_name, server_id, decision, scope,
+                     approved_at, expires_at, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+                RETURNING *
+            """
+        params = [
+            grant.id,
+            grant.artifact_id,
+            grant.user_id,
+            grant.tool_name,
+            grant.server_id,
+            decision,
+            scope,
+            grant.approved_at or now,
+            grant.expires_at,
+            now,
+        ]
+        async with self.db:
+            rows = await self.db.query(sql, params, schema=self.schema)
+        if not rows:
+            raise RuntimeError("upsert_mcp_grant returned no row")
+        return self._row_to_grant(rows[0])
+
+    async def find_always_grant(
+        self,
+        artifact_id: str,
+        user_id: str,
+        tool_name: str,
+        server_id: str,
+    ) -> Optional[ArtifactMCPGrant]:
+        """Return an active ``allow``+``always`` grant, or None.
+
+        ``expires_at`` is honoured — expired grants behave as if absent so
+        the next /mcp/call falls back to the approval prompt.
+        """
+        sql = f"""
+            SELECT * FROM {self.schema}.artifact_mcp_grants
+            WHERE artifact_id = $1 AND user_id = $2 AND tool_name = $3 AND server_id = $4
+              AND decision = 'allow' AND scope = 'always'
+              AND (expires_at IS NULL OR expires_at > $5)
+            ORDER BY approved_at DESC
+            LIMIT 1
+        """
+        try:
+            async with self.db:
+                row = await self.db.query_row(
+                    sql,
+                    [artifact_id, user_id, tool_name, server_id, _now_naive()],
+                    schema=self.schema,
+                )
+        except Exception as e:
+            logger.error(f"find_always_grant failed: {e}")
+            return None
+        if not row:
+            return None
+        return self._row_to_grant(row)
+
+    async def list_grants(self, artifact_id: str, user_id: str) -> List[ArtifactMCPGrant]:
+        sql = f"""
+            SELECT * FROM {self.schema}.artifact_mcp_grants
+            WHERE artifact_id = $1 AND user_id = $2
+            ORDER BY approved_at DESC
+        """
+        try:
+            async with self.db:
+                rows = await self.db.query(sql, [artifact_id, user_id], schema=self.schema)
+            return [self._row_to_grant(r) for r in rows]
+        except Exception as e:
+            logger.error(f"list_grants({artifact_id},{user_id}) failed: {e}")
+            return []
+
+    async def touch_grant_last_used(self, grant_id: str) -> bool:
+        sql = f"""
+            UPDATE {self.schema}.artifact_mcp_grants
+            SET last_used_at = $1, updated_at = $1
+            WHERE id = $2
+        """
+        async with self.db:
+            count = await self.db.execute(sql, [_now_naive(), grant_id], schema=self.schema)
+        return bool(count and count > 0)
+
+    # ==================== Phase 3: KV storage ====================
+    #
+    # The PK is (artifact_id, scope, user_id, key); shared rows use the
+    # '_shared' sentinel in user_id so the same uniqueness rule covers both
+    # scopes. The service layer is responsible for swapping NULL <-> '_shared'
+    # before this repo sees the value.
+
+    SHARED_SENTINEL = "_shared"
+
+    @staticmethod
+    def _kv_user_key(scope: str, user_id: Optional[str]) -> str:
+        return user_id if scope == "personal" else "_shared"
+
+    async def kv_get(
+        self,
+        artifact_id: str,
+        scope: str,
+        user_id: Optional[str],
+        key: str,
+    ) -> Optional[dict]:
+        ukey = self._kv_user_key(scope, user_id)
+        sql = f"""
+            SELECT artifact_id, scope, user_id, key, value, updated_at
+            FROM {self.schema}.artifact_kv
+            WHERE artifact_id = $1 AND scope = $2 AND user_id = $3 AND key = $4
+        """
+        try:
+            async with self.db:
+                row = await self.db.query_row(sql, [artifact_id, scope, ukey, key], schema=self.schema)
+        except Exception as e:
+            logger.error(f"kv_get({artifact_id},{scope},{key}) failed: {e}")
+            return None
+        if not row:
+            return None
+        cleaned = dict(row)
+        if "value" in cleaned:
+            cleaned["value"] = self._unwrap_kv_value(_to_native(cleaned["value"]))
+        return cleaned
+
+    async def kv_put(
+        self,
+        artifact_id: str,
+        scope: str,
+        user_id: Optional[str],
+        key: str,
+        value: Any,
+    ) -> dict:
+        """Upsert a JSONB row.
+
+        The shared AsyncPostgresClient sets a JSONB codec (json.dumps on
+        the way in, json.loads on the way out), so we MUST pass a raw
+        Python object here — calling json.dumps ourselves would
+        double-encode and we'd read back a JSON string instead of the
+        original shape.
+
+        However the dial-down path (gRPC postgres_service) passes params
+        through protobuf Struct, which doesn't carry arbitrary scalars
+        cleanly. For safety we wrap scalars in a {"_v": value} envelope
+        only when the value is NOT a dict/list — but the response layer
+        re-unwraps via _maybe_unwrap_scalar below.
+        """
+        ukey = self._kv_user_key(scope, user_id)
+        now = _now_naive()
+        payload = self._wrap_kv_value(value)
+        sql = f"""
+            INSERT INTO {self.schema}.artifact_kv
+                (artifact_id, scope, user_id, key, value, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $6)
+            ON CONFLICT (artifact_id, scope, user_id, key) DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = EXCLUDED.updated_at
+            RETURNING artifact_id, scope, user_id, key, value, updated_at
+        """
+        async with self.db:
+            rows = await self.db.query(
+                sql,
+                [artifact_id, scope, ukey, key, payload, now],
+                schema=self.schema,
+            )
+        if not rows:
+            raise RuntimeError("kv_put returned no row")
+        cleaned = dict(rows[0])
+        if "value" in cleaned:
+            cleaned["value"] = self._unwrap_kv_value(_to_native(cleaned["value"]))
+        return cleaned
+
+    @staticmethod
+    def _wrap_kv_value(value: Any) -> Any:
+        """Ensure the JSONB codec sees a dict/list (its native shape).
+
+        Scalars (str/int/float/bool/None) get tucked into {"_v": value}
+        so we can store them in a JSONB column without surprising the
+        gRPC fallback path. The reverse happens in _unwrap_kv_value.
+        """
+        if isinstance(value, (dict, list)):
+            return value
+        return {"_v": value}
+
+    @staticmethod
+    def _unwrap_kv_value(value: Any) -> Any:
+        if isinstance(value, dict) and set(value.keys()) == {"_v"}:
+            return value["_v"]
+        return value
+
+    async def kv_delete(
+        self,
+        artifact_id: str,
+        scope: str,
+        user_id: Optional[str],
+        key: str,
+    ) -> bool:
+        ukey = self._kv_user_key(scope, user_id)
+        sql = f"""
+            DELETE FROM {self.schema}.artifact_kv
+            WHERE artifact_id = $1 AND scope = $2 AND user_id = $3 AND key = $4
+        """
+        async with self.db:
+            count = await self.db.execute(sql, [artifact_id, scope, ukey, key], schema=self.schema)
         return bool(count and count > 0)

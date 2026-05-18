@@ -20,7 +20,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from core.config_manager import ConfigManager
@@ -345,4 +345,203 @@ async def remix_artifact(body: RemixArtifactRequest):
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"remix_artifact failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Phase 3 (#441) — AI Runtime + per-user daily quota,
+#                  MCP grants (approve/call/list),
+#                  KV storage (get/put/delete).
+#
+# See isA_/docs/design/427-artifact-flows.md §9-11 for the spec.
+# Imports for Phase 3 schemas live in a deferred block below so the format
+# step doesn't strip them as "unused" before the route handlers reference
+# them. They MUST appear before the @app.<method> decorators below.
+# ============================================================================
+
+from .artifact_service import ArtifactQuotaExceededError  # noqa: E402
+from .models import (  # noqa: E402
+    ArtifactKVResponse,
+    ArtifactKVScope,
+    ArtifactKVValueRequest,
+    ArtifactMCPGrant,
+    ArtifactMCPGrantsListResponse,
+    ArtifactRuntimeInvokeRequest,
+    ArtifactRuntimeInvokeResponse,
+    ArtifactRuntimeUsageResponse,
+    MCPApproveRequest,
+    MCPCallRequest,
+    MCPCallResponse,
+)
+
+
+# ----- AI Runtime -----
+
+
+@app.post(
+    "/api/v1/artifacts/{artifact_id}/runtime/invoke",
+    response_model=ArtifactRuntimeInvokeResponse,
+)
+async def runtime_invoke(
+    artifact_id: str,
+    body: ArtifactRuntimeInvokeRequest,
+    response: Response,
+):
+    """Invoke the artifact's AI runtime (stubbed) + book usage against quota.
+
+    Returns 429 + Retry-After when the per-user daily call cap is hit. The
+    quota check + usage upsert run inside the service layer so we never book
+    a call we refused.
+    """
+    try:
+        return await artifact_service.runtime_invoke(artifact_id, body)
+    except ArtifactQuotaExceededError as e:
+        response.headers["Retry-After"] = str(e.retry_after)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "daily_quota_exceeded",
+                "calls_today": e.calls_today,
+                "quota": e.quota,
+                "retry_after": e.retry_after,
+            },
+            headers={"Retry-After": str(e.retry_after)},
+        )
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"runtime_invoke failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/artifacts/{artifact_id}/runtime/usage",
+    response_model=ArtifactRuntimeUsageResponse,
+)
+async def runtime_usage(
+    artifact_id: str,
+    user_id: str = Query(..., description="User id"),
+):
+    """Return today's (UTC) usage row + the daily quota for the caller."""
+    try:
+        return await artifact_service.runtime_usage(artifact_id, user_id)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"runtime_usage failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- MCP grants -----
+
+
+@app.post(
+    "/api/v1/artifacts/{artifact_id}/mcp/approve",
+    response_model=ArtifactMCPGrant,
+)
+async def mcp_approve(artifact_id: str, body: MCPApproveRequest):
+    """Upsert an MCP grant — ``allow``+``always`` is the one that unlocks the
+    silent /mcp/call path. Other (decision, scope) combos are persisted for
+    audit but do NOT short-circuit the approval prompt on subsequent calls.
+    """
+    try:
+        return await artifact_service.mcp_approve(artifact_id, body)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"mcp_approve failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/api/v1/artifacts/{artifact_id}/mcp/call",
+    response_model=MCPCallResponse,
+)
+async def mcp_call(artifact_id: str, body: MCPCallRequest):
+    """Stubbed MCP tool call — gated by an active ``allow``+``always`` grant.
+
+    First call (no grant) returns ``{requires_approval: true, prompt}``. After
+    POSTing /mcp/approve with scope=always, the same body returns the stubbed
+    tool result.
+    """
+    try:
+        return await artifact_service.mcp_call(artifact_id, body)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"mcp_call failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/artifacts/{artifact_id}/mcp/grants",
+    response_model=ArtifactMCPGrantsListResponse,
+)
+async def list_mcp_grants(
+    artifact_id: str,
+    user_id: str = Query(..., description="User id"),
+):
+    """List every (active or expired) grant the user holds on this artifact."""
+    try:
+        return await artifact_service.list_mcp_grants(artifact_id, user_id)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"list_mcp_grants failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- KV storage -----
+#
+# scope=personal requires user_id (the row is keyed per-user); scope=shared
+# only writes if the artifact's storage_scope='shared'. The service layer
+# raises ArtifactPermissionError (-> 403) when a shared write isn't allowed
+# and ArtifactNotFoundError (-> 404) for missing keys.
+
+
+@app.get(
+    "/api/v1/artifacts/{artifact_id}/kv/{key}",
+    response_model=ArtifactKVResponse,
+)
+async def kv_get(
+    artifact_id: str,
+    key: str,
+    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    user_id: Optional[str] = Query(None, description="Required when scope=personal"),
+):
+    try:
+        return await artifact_service.kv_get(artifact_id, key, scope=scope, user_id=user_id)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"kv_get failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put(
+    "/api/v1/artifacts/{artifact_id}/kv/{key}",
+    response_model=ArtifactKVResponse,
+)
+async def kv_put(
+    artifact_id: str,
+    key: str,
+    body: ArtifactKVValueRequest,
+    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    user_id: Optional[str] = Query(None, description="Required when scope=personal"),
+):
+    try:
+        return await artifact_service.kv_put(artifact_id, key, value=body.value, scope=scope, user_id=user_id)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"kv_put failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/artifacts/{artifact_id}/kv/{key}")
+async def kv_delete(
+    artifact_id: str,
+    key: str,
+    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    user_id: Optional[str] = Query(None, description="Required when scope=personal"),
+):
+    try:
+        ok = await artifact_service.kv_delete(artifact_id, key, scope=scope, user_id=user_id)
+        return {"success": ok}
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"kv_delete failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
