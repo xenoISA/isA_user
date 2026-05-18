@@ -21,9 +21,7 @@ import pytest
 import pytest_asyncio
 
 # Add project root
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 # =============================================================================
@@ -80,6 +78,7 @@ class APITestConfig:
         "sharing": 8255,
         "project": 8260,
         "developer": 8261,
+        "project_sharing": 8270,
     }
 
     # Test mode: "gateway" or "direct"
@@ -258,9 +257,9 @@ class APIAssertions:
     @staticmethod
     def assert_success(response: httpx.Response, expected_status: int = 200):
         """Assert response is successful"""
-        assert (
-            response.status_code == expected_status
-        ), f"Expected {expected_status}, got {response.status_code}: {response.text}"
+        assert response.status_code == expected_status, (
+            f"Expected {expected_status}, got {response.status_code}: {response.text}"
+        )
 
     @staticmethod
     def assert_created(response: httpx.Response):
