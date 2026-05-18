@@ -24,11 +24,15 @@ class FakeOAuthClientRepository:
         return None
 
 
-async def _caller():
-    return {
-        "user_id": "usr_1",
-        "organization_id": "org_1",
-    }
+class FakeAuthService:
+    def __init__(self):
+        self.verify_access_token_for_resource = AsyncMock(
+            return_value={
+                "valid": True,
+                "user_id": "usr_1",
+                "organization_id": "org_1",
+            }
+        )
 
 
 def _client():
@@ -50,15 +54,22 @@ def authz_code_service():
     return service
 
 
+@pytest.fixture
+def auth_service():
+    return FakeAuthService()
+
+
 @pytest.fixture(autouse=True)
-def dependency_overrides(authz_code_service):
+def dependency_overrides(authz_code_service, auth_service):
     auth_main.app.dependency_overrides[
         auth_main.get_oauth_client_repository
     ] = lambda: FakeOAuthClientRepository()
     auth_main.app.dependency_overrides[
         auth_main.get_authorization_code_service
     ] = lambda: authz_code_service
-    auth_main.app.dependency_overrides[auth_main.get_current_caller] = _caller
+    auth_main.app.dependency_overrides[
+        auth_main.get_auth_service
+    ] = lambda: auth_service
     yield
     auth_main.app.dependency_overrides.clear()
 
@@ -120,6 +131,7 @@ async def test_authorize_keeps_json_payload_for_api_clients():
 
 async def test_consent_approve_redirects_back_with_authorization_code(
     authz_code_service,
+    auth_service,
 ):
     async with _client() as client:
         response = await client.post(
@@ -135,6 +147,7 @@ async def test_consent_approve_redirects_back_with_authorization_code(
     assert response.headers["location"] == (
         "https://app.example/callback?code=auth-code-123&state=csrf-state"
     )
+    auth_service.verify_access_token_for_resource.assert_awaited_once_with("user-token")
     authz_code_service.create_authorization_request.assert_awaited_once_with(
         client_id="client-1",
         redirect_uri="https://app.example/callback",
@@ -146,6 +159,47 @@ async def test_consent_approve_redirects_back_with_authorization_code(
         user_id="usr_1",
         organization_id="org_1",
     )
+
+
+async def test_consent_approve_accepts_browser_session_cookie(
+    authz_code_service,
+    auth_service,
+):
+    async with _client() as client:
+        response = await client.post(
+            "/oauth/consent",
+            data={
+                **_authorize_params(),
+                "decision": "approve",
+            },
+            headers={"cookie": "isa_access_token=browser-token"},
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "https://app.example/callback?code=auth-code-123&state=csrf-state"
+    )
+    auth_service.verify_access_token_for_resource.assert_awaited_once_with(
+        "browser-token"
+    )
+    authz_code_service.create_authorization_request.assert_awaited_once()
+
+
+async def test_consent_approve_requires_cookie_or_bearer_token(
+    authz_code_service,
+):
+    async with _client() as client:
+        response = await client.post(
+            "/oauth/consent",
+            data={
+                **_authorize_params(),
+                "decision": "approve",
+            },
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Missing bearer token"
+    authz_code_service.create_authorization_request.assert_not_awaited()
 
 
 async def test_consent_deny_redirects_back_with_access_denied(authz_code_service):
