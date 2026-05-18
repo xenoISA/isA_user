@@ -6,6 +6,7 @@ Compliance Repository
 
 import logging
 import os
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
@@ -17,7 +18,15 @@ sys.path.append(
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
-from .models import ComplianceCheck, CompliancePolicy, ComplianceStatus, RiskLevel
+from .models import (
+    ComplianceCheck,
+    CompliancePolicy,
+    ComplianceStatus,
+    GDPRDataRequest,
+    GDPRDataRequestStatus,
+    GDPRDataRequestType,
+    RiskLevel,
+)
 
 
 from core.postgres_client import compute_pool_size as _pg_compute_pool
@@ -65,6 +74,26 @@ class ComplianceRepository:
         self.schema = "compliance"
         self.checks_table = "compliance_checks"
         self.policies_table = "compliance_policies"
+        self.data_requests_table = "gdpr_data_requests"
+
+    @staticmethod
+    def _json_value(value: Any, default: Any) -> Any:
+        """Normalize JSONB values returned by asyncpg/test doubles."""
+        if value is None:
+            return default
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return default
+        return value
+
+    @classmethod
+    def _row_to_data_request(cls, row: Dict[str, Any]) -> GDPRDataRequest:
+        data = dict(row)
+        data["per_service_status"] = cls._json_value(data.get("per_service_status"), {})
+        data["metadata"] = cls._json_value(data.get("metadata"), {})
+        return GDPRDataRequest(**data)
 
     # ====================
     # 合规检查记录管理
@@ -547,6 +576,206 @@ class ComplianceRepository:
         except Exception as e:
             logger.error(f"Error updating consent for {user_id}: {e}")
             return False
+
+    async def create_data_request(
+        self, data_request: GDPRDataRequest
+    ) -> Optional[GDPRDataRequest]:
+        """创建 GDPR 数据请求工作流记录"""
+        try:
+            query = f"""
+                INSERT INTO {self.schema}.{self.data_requests_table} (
+                    request_id, request_type, user_id, organization_id, status,
+                    requested_by, approved_by, reason, artifact_uri,
+                    per_service_status, failure_reason, metadata,
+                    created_at, updated_at, approved_at, completed_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                          $9, $10, $11, $12, $13, $14, $15, $16)
+                RETURNING *
+            """
+
+            now = datetime.now(timezone.utc)
+            params = [
+                data_request.request_id,
+                data_request.request_type.value,
+                data_request.user_id,
+                data_request.organization_id,
+                data_request.status.value,
+                data_request.requested_by,
+                data_request.approved_by,
+                data_request.reason,
+                data_request.artifact_uri,
+                json.dumps(data_request.per_service_status or {}),
+                data_request.failure_reason,
+                json.dumps(data_request.metadata or {}),
+                data_request.created_at or now,
+                data_request.updated_at or now,
+                data_request.approved_at,
+                data_request.completed_at,
+            ]
+
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
+
+            if results:
+                return self._row_to_data_request(results[0])
+            return None
+
+        except Exception as e:
+            logger.error(
+                f"Error creating GDPR data request {data_request.request_id}: {e}",
+                exc_info=True,
+            )
+            return None
+
+    async def get_data_request(self, request_id: str) -> Optional[GDPRDataRequest]:
+        """根据 ID 获取 GDPR 数据请求"""
+        try:
+            query = f"""
+                SELECT * FROM {self.schema}.{self.data_requests_table}
+                WHERE request_id = $1
+            """
+
+            async with self.db:
+                results = await self.db.query(query, [request_id], schema=self.schema)
+
+            if results:
+                return self._row_to_data_request(results[0])
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting GDPR data request {request_id}: {e}")
+            return None
+
+    async def list_data_requests(
+        self,
+        *,
+        status: Optional[GDPRDataRequestStatus] = None,
+        request_type: Optional[GDPRDataRequestType] = None,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[List[GDPRDataRequest], int]:
+        """列出 GDPR 数据请求队列"""
+        try:
+            conditions = []
+            params: List[Any] = []
+            param_count = 0
+
+            if status:
+                param_count += 1
+                conditions.append(f"status = ${param_count}")
+                params.append(status.value if hasattr(status, "value") else status)
+
+            if request_type:
+                param_count += 1
+                conditions.append(f"request_type = ${param_count}")
+                params.append(
+                    request_type.value
+                    if hasattr(request_type, "value")
+                    else request_type
+                )
+
+            if user_id:
+                param_count += 1
+                conditions.append(f"user_id = ${param_count}")
+                params.append(user_id)
+
+            if organization_id:
+                param_count += 1
+                conditions.append(f"organization_id = ${param_count}")
+                params.append(organization_id)
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            count_query = f"""
+                SELECT COUNT(*) AS total
+                FROM {self.schema}.{self.data_requests_table}
+                {where_clause}
+            """
+            list_query = f"""
+                SELECT * FROM {self.schema}.{self.data_requests_table}
+                {where_clause}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ${param_count + 1} OFFSET ${param_count + 2}
+            """
+
+            async with self.db:
+                count_results = await self.db.query(
+                    count_query, params, schema=self.schema
+                )
+                results = await self.db.query(
+                    list_query, [*params, limit, offset], schema=self.schema
+                )
+
+            total = int(count_results[0].get("total", 0)) if count_results else 0
+            return [self._row_to_data_request(item) for item in (results or [])], total
+
+        except Exception as e:
+            logger.error(f"Error listing GDPR data requests: {e}")
+            return [], 0
+
+    async def update_data_request(
+        self, request_id: str, **updates: Any
+    ) -> Optional[GDPRDataRequest]:
+        """更新 GDPR 数据请求工作流状态"""
+        try:
+            allowed_fields = {
+                "status",
+                "approved_by",
+                "reason",
+                "artifact_uri",
+                "per_service_status",
+                "failure_reason",
+                "metadata",
+                "approved_at",
+                "completed_at",
+            }
+            set_clauses = []
+            params: List[Any] = []
+            param_count = 0
+
+            for field, raw_value in updates.items():
+                if field not in allowed_fields or raw_value is None:
+                    continue
+
+                param_count += 1
+                set_clauses.append(f"{field} = ${param_count}")
+
+                if field in {"per_service_status", "metadata"}:
+                    params.append(json.dumps(raw_value or {}))
+                elif hasattr(raw_value, "value"):
+                    params.append(raw_value.value)
+                else:
+                    params.append(raw_value)
+
+            if not set_clauses:
+                return await self.get_data_request(request_id)
+
+            param_count += 1
+            set_clauses.append(f"updated_at = ${param_count}")
+            params.append(datetime.now(timezone.utc))
+
+            param_count += 1
+            params.append(request_id)
+
+            query = f"""
+                UPDATE {self.schema}.{self.data_requests_table}
+                SET {", ".join(set_clauses)}
+                WHERE request_id = ${param_count}
+                RETURNING *
+            """
+
+            async with self.db:
+                results = await self.db.query(query, params, schema=self.schema)
+
+            if results:
+                return self._row_to_data_request(results[0])
+            return None
+
+        except Exception as e:
+            logger.error(f"Error updating GDPR data request {request_id}: {e}")
+            return None
 
     async def initialize(self):
         """初始化合规服务（如需要）"""
