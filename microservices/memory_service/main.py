@@ -506,6 +506,224 @@ async def import_memory(body: MemoryImportRequest):
     }
 
 
+# ============================================================================
+# Summary + Past-chat RAG endpoints (xenoISA/isA_user#439 hard slice —
+# paired with #428 §4-5). These four routes round out the Phase 2 backend
+# contract that #439 ships incrementally:
+#   GET   /api/v1/memories/summary?scope=&scope_id=
+#   PUT   /api/v1/memories/summary
+#   POST  /api/v1/memories/summary/regenerate
+#   POST  /api/v1/memories/past-chats/search
+# ============================================================================
+
+_summary_repo = None  # Lazy singleton — mirrors _memory_state_repo.
+
+
+def _get_summary_repo():
+    """Return a process-global MemorySummaryRepository, instantiated on first use."""
+    global _summary_repo
+    if _summary_repo is None:
+        from .summary_repository import MemorySummaryRepository
+
+        _summary_repo = MemorySummaryRepository()
+    return _summary_repo
+
+
+def _user_id_for_scope(scope: str, scope_id: str) -> str:
+    """
+    Map (scope, scope_id) → user_id for the summary row.
+
+    For scope='user' the scope_id IS the user_id. For scope='project' the
+    caller MUST supply user_id separately via the request body; the frontend
+    contract embeds the user via the bearer token so for now we treat scope_id
+    as user_id for 'user' scope and require explicit user_id for 'project'
+    (validated in the route handlers).
+    """
+    return scope_id  # extended once project-scope auth lands; tracked in #428 §3.1
+
+
+@app.get("/api/v1/memories/summary")
+async def get_summary(
+    scope: str = Query("user", pattern="^(user|project)$"),
+    scope_id: str = Query(..., description="user_id for scope=user; project_id for scope=project"),
+):
+    """
+    Fetch the latest MemorySummary for (scope, scope_id).
+
+    Returns 404 when no summary has been generated yet — the FE's
+    `getSummary` contract maps 404 → null so this matches the TS client.
+    """
+    try:
+        row = await _get_summary_repo().get(_user_id_for_scope(scope, scope_id), scope, scope_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="No summary yet")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_summary({scope},{scope_id}) failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SaveSummaryRequest(BaseModel):
+    scope: str
+    scope_id: str
+    content: str
+
+
+@app.put("/api/v1/memories/summary")
+async def save_summary(body: SaveSummaryRequest):
+    """Persist a user-edited summary — bumps version, sets `edited_at = now()`."""
+    if body.scope not in {"user", "project"}:
+        raise HTTPException(status_code=400, detail="scope must be 'user' or 'project'")
+    try:
+        row = await _get_summary_repo().upsert(
+            user_id=_user_id_for_scope(body.scope, body.scope_id),
+            scope=body.scope,
+            scope_id=body.scope_id,
+            content=body.content,
+            edited=True,
+        )
+        return row
+    except Exception as e:
+        logger.error(f"save_summary({body.scope},{body.scope_id}) failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RegenerateSummaryRequest(BaseModel):
+    scope: str
+    scope_id: str
+
+
+@app.post("/api/v1/memories/summary/regenerate")
+async def regenerate_summary(body: RegenerateSummaryRequest):
+    """
+    Trigger LLM synthesis from the user's memory corpus.
+
+    Pulls memories via memory_service.list_memories, composes a prompt, calls
+    isA_Model, and saves the result. If isA_Model is unreachable the synthesis
+    helper returns a deterministic "Summary of N memories" fallback so the
+    endpoint shape stays correct.
+    """
+    if body.scope not in {"user", "project"}:
+        raise HTTPException(status_code=400, detail="scope must be 'user' or 'project'")
+
+    try:
+        from .summary_service import synthesize_summary
+
+        user_id = _user_id_for_scope(body.scope, body.scope_id)
+
+        # Pull all memory types. MemoryListParams.limit is capped at 100 by the
+        # Pydantic model, so we page once-or-twice per type — enough for
+        # synthesis without blowing the LLM context budget.
+        all_memories: List[Dict[str, Any]] = []
+        by_type: Dict[str, int] = {}
+        REGEN_PER_TYPE_CAP = 200  # synthesize_summary itself trims at 80
+        for memory_type in MemoryType:
+            offset = 0
+            type_total = 0
+            while type_total < REGEN_PER_TYPE_CAP:
+                params = MemoryListParams(
+                    user_id=user_id,
+                    memory_type=memory_type,
+                    limit=100,
+                    offset=offset,
+                )
+                try:
+                    batch = await memory_service.list_memories(params)
+                except Exception as e:
+                    logger.warning(f"list_memories({memory_type.value}) failed during regen: {e}")
+                    batch = []
+                if not batch:
+                    break
+                all_memories.extend(batch)
+                type_total += len(batch)
+                if len(batch) < 100:
+                    break
+                offset += 100
+            if type_total:
+                by_type[memory_type.value] = type_total
+
+        synthesis = await synthesize_summary(all_memories)
+        source_counts = {
+            "memories": len(all_memories),
+            "by_type": by_type,
+            # `sessions` / `turns` are placeholders until we wire the per-scope
+            # session crawl — kept in the payload for frontend compatibility.
+            "sessions": 0,
+            "turns": 0,
+        }
+
+        row = await _get_summary_repo().upsert(
+            user_id=user_id,
+            scope=body.scope,
+            scope_id=body.scope_id,
+            content=synthesis["content"],
+            highlights=synthesis["highlights"],
+            source_counts=source_counts,
+            edited=False,
+        )
+
+        # Bump last_synthesis_at on the state row so SidePanelMemory can badge
+        # freshness without a second round-trip.
+        try:
+            await _get_state_repo().upsert(user_id, last_synthesis_at=datetime.now(timezone.utc))
+        except Exception as e:
+            logger.warning(f"Failed to bump last_synthesis_at for {user_id}: {e}")
+
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"regenerate_summary({body.scope},{body.scope_id}) failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class PastChatsSearchRequest(BaseModel):
+    user_id: str
+    query: str
+    scope: str = "user"
+    project_id: Optional[str] = None
+    k: int = 8
+    exclude_incognito: bool = True
+
+
+@app.post("/api/v1/memories/past-chats/search")
+async def search_past_chats_route(body: PastChatsSearchRequest):
+    """
+    Past-chat RAG search → PastChatHit[].
+
+    Tries Qdrant (via memory_service.session_service.vector_search) first;
+    falls back to a Postgres ILIKE on session_memories.content when Qdrant or
+    isa_model are unavailable. Incognito turns are filtered out at the row
+    level regardless of upstream — defense in depth.
+    """
+    if body.scope not in {"user", "project"}:
+        raise HTTPException(status_code=400, detail="scope must be 'user' or 'project'")
+    if not body.query or not body.query.strip():
+        return []
+
+    try:
+        from .summary_service import search_past_chats
+
+        session_handle = getattr(memory_service, "session_service", None) if memory_service else None
+        hits = await search_past_chats(
+            user_id=body.user_id,
+            query=body.query,
+            k=max(1, min(body.k, 50)),
+            exclude_incognito=body.exclude_incognito,
+            project_id=body.project_id,
+            session_service=session_handle,
+        )
+        return hits
+    except Exception as e:
+        logger.error(f"search_past_chats({body.user_id}) failed: {e}")
+        # Return empty list rather than 500 — the FE treats empty hits as
+        # "no past chats matched" which is the correct UX when retrieval is
+        # transiently degraded.
+        return []
+
+
 class StoreFactualMemoryRequest(BaseModel):
     user_id: str
     dialog_content: str

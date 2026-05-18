@@ -2,6 +2,7 @@
 Memory Service Routes Registry
 Defines all API routes for Consul service registration
 """
+
 from typing import Dict, Any
 
 # 定义所有路由
@@ -137,6 +138,25 @@ SERVICE_ROUTES = [
         "methods": ["GET"],
         "auth_required": True,
         "description": "Get memory statistics",
+    },
+    # Phase 2 hard slice (xenoISA/isA_user#439): summary + past-chats RAG
+    {
+        "path": "/memories/summary",
+        "methods": ["GET", "PUT"],
+        "auth_required": True,
+        "description": "Fetch / save MemorySummary by (scope, scope_id)",
+    },
+    {
+        "path": "/memories/summary/regenerate",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Trigger LLM synthesis of MemorySummary",
+    },
+    {
+        "path": "/memories/past-chats/search",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Past-chat RAG search → PastChatHit[]",
     },
 ]
 
