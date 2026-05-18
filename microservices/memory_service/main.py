@@ -16,7 +16,7 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
@@ -596,7 +596,10 @@ class RegenerateSummaryRequest(BaseModel):
 
 
 @app.post("/api/v1/memories/summary/regenerate")
-async def regenerate_summary(body: RegenerateSummaryRequest):
+async def regenerate_summary(
+    body: RegenerateSummaryRequest,
+    authorization: Optional[str] = Header(default=None),
+):
     """
     Trigger LLM synthesis from the user's memory corpus.
 
@@ -604,6 +607,10 @@ async def regenerate_summary(body: RegenerateSummaryRequest):
     isA_Model, and saves the result. If isA_Model is unreachable the synthesis
     helper returns a deterministic "Summary of N memories" fallback so the
     endpoint shape stays correct.
+
+    When the request carries an ``Authorization: Bearer <jwt>`` header, the
+    token is forwarded to isA_Model so upstream user-level quotas/audit apply.
+    Absent header → falls back to isA_Model's service-level auth (no change).
     """
     if body.scope not in {"user", "project"}:
         raise HTTPException(status_code=400, detail="scope must be 'user' or 'project'")
@@ -644,7 +651,7 @@ async def regenerate_summary(body: RegenerateSummaryRequest):
             if type_total:
                 by_type[memory_type.value] = type_total
 
-        synthesis = await synthesize_summary(all_memories)
+        synthesis = await synthesize_summary(all_memories, auth_token=authorization)
         source_counts = {
             "memories": len(all_memories),
             "by_type": by_type,

@@ -88,7 +88,11 @@ def _rank_memories(memories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return ranked[:_MAX_MEMORIES_FOR_SYNTHESIS]
 
 
-async def synthesize_summary(memories: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def synthesize_summary(
+    memories: List[Dict[str, Any]],
+    *,
+    auth_token: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Build a 3-paragraph narrative + 5 highlights from a list of memories via
     the isA_Model gateway.
@@ -102,6 +106,13 @@ async def synthesize_summary(memories: List[Dict[str, Any]]) -> Dict[str, Any]:
     NOTE: Input memories are capped at top-50 by importance_score (most recent
     when score is absent) to keep the prompt inside the gpt-5-nano /
     claude-haiku context budget.
+
+    JWT pass-through (xenoISA/isA_user#439): when the caller forwards the
+    incoming `Authorization` header value (e.g. ``"Bearer <jwt>"``) via
+    ``auth_token``, it is attached to the isA_Model call as ``extra_headers``
+    so the upstream service can apply user-level quotas and audit. When
+    absent, isA_Model falls back to its own service-level auth (no change in
+    behaviour for unauthenticated callers).
     """
     n = len(memories)
     fallback_payload: Dict[str, Any] = {
@@ -133,8 +144,23 @@ async def synthesize_summary(memories: List[Dict[str, Any]]) -> Dict[str, Any]:
         '"highlights": ["...", "...", "...", "...", "..."]}'
     )
 
+    # Forward the caller's JWT to isA_Model when present so the upstream
+    # service can apply user-level quotas/audit. AsyncISAModel merges
+    # extra_headers into every outbound request.
+    extra_headers: Optional[Dict[str, str]] = None
+    if auth_token:
+        token = auth_token.strip()
+        if token:
+            # Accept either "Bearer <jwt>" or a bare "<jwt>" for ergonomics.
+            if not token.lower().startswith("bearer "):
+                token = f"Bearer {token}"
+            extra_headers = {"Authorization": token}
+
     try:
-        async with AsyncISAModel(base_url=_model_url()) as client:
+        client_kwargs: Dict[str, Any] = {"base_url": _model_url()}
+        if extra_headers:
+            client_kwargs["extra_headers"] = extra_headers
+        async with AsyncISAModel(**client_kwargs) as client:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano",
                 messages=[
