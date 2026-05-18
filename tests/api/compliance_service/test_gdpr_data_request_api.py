@@ -87,6 +87,26 @@ class FakeGDPRService:
         )
         return self.request
 
+    async def get_data_request_artifact(self, request_id, expires_minutes=60):
+        if request_id != self.request.request_id:
+            return None
+        return {
+            "request_id": request_id,
+            "artifact_uri": f"storage://files/file-{request_id}",
+            "storage_file_id": f"file-{request_id}",
+            "filename": f"{request_id}.json",
+            "content_type": "application/json",
+            "size_bytes": 512,
+            "sha256": "abc123",
+            "download_url": (
+                f"https://storage.example/download/file-{request_id}"
+                f"?expires={expires_minutes}"
+            ),
+            "expires_minutes": expires_minutes,
+            "generated_at": datetime.utcnow().isoformat(),
+            "manifest": {"services": {"compliance_service": {"records": 0}}},
+        }
+
 
 def _client_for(service: FakeGDPRService):
     compliance_main.app.dependency_overrides[
@@ -138,3 +158,25 @@ async def test_run_gdpr_data_request_returns_result_panel_payload():
     assert body["status"] == "completed"
     assert body["artifact_uri"] == "compliance://gdpr-exports/gdpr_req_test.json"
     assert body["per_service_status"]["compliance_service"]["status"] == "completed"
+
+
+async def test_get_gdpr_data_request_artifact_returns_download_payload():
+    service = FakeGDPRService()
+    try:
+        async with _client_for(service) as client:
+            response = await client.get(
+                "/api/v1/compliance/data-requests/gdpr_req_test/artifact",
+                params={"expires_minutes": 15},
+            )
+    finally:
+        compliance_main.app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["request_id"] == "gdpr_req_test"
+    assert body["artifact_uri"] == "storage://files/file-gdpr_req_test"
+    assert body["storage_file_id"] == "file-gdpr_req_test"
+    assert (
+        body["download_url"]
+        == "https://storage.example/download/file-gdpr_req_test?expires=15"
+    )

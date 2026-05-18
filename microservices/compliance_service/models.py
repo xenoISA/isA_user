@@ -471,6 +471,22 @@ class GDPRDataRequest(BaseModel):
         from_attributes = True
 
 
+class GDPRDataRequestArtifactResponse(BaseModel):
+    """GDPR export artifact download metadata."""
+
+    request_id: str
+    artifact_uri: str
+    storage_file_id: Optional[str] = None
+    filename: Optional[str] = None
+    content_type: str = "application/json"
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = None
+    download_url: Optional[str] = None
+    expires_minutes: int = Field(60, ge=1, le=1440)
+    generated_at: Optional[datetime] = None
+    manifest: Dict[str, Any] = Field(default_factory=dict)
+
+
 class GDPRDataRequestListResponse(BaseModel):
     """GDPR 数据请求列表响应"""
 
@@ -557,6 +573,7 @@ __all__ = [
     "GDPRDeletionApprovalRequest",
     "GDPRDataRequestRunRequest",
     "GDPRDataRequest",
+    "GDPRDataRequestArtifactResponse",
     "GDPRDataRequestListResponse",
     # System Models
     "ComplianceServiceStatus",

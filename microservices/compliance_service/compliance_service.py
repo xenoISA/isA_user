@@ -6,6 +6,8 @@ Compliance Service Business Logic
 
 import logging
 import hashlib
+import json
+import os
 import re
 import time
 from typing import Optional, List, Dict, Any, Tuple
@@ -30,6 +32,7 @@ from .models import (
     PIIType,
     CompliancePolicy,
     GDPRDataRequest,
+    GDPRDataRequestArtifactResponse,
     GDPRDataRequestCreate,
     GDPRDataRequestListResponse,
     GDPRDataRequestRunRequest,
@@ -55,10 +58,26 @@ class ComplianceService:
     """合规服务核心业务逻辑"""
 
     def __init__(
-        self, event_bus=None, config=None, policy_cache: Optional[RedisCache] = None
+        self,
+        event_bus=None,
+        config=None,
+        policy_cache: Optional[RedisCache] = None,
+        artifact_storage_client=None,
+        enable_gdpr_artifact_storage: Optional[bool] = None,
     ):
         self.repository = ComplianceRepository(config=config)
         self.event_bus = event_bus
+        self.artifact_storage_client = artifact_storage_client
+        if enable_gdpr_artifact_storage is None:
+            storage_enabled = os.getenv("GDPR_EXPORT_STORAGE_ENABLED", "true").lower()
+            self.enable_gdpr_artifact_storage = storage_enabled not in {
+                "0",
+                "false",
+                "no",
+                "off",
+            }
+        else:
+            self.enable_gdpr_artifact_storage = enable_gdpr_artifact_storage
 
         # 配置
         self.enable_openai_moderation = True
@@ -134,6 +153,51 @@ class ComplianceService:
     async def get_data_request(self, request_id: str) -> Optional[GDPRDataRequest]:
         """Get a single GDPR data request."""
         return await self.repository.get_data_request(request_id)
+
+    async def get_data_request_artifact(
+        self, request_id: str, expires_minutes: int = 60
+    ) -> Optional[GDPRDataRequestArtifactResponse]:
+        """Return download metadata for a completed GDPR export artifact."""
+        data_request = await self.repository.get_data_request(request_id)
+        if not data_request:
+            return None
+        if data_request.request_type != GDPRDataRequestType.EXPORT:
+            return None
+        if data_request.status != GDPRDataRequestStatus.COMPLETED:
+            return None
+        if not data_request.artifact_uri:
+            return None
+
+        manifest = dict((data_request.metadata or {}).get("export_manifest") or {})
+        storage_file_id = manifest.get("storage_file_id")
+        download_url = manifest.get("download_url")
+
+        if storage_file_id and self._gdpr_artifact_storage_enabled():
+            download_info = await self._get_export_artifact_download_url(
+                storage_file_id=storage_file_id,
+                user_id=data_request.user_id,
+                expires_minutes=expires_minutes,
+            )
+            if download_info:
+                download_url = (
+                    download_info.get("download_url")
+                    or download_info.get("url")
+                    or download_url
+                )
+
+        return GDPRDataRequestArtifactResponse(
+            request_id=data_request.request_id,
+            artifact_uri=data_request.artifact_uri,
+            storage_file_id=storage_file_id,
+            filename=manifest.get("filename"),
+            content_type=manifest.get("content_type") or "application/json",
+            size_bytes=manifest.get("size_bytes"),
+            sha256=manifest.get("sha256"),
+            download_url=download_url,
+            expires_minutes=expires_minutes,
+            generated_at=manifest.get("generated_at"),
+            manifest=manifest,
+        )
 
     async def approve_data_request_deletion(
         self, request_id: str, approval: GDPRDeletionApprovalRequest
@@ -237,33 +301,53 @@ class ComplianceService:
     async def _run_export_data_request(
         self, data_request: GDPRDataRequest, service_names: List[str]
     ) -> Dict[str, Any]:
+        generated_at = datetime.utcnow()
         checks = await self.repository.get_checks_by_user(
             user_id=data_request.user_id,
             limit=10000,
         )
-        artifact_uri = f"compliance://gdpr-exports/{data_request.request_id}.json"
         per_service_status = self._empty_service_status(service_names)
-        per_service_status["compliance_service"] = {
-            "status": "completed",
-            "records_exported": len(checks),
-            "records_deleted": 0,
-            "artifact_uri": artifact_uri,
-            "completed_at": datetime.utcnow().isoformat(),
-        }
-
-        metadata = dict(data_request.metadata or {})
-        metadata["export_manifest"] = {
+        export_bundle = {
             "request_id": data_request.request_id,
+            "request_type": data_request.request_type.value,
             "user_id": data_request.user_id,
             "organization_id": data_request.organization_id,
-            "generated_at": datetime.utcnow().isoformat(),
-            "artifact_uri": artifact_uri,
+            "generated_at": generated_at.isoformat(),
             "services": {
                 "compliance_service": {
                     "records": len(checks),
                     "checks": [check.model_dump(mode="json") for check in checks],
                 }
             },
+        }
+        artifact = await self._persist_export_artifact(data_request, export_bundle)
+        artifact_uri = artifact["artifact_uri"]
+
+        metadata = dict(data_request.metadata or {})
+        metadata["export_manifest"] = {
+            "request_id": data_request.request_id,
+            "user_id": data_request.user_id,
+            "organization_id": data_request.organization_id,
+            "artifact_uri": artifact_uri,
+            "storage_file_id": artifact.get("storage_file_id"),
+            "download_url": artifact.get("download_url"),
+            "filename": artifact["filename"],
+            "content_type": artifact["content_type"],
+            "size_bytes": artifact["size_bytes"],
+            "sha256": artifact["sha256"],
+            "generated_at": generated_at.isoformat(),
+            "services": {
+                "compliance_service": {
+                    "records": len(checks),
+                }
+            },
+        }
+        per_service_status["compliance_service"] = {
+            "status": "completed",
+            "records_exported": len(checks),
+            "records_deleted": 0,
+            "artifact_uri": artifact_uri,
+            "completed_at": datetime.utcnow().isoformat(),
         }
         return {
             "artifact_uri": artifact_uri,
@@ -275,6 +359,12 @@ class ComplianceService:
         self, data_request: GDPRDataRequest, service_names: List[str]
     ) -> Dict[str, Any]:
         deleted_count = await self.repository.delete_user_data(data_request.user_id)
+        cascade_event = await self._publish_user_deleted_cascade_event(data_request)
+        if cascade_event.get("status") == "failed":
+            raise RuntimeError(
+                "Failed to publish GDPR user.deleted cascade event: "
+                f"{cascade_event.get('error', 'unknown error')}"
+            )
         per_service_status = self._empty_service_status(service_names)
         per_service_status["compliance_service"] = {
             "status": "completed",
@@ -290,6 +380,7 @@ class ComplianceService:
             "organization_id": data_request.organization_id,
             "deleted_at": datetime.utcnow().isoformat(),
             "services": {"compliance_service": {"records_deleted": deleted_count}},
+            "cascade_event": cascade_event,
         }
         return {
             "artifact_uri": data_request.artifact_uri,
@@ -308,6 +399,164 @@ class ComplianceService:
             for service_name in service_names
             if service_name != "compliance_service"
         }
+
+    def _gdpr_artifact_storage_enabled(self) -> bool:
+        return bool(getattr(self, "enable_gdpr_artifact_storage", False))
+
+    async def _persist_export_artifact(
+        self, data_request: GDPRDataRequest, export_bundle: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        filename = f"{data_request.request_id}.json"
+        file_content = json.dumps(
+            export_bundle,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        sha256 = hashlib.sha256(file_content).hexdigest()
+        base_artifact = {
+            "filename": filename,
+            "content_type": "application/json",
+            "size_bytes": len(file_content),
+            "sha256": sha256,
+        }
+
+        if not self._gdpr_artifact_storage_enabled():
+            return {
+                **base_artifact,
+                "artifact_uri": f"compliance://gdpr-exports/{filename}",
+                "storage_file_id": None,
+                "download_url": None,
+            }
+
+        upload_result = await self._upload_export_artifact(
+            data_request=data_request,
+            file_content=file_content,
+            filename=filename,
+            sha256=sha256,
+        )
+        if not upload_result or not upload_result.get("file_id"):
+            raise RuntimeError("Failed to persist GDPR export artifact to storage")
+
+        storage_file_id = upload_result["file_id"]
+        return {
+            **base_artifact,
+            "artifact_uri": f"storage://files/{storage_file_id}",
+            "storage_file_id": storage_file_id,
+            "download_url": upload_result.get("download_url"),
+        }
+
+    async def _upload_export_artifact(
+        self,
+        *,
+        data_request: GDPRDataRequest,
+        file_content: bytes,
+        filename: str,
+        sha256: str,
+    ) -> Optional[Dict[str, Any]]:
+        metadata = {
+            "gdpr_request_id": data_request.request_id,
+            "gdpr_request_type": data_request.request_type.value,
+            "artifact_sha256": sha256,
+            "classification": "gdpr_export",
+            "retention_policy": "privacy_request",
+        }
+        upload_kwargs = {
+            "file_content": file_content,
+            "filename": filename,
+            "user_id": data_request.user_id,
+            "organization_id": data_request.organization_id,
+            "access_level": "restricted",
+            "content_type": "application/json",
+            "metadata": metadata,
+            "tags": ["gdpr", "data-export", data_request.request_id],
+            "enable_indexing": False,
+        }
+
+        client = getattr(self, "artifact_storage_client", None)
+        if client is not None:
+            return await client.upload_file(**upload_kwargs)
+
+        from microservices.storage_service.client import StorageServiceClient
+
+        async with StorageServiceClient() as storage_client:
+            return await storage_client.upload_file(**upload_kwargs)
+
+    async def _get_export_artifact_download_url(
+        self,
+        *,
+        storage_file_id: str,
+        user_id: str,
+        expires_minutes: int,
+    ) -> Optional[Dict[str, Any]]:
+        client = getattr(self, "artifact_storage_client", None)
+        if client is not None:
+            return await client.get_download_url(
+                storage_file_id,
+                user_id,
+                expires_minutes=expires_minutes,
+            )
+
+        from microservices.storage_service.client import StorageServiceClient
+
+        async with StorageServiceClient() as storage_client:
+            return await storage_client.get_download_url(
+                storage_file_id,
+                user_id,
+                expires_minutes=expires_minutes,
+            )
+
+    async def _publish_user_deleted_cascade_event(
+        self, data_request: GDPRDataRequest
+    ) -> Dict[str, Any]:
+        if not self.event_bus:
+            return {
+                "status": "skipped",
+                "reason": "event_bus_unavailable",
+            }
+
+        try:
+            from core.nats_client import Event
+
+            event = Event(
+                event_type="user.deleted",
+                source="compliance_service",
+                data={
+                    "user_id": data_request.user_id,
+                    "organization_id": data_request.organization_id,
+                    "reason": "gdpr_data_request",
+                    "gdpr_request_id": data_request.request_id,
+                    "requested_by": data_request.requested_by,
+                    "approved_by": data_request.approved_by,
+                    "deleted_at": datetime.utcnow().isoformat(),
+                },
+                metadata={
+                    "gdpr_request_id": data_request.request_id,
+                    "gdpr_request_type": data_request.request_type.value,
+                },
+            )
+            subject = "account_service.user.deleted"
+            published = await self.event_bus.publish_event(event, subject=subject)
+            if published is False:
+                return {
+                    "status": "failed",
+                    "subject": subject,
+                    "event_id": event.id,
+                    "error": "event_bus_publish_returned_false",
+                }
+
+            return {
+                "status": "published",
+                "subject": subject,
+                "event_id": event.id,
+            }
+        except Exception as exc:
+            logger.warning("Failed to publish GDPR user.deleted cascade event: %s", exc)
+            return {
+                "status": "failed",
+                "subject": "account_service.user.deleted",
+                "error": str(exc),
+            }
 
     async def _publish_data_request_event(
         self, event_type: str, data_request: GDPRDataRequest
