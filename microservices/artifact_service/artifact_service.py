@@ -69,7 +69,14 @@ DEFAULT_DAILY_QUOTA = 50
 # 500s on a transient outage. The defaults below match how isA_Model and
 # isA_MCP are reachable from a local-dev deploy (`bash deployment/local-dev.sh`).
 DEFAULT_ISA_MODEL_URL = "http://localhost:8082"
-DEFAULT_ISA_MCP_URL = "http://localhost:8081"
+# MCP root path — the streamable-HTTP transport posts ``initialize``,
+# ``notifications/initialized``, then ``tools/call`` to the same endpoint
+# (the protocol multiplexes via the JSON-RPC ``method`` field). The earlier
+# Phase 3 polish (single-POST) targeted ``/mcp/tools/call`` directly which
+# only works for non-session servers; the session-aware client below uses
+# ``/mcp`` and falls back to the legacy path when an env override points
+# there.
+DEFAULT_ISA_MCP_URL = "http://localhost:8081/mcp"
 DEFAULT_RUNTIME_MODEL = "gpt-4.1-nano"
 DEFAULT_RUNTIME_PROVIDER = "openai"
 DEFAULT_RUNTIME_MAX_TOKENS = 512
@@ -137,6 +144,195 @@ logger = logging.getLogger(__name__)
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+# ==================== MCP session-aware client ====================
+#
+# The MCP streamable-HTTP transport (used by isA_MCP and any other modern MCP
+# server) requires a three-step handshake:
+#   1. POST ``/mcp`` with ``{method: 'initialize', ...}`` -> server returns
+#      capabilities and an ``Mcp-Session-Id`` response header.
+#   2. POST ``/mcp`` with ``Mcp-Session-Id`` header + ``notifications/initialized``
+#      (no response body expected).
+#   3. POST ``/mcp`` with ``Mcp-Session-Id`` + ``tools/call`` to actually run
+#      the tool. The response may be plain JSON (Content-Type:
+#      application/json) or an SSE event stream (text/event-stream) carrying
+#      one or more ``data: <json>`` frames.
+#
+# _McpSession holds the per-(artifact, server) session state. The earlier
+# single-POST transport is preserved as a fallback for legacy/stateless MCP
+# endpoints that 404 on /initialize.
+
+MCP_PROTOCOL_VERSION = "2025-03-26"
+MCP_CLIENT_NAME = "isA_user.artifact_service"
+MCP_CLIENT_VERSION = "1.0.0"
+MCP_SESSION_TIMEOUT_SECONDS = 5.0
+
+
+class _McpSessionExpired(Exception):
+    """Raised when the server returns 401/404 for a cached session id."""
+
+
+class _McpSession:
+    """Per-server MCP client that lazily initializes a session and reuses it.
+
+    Thread-safety: the FastAPI runtime is single-event-loop; concurrent calls
+    to the same session share the cached id without locking. If a second call
+    races the initial handshake both will perform an initialize — that's
+    benign (the second one's session id wins in cache). A future revision can
+    add an asyncio.Lock if this turns out to matter.
+    """
+
+    def __init__(self, server_url: str, server_id: str):
+        # ``server_url`` is the MCP root (e.g. ``http://localhost:8081/mcp``).
+        # The transport always POSTs back to this same URL — the JSON-RPC
+        # ``method`` field multiplexes initialize / notifications / tools.
+        self.server_url = server_url.rstrip("/")
+        self.server_id = server_id
+        self.session_id: Optional[str] = None
+        self.initialized: bool = False
+
+    def reset(self) -> None:
+        self.session_id = None
+        self.initialized = False
+
+    @staticmethod
+    def _parse_mcp_body(content_type: str, body: bytes) -> dict:
+        """Extract a JSON-RPC envelope from a streamable-HTTP response body.
+
+        For ``application/json`` returns the parsed object directly. For
+        ``text/event-stream`` walks the SSE frames and returns the LAST
+        frame that carries a ``result`` (the spec allows progress frames
+        before the terminal result). Raises ValueError if nothing parseable
+        is found.
+        """
+        import json
+
+        text = body.decode("utf-8", errors="replace")
+        if "event-stream" in content_type.lower() or text.lstrip().startswith("event:"):
+            chosen: Optional[dict] = None
+            for line in text.splitlines():
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:") :].strip()
+                if not data or data == "[DONE]":
+                    continue
+                try:
+                    frame = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(frame, dict) and "result" in frame:
+                    chosen = frame
+                elif chosen is None and isinstance(frame, dict):
+                    chosen = frame
+            if chosen is None:
+                raise ValueError("SSE stream contained no JSON-RPC frames")
+            return chosen
+        # Plain JSON
+        return json.loads(text)
+
+    async def _post(
+        self,
+        rpc_body: dict,
+        *,
+        expect_response: bool,
+        auth_token: Optional[str] = None,
+    ) -> tuple[Optional[dict], Optional[str]]:
+        """POST a JSON-RPC frame to the MCP root. Returns (payload, session_id).
+
+        ``payload`` is None when ``expect_response`` is False (notifications)
+        or the server returned an empty 2xx body. ``session_id`` is the
+        value of the ``Mcp-Session-Id`` response header, if present.
+
+        Raises _McpSessionExpired on 401/404 so the caller can re-init.
+        """
+        import httpx
+
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        }
+        if self.session_id:
+            headers["Mcp-Session-Id"] = self.session_id
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
+
+        async with httpx.AsyncClient(timeout=MCP_SESSION_TIMEOUT_SECONDS) as client:
+            resp = await client.post(self.server_url, json=rpc_body, headers=headers)
+
+        if resp.status_code in (401, 404):
+            raise _McpSessionExpired(f"MCP session expired (HTTP {resp.status_code}); re-initializing")
+        if resp.status_code >= 400:
+            raise RuntimeError(f"isA_MCP returned HTTP {resp.status_code}: {resp.text[:500]}")
+
+        new_session_id = resp.headers.get("Mcp-Session-Id") or resp.headers.get("mcp-session-id")
+        if not expect_response or not resp.content:
+            return None, new_session_id
+
+        content_type = resp.headers.get("Content-Type", "application/json")
+        payload = self._parse_mcp_body(content_type, resp.content)
+        if isinstance(payload, dict) and payload.get("error"):
+            raise RuntimeError(f"isA_MCP RPC error: {payload['error']}")
+        return payload, new_session_id
+
+    async def initialize(self, auth_token: Optional[str] = None) -> None:
+        """Run the MCP handshake: initialize + notifications/initialized."""
+        init_body = {
+            "jsonrpc": "2.0",
+            "id": _new_id("mcp")[4:],
+            "method": "initialize",
+            "params": {
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": MCP_CLIENT_NAME, "version": MCP_CLIENT_VERSION},
+            },
+        }
+        _payload, session_id = await self._post(init_body, expect_response=True, auth_token=auth_token)
+        if session_id:
+            self.session_id = session_id
+
+        # Notification — no body expected back. Some servers 202 with empty
+        # body; some 200 with empty body. Either is fine.
+        notif_body = {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {},
+        }
+        await self._post(notif_body, expect_response=False, auth_token=auth_token)
+        self.initialized = True
+
+    async def tools_call(
+        self,
+        tool_name: str,
+        args: dict,
+        *,
+        auth_token: Optional[str] = None,
+    ) -> dict:
+        """Call a tool; auto-initialize on the first call."""
+        if not self.initialized:
+            await self.initialize(auth_token=auth_token)
+
+        call_body = {
+            "jsonrpc": "2.0",
+            "id": _new_id("mcp")[4:],
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": args,
+                # ``server_id`` isn't part of the MCP spec but isA_MCP's
+                # multiplexed gateway uses it to pick a backend; harmless on
+                # vanilla servers that ignore unknown params.
+                "server_id": self.server_id,
+            },
+        }
+        payload, _session_id = await self._post(call_body, expect_response=True, auth_token=auth_token)
+        if payload is None:
+            raise RuntimeError("isA_MCP tools/call returned empty body")
+        # JSON-RPC envelopes wrap the answer in ``result``; surface that when
+        # present, otherwise the raw payload (servers vary).
+        result = payload.get("result", payload) if isinstance(payload, dict) else payload
+        return {"tool_name": tool_name, "server_id": self.server_id, "result": result}
 
 
 class ArtifactService:
@@ -636,20 +832,31 @@ class ArtifactService:
         return min(max(1, int(requested)), RUNTIME_MAX_TOKENS_CAP)
 
     async def _call_isa_model(
-        self, artifact: Artifact, user_prompt: str, max_tokens: int
+        self,
+        artifact: Artifact,
+        user_prompt: str,
+        max_tokens: int,
+        auth_token: Optional[str] = None,
     ) -> tuple[str, Optional[int], Optional[int]]:
         """Invoke isA_Model — returns (output, tokens_in, tokens_out).
 
         Raises on any failure; caller is responsible for falling back to the
         stub. Token counts come from response.usage when the provider supplies
         them; otherwise the caller estimates from string lengths.
+
+        ``auth_token`` (the caller's bearer JWT, if any) is forwarded to
+        isA_Model so user-level rate limits + audit apply to upstream calls.
         """
         # Late import keeps the dependency optional for unit tests that mock
         # the call out at the service level.
         from isa_model.inference_client import AsyncISAModel
 
         envelope = self._build_runtime_prompt(artifact, user_prompt)
-        async with AsyncISAModel(base_url=_isa_model_url()) as client:
+        extra_headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else None
+        async with AsyncISAModel(
+            base_url=_isa_model_url(),
+            extra_headers=extra_headers,
+        ) as client:
             response = await client.chat.completions.create(
                 model=_runtime_model(),
                 messages=[
@@ -673,7 +880,10 @@ class ArtifactService:
         return output, tokens_in, tokens_out
 
     async def runtime_invoke(
-        self, artifact_id: str, request: "ArtifactRuntimeInvokeRequest"
+        self,
+        artifact_id: str,
+        request: "ArtifactRuntimeInvokeRequest",
+        auth_token: Optional[str] = None,
     ) -> "ArtifactRuntimeInvokeResponse":
         from .models import ArtifactRuntimeInvokeResponse
 
@@ -699,7 +909,9 @@ class ArtifactService:
         # The stub path preserves the exact contract that the golden tests
         # depend on (tokens_out=32, "Phase 3 stub response for: ..." prefix).
         try:
-            output, llm_in, llm_out = await self._call_isa_model(artifact, request.prompt, max_tokens)
+            output, llm_in, llm_out = await self._call_isa_model(
+                artifact, request.prompt, max_tokens, auth_token=auth_token
+            )
             tokens_in = llm_in if isinstance(llm_in, int) and llm_in > 0 else max(1, len(request.prompt) // 4)
             tokens_out = llm_out if isinstance(llm_out, int) and llm_out > 0 else max(1, len(output) // 4)
         except Exception as e:
@@ -800,49 +1012,60 @@ class ArtifactService:
         )
         return upserted
 
-    async def _invoke_mcp_tool(self, tool_name: str, server_id: str, args: dict) -> dict:
-        """Best-effort MCP tool invocation via JSON-RPC over HTTP.
+    async def _invoke_mcp_tool(
+        self,
+        tool_name: str,
+        server_id: str,
+        args: dict,
+        artifact_id: Optional[str] = None,
+        auth_token: Optional[str] = None,
+    ) -> dict:
+        """Session-aware MCP tool invocation via the streamable-HTTP transport.
 
-        Targets the isA_MCP server at ``ISA_MCP_URL`` (default
-        ``http://localhost:8081``) using the standard MCP ``tools/call``
-        envelope. Raises on any network/protocol failure so the caller can
-        fall back to a stubbed response.
+        Implements the MCP handshake that streamable-HTTP servers require:
+          1. POST ``initialize`` -> read ``Mcp-Session-Id`` from response
+          2. POST ``notifications/initialized`` with the session header
+          3. POST ``tools/call`` with the session header
 
-        NOTE: This is the simplest viable transport. Some MCP servers require
-        a session bootstrap (``initialize`` → session id → ``tools/call``)
-        and/or stream over SSE rather than plain JSON. When those servers are
-        targeted, the call will fail here and the caller's fallback path
-        kicks in. A richer client lands in a follow-up.
+        The session id is cached on the service instance keyed by
+        ``(artifact_id, server_id)`` so subsequent calls skip the handshake.
+        On 401/404 (session expired) we re-init once and retry.
+
+        Response parsing handles both plain JSON (`Content-Type: application/json`)
+        and SSE-style event-stream bodies (`text/event-stream`) by scanning
+        ``data: ...`` lines for JSON-RPC frames carrying a ``result``.
+
+        Raises on any unrecoverable failure so the caller can fall back to
+        the stubbed response.
         """
-        import aiohttp
+        session = self._get_mcp_session(server_id, artifact_id=artifact_id)
+        try:
+            return await session.tools_call(tool_name, args or {}, auth_token=auth_token)
+        except _McpSessionExpired:
+            # Session expired (401/404 from the server) — drop the cached id,
+            # re-init from scratch, and retry once.
+            session.reset()
+            return await session.tools_call(tool_name, args or {}, auth_token=auth_token)
 
-        url = f"{_isa_mcp_url().rstrip('/')}/mcp/tools/call"
-        rpc_body = {
-            "jsonrpc": "2.0",
-            "id": _new_id("mcp")[4:],
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": args or {},
-                "server_id": server_id,
-            },
-        }
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=rpc_body) as resp:
-                if resp.status >= 400:
-                    raise RuntimeError(f"isA_MCP returned HTTP {resp.status}: {await resp.text()}")
-                payload = await resp.json()
+    def _get_mcp_session(self, server_id: str, *, artifact_id: Optional[str]) -> "_McpSession":
+        """Return a process-cached session client for (artifact_id, server_id)."""
+        cache = getattr(self, "_mcp_sessions", None)
+        if cache is None:
+            cache = {}
+            self._mcp_sessions = cache
+        key = (artifact_id or "_global", server_id)
+        existing = cache.get(key)
+        if existing is None:
+            existing = _McpSession(server_url=_isa_mcp_url(), server_id=server_id)
+            cache[key] = existing
+        return existing
 
-        if isinstance(payload, dict) and payload.get("error"):
-            raise RuntimeError(f"isA_MCP RPC error: {payload['error']}")
-        # JSON-RPC envelopes wrap the answer in ``result``; surface that when
-        # present, otherwise the raw payload (servers vary).
-        if isinstance(payload, dict) and "result" in payload:
-            return {"tool_name": tool_name, "server_id": server_id, "result": payload["result"]}
-        return {"tool_name": tool_name, "server_id": server_id, "result": payload}
-
-    async def mcp_call(self, artifact_id: str, request: "MCPCallRequest") -> "MCPCallResponse":
+    async def mcp_call(
+        self,
+        artifact_id: str,
+        request: "MCPCallRequest",
+        auth_token: Optional[str] = None,
+    ) -> "MCPCallResponse":
         from .models import MCPCallResponse, MCPGrantScope
 
         artifact = await self.repo.get_artifact(artifact_id)
@@ -875,6 +1098,8 @@ class ArtifactService:
                 tool_name=request.tool_name,
                 server_id=request.server_id,
                 args=request.args or {},
+                artifact_id=artifact_id,
+                auth_token=auth_token,
             )
             return MCPCallResponse(
                 requires_approval=False,
