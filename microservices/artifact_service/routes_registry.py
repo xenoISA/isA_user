@@ -44,10 +44,10 @@ API_ROUTES = {
     "GET /api/v1/shares/artifacts/{token}": "Public artifact reader",
     "POST /api/v1/artifacts/remix": "Clone a published artifact",
     # Phase 3
-    "POST /api/v1/artifacts/{artifact_id}/runtime/invoke": "AI runtime (stubbed) + quota gate",
+    "POST /api/v1/artifacts/{artifact_id}/runtime/invoke": "AI runtime (isA_Model proxy, stub fallback) + quota gate",
     "GET /api/v1/artifacts/{artifact_id}/runtime/usage": "Today's runtime usage + cap",
     "POST /api/v1/artifacts/{artifact_id}/mcp/approve": "Persist MCP tool grant",
-    "POST /api/v1/artifacts/{artifact_id}/mcp/call": "Approval-gated MCP tool call",
+    "POST /api/v1/artifacts/{artifact_id}/mcp/call": "Approval-gated MCP tool call (isA_MCP proxy, stub fallback)",
     "GET /api/v1/artifacts/{artifact_id}/mcp/grants": "List MCP grants for user",
     "GET /api/v1/artifacts/{artifact_id}/kv/{key}": "Read artifact KV (scope+user_id)",
     "PUT /api/v1/artifacts/{artifact_id}/kv/{key}": "Upsert artifact KV value",

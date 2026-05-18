@@ -387,11 +387,13 @@ async def runtime_invoke(
     body: ArtifactRuntimeInvokeRequest,
     response: Response,
 ):
-    """Invoke the artifact's AI runtime (stubbed) + book usage against quota.
+    """Invoke the artifact's AI runtime + book usage against quota.
 
-    Returns 429 + Retry-After when the per-user daily call cap is hit. The
-    quota check + usage upsert run inside the service layer so we never book
-    a call we refused.
+    Proxies to isA_Model with a stub fallback when the upstream is
+    unreachable, so the endpoint never 500s on a transient outage. Returns
+    429 + Retry-After when the per-user daily call cap is hit. The quota
+    check + usage upsert run inside the service layer so we never book a
+    call we refused.
     """
     try:
         return await artifact_service.runtime_invoke(artifact_id, body)
@@ -455,11 +457,12 @@ async def mcp_approve(artifact_id: str, body: MCPApproveRequest):
     response_model=MCPCallResponse,
 )
 async def mcp_call(artifact_id: str, body: MCPCallRequest):
-    """Stubbed MCP tool call — gated by an active ``allow``+``always`` grant.
+    """MCP tool call — gated by an active ``allow``+``always`` grant.
 
     First call (no grant) returns ``{requires_approval: true, prompt}``. After
-    POSTing /mcp/approve with scope=always, the same body returns the stubbed
-    tool result.
+    POSTing /mcp/approve with scope=always, the same body proxies to isA_MCP
+    over JSON-RPC and returns the tool's result. If isA_MCP is unreachable
+    the response falls back to a stub body so the endpoint never 500s.
     """
     try:
         return await artifact_service.mcp_call(artifact_id, body)
