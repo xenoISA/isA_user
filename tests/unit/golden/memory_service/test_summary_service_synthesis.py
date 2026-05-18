@@ -58,11 +58,15 @@ class _FakeAsyncISAModel:
     def __init__(self, *, response=None, error: Exception | None = None):
         self._completions = _FakeChatCompletions(response=response, error=error)
         self.chat = _FakeChat(self._completions)
+        # Capture construction kwargs across all __call__ invocations so tests
+        # can assert what summary_service passed to AsyncISAModel(...).
+        self.init_calls: List[Dict[str, Any]] = []
         _FakeAsyncISAModel.last_instance = self
 
     def __call__(self, *args, **kwargs):  # noqa: D401 - acts as constructor proxy
         # The class itself doubles as the factory: `AsyncISAModel(base_url=...)`
         # calls __call__, which returns self so we keep one fixed fake instance.
+        self.init_calls.append({"args": args, "kwargs": kwargs})
         return self
 
     async def __aenter__(self):
@@ -179,3 +183,101 @@ async def test_regenerate_caps_at_top_50_by_importance(monkeypatch):
         assert f"HIGH-{i}" in user_msg["content"]
     # The prompt header advertises exactly 50 memories used.
     assert "Memories (50)" in user_msg["content"]
+
+
+# ---------------------------------------------------------------------------
+# JWT pass-through (xenoISA/isA_user#439)
+# ---------------------------------------------------------------------------
+
+
+async def test_regenerate_forwards_auth_header_to_llm(monkeypatch):
+    """auth_token kwarg → AsyncISAModel(extra_headers={'Authorization': 'Bearer ...'})."""
+    fake = _FakeAsyncISAModel(
+        response=_build_response(
+            json.dumps(
+                {
+                    "content": "narrative",
+                    "highlights": ["a", "b", "c", "d", "e"],
+                }
+            )
+        )
+    )
+    monkeypatch.setattr(summary_service, "AsyncISAModel", fake)
+    monkeypatch.setattr(summary_service, "_ISA_MODEL_AVAILABLE", True)
+
+    memories = [
+        {"memory_type": "factual", "content": "User lives in Tokyo."},
+    ]
+
+    result = await summary_service.synthesize_summary(memories, auth_token="Bearer test-jwt")
+
+    # Synthesis still succeeds.
+    assert result["fallback"] is False
+
+    # AsyncISAModel was constructed exactly once with the forwarded header.
+    assert len(fake.init_calls) == 1
+    kwargs = fake.init_calls[0]["kwargs"]
+    assert "extra_headers" in kwargs, f"extra_headers missing from {kwargs!r}"
+    assert kwargs["extra_headers"] == {"Authorization": "Bearer test-jwt"}
+    # base_url stays wired so we don't break the existing call shape.
+    assert kwargs.get("base_url"), "base_url must still be forwarded"
+
+
+async def test_regenerate_no_auth_header_uses_default(monkeypatch):
+    """No auth_token (or empty) → AsyncISAModel called WITHOUT extra_headers."""
+    fake = _FakeAsyncISAModel(
+        response=_build_response(
+            json.dumps(
+                {
+                    "content": "narrative",
+                    "highlights": ["a", "b", "c", "d", "e"],
+                }
+            )
+        )
+    )
+    monkeypatch.setattr(summary_service, "AsyncISAModel", fake)
+    monkeypatch.setattr(summary_service, "_ISA_MODEL_AVAILABLE", True)
+
+    memories = [
+        {"memory_type": "factual", "content": "User lives in Tokyo."},
+    ]
+
+    # No auth_token → must still work and must NOT attach extra_headers.
+    result_no_arg = await summary_service.synthesize_summary(memories)
+    assert result_no_arg["fallback"] is False
+
+    # Empty / whitespace token is treated identically to "no token".
+    result_empty = await summary_service.synthesize_summary(memories, auth_token="")
+    assert result_empty["fallback"] is False
+    result_ws = await summary_service.synthesize_summary(memories, auth_token="   ")
+    assert result_ws["fallback"] is False
+
+    assert len(fake.init_calls) == 3
+    for entry in fake.init_calls:
+        kwargs = entry["kwargs"]
+        assert "extra_headers" not in kwargs, (
+            f"extra_headers must be omitted when no auth_token is forwarded; got {kwargs!r}"
+        )
+
+
+async def test_regenerate_bare_jwt_gets_bearer_prefix(monkeypatch):
+    """Defensive: a bare JWT (no 'Bearer ' prefix) is normalized for upstream."""
+    fake = _FakeAsyncISAModel(
+        response=_build_response(
+            json.dumps(
+                {
+                    "content": "narrative",
+                    "highlights": ["a", "b", "c", "d", "e"],
+                }
+            )
+        )
+    )
+    monkeypatch.setattr(summary_service, "AsyncISAModel", fake)
+    monkeypatch.setattr(summary_service, "_ISA_MODEL_AVAILABLE", True)
+
+    memories = [{"memory_type": "factual", "content": "User lives in Tokyo."}]
+
+    await summary_service.synthesize_summary(memories, auth_token="raw-jwt-token")
+
+    kwargs = fake.init_calls[0]["kwargs"]
+    assert kwargs["extra_headers"] == {"Authorization": "Bearer raw-jwt-token"}
