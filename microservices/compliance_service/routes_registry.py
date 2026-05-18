@@ -134,6 +134,12 @@ SERVICE_ROUTES = [
         "description": "Get GDPR data request",
     },
     {
+        "path": "/api/v1/compliance/data-requests/{request_id}/artifact",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Get GDPR export artifact download metadata",
+    },
+    {
         "path": "/api/v1/compliance/data-requests/{request_id}/approve-deletion",
         "methods": ["POST"],
         "auth_required": True,

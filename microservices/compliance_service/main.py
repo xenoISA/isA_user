@@ -46,6 +46,7 @@ from .models import (
     ComplianceStats,
     ComplianceStatus,
     GDPRDataRequest,
+    GDPRDataRequestArtifactResponse,
     GDPRDataRequestCreate,
     GDPRDataRequestListResponse,
     GDPRDataRequestRunRequest,
@@ -727,6 +728,34 @@ async def get_gdpr_data_request(
         raise
     except Exception as e:
         logger.error(f"Error getting GDPR data request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/compliance/data-requests/{request_id}/artifact",
+    response_model=GDPRDataRequestArtifactResponse,
+)
+async def get_gdpr_data_request_artifact(
+    request_id: str,
+    expires_minutes: int = Query(60, ge=1, le=1440),
+    service: ComplianceService = Depends(get_compliance_service),
+):
+    """Get download metadata for a completed GDPR export artifact."""
+    try:
+        artifact = await service.get_data_request_artifact(
+            request_id,
+            expires_minutes=expires_minutes,
+        )
+        if not artifact:
+            raise HTTPException(
+                status_code=404,
+                detail="GDPR export artifact not found",
+            )
+        return artifact
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting GDPR export artifact: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
