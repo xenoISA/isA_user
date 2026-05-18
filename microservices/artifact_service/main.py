@@ -37,9 +37,16 @@ from .models import (
     ArtifactCreateRequest,
     ArtifactListResponse,
     ArtifactScope,
+    ArtifactSharesListResponse,
     ArtifactUpdateRequest,
     ArtifactVersion,
     ArtifactVersionCreateRequest,
+    PublicArtifactResponse,
+    PublishArtifactRequest,
+    PublishArtifactResponse,
+    RemixArtifactRequest,
+    RevokeArtifactRequest,
+    RevokeArtifactResponse,
 )
 from .protocols import (
     ArtifactNotFoundError,
@@ -245,4 +252,97 @@ async def add_version(artifact_id: str, body: AddVersionBody):
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"add_version failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Phase 2 (#441) — publish / revoke / public reader / remix
+# ============================================================================
+# Wires to ArtifactService.publish_artifact / revoke_artifact / list_shares /
+# read_public_share / remix_artifact. See isA_/docs/design/427-artifact-flows.md
+# §7-8 for the publish + remix flows, and the share + visibility rules.
+
+# Phase 2 Pydantic schemas are imported up top so ruff doesn't strip them
+# as unused once the routes below land:
+#   PublishArtifactRequest, PublishArtifactResponse,
+#   RevokeArtifactRequest, RevokeArtifactResponse,
+#   ArtifactSharesListResponse, PublicArtifactResponse, RemixArtifactRequest
+
+
+@app.post(
+    "/api/v1/artifacts/{artifact_id}/publish",
+    response_model=PublishArtifactResponse,
+)
+async def publish_artifact(artifact_id: str, body: PublishArtifactRequest):
+    """Owner mints a public/org share token for an artifact (Phase 2 §7)."""
+    try:
+        return await artifact_service.publish_artifact(artifact_id, body)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"publish_artifact failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/api/v1/artifacts/{artifact_id}/revoke",
+    response_model=RevokeArtifactResponse,
+)
+async def revoke_artifact(artifact_id: str, body: RevokeArtifactRequest):
+    """Owner revokes one share (by token) or all active shares for the artifact."""
+    try:
+        return await artifact_service.revoke_artifact(artifact_id, body)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"revoke_artifact failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/artifacts/{artifact_id}/shares",
+    response_model=ArtifactSharesListResponse,
+)
+async def list_artifact_shares(
+    artifact_id: str,
+    user_id: str = Query(..., description="User id"),
+):
+    """Owner lists all share rows (active + revoked) for an artifact."""
+    try:
+        return await artifact_service.list_shares(artifact_id, user_id)
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"list_artifact_shares failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/shares/artifacts/{token}",
+    response_model=PublicArtifactResponse,
+)
+async def read_public_artifact_share(
+    token: str,
+    v: Optional[int] = Query(None, description="Pin to a specific version number"),
+    org_id: Optional[str] = Query(None, description="Caller org id for org-scoped shares"),
+):
+    """Public reader — resolves token → artifact + version. 410 if revoked/expired."""
+    try:
+        return await artifact_service.read_public_share(token, version=v, org_id=org_id)
+    except ArtifactValidationError as e:
+        # Revoked/expired/bad-version → 410 Gone is the design-doc behaviour.
+        raise HTTPException(status_code=410, detail=str(e))
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"read_public_artifact_share failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/artifacts/remix", response_model=Artifact)
+async def remix_artifact(body: RemixArtifactRequest):
+    """Clone a published artifact into a new artifact owned by body.user_id (§8)."""
+    try:
+        return await artifact_service.remix_artifact(body)
+    except ArtifactValidationError as e:
+        raise HTTPException(status_code=410, detail=str(e))
+    except Exception as e:
+        _raise_for_artifact_error(e)
+        logger.error(f"remix_artifact failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

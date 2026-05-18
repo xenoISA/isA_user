@@ -32,6 +32,8 @@ from core.postgres_client import compute_pool_size as _pg_compute_pool
 from .models import (
     Artifact,
     ArtifactScope,
+    ArtifactShare,
+    ArtifactShareVisibility,
     ArtifactVersion,
 )
 
@@ -352,3 +354,101 @@ class ArtifactRepository:
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")
             return False
+
+    # ==================== Phase 2: artifact_shares ====================
+    #
+    # Powers POST /publish, POST /revoke, GET /shares, GET /shares/artifacts/{token},
+    # and POST /remix (see artifact_service for the business logic).
+    #
+    # The migration's CHECK constraint limits ``visibility`` to ``public|org``
+    # — anything else is rejected at the service layer before we get here.
+
+    @staticmethod
+    def _row_to_share(row: dict) -> ArtifactShare:
+        cleaned = dict(row)
+        if "view_count" in cleaned and cleaned["view_count"] is not None:
+            cleaned["view_count"] = int(cleaned["view_count"])
+        return ArtifactShare.model_validate(cleaned)
+
+    async def create_share(self, share: ArtifactShare) -> ArtifactShare:
+        data = {
+            "token": share.token,
+            "artifact_id": share.artifact_id,
+            "version_pin": share.version_pin,
+            "visibility": (
+                share.visibility.value if isinstance(share.visibility, ArtifactShareVisibility) else share.visibility
+            ),
+            "org_id": share.org_id,
+            "created_by": share.created_by,
+            "expires_at": share.expires_at,
+            "revoked_at": None,
+            "view_count": 0,
+            "created_at": _now_naive(),
+        }
+        async with self.db:
+            await self.db.insert_into("artifact_shares", [data], schema=self.schema)
+        fetched = await self.get_share_by_token(share.token)
+        if fetched is None:  # pragma: no cover - defensive
+            raise RuntimeError(f"insert succeeded but share {share.token} not visible")
+        return fetched
+
+    async def get_share_by_token(self, token: str) -> Optional[ArtifactShare]:
+        sql = f"""
+            SELECT * FROM {self.schema}.artifact_shares
+            WHERE token = $1
+        """
+        try:
+            async with self.db:
+                row = await self.db.query_row(sql, [token], schema=self.schema)
+            if not row:
+                return None
+            return self._row_to_share(row)
+        except Exception as e:
+            logger.error(f"get_share_by_token({token}) failed: {e}")
+            return None
+
+    async def list_shares_by_artifact(self, artifact_id: str) -> List[ArtifactShare]:
+        sql = f"""
+            SELECT * FROM {self.schema}.artifact_shares
+            WHERE artifact_id = $1
+            ORDER BY created_at DESC
+        """
+        try:
+            async with self.db:
+                rows = await self.db.query(sql, [artifact_id], schema=self.schema)
+            return [self._row_to_share(r) for r in rows]
+        except Exception as e:
+            logger.error(f"list_shares_by_artifact({artifact_id}) failed: {e}")
+            return []
+
+    async def revoke_share(self, artifact_id: str, token: str) -> int:
+        """Revoke one share by token. Returns 1 if a row was updated, else 0."""
+        sql = f"""
+            UPDATE {self.schema}.artifact_shares
+            SET revoked_at = $1
+            WHERE token = $2 AND artifact_id = $3 AND revoked_at IS NULL
+        """
+        async with self.db:
+            count = await self.db.execute(sql, [_now_naive(), token, artifact_id], schema=self.schema)
+        return int(count or 0)
+
+    async def revoke_all_shares(self, artifact_id: str) -> int:
+        """Revoke every active share for an artifact. Returns rows-updated."""
+        sql = f"""
+            UPDATE {self.schema}.artifact_shares
+            SET revoked_at = $1
+            WHERE artifact_id = $2 AND revoked_at IS NULL
+        """
+        async with self.db:
+            count = await self.db.execute(sql, [_now_naive(), artifact_id], schema=self.schema)
+        return int(count or 0)
+
+    async def increment_view_count(self, token: str) -> bool:
+        sql = f"""
+            UPDATE {self.schema}.artifact_shares
+            SET view_count = view_count + 1
+            WHERE token = $1
+        """
+        async with self.db:
+            count = await self.db.execute(sql, [token], schema=self.schema)
+        return bool(count and count > 0)
