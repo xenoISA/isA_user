@@ -87,6 +87,7 @@ class AuthorizationService:
         event_bus: Optional[EventBusProtocol] = None,
         config: Optional["ConfigManager"] = None,
         permission_cache: Optional[RedisCache] = None,
+        project_sharing_client: Optional[Any] = None,
     ):
         """
         Initialize authorization service with injected dependencies.
@@ -96,9 +97,14 @@ class AuthorizationService:
             event_bus: Event bus for publishing events (optional)
             config: Configuration manager (optional, for backwards compatibility)
             permission_cache: Optional Redis cache override for tests (issue #347)
+            project_sharing_client: Optional project_sharing_service HTTP
+                client used by :meth:`check_project_access` (Story 9). When
+                ``None``, lazily constructed on first use.
         """
         self.repository = repository  # Will be set by factory if None
         self.event_bus = event_bus
+        # Story 9 — injectable for tests; production wires via factory.
+        self._project_sharing_client = project_sharing_client
 
         # Issue #347: Redis-backed permission cache. The cache stores the
         # final ResourceAccessResponse keyed by (user, resource, level)
@@ -131,9 +137,7 @@ class AuthorizationService:
     # Core Authorization Logic
     # ====================
 
-    async def check_resource_access(
-        self, request: ResourceAccessRequest
-    ) -> ResourceAccessResponse:
+    async def check_resource_access(self, request: ResourceAccessRequest) -> ResourceAccessResponse:
         """
         Check if user has access to a specific resource (Redis-cached).
 
@@ -144,9 +148,7 @@ class AuthorizationService:
         """
         cache_key = self._permission_cache_key(request)
         if cache_key is not None:
-            cached = await self._permission_cache.get(
-                cache_key, loads=_access_response_loads
-            )
+            cached = await self._permission_cache.get(cache_key, loads=_access_response_loads)
             if cached is not None:
                 return cached
 
@@ -156,26 +158,16 @@ class AuthorizationService:
         # the response itself isn't an error fallback (those have
         # ``metadata['error']``). Caching transient errors would lock in
         # a 500-state for ten minutes.
-        if cache_key is not None and not (
-            response.metadata and "error" in response.metadata
-        ):
+        if cache_key is not None and not (response.metadata and "error" in response.metadata):
             # Issue #347 follow-up: asymmetric TTLs — short for denies
             # (so a corrected grant becomes visible quickly) and long
             # for allows (so we still get the read-amplification win).
-            ttl = (
-                PERMISSION_CACHE_TTL_SECONDS
-                if response.has_access
-                else PERMISSION_DENY_CACHE_TTL_SECONDS
-            )
-            await self._permission_cache.set(
-                cache_key, response, ttl=ttl, dumps=_access_response_dumps
-            )
+            ttl = PERMISSION_CACHE_TTL_SECONDS if response.has_access else PERMISSION_DENY_CACHE_TTL_SECONDS
+            await self._permission_cache.set(cache_key, response, ttl=ttl, dumps=_access_response_dumps)
 
         return response
 
-    async def _check_resource_access_uncached(
-        self, request: ResourceAccessRequest
-    ) -> ResourceAccessResponse:
+    async def _check_resource_access_uncached(self, request: ResourceAccessRequest) -> ResourceAccessResponse:
         """
         Resolve the access decision without consulting the cache.
 
@@ -210,16 +202,9 @@ class AuthorizationService:
                 )
 
             # 1. Check admin-granted permissions (highest priority)
-            admin_permission = await self.repository.get_user_permission(
-                user_id, resource_type, resource_name
-            )
-            if (
-                admin_permission
-                and admin_permission.permission_source == PermissionSource.ADMIN_GRANT
-            ):
-                if self._has_sufficient_access(
-                    admin_permission.access_level, required_level
-                ):
+            admin_permission = await self.repository.get_user_permission(user_id, resource_type, resource_name)
+            if admin_permission and admin_permission.permission_source == PermissionSource.ADMIN_GRANT:
+                if self._has_sufficient_access(admin_permission.access_level, required_level):
                     await self._log_access_check(
                         user_id,
                         resource_type,
@@ -276,16 +261,9 @@ class AuthorizationService:
                 return subscription_access
 
             # 4. Check user-specific permissions (non-admin)
-            user_permission = await self.repository.get_user_permission(
-                user_id, resource_type, resource_name
-            )
-            if (
-                user_permission
-                and user_permission.permission_source != PermissionSource.ADMIN_GRANT
-            ):
-                if self._has_sufficient_access(
-                    user_permission.access_level, required_level
-                ):
+            user_permission = await self.repository.get_user_permission(user_id, resource_type, resource_name)
+            if user_permission and user_permission.permission_source != PermissionSource.ADMIN_GRANT:
+                if self._has_sufficient_access(user_permission.access_level, required_level):
                     await self._log_access_check(
                         user_id,
                         resource_type,
@@ -365,9 +343,7 @@ class AuthorizationService:
 
         except Exception as e:
             logger.error(f"Error checking resource access: {e}")
-            await self._log_access_check(
-                user_id, resource_type, resource_name, "error", False, str(e)
-            )
+            await self._log_access_check(user_id, resource_type, resource_name, "error", False, str(e))
             return ResourceAccessResponse(
                 has_access=False,
                 user_access_level=AccessLevel.NONE,
@@ -389,9 +365,7 @@ class AuthorizationService:
         """Check organization-based access"""
         try:
             # Verify user is organization member
-            if not await self.repository.is_user_organization_member(
-                user_id, organization_id
-            ):
+            if not await self.repository.is_user_organization_member(user_id, organization_id):
                 return ResourceAccessResponse(
                     has_access=False,
                     user_access_level=AccessLevel.NONE,
@@ -415,12 +389,8 @@ class AuthorizationService:
             )
             if org_permission:
                 # Check if organization plan meets requirements
-                if self._organization_plan_sufficient(
-                    org_info.plan, org_permission.org_plan_required
-                ):
-                    if self._has_sufficient_access(
-                        org_permission.access_level, required_level
-                    ):
+                if self._organization_plan_sufficient(org_info.plan, org_permission.org_plan_required):
+                    if self._has_sufficient_access(org_permission.access_level, required_level):
                         return ResourceAccessResponse(
                             has_access=True,
                             user_access_level=org_permission.access_level,
@@ -466,13 +436,9 @@ class AuthorizationService:
             )
 
             # Get resource permission configuration
-            resource_permission = await self.repository.get_resource_permission(
-                resource_type, resource_name
-            )
+            resource_permission = await self.repository.get_resource_permission(resource_type, resource_name)
             if not resource_permission:
-                logger.warning(
-                    f"No resource configuration found for {resource_type.value}:{resource_name}"
-                )
+                logger.warning(f"No resource configuration found for {resource_type.value}:{resource_name}")
                 return ResourceAccessResponse(
                     has_access=False,
                     user_access_level=AccessLevel.NONE,
@@ -501,9 +467,7 @@ class AuthorizationService:
             logger.info(f"Subscription tier sufficient: {tier_sufficient}")
 
             if tier_sufficient:
-                access_sufficient = self._has_sufficient_access(
-                    resource_permission.access_level, required_level
-                )
+                access_sufficient = self._has_sufficient_access(resource_permission.access_level, required_level)
                 logger.info(
                     f"Access level sufficient: {access_sufficient} (user={resource_permission.access_level.value}, required={required_level.value})"
                 )
@@ -545,6 +509,106 @@ class AuthorizationService:
             )
 
     # ====================
+    # Project Access Check (Story 9 — viewer-role write rejection)
+    # ====================
+
+    # Allowed action vocabulary for :meth:`check_project_access`.
+    _PROJECT_ACTIONS = ("read", "write", "admin")
+
+    def _get_project_sharing_client(self):
+        """Lazy-build a project_sharing_service client if none was injected."""
+        if self._project_sharing_client is None:
+            # Import lazily so test environments without httpx/network deps
+            # can still instantiate the service.
+            from .clients.project_sharing_client import ProjectSharingClient
+
+            self._project_sharing_client = ProjectSharingClient()
+        return self._project_sharing_client
+
+    async def check_project_access(self, user_id: str, project_id: str, action: str) -> Dict[str, Any]:
+        """
+        Story 9: per-action permission check for project resources.
+
+        Rules (from §10 of docs/design/429-project-sharing.md):
+            - ``action="read"``  → always allowed (200, allowed=true)
+            - ``action="write"`` → allowed unless the user's role on the
+              project is ``viewer``. Viewers are read-only.
+            - ``action="admin"`` → owner-only; editors and viewers are
+              rejected.
+
+        The user's role is resolved through project_sharing_service via
+        :class:`ProjectSharingClient`. Owners of the project itself are
+        not stored in ``project_shares`` — callers wanting full ownership
+        semantics should layer ownership checks above this method. For
+        the frontend's current use case (rejecting viewer writes), this
+        is sufficient.
+
+        Args:
+            user_id: User attempting the action
+            project_id: Project being acted on
+            action: One of ``read | write | admin``
+
+        Returns:
+            ``{"allowed": bool, "reason": Optional[str]}``
+        """
+        # Normalise + validate action.
+        if not action or action not in self._PROJECT_ACTIONS:
+            return {
+                "allowed": False,
+                "reason": (f"invalid action {action!r}; expected one of {', '.join(self._PROJECT_ACTIONS)}"),
+            }
+
+        # Reads are unconditionally allowed for project resources. The
+        # frontend only calls this endpoint for sessions it already has
+        # surfaced, so we don't need to gate visibility here.
+        if action == "read":
+            return {"allowed": True, "reason": None}
+
+        client = self._get_project_sharing_client()
+        try:
+            role = await client.get_user_role_on_project(user_id, project_id)
+        except Exception as e:
+            logger.error(
+                "project_sharing_service lookup failed for user=%s project=%s: %s",
+                user_id,
+                project_id,
+                e,
+            )
+            # Fail-closed for writes/admin — we'd rather reject a
+            # legitimate action than silently allow a viewer to write
+            # because the upstream service hiccupped.
+            return {
+                "allowed": False,
+                "reason": "could not verify project role; please retry",
+            }
+
+        if role is None:
+            # No accepted share → no project-scoped permission. The
+            # caller (project owner, platform admin, etc.) handles that
+            # path separately; for shared-collaboration we fail-closed.
+            return {
+                "allowed": False,
+                "reason": f"user {user_id} has no accepted share on project {project_id}",
+            }
+
+        if action == "admin":
+            if role == "owner":
+                return {"allowed": True, "reason": None}
+            return {
+                "allowed": False,
+                "reason": f"role {role!r} cannot perform admin actions on project {project_id}",
+            }
+
+        # action == "write"
+        if role in ("editor", "owner"):
+            return {"allowed": True, "reason": None}
+        # viewer (or any other non-write role) is rejected.
+        return {
+            "allowed": False,
+            "reason": f"role {role!r} is read-only on project {project_id}",
+        }
+
+    # ====================
     # Permission Management
     # ====================
 
@@ -554,9 +618,7 @@ class AuthorizationService:
             # Validate user exists
             user_info = await self.repository.get_user_info(request.user_id)
             if not user_info:
-                logger.error(
-                    f"Cannot grant permission to non-existent user: {request.user_id}"
-                )
+                logger.error(f"Cannot grant permission to non-existent user: {request.user_id}")
                 return False
 
             # Create permission record
@@ -671,9 +733,7 @@ class AuthorizationService:
 
             return False
 
-    async def revoke_resource_permission(
-        self, request: RevokePermissionRequest
-    ) -> bool:
+    async def revoke_resource_permission(self, request: RevokePermissionRequest) -> bool:
         """Revoke resource permission from a user"""
         try:
             # Get current permission for logging
@@ -712,8 +772,7 @@ class AuthorizationService:
                         reason=request.reason,
                         success=False,
                         error_message=(
-                            "cache invalidation failed; revoke must be "
-                            "retried to ensure replicas evict stale grant"
+                            "cache invalidation failed; revoke must be retried to ensure replicas evict stale grant"
                         ),
                     )
                     return False
@@ -724,9 +783,7 @@ class AuthorizationService:
                     resource_type=request.resource_type,
                     resource_name=request.resource_name,
                     action="revoke",
-                    old_access_level=current_permission.access_level
-                    if current_permission
-                    else None,
+                    old_access_level=current_permission.access_level if current_permission else None,
                     performed_by_user_id=request.revoked_by_user_id,
                     reason=request.reason,
                     success=True,
@@ -804,17 +861,13 @@ class AuthorizationService:
     # Bulk Operations
     # ====================
 
-    async def bulk_grant_permissions(
-        self, request: BulkPermissionRequest
-    ) -> List[BatchOperationResult]:
+    async def bulk_grant_permissions(self, request: BulkPermissionRequest) -> List[BatchOperationResult]:
         """Grant multiple permissions in bulk"""
         results = []
         batch_id = str(uuid.uuid4())
         started_at = datetime.utcnow()
 
-        logger.info(
-            f"Starting bulk grant operation: {len(request.operations)} operations"
-        )
+        logger.info(f"Starting bulk grant operation: {len(request.operations)} operations")
 
         for operation in request.operations:
             if isinstance(operation, GrantPermissionRequest):
@@ -851,23 +904,17 @@ class AuthorizationService:
         completed_at = datetime.utcnow()
         execution_time = (completed_at - started_at).total_seconds()
 
-        logger.info(
-            f"Bulk grant completed: {len([r for r in results if r.success])}/{len(results)} successful"
-        )
+        logger.info(f"Bulk grant completed: {len([r for r in results if r.success])}/{len(results)} successful")
 
         return results
 
-    async def bulk_revoke_permissions(
-        self, request: BulkPermissionRequest
-    ) -> List[BatchOperationResult]:
+    async def bulk_revoke_permissions(self, request: BulkPermissionRequest) -> List[BatchOperationResult]:
         """Revoke multiple permissions in bulk"""
         results = []
         batch_id = str(uuid.uuid4())
         started_at = datetime.utcnow()
 
-        logger.info(
-            f"Starting bulk revoke operation: {len(request.operations)} operations"
-        )
+        logger.info(f"Starting bulk revoke operation: {len(request.operations)} operations")
 
         for operation in request.operations:
             if isinstance(operation, RevokePermissionRequest):
@@ -884,9 +931,7 @@ class AuthorizationService:
                             resource_type=operation.resource_type,
                             resource_name=operation.resource_name,
                             success=success,
-                            error_message=None
-                            if success
-                            else "Revoke operation failed",
+                            error_message=None if success else "Revoke operation failed",
                         )
                     )
 
@@ -906,9 +951,7 @@ class AuthorizationService:
         completed_at = datetime.utcnow()
         execution_time = (completed_at - started_at).total_seconds()
 
-        logger.info(
-            f"Bulk revoke completed: {len([r for r in results if r.success])}/{len(results)} successful"
-        )
+        logger.info(f"Bulk revoke completed: {len([r for r in results if r.success])}/{len(results)} successful")
 
         return results
 
@@ -916,9 +959,7 @@ class AuthorizationService:
     # User Information and Summary
     # ====================
 
-    async def get_user_permission_summary(
-        self, user_id: str
-    ) -> Optional[UserPermissionSummary]:
+    async def get_user_permission_summary(self, user_id: str) -> Optional[UserPermissionSummary]:
         """Get comprehensive permission summary for a user"""
         try:
             return await self.repository.get_user_permission_summary(user_id)
@@ -941,9 +982,7 @@ class AuthorizationService:
                     return []
 
             # Get user permissions
-            permissions = await self.repository.list_user_permissions(
-                user_id, resource_type_enum
-            )
+            permissions = await self.repository.list_user_permissions(user_id, resource_type_enum)
 
             # Get user info for subscription-based resources
             user_info = await self.repository.get_user_info(user_id)
@@ -960,17 +999,13 @@ class AuthorizationService:
                         "resource_name": perm.resource_name,
                         "access_level": perm.access_level.value,
                         "permission_source": perm.permission_source.value,
-                        "expires_at": perm.expires_at.isoformat()
-                        if perm.expires_at
-                        else None,
+                        "expires_at": perm.expires_at.isoformat() if perm.expires_at else None,
                         "organization_id": perm.organization_id,
                     }
                 )
 
             # Add subscription-based resources
-            base_permissions = await self.repository.list_resource_permissions(
-                resource_type_enum
-            )
+            base_permissions = await self.repository.list_resource_permissions(resource_type_enum)
             user_tier = (
                 SubscriptionTier(user_info.subscription_status)
                 if user_info.subscription_status in [t.value for t in SubscriptionTier]
@@ -979,13 +1014,8 @@ class AuthorizationService:
 
             for base_perm in base_permissions:
                 # Check if user already has specific permission
-                if not any(
-                    r["resource_name"] == base_perm.resource_name
-                    for r in accessible_resources
-                ):
-                    if self._subscription_tier_sufficient(
-                        user_tier, base_perm.subscription_tier_required
-                    ):
+                if not any(r["resource_name"] == base_perm.resource_name for r in accessible_resources):
+                    if self._subscription_tier_sufficient(user_tier, base_perm.subscription_tier_required):
                         accessible_resources.append(
                             {
                                 "resource_type": base_perm.resource_type.value,
@@ -1073,18 +1103,14 @@ class AuthorizationService:
                     permission.resource_type, permission.resource_name
                 )
                 if not existing:
-                    result = await self.repository.create_resource_permission(
-                        permission
-                    )
+                    result = await self.repository.create_resource_permission(permission)
                     if result:
                         success_count += 1
                         logger.debug(
                             f"Created default permission: {permission.resource_type}:{permission.resource_name}"
                         )
                 else:
-                    logger.debug(
-                        f"Permission already exists: {permission.resource_type}:{permission.resource_name}"
-                    )
+                    logger.debug(f"Permission already exists: {permission.resource_type}:{permission.resource_name}")
 
             logger.info(f"Initialized {success_count} default permissions")
             return success_count > 0
@@ -1146,10 +1172,7 @@ class AuthorizationService:
                     "success": False,
                     "rule": "invalid_org_role",
                     "normalized_role": None,
-                    "reason": (
-                        f"{assignee!r} is not a valid org role — see "
-                        "docs/guidance/role-taxonomy.md"
-                    ),
+                    "reason": (f"{assignee!r} is not a valid org role — see docs/guidance/role-taxonomy.md"),
                 }
         elif scope == "platform":
             if not is_valid_platform_role(assignee):
@@ -1163,10 +1186,7 @@ class AuthorizationService:
                     "success": False,
                     "rule": "invalid_platform_role",
                     "normalized_role": None,
-                    "reason": (
-                        f"{assignee!r} is not a valid platform-admin role — "
-                        "see docs/guidance/role-taxonomy.md"
-                    ),
+                    "reason": (f"{assignee!r} is not a valid platform-admin role — see docs/guidance/role-taxonomy.md"),
                 }
         elif scope == "app":
             # c-users are minted by the consuming app's signup flow.
@@ -1212,17 +1232,12 @@ class AuthorizationService:
                 "success": False,
                 "rule": "assigner_not_authorized",
                 "normalized_role": None,
-                "reason": (
-                    f"role {assigner!r} cannot assign {assignee!r} at "
-                    f"{scope} scope per the canonical taxonomy"
-                ),
+                "reason": (f"role {assigner!r} cannot assign {assignee!r} at {scope} scope per the canonical taxonomy"),
             }
 
         # Successful assignment — resolve any legacy alias so downstream
         # storage sees only canonical strings.
-        normalized = (
-            normalize_org_role(assignee) if scope == "organization" else assignee
-        )
+        normalized = normalize_org_role(assignee) if scope == "organization" else assignee
 
         logger.info(
             "role assignment allowed: %s -> %s (scope=%s)",
@@ -1312,11 +1327,7 @@ class AuthorizationService:
         """
         if not request.user_id or not request.resource_name:
             return None
-        rtype = (
-            request.resource_type.value
-            if hasattr(request.resource_type, "value")
-            else str(request.resource_type)
-        )
+        rtype = request.resource_type.value if hasattr(request.resource_type, "value") else str(request.resource_type)
         rname = request.resource_name
 
         # Capture every field of the request. ``mode='json'`` resolves
@@ -1364,17 +1375,13 @@ class AuthorizationService:
 
     # ---- Existing helpers ----
 
-    def _subscription_tier_sufficient(
-        self, user_tier: SubscriptionTier, required_tier: SubscriptionTier
-    ) -> bool:
+    def _subscription_tier_sufficient(self, user_tier: SubscriptionTier, required_tier: SubscriptionTier) -> bool:
         """Check if user's subscription tier meets requirements"""
         user_level = self.subscription_hierarchy.get(user_tier, -1)
         required_level = self.subscription_hierarchy.get(required_tier, 999)
         return user_level >= required_level
 
-    def _has_sufficient_access(
-        self, user_level: AccessLevel, required_level: AccessLevel
-    ) -> bool:
+    def _has_sufficient_access(self, user_level: AccessLevel, required_level: AccessLevel) -> bool:
         """Check if user's access level meets requirements"""
         user_priority = self.access_level_hierarchy.get(user_level, -1)
         required_priority = self.access_level_hierarchy.get(required_level, 999)

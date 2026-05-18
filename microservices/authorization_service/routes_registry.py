@@ -2,6 +2,7 @@
 Authorization Service Routes Registry
 Defines all API routes for Consul service registration
 """
+
 from typing import Dict, Any
 
 # Define all routes
@@ -43,6 +44,12 @@ SERVICE_ROUTES = [
         "methods": ["POST"],
         "auth_required": True,
         "description": "Check resource access permission",
+    },
+    {
+        "path": "/api/v1/authorization/check",
+        "methods": ["POST"],
+        "auth_required": True,
+        "description": "Per-action project access check (Story 9)",
     },
     {
         "path": "/api/v1/authorization/grant",

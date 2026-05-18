@@ -173,6 +173,39 @@ class ResourceAccessRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 
+# ----------------------------------------------------------------------------
+# Story 9 — viewer-role write rejection (project resources)
+# ----------------------------------------------------------------------------
+
+
+class ProjectAccessCheckRequest(BaseModel):
+    """
+    Frontend-facing permission check for project resources (Story 9).
+
+    Used by POST /api/v1/authorization/check. Distinct from the
+    subscription/admin oriented :class:`ResourceAccessRequest` — this is a
+    lightweight per-action check that consults project_sharing_service to
+    apply role-based read/write rules.
+
+    The ``action`` field must be one of:
+        - ``"read"``   — viewer, editor, owner all allowed
+        - ``"write"``  — editor and owner only; viewer is rejected
+        - ``"admin"``  — owner only
+    """
+
+    user_id: str = Field(..., description="User attempting the action")
+    resource_type: str = Field(..., description="Currently only 'project' is supported")
+    resource_id: str = Field(..., description="Project id (or generic resource id)")
+    action: str = Field(..., description="One of: read | write | admin")
+
+
+class ProjectAccessCheckResponse(BaseModel):
+    """Response for POST /api/v1/authorization/check (Story 9)."""
+
+    allowed: bool
+    reason: Optional[str] = None
+
+
 class ResourceAccessResponse(BaseModel):
     """Response for resource access check"""
 
@@ -350,9 +383,7 @@ class PermissionCacheEntry(BaseModel):
     access_level: AccessLevel
     permission_source: PermissionSource
     cached_at: datetime = Field(default_factory=datetime.utcnow)
-    expires_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow() + timedelta(minutes=15)
-    )
+    expires_at: datetime = Field(default_factory=lambda: datetime.utcnow() + timedelta(minutes=15))
 
     @property
     def is_expired(self) -> bool:

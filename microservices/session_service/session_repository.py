@@ -14,9 +14,7 @@ import uuid
 import sys
 import os
 
-sys.path.append(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from isa_common import AsyncPostgresClient
 from core.config_manager import ConfigManager
@@ -100,9 +98,7 @@ class SessionRepository:
             }
 
             async with self.db:
-                count = await self.db.insert_into(
-                    self.sessions_table, [data], schema=self.schema
-                )
+                count = await self.db.insert_into(self.sessions_table, [data], schema=self.schema)
 
             # Check if insert succeeded
             if count is not None and count > 0:
@@ -225,9 +221,7 @@ class SessionRepository:
             logger.error(f"Error updating session activity: {e}")
             return False
 
-    async def increment_message_count(
-        self, session_id: str, tokens_used: int = 0, cost_usd: float = 0.0
-    ) -> bool:
+    async def increment_message_count(self, session_id: str, tokens_used: int = 0, cost_usd: float = 0.0) -> bool:
         """增加消息计数和统计信息"""
         try:
             # 首先获取当前会话
@@ -285,6 +279,49 @@ class SessionRepository:
             logger.error(f"Error expiring old sessions: {e}")
             return 0
 
+    async def set_metadata_project_id(self, session_id: str, project_id: Optional[str]) -> bool:
+        """
+        Set or unset ``metadata.project_id`` on the session row (Story 8).
+
+        Uses jsonb_set when assigning, jsonb path delete when ``project_id``
+        is ``None`` so the key is fully removed (matters because the
+        frontend treats key-missing and key-null differently when sorting
+        sessions by project membership).
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            if project_id is None:
+                # Strip the key entirely.
+                query = f"""
+                    UPDATE {self.schema}.{self.sessions_table}
+                    SET metadata = COALESCE(metadata, '{{}}'::jsonb) - 'project_id',
+                        updated_at = $1
+                    WHERE session_id = $2
+                """
+                params = [now, session_id]
+            else:
+                # jsonb_set with create_missing=true (default true) sets
+                # the value whether or not the key existed.
+                query = f"""
+                    UPDATE {self.schema}.{self.sessions_table}
+                    SET metadata = jsonb_set(
+                            COALESCE(metadata, '{{}}'::jsonb),
+                            '{{project_id}}',
+                            to_jsonb($1::text),
+                            true
+                        ),
+                        updated_at = $2
+                    WHERE session_id = $3
+                """
+                params = [project_id, now, session_id]
+
+            async with self.db:
+                count = await self.db.execute(query, params, schema=self.schema)
+            return count is not None and count > 0
+        except Exception as e:
+            logger.error(f"Error setting metadata.project_id: {e}")
+            return False
+
     async def star_session(self, session_id: str) -> bool:
         """Star a session (idempotent)"""
         try:
@@ -319,9 +356,7 @@ class SessionRepository:
             logger.error(f"Error unstarring session: {e}")
             return False
 
-    async def get_starred_sessions(
-        self, user_id: str, limit: int = 50, offset: int = 0
-    ) -> List[Session]:
+    async def get_starred_sessions(self, user_id: str, limit: int = 50, offset: int = 0) -> List[Session]:
         """Get starred sessions for a user, ordered by starred_at desc"""
         try:
             query = f"""
@@ -358,9 +393,7 @@ class SessionMessageRepository:
             env_port_key="POSTGRES_PORT",
         )
 
-        logger.info(
-            f"SessionMessageRepository connecting to PostgreSQL at {host}:{port}"
-        )
+        logger.info(f"SessionMessageRepository connecting to PostgreSQL at {host}:{port}")
         self.db = AsyncPostgresClient(
             host=host,
             port=port,
@@ -374,9 +407,7 @@ class SessionMessageRepository:
         self.schema = "session"
         self.messages_table = "session_messages"
 
-    async def create_message(
-        self, message_data: Dict[str, Any]
-    ) -> Optional[SessionMessage]:
+    async def create_message(self, message_data: Dict[str, Any]) -> Optional[SessionMessage]:
         """创建消息"""
         try:
             # Generate UUID for message
@@ -399,19 +430,13 @@ class SessionMessageRepository:
             }
 
             async with self.db:
-                count = await self.db.insert_into(
-                    self.messages_table, [data], schema=self.schema
-                )
+                count = await self.db.insert_into(self.messages_table, [data], schema=self.schema)
 
             if count is not None and count > 0:
                 # Query the inserted message
-                query = (
-                    f"SELECT * FROM {self.schema}.{self.messages_table} WHERE id = $1"
-                )
+                query = f"SELECT * FROM {self.schema}.{self.messages_table} WHERE id = $1"
                 async with self.db:
-                    result = await self.db.query_row(
-                        query, [message_id], schema=self.schema
-                    )
+                    result = await self.db.query_row(query, [message_id], schema=self.schema)
 
                 if result:
                     # Map database columns to SessionMessage model
@@ -435,9 +460,7 @@ class SessionMessageRepository:
             logger.error(f"Error creating message: {e}")
             return None
 
-    async def get_session_messages(
-        self, session_id: str, limit: int = 100, offset: int = 0
-    ) -> List[SessionMessage]:
+    async def get_session_messages(self, session_id: str, limit: int = 100, offset: int = 0) -> List[SessionMessage]:
         """获取会话消息"""
         try:
             query = f"""
@@ -569,14 +592,10 @@ class SessionMessageRepository:
             """
 
             async with self.db:
-                count_result = await self.db.query_row(
-                    count_query, params[:2], schema=self.schema
-                )
+                count_result = await self.db.query_row(count_query, params[:2], schema=self.schema)
                 total = count_result["cnt"] if count_result else 0
 
-                rows = (
-                    await self.db.query(search_query, params, schema=self.schema) or []
-                )
+                rows = await self.db.query(search_query, params, schema=self.schema) or []
 
             return rows, total
 

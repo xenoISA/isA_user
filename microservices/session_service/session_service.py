@@ -48,9 +48,7 @@ from .protocols import (
 if TYPE_CHECKING:
     pass
 
-sys.path.append(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from core.nats_client import Event
 
 logger = logging.getLogger(__name__)
@@ -156,13 +154,9 @@ class SessionService:
             # Application-layer validation: Check if user exists via account service API
             # This replaces database foreign key constraint for microservice independence
             try:
-                user_profile = await self.account_client.get_account_profile(
-                    request.user_id
-                )
+                user_profile = await self.account_client.get_account_profile(request.user_id)
                 if not user_profile:
-                    logger.warning(
-                        f"Creating session for potentially non-existent user: {request.user_id}"
-                    )
+                    logger.warning(f"Creating session for potentially non-existent user: {request.user_id}")
                     # Note: We log a warning but don't fail - this allows eventual consistency
             except Exception as e:
                 logger.warning(f"Account service unavailable, failing open: {e}")
@@ -202,9 +196,7 @@ class SessionService:
                         },
                     )
                     await self.event_bus.publish_event(event)
-                    logger.info(
-                        f"Published session.started event for session {session_id}"
-                    )
+                    logger.info(f"Published session.started event for session {session_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish session.started event: {e}")
 
@@ -216,9 +208,7 @@ class SessionService:
             logger.error(f"Error creating session: {e}")
             raise SessionServiceError(f"Failed to create session: {str(e)}")
 
-    async def get_session(
-        self, session_id: str, user_id: Optional[str] = None
-    ) -> SessionResponse:
+    async def get_session(self, session_id: str, user_id: Optional[str] = None) -> SessionResponse:
         """
         Get session by ID
 
@@ -316,9 +306,7 @@ class SessionService:
 
             # Update session status if provided
             if request.status:
-                await self.session_repo.update_session_status(
-                    session_id, request.status
-                )
+                await self.session_repo.update_session_status(session_id, request.status)
 
             # Record activity
             await self.session_repo.update_session_activity(session_id)
@@ -363,21 +351,15 @@ class SessionService:
                 if self.event_bus:
                     try:
                         # Get updated session for metrics
-                        updated_session = await self.session_repo.get_by_session_id(
-                            session_id
-                        )
+                        updated_session = await self.session_repo.get_by_session_id(session_id)
                         event = Event(
                             event_type="session.ended",
                             source="session_service",
                             data={
                                 "session_id": session_id,
                                 "user_id": session.user_id,
-                                "total_messages": updated_session.message_count
-                                if updated_session
-                                else 0,
-                                "total_tokens": updated_session.total_tokens
-                                if updated_session
-                                else 0,
+                                "total_messages": updated_session.message_count if updated_session else 0,
+                                "total_tokens": updated_session.total_tokens if updated_session else 0,
                                 "total_cost": float(updated_session.total_cost)
                                 if updated_session and updated_session.total_cost
                                 else 0.0,
@@ -385,9 +367,7 @@ class SessionService:
                             },
                         )
                         await self.event_bus.publish_event(event)
-                        logger.info(
-                            f"Published session.ended event for session {session_id}"
-                        )
+                        logger.info(f"Published session.ended event for session {session_id}")
                     except Exception as e:
                         logger.error(f"Failed to publish session.ended event: {e}")
 
@@ -398,6 +378,73 @@ class SessionService:
         except Exception as e:
             logger.error(f"Error ending session {session_id}: {e}")
             raise SessionServiceError(f"Failed to end session: {str(e)}")
+
+    # Project Move (Story 8)
+
+    async def move_session_to_project(
+        self,
+        session_id: str,
+        user_id: str,
+        project_id: Optional[str],
+    ) -> SessionResponse:
+        """
+        Move a chat session into / out of / between projects (Story 8).
+
+        Updates ``metadata.project_id`` on the session row. Passing
+        ``project_id=None`` strips the key, removing the session from
+        any project.
+
+        Args:
+            session_id: Session to move
+            user_id: Owning user (auth scope — 404 if mismatched)
+            project_id: Target project id, or ``None`` to unassign
+
+        Returns:
+            Updated SessionResponse with the new metadata
+
+        Raises:
+            SessionNotFoundError: If session not found or not owned by user
+            SessionServiceError: On unexpected failure
+        """
+        try:
+            session = await self.session_repo.get_by_session_id(session_id)
+            if not session:
+                raise SessionNotFoundError(f"Session not found: {session_id}")
+            if session.user_id != user_id:
+                # Don't leak existence
+                raise SessionNotFoundError(f"Session not found: {session_id}")
+
+            ok = await self.session_repo.set_metadata_project_id(session_id, project_id)
+            if not ok:
+                raise SessionServiceError(f"Failed to update project_id for session {session_id}")
+
+            # Best-effort event
+            if self.event_bus:
+                try:
+                    event = Event(
+                        event_type="session.project_changed",
+                        source="session_service",
+                        data={
+                            "session_id": session_id,
+                            "user_id": user_id,
+                            "project_id": project_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    await self.event_bus.publish_event(event)
+                except Exception as e:
+                    logger.error(f"Failed to publish session.project_changed event: {e}")
+
+            updated = await self.session_repo.get_by_session_id(session_id)
+            return self._session_to_response(updated)
+
+        except SessionNotFoundError:
+            raise
+        except SessionServiceError:
+            raise
+        except Exception as e:
+            logger.error(f"Error moving session {session_id} to project {project_id}: {e}")
+            raise SessionServiceError(f"Failed to move session: {str(e)}")
 
     # Star Operations
 
@@ -471,15 +518,11 @@ class SessionService:
             logger.error(f"Error unstarring session {session_id}: {e}")
             raise SessionServiceError(f"Failed to unstar session: {str(e)}")
 
-    async def get_starred_sessions(
-        self, user_id: str, page: int = 1, page_size: int = 50
-    ) -> SessionListResponse:
+    async def get_starred_sessions(self, user_id: str, page: int = 1, page_size: int = 50) -> SessionListResponse:
         """Get starred sessions for a user with pagination"""
         try:
             offset = (page - 1) * page_size
-            sessions = await self.session_repo.get_starred_sessions(
-                user_id=user_id, limit=page_size, offset=offset
-            )
+            sessions = await self.session_repo.get_starred_sessions(user_id=user_id, limit=page_size, offset=offset)
             session_responses = [self._session_to_response(s) for s in sessions]
             return SessionListResponse(
                 sessions=session_responses,
@@ -541,9 +584,7 @@ class SessionService:
                 raise SessionServiceError("Failed to create message")
 
             # Update session metrics
-            await self.session_repo.increment_message_count(
-                session_id, request.tokens_used, request.cost_usd
-            )
+            await self.session_repo.increment_message_count(session_id, request.tokens_used, request.cost_usd)
 
             # Publish SESSION_MESSAGE_SENT event
             if self.event_bus:
@@ -559,16 +600,12 @@ class SessionService:
                             "content": request.content,  # Add message content for memory service
                             "message_type": request.message_type,
                             "tokens_used": request.tokens_used or 0,
-                            "cost_usd": float(request.cost_usd)
-                            if request.cost_usd
-                            else 0.0,
+                            "cost_usd": float(request.cost_usd) if request.cost_usd else 0.0,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                     )
                     await self.event_bus.publish_event(event)
-                    logger.info(
-                        f"Published session.message_sent event for session {session_id}"
-                    )
+                    logger.info(f"Published session.message_sent event for session {session_id}")
                 except Exception as e:
                     logger.error(f"Failed to publish session.message_sent event: {e}")
 
@@ -583,9 +620,7 @@ class SessionService:
                             "user_id": session.user_id,
                             "message_id": message.message_id,
                             "tokens_used": request.tokens_used,
-                            "cost_usd": float(request.cost_usd)
-                            if request.cost_usd
-                            else 0.0,
+                            "cost_usd": float(request.cost_usd) if request.cost_usd else 0.0,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                     )
@@ -728,9 +763,7 @@ class SessionService:
             next_cursor = None
             if len(rows) == limit and last_created_at is not None:
                 next_cursor = (
-                    last_created_at.isoformat()
-                    if hasattr(last_created_at, "isoformat")
-                    else str(last_created_at)
+                    last_created_at.isoformat() if hasattr(last_created_at, "isoformat") else str(last_created_at)
                 )
 
             return SessionSearchResponse(
@@ -743,16 +776,12 @@ class SessionService:
         except SessionValidationError:
             raise
         except Exception as e:
-            logger.error(
-                f"Error searching sessions for user {user_id}: {e}", exc_info=True
-            )
+            logger.error(f"Error searching sessions for user {user_id}: {e}", exc_info=True)
             raise SessionServiceError(f"Failed to search sessions: {str(e)}")
 
     # Utility Methods
 
-    async def get_session_summary(
-        self, session_id: str, user_id: Optional[str] = None
-    ) -> SessionSummaryResponse:
+    async def get_session_summary(self, session_id: str, user_id: Optional[str] = None) -> SessionSummaryResponse:
         """
         Get session summary with metrics
         """

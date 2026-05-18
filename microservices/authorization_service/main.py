@@ -38,6 +38,8 @@ from .models import (
     UserPermissionSummary,
     BulkPermissionRequest,
     AssignRoleRequest,
+    ProjectAccessCheckRequest,
+    ProjectAccessCheckResponse,
 )
 from .role_validator import (
     is_valid_org_role,
@@ -75,9 +77,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Event bus initialized successfully")
 
             # Initialize authorization service using factory pattern
-            authorization_service = create_authorization_service(
-                config=config_manager, event_bus=event_bus
-            )
+            authorization_service = create_authorization_service(config=config_manager, event_bus=event_bus)
 
             # Subscribe to events
             from .events import AuthorizationEventHandlers
@@ -87,23 +87,17 @@ async def lifespan(app: FastAPI):
 
             for event_type, handler_func in handler_map.items():
                 # Subscribe to each event type
-                await event_bus.subscribe_to_events(
-                    pattern=f"*.{event_type}", handler=handler_func
-                )
+                await event_bus.subscribe_to_events(pattern=f"*.{event_type}", handler=handler_func)
                 logger.info(f"✅ Subscribed to {event_type} events")
 
             logger.info(f"✅ Subscribed to {len(handler_map)} event types")
 
         except Exception as e:
-            logger.warning(
-                f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing."
-            )
+            logger.warning(f"⚠️  Failed to initialize event bus: {e}. Continuing without event publishing.")
             event_bus = None
 
             # Initialize authorization service using factory pattern (without event bus)
-            authorization_service = create_authorization_service(
-                config=config_manager, event_bus=None
-            )
+            authorization_service = create_authorization_service(config=config_manager, event_bus=None)
 
         # Initialize default permissions
         await authorization_service.initialize_default_permissions()
@@ -132,9 +126,7 @@ async def lifespan(app: FastAPI):
                 )
                 consul_registry.register()
                 consul_registry.start_maintenance()  # Start TTL heartbeat
-                logger.info(
-                    f"✅ Service registered with Consul: {route_meta.get('route_count')} routes"
-                )
+                logger.info(f"✅ Service registered with Consul: {route_meta.get('route_count')} routes")
             except Exception as e:
                 logger.warning(f"⚠️  Failed to register with Consul: {e}")
                 consul_registry = None
@@ -188,24 +180,20 @@ setup_metrics(app, "authorization_service")
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=500, content={"detail": f"Internal server error: {str(exc)}"}
-    )
+    return JSONResponse(status_code=500, content={"detail": f"Internal server error: {str(exc)}"})
 
 
 # ==========================================
 # Health Check & Service Information
 # ==========================================
 
-health = HealthCheck(
-    "authorization_service", version="1.0.0", shutdown_manager=shutdown_manager
-)
+health = HealthCheck("authorization_service", version="1.0.0", shutdown_manager=shutdown_manager)
 health.add_postgres(
-    lambda: authorization_service.repository.db
-    if authorization_service
-    and hasattr(authorization_service, "repository")
-    and authorization_service.repository
-    else None
+    lambda: (
+        authorization_service.repository.db
+        if authorization_service and hasattr(authorization_service, "repository") and authorization_service.repository
+        else None
+    )
 )
 health.add_nats(lambda: event_bus)
 
@@ -291,6 +279,63 @@ async def check_resource_access(request: ResourceAccessRequest):
         raise HTTPException(status_code=500, detail=f"Access check failed: {str(e)}")
 
 
+@app.post(
+    "/api/v1/authorization/check",
+    response_model=ProjectAccessCheckResponse,
+)
+async def check_project_access(request: ProjectAccessCheckRequest):
+    """
+    Story 9: per-action permission check for project resources.
+
+    Body: ``{ user_id, resource_type: 'project', resource_id, action }``.
+    Action must be one of ``read | write | admin``.
+
+    Viewers on a project can read but cannot write. Editors can write.
+    Owners can do anything. Project ownership (i.e. the user that
+    created the project) is NOT resolved here — that lives in
+    project_service. This endpoint authoritatively enforces the
+    shared-collaboration rules from project_sharing_service.
+    """
+    global authorization_service
+
+    if not authorization_service:
+        raise HTTPException(status_code=503, detail="Service not available")
+
+    # Only the 'project' resource type is wired up — reject unknown
+    # types up front so the frontend gets a clear 400 rather than a
+    # silent allow.
+    if request.resource_type != "project":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unsupported resource_type {request.resource_type!r}; only 'project' is currently supported by /check"
+            ),
+        )
+
+    if request.action not in ("read", "write", "admin"):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"invalid action {request.action!r}; expected one of read | write | admin"),
+        )
+
+    try:
+        result = await authorization_service.check_project_access(
+            user_id=request.user_id,
+            project_id=request.resource_id,
+            action=request.action,
+        )
+        return ProjectAccessCheckResponse(
+            allowed=bool(result.get("allowed", False)),
+            reason=result.get("reason"),
+        )
+    except Exception as e:
+        logger.error(f"check_project_access failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"project access check failed: {str(e)}",
+        )
+
+
 @app.post("/api/v1/authorization/grant")
 async def grant_permission(request: GrantPermissionRequest):
     """Grant resource access permission to user"""
@@ -313,9 +358,7 @@ async def grant_permission(request: GrantPermissionRequest):
 
     except Exception as e:
         logger.error(f"Grant permission failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Grant permission failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Grant permission failed: {str(e)}")
 
 
 @app.post("/api/v1/authorization/revoke")
@@ -340,9 +383,7 @@ async def revoke_permission(request: RevokePermissionRequest):
 
     except Exception as e:
         logger.error(f"Revoke permission failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Revoke permission failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Revoke permission failed: {str(e)}")
 
 
 # ==========================================
@@ -375,9 +416,7 @@ async def get_user_permissions(user_id: str):
         raise
     except Exception as e:
         logger.error(f"Get user permissions failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Get user permissions failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Get user permissions failed: {str(e)}")
 
 
 @app.get("/api/v1/authorization/user-resources/{user_id}")
@@ -391,9 +430,7 @@ async def list_user_accessible_resources(user_id: str, resource_type: str = None
     try:
         logger.info(f"Listing accessible resources for user: {user_id}")
 
-        resources = await authorization_service.list_user_accessible_resources(
-            user_id, resource_type
-        )
+        resources = await authorization_service.list_user_accessible_resources(user_id, resource_type)
 
         return {
             "user_id": user_id,
@@ -404,9 +441,7 @@ async def list_user_accessible_resources(user_id: str, resource_type: str = None
 
     except Exception as e:
         logger.error(f"List user resources failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"List user resources failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"List user resources failed: {str(e)}")
 
 
 @app.post("/api/v1/authorization/bulk-grant")
@@ -431,9 +466,7 @@ async def bulk_grant_permissions(request: BulkPermissionRequest):
 
     except Exception as e:
         logger.error(f"Bulk grant permissions failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Bulk grant permissions failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Bulk grant permissions failed: {str(e)}")
 
 
 @app.post("/api/v1/authorization/bulk-revoke")
@@ -458,9 +491,7 @@ async def bulk_revoke_permissions(request: BulkPermissionRequest):
 
     except Exception as e:
         logger.error(f"Bulk revoke permissions failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Bulk revoke permissions failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Bulk revoke permissions failed: {str(e)}")
 
 
 # ==========================================
@@ -500,8 +531,7 @@ async def assign_role(request: AssignRoleRequest):
                 detail={
                     "rule": "invalid_org_role",
                     "message": (
-                        f"{request.assignee_role!r} is not a valid org role — "
-                        "see docs/guidance/role-taxonomy.md"
+                        f"{request.assignee_role!r} is not a valid org role — see docs/guidance/role-taxonomy.md"
                     ),
                 },
             )
@@ -595,9 +625,7 @@ def main():
     # Print configuration summary for debugging
     config_manager.print_config_summary()
 
-    logger.info(
-        f"🚀 Starting Authorization Microservice on port {config.service_port}..."
-    )
+    logger.info(f"🚀 Starting Authorization Microservice on port {config.service_port}...")
 
     try:
         uvicorn.run(
