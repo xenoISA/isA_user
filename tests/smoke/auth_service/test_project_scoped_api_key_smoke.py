@@ -4,7 +4,9 @@ import pytest
 
 from microservices.auth_service.api_key_repository import ApiKeyRepository
 from microservices.auth_service.api_key_service import ApiKeyService
-from tests.integration.tdd.auth_service.test_project_scoped_api_keys import MemoryApiKeyDb
+from tests.integration.tdd.auth_service.test_project_scoped_api_keys import (
+    MemoryApiKeyDb,
+)
 
 pytestmark = [pytest.mark.smoke, pytest.mark.asyncio]
 
@@ -57,5 +59,7 @@ async def test_project_scoped_api_key_create_verify_list_revoke_smoke(repository
     revoked = await service.revoke_api_key(created["key_id"], "org_1")
     assert revoked["success"] is True
 
-    verify_revoked = await service.verify_api_key(created["api_key"], project_id="proj_1")
+    verify_revoked = await service.verify_api_key(
+        created["api_key"], project_id="proj_1"
+    )
     assert verify_revoked["valid"] is False

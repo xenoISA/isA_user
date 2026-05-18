@@ -144,9 +144,7 @@ async def test_list_api_keys_filters_by_project_and_hides_secret_material(
     assert body["api_keys"][0]["project_id"] == "proj_1"
     assert "api_key" not in body["api_keys"][0]
     assert "key_hash" not in body["api_keys"][0]
-    api_key_service.list_api_keys.assert_awaited_once_with(
-        "org_1", project_id="proj_1"
-    )
+    api_key_service.list_api_keys.assert_awaited_once_with("org_1", project_id="proj_1")
 
 
 async def test_verify_api_key_returns_project_metadata(api_key_service):

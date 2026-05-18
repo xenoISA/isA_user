@@ -111,7 +111,9 @@ async def test_create_service_account_key_requires_service_account_id(service, r
     repo.create_api_key.assert_not_awaited()
 
 
-async def test_list_api_keys_passes_project_filter_and_counts_filtered_keys(service, repo):
+async def test_list_api_keys_passes_project_filter_and_counts_filtered_keys(
+    service, repo
+):
     repo.get_organization_api_keys.return_value = [
         {"key_id": "key_1", "project_id": "proj_1", "key_preview": "isa_...abcd"}
     ]

@@ -225,7 +225,9 @@ class ApiKeyRepository:
             if owner_type not in API_KEY_OWNER_TYPES:
                 raise ValueError(f"Unsupported API key owner_type: {owner_type}")
             if owner_type == "service_account" and not service_account_id:
-                raise ValueError("service_account_id is required for service-account keys")
+                raise ValueError(
+                    "service_account_id is required for service-account keys"
+                )
 
             api_key = self._generate_api_key("isa")
             key_hash = self._hash_api_key(api_key)
