@@ -88,7 +88,8 @@ class MockProjectRepository:
             user_projects = [
                 p
                 for p in self._projects.values()
-                if p.get("organization_id") == organization_id or p.get("org_id") == organization_id
+                if p.get("organization_id") == organization_id
+                or p.get("org_id") == organization_id
             ]
         else:
             user_projects = [
