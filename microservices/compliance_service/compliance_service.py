@@ -125,6 +125,15 @@ class ComplianceService:
         await self._publish_data_request_event(
             "compliance.gdpr_request.created", created
         )
+        await self._publish_gdpr_admin_audit_event(
+            "created",
+            created,
+            actor_user_id=created.requested_by,
+            changes={
+                "status": {"after": created.status.value},
+                "request_type": {"after": created.request_type.value},
+            },
+        )
         return created
 
     async def list_data_requests(
@@ -234,6 +243,12 @@ class ComplianceService:
             await self._publish_data_request_event(
                 "compliance.gdpr_request.deletion_approved", updated
             )
+            await self._publish_gdpr_admin_audit_event(
+                "deletion_approved",
+                updated,
+                actor_user_id=approval.approved_by,
+                changes={"approved_by": {"after": approval.approved_by}},
+            )
         return updated
 
     async def run_data_request(
@@ -276,6 +291,22 @@ class ComplianceService:
                 await self._publish_data_request_event(
                     "compliance.gdpr_request.completed", completed
                 )
+                await self._publish_gdpr_admin_audit_event(
+                    "completed",
+                    completed,
+                    actor_user_id=completed.approved_by or completed.requested_by,
+                    changes={
+                        "status": {"after": completed.status.value},
+                        "artifact_uri": {"after": completed.artifact_uri},
+                    },
+                    metadata={
+                        "tombstone": (completed.metadata or {})
+                        .get("deletion_result", {})
+                        .get("tombstone")
+                    }
+                    if completed.request_type == GDPRDataRequestType.DELETE
+                    else {"artifact_uri": completed.artifact_uri},
+                )
             return completed
 
         except Exception as exc:
@@ -288,6 +319,15 @@ class ComplianceService:
             if failed:
                 await self._publish_data_request_event(
                     "compliance.gdpr_request.failed", failed
+                )
+                await self._publish_gdpr_admin_audit_event(
+                    "failed",
+                    failed,
+                    actor_user_id=failed.approved_by or failed.requested_by,
+                    changes={
+                        "status": {"after": failed.status.value},
+                        "failure_reason": {"after": failed.failure_reason},
+                    },
                 )
             raise
 
@@ -358,6 +398,7 @@ class ComplianceService:
     async def _run_delete_data_request(
         self, data_request: GDPRDataRequest, service_names: List[str]
     ) -> Dict[str, Any]:
+        deleted_at = datetime.utcnow()
         deleted_count = await self.repository.delete_user_data(data_request.user_id)
         cascade_event = await self._publish_user_deleted_cascade_event(data_request)
         if cascade_event.get("status") == "failed":
@@ -374,13 +415,20 @@ class ComplianceService:
         }
 
         metadata = dict(data_request.metadata or {})
+        tombstone = self._build_gdpr_deletion_tombstone(
+            data_request=data_request,
+            deleted_count=deleted_count,
+            cascade_event=cascade_event,
+            deleted_at=deleted_at,
+        )
         metadata["deletion_result"] = {
             "request_id": data_request.request_id,
-            "user_id": data_request.user_id,
+            "subject_user_hash": tombstone["subject_user_hash"],
             "organization_id": data_request.organization_id,
-            "deleted_at": datetime.utcnow().isoformat(),
+            "deleted_at": deleted_at.isoformat(),
             "services": {"compliance_service": {"records_deleted": deleted_count}},
             "cascade_event": cascade_event,
+            "tombstone": tombstone,
         }
         return {
             "artifact_uri": data_request.artifact_uri,
@@ -402,6 +450,32 @@ class ComplianceService:
 
     def _gdpr_artifact_storage_enabled(self) -> bool:
         return bool(getattr(self, "enable_gdpr_artifact_storage", False))
+
+    @staticmethod
+    def _gdpr_subject_hash(user_id: str) -> str:
+        return hashlib.sha256(user_id.encode("utf-8")).hexdigest()
+
+    def _build_gdpr_deletion_tombstone(
+        self,
+        *,
+        data_request: GDPRDataRequest,
+        deleted_count: int,
+        cascade_event: Dict[str, Any],
+        deleted_at: datetime,
+    ) -> Dict[str, Any]:
+        return {
+            "gdpr_request_id": data_request.request_id,
+            "request_type": data_request.request_type.value,
+            "subject_user_hash": self._gdpr_subject_hash(data_request.user_id),
+            "organization_id": data_request.organization_id,
+            "requested_by": data_request.requested_by,
+            "approved_by": data_request.approved_by,
+            "deleted_at": deleted_at.isoformat(),
+            "records_deleted": {"compliance_service": deleted_count},
+            "cascade_event_status": cascade_event.get("status"),
+            "cascade_event_subject": cascade_event.get("subject"),
+            "retention_policy": "gdpr_erasure_tombstone",
+        }
 
     async def _persist_export_artifact(
         self, data_request: GDPRDataRequest, export_bundle: Dict[str, Any]
@@ -557,6 +631,58 @@ class ComplianceService:
                 "subject": "account_service.user.deleted",
                 "error": str(exc),
             }
+
+    async def _publish_gdpr_admin_audit_event(
+        self,
+        action: str,
+        data_request: GDPRDataRequest,
+        *,
+        actor_user_id: Optional[str],
+        changes: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.event_bus:
+            return
+
+        try:
+            from core.nats_client import Event
+
+            action_name = f"gdpr_data_request.{action}"
+            subject = f"admin.action.gdpr_data_request.{action}"
+            audit_metadata = {
+                "service": "compliance_service",
+                "gdpr_request_id": data_request.request_id,
+                "request_type": data_request.request_type.value,
+                "request_status": data_request.status.value,
+                "subject_user_hash": self._gdpr_subject_hash(data_request.user_id),
+                "organization_id": data_request.organization_id,
+                "retention_policy": "gdpr_admin_audit",
+            }
+            if metadata:
+                audit_metadata.update(
+                    {key: value for key, value in metadata.items() if value is not None}
+                )
+
+            event = Event(
+                event_type=subject,
+                source="compliance_service",
+                data={
+                    "admin_user_id": actor_user_id or "system",
+                    "action": action_name,
+                    "resource_type": "gdpr_data_request",
+                    "resource_id": data_request.request_id,
+                    "changes": changes or {},
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "metadata": audit_metadata,
+                },
+                metadata={
+                    "gdpr_request_id": data_request.request_id,
+                    "gdpr_request_type": data_request.request_type.value,
+                },
+            )
+            await self.event_bus.publish_event(event, subject=subject)
+        except Exception as exc:
+            logger.warning("Failed to publish GDPR admin audit event: %s", exc)
 
     async def _publish_data_request_event(
         self, event_type: str, data_request: GDPRDataRequest
