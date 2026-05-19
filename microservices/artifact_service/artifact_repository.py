@@ -20,7 +20,9 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from google.protobuf.json_format import MessageToDict  # type: ignore
 from google.protobuf.struct_pb2 import ListValue, Struct  # type: ignore
@@ -130,10 +132,14 @@ class ArtifactRepository:
             await self.db.insert_into(self.artifacts_table, [data], schema=self.schema)
         fetched = await self.get_artifact(artifact.id)
         if fetched is None:  # pragma: no cover - defensive
-            raise RuntimeError(f"insert succeeded but artifact {artifact.id} not visible")
+            raise RuntimeError(
+                f"insert succeeded but artifact {artifact.id} not visible"
+            )
         return fetched
 
-    async def get_artifact(self, artifact_id: str, include_deleted: bool = False) -> Optional[Artifact]:
+    async def get_artifact(
+        self, artifact_id: str, include_deleted: bool = False
+    ) -> Optional[Artifact]:
         try:
             query = f"""
                 SELECT * FROM {self.schema}.{self.artifacts_table}
@@ -208,7 +214,9 @@ class ArtifactRepository:
         """
 
         async with self.db:
-            count_row = await self.db.query_row(count_sql, params[:-1], schema=self.schema)
+            count_row = await self.db.query_row(
+                count_sql, params[:-1], schema=self.schema
+            )
             rows = await self.db.query(list_sql, params, schema=self.schema)
 
         total = int(count_row.get("n", 0)) if count_row else 0
@@ -252,7 +260,9 @@ class ArtifactRepository:
 
         return artifacts, next_cursor, total
 
-    async def update_artifact(self, artifact_id: str, fields: dict) -> Optional[Artifact]:
+    async def update_artifact(
+        self, artifact_id: str, fields: dict
+    ) -> Optional[Artifact]:
         if not fields:
             return await self.get_artifact(artifact_id)
         set_clauses = []
@@ -286,7 +296,9 @@ class ArtifactRepository:
             WHERE id = $3 AND deleted_at IS NULL
         """
         async with self.db:
-            count = await self.db.execute(sql, [version_id, _now_naive(), artifact_id], schema=self.schema)
+            count = await self.db.execute(
+                sql, [version_id, _now_naive(), artifact_id], schema=self.schema
+            )
         return bool(count and count > 0)
 
     async def soft_delete_artifact(self, artifact_id: str, user_id: str) -> bool:
@@ -296,12 +308,16 @@ class ArtifactRepository:
             WHERE id = $2 AND owner_user_id = $3 AND deleted_at IS NULL
         """
         async with self.db:
-            count = await self.db.execute(sql, [_now_naive(), artifact_id, user_id], schema=self.schema)
+            count = await self.db.execute(
+                sql, [_now_naive(), artifact_id, user_id], schema=self.schema
+            )
         return bool(count and count > 0)
 
     # ==================== Versions ====================
 
-    async def add_version(self, artifact_id: str, version: ArtifactVersion) -> ArtifactVersion:
+    async def add_version(
+        self, artifact_id: str, version: ArtifactVersion
+    ) -> ArtifactVersion:
         data = {
             "id": version.id,
             "artifact_id": artifact_id,
@@ -380,7 +396,9 @@ class ArtifactRepository:
             "artifact_id": share.artifact_id,
             "version_pin": share.version_pin,
             "visibility": (
-                share.visibility.value if isinstance(share.visibility, ArtifactShareVisibility) else share.visibility
+                share.visibility.value
+                if isinstance(share.visibility, ArtifactShareVisibility)
+                else share.visibility
             ),
             "org_id": share.org_id,
             "created_by": share.created_by,
@@ -433,7 +451,9 @@ class ArtifactRepository:
             WHERE token = $2 AND artifact_id = $3 AND revoked_at IS NULL
         """
         async with self.db:
-            count = await self.db.execute(sql, [_now_naive(), token, artifact_id], schema=self.schema)
+            count = await self.db.execute(
+                sql, [_now_naive(), token, artifact_id], schema=self.schema
+            )
         return int(count or 0)
 
     async def revoke_all_shares(self, artifact_id: str) -> int:
@@ -444,7 +464,9 @@ class ArtifactRepository:
             WHERE artifact_id = $2 AND revoked_at IS NULL
         """
         async with self.db:
-            count = await self.db.execute(sql, [_now_naive(), artifact_id], schema=self.schema)
+            count = await self.db.execute(
+                sql, [_now_naive(), artifact_id], schema=self.schema
+            )
         return int(count or 0)
 
     async def increment_view_count(self, token: str) -> bool:
@@ -470,7 +492,9 @@ class ArtifactRepository:
 
         return datetime.now(timezone.utc).date()
 
-    async def get_today_usage(self, artifact_id: str, user_id: str) -> ArtifactRuntimeUsage:
+    async def get_today_usage(
+        self, artifact_id: str, user_id: str
+    ) -> ArtifactRuntimeUsage:
         """Return today's usage row for the (artifact, user) pair.
 
         When no row exists for today we return a zeroed view so callers don't
@@ -484,7 +508,9 @@ class ArtifactRepository:
         """
         try:
             async with self.db:
-                row = await self.db.query_row(sql, [artifact_id, user_id, today], schema=self.schema)
+                row = await self.db.query_row(
+                    sql, [artifact_id, user_id, today], schema=self.schema
+                )
         except Exception as e:
             logger.error(f"get_today_usage({artifact_id},{user_id}) failed: {e}")
             row = None
@@ -579,8 +605,14 @@ class ArtifactRepository:
         insert a fresh row so audit history stays intact.
         """
         now = _now_naive()
-        decision = grant.decision.value if isinstance(grant.decision, MCPGrantDecision) else grant.decision
-        scope = grant.scope.value if isinstance(grant.scope, MCPGrantScope) else grant.scope
+        decision = (
+            grant.decision.value
+            if isinstance(grant.decision, MCPGrantDecision)
+            else grant.decision
+        )
+        scope = (
+            grant.scope.value if isinstance(grant.scope, MCPGrantScope) else grant.scope
+        )
 
         if decision == "allow" and scope == "always":
             sql = f"""
@@ -632,13 +664,17 @@ class ArtifactRepository:
         """Return an active ``allow``+``always`` grant, or None.
 
         ``expires_at`` is honoured — expired grants behave as if absent so
-        the next /mcp/call falls back to the approval prompt.
+        the next /mcp/call falls back to the approval prompt. The cutoff is
+        evaluated server-side via ``NOW()`` so we don't depend on Python<->
+        gRPC datetime serialisation matching ``TIMESTAMPTZ`` semantics
+        (xenoISA/isA_user#452 item 7 — naive Python datetime parameters
+        were not being honoured against the timezone-aware column).
         """
         sql = f"""
             SELECT * FROM {self.schema}.artifact_mcp_grants
             WHERE artifact_id = $1 AND user_id = $2 AND tool_name = $3 AND server_id = $4
               AND decision = 'allow' AND scope = 'always'
-              AND (expires_at IS NULL OR expires_at > $5)
+              AND (expires_at IS NULL OR expires_at > NOW())
             ORDER BY approved_at DESC
             LIMIT 1
         """
@@ -646,7 +682,7 @@ class ArtifactRepository:
             async with self.db:
                 row = await self.db.query_row(
                     sql,
-                    [artifact_id, user_id, tool_name, server_id, _now_naive()],
+                    [artifact_id, user_id, tool_name, server_id],
                     schema=self.schema,
                 )
         except Exception as e:
@@ -656,7 +692,9 @@ class ArtifactRepository:
             return None
         return self._row_to_grant(row)
 
-    async def list_grants(self, artifact_id: str, user_id: str) -> List[ArtifactMCPGrant]:
+    async def list_grants(
+        self, artifact_id: str, user_id: str
+    ) -> List[ArtifactMCPGrant]:
         sql = f"""
             SELECT * FROM {self.schema}.artifact_mcp_grants
             WHERE artifact_id = $1 AND user_id = $2
@@ -664,7 +702,9 @@ class ArtifactRepository:
         """
         try:
             async with self.db:
-                rows = await self.db.query(sql, [artifact_id, user_id], schema=self.schema)
+                rows = await self.db.query(
+                    sql, [artifact_id, user_id], schema=self.schema
+                )
             return [self._row_to_grant(r) for r in rows]
         except Exception as e:
             logger.error(f"list_grants({artifact_id},{user_id}) failed: {e}")
@@ -677,7 +717,9 @@ class ArtifactRepository:
             WHERE id = $2
         """
         async with self.db:
-            count = await self.db.execute(sql, [_now_naive(), grant_id], schema=self.schema)
+            count = await self.db.execute(
+                sql, [_now_naive(), grant_id], schema=self.schema
+            )
         return bool(count and count > 0)
 
     # ==================== Phase 3: KV storage ====================
@@ -708,7 +750,9 @@ class ArtifactRepository:
         """
         try:
             async with self.db:
-                row = await self.db.query_row(sql, [artifact_id, scope, ukey, key], schema=self.schema)
+                row = await self.db.query_row(
+                    sql, [artifact_id, scope, ukey, key], schema=self.schema
+                )
         except Exception as e:
             logger.error(f"kv_get({artifact_id},{scope},{key}) failed: {e}")
             return None
@@ -797,5 +841,7 @@ class ArtifactRepository:
             WHERE artifact_id = $1 AND scope = $2 AND user_id = $3 AND key = $4
         """
         async with self.db:
-            count = await self.db.execute(sql, [artifact_id, scope, ukey, key], schema=self.schema)
+            count = await self.db.execute(
+                sql, [artifact_id, scope, ukey, key], schema=self.schema
+            )
         return bool(count and count > 0)

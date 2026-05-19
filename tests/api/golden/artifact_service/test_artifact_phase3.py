@@ -23,6 +23,7 @@ in CI is 50; the dedicated quota test temporarily relies on a sub-quota cap
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -119,7 +120,9 @@ class TestRuntimeInvoke:
 
 
 class TestRuntimeQuota:
-    async def test_exceeding_cap_returns_429_with_retry_after(self, http_client, user_id):
+    async def test_exceeding_cap_returns_429_with_retry_after(
+        self, http_client, user_id
+    ):
         art = await _create_artifact(http_client, user_id)
         # Drain the quota exactly to the cap.
         for i in range(TEST_QUOTA):
@@ -136,7 +139,9 @@ class TestRuntimeQuota:
         )
         assert over.status_code == 429, over.text
         assert "retry-after" in {k.lower() for k in over.headers.keys()}
-        retry_after_header = over.headers.get("Retry-After") or over.headers.get("retry-after") or "0"
+        retry_after_header = (
+            over.headers.get("Retry-After") or over.headers.get("retry-after") or "0"
+        )
         assert int(retry_after_header) > 0
         # Body carries machine-readable detail for the BFF to surface.
         detail = over.json().get("detail", {})
@@ -271,6 +276,82 @@ class TestMCPApprovalGate:
         names = {g["tool_name"] for g in grants}
         assert "net.fetch" in names
 
+    async def test_expired_grant_falls_back_to_approval_prompt(
+        self, http_client, user_id
+    ):
+        """A grant whose ``expires_at`` is in the past MUST NOT short-circuit
+        the approval gate — /mcp/call must respond identically to the
+        no-grant case (``requires_approval=True``).
+
+        Partial close of xenoISA/isA_#452 item 7 (security review): expired
+        grants were previously honoured because the SQL filter was missing
+        in earlier drafts. This test pins the SQL filter
+        ``AND (expires_at IS NULL OR expires_at > NOW())`` so a regression
+        re-opens the vulnerability.
+        """
+        art = await _create_artifact(http_client, user_id)
+        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        ap = await http_client.post(
+            f"{API_BASE}/artifacts/{art['id']}/mcp/approve",
+            json={
+                "user_id": user_id,
+                "tool_name": "fs.read_file",
+                "server_id": "isA_MCP",
+                "decision": "allow",
+                "scope": "always",
+                "expires_at": past.isoformat(),
+            },
+        )
+        assert ap.status_code == 200, ap.text
+
+        call = await http_client.post(
+            f"{API_BASE}/artifacts/{art['id']}/mcp/call",
+            json={
+                "user_id": user_id,
+                "tool_name": "fs.read_file",
+                "server_id": "isA_MCP",
+                "args": {"path": "/etc/hosts"},
+            },
+        )
+        assert call.status_code == 200, call.text
+        body = call.json()
+        # Expired -> same response as "no grant".
+        assert body["requires_approval"] is True
+        assert body.get("result") is None
+        assert "fs.read_file" in body["prompt"]
+
+    async def test_future_expires_at_still_allows_call(self, http_client, user_id):
+        """A grant with ``expires_at`` in the future MUST still proceed."""
+        art = await _create_artifact(http_client, user_id)
+        future = datetime.now(timezone.utc) + timedelta(hours=1)
+        ap = await http_client.post(
+            f"{API_BASE}/artifacts/{art['id']}/mcp/approve",
+            json={
+                "user_id": user_id,
+                "tool_name": "fs.read_file",
+                "server_id": "isA_MCP",
+                "decision": "allow",
+                "scope": "always",
+                "expires_at": future.isoformat(),
+            },
+        )
+        assert ap.status_code == 200, ap.text
+
+        call = await http_client.post(
+            f"{API_BASE}/artifacts/{art['id']}/mcp/call",
+            json={
+                "user_id": user_id,
+                "tool_name": "fs.read_file",
+                "server_id": "isA_MCP",
+                "args": {"path": "/etc/hosts"},
+            },
+        )
+        assert call.status_code == 200
+        body = call.json()
+        assert body["requires_approval"] is False
+        assert body["scope_used"] == "always"
+        assert body["result"] is not None
+
 
 # ==========================================================================
 # KV storage
@@ -295,7 +376,9 @@ class TestKVPersonalScope:
         assert got.status_code == 200
         assert got.json()["value"] == {"text": "hello", "n": 42}
 
-    async def test_personal_is_isolated_per_user(self, http_client, user_id, other_user_id):
+    async def test_personal_is_isolated_per_user(
+        self, http_client, user_id, other_user_id
+    ):
         """User A's personal KV must NOT be visible to User B."""
         art = await _create_artifact(http_client, user_id)
         await http_client.put(
@@ -332,7 +415,9 @@ class TestKVPersonalScope:
 
 
 class TestKVSharedScope:
-    async def test_shared_write_requires_storage_scope_shared(self, http_client, user_id):
+    async def test_shared_write_requires_storage_scope_shared(
+        self, http_client, user_id
+    ):
         # storage_scope='none' on the artifact → shared write rejected (403).
         art = await _create_artifact(http_client, user_id, storage_scope="none")
         resp = await http_client.put(
@@ -342,7 +427,9 @@ class TestKVSharedScope:
         )
         assert resp.status_code == 403, resp.text
 
-    async def test_shared_value_visible_to_other_users(self, http_client, user_id, other_user_id):
+    async def test_shared_value_visible_to_other_users(
+        self, http_client, user_id, other_user_id
+    ):
         """When storage_scope='shared', writes are readable cross-user."""
         art = await _create_artifact(http_client, user_id, storage_scope="shared")
         put = await http_client.put(
