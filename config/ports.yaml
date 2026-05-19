@@ -420,6 +420,11 @@ microservices:
     k8s_service: "project-sharing"
     description: "Project-level invite/accept/revoke for project collaboration (#442, paired with isA_/#429)"
 
+  connector_service:
+    port: 8292
+    k8s_service: "connector"
+    description: "Connector marketplace + custom remote MCP — xenoISA/isA_#464"
+
 # =============================================================================
 # Port Ranges Summary
 # =============================================================================

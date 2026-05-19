@@ -1,0 +1,118 @@
+# =============================================================================
+# Built-in connector catalog (xenoISA/isA_#464 backend slice).
+#
+# Seeded into the GET /api/v1/connectors/catalog response. The frontend
+# ConnectorMarketplace renders these as the static rows of the marketplace.
+# Per-user install state lives in the `connector.connector` table; it is
+# initially empty for every user and only gets populated once a user
+# clicks "Connect" (which, in this slice, is a no-op stub — see
+# connector_marketplace_service.md for the OAuth handoff spec).
+#
+# Schema:
+#   id:                   stable provider id (e.g. google_drive)
+#   name:                 user-visible name
+#   description:          short marketplace blurb
+#   icon:                 iconify id or url; the frontend resolves both
+#   category:             calendar | storage | crm | email | productivity | custom
+#   auth_type:            oauth2 | api_key | none | custom
+#   capabilities:         machine-readable capabilities
+#   availability:         available | beta | disabled | unsupported
+#   provider_metadata:    free-form (oauth scopes, docs urls, …)
+# =============================================================================
+
+connectors:
+  - id: google_drive
+    name: Google Drive
+    description: Read and write files in the user's Google Drive.
+    icon: logos:google-drive
+    category: storage
+    auth_type: oauth2
+    availability: available
+    capabilities:
+      - drive.files.read
+      - drive.files.write
+    provider_metadata:
+      provider: google
+      scopes:
+        - https://www.googleapis.com/auth/drive
+      docs_url: https://developers.google.com/drive/api
+
+  - id: gmail
+    name: Gmail
+    description: Read, send, and manage email through Gmail.
+    icon: logos:google-gmail
+    category: email
+    auth_type: oauth2
+    availability: available
+    capabilities:
+      - gmail.messages.read
+      - gmail.messages.send
+    provider_metadata:
+      provider: google
+      scopes:
+        - https://www.googleapis.com/auth/gmail.modify
+      docs_url: https://developers.google.com/gmail/api
+
+  - id: slack
+    name: Slack
+    description: Read channels, send messages, and react in Slack workspaces.
+    icon: logos:slack-icon
+    category: productivity
+    auth_type: oauth2
+    availability: available
+    capabilities:
+      - slack.channels.read
+      - slack.messages.write
+    provider_metadata:
+      provider: slack
+      scopes:
+        - chat:write
+        - channels:read
+      docs_url: https://api.slack.com/docs
+
+  - id: github
+    name: GitHub
+    description: Browse repositories, open PRs, and manage issues on GitHub.
+    icon: logos:github-icon
+    category: productivity
+    auth_type: oauth2
+    availability: available
+    capabilities:
+      - github.repos.read
+      - github.issues.write
+      - github.pulls.write
+    provider_metadata:
+      provider: github
+      scopes:
+        - repo
+        - read:user
+      docs_url: https://docs.github.com/en/rest
+
+  - id: notion
+    name: Notion
+    description: Read and update pages and databases in Notion.
+    icon: logos:notion-icon
+    category: productivity
+    auth_type: oauth2
+    availability: available
+    capabilities:
+      - notion.pages.read
+      - notion.pages.write
+      - notion.databases.read
+    provider_metadata:
+      provider: notion
+      docs_url: https://developers.notion.com
+
+  - id: linear
+    name: Linear
+    description: Sync issues, projects, and cycles from Linear.
+    icon: logos:linear-icon
+    category: productivity
+    auth_type: oauth2
+    availability: available
+    capabilities:
+      - linear.issues.read
+      - linear.issues.write
+    provider_metadata:
+      provider: linear
+      docs_url: https://developers.linear.app

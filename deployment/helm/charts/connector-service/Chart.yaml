@@ -1,0 +1,29 @@
+apiVersion: v2
+name: connector-service
+description: |
+  Helm chart for the isA_user connector_service (xenoISA/isA_#464).
+
+  Renders a Deployment + Service + HPA for the connector marketplace +
+  custom remote MCP microservice on port 8292. Backend home for the
+  /api/v1/connectors/* routes that the ConnectorMarketplace UI in isA_
+  has been calling into the void.
+
+  Mirrors the shape of project-sharing-service / artifact-service so
+  the chart can be installed standalone. For the main cluster deploy
+  path, the service is also wired into the `services:` map in
+  deployment/helm/values-{staging,production}.yaml and rendered by
+  deploy.sh against the shared chart.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - connector
+  - marketplace
+  - mcp
+  - microservice
+  - isa-user
+home: https://github.com/xenoISA/isA_user
+sources:
+  - https://github.com/xenoISA/isA_user
+maintainers:
+  - name: isa-platform

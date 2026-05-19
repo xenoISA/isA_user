@@ -1,0 +1,93 @@
+# =============================================================================
+# connector_service — Helm values (xenoISA/isA_#464)
+# =============================================================================
+# Render:
+#   helm template deployment/helm/charts/connector-service/ \
+#     -f deployment/helm/charts/connector-service/values.yaml
+#
+# -----------------------------------------------------------------------------
+# Environment variables consumed by the service
+# (microservices/connector_service):
+# -----------------------------------------------------------------------------
+#   Service-specific:
+#     ALLOW_CUSTOM_MCP_CONNECTORS — gate POST/DELETE/revalidate on /custom
+#                                   (default true). Flip to false in prod if
+#                                   ops wants gradual rollout.
+#     ALLOW_PRIVATE_MCP_HOSTS    — bypass private-IP block (dev only, default
+#                                   false). Never set in staging/production.
+#     CONNECTOR_USE_DEV_VAULT    — use the in-process secret stub (default true
+#                                   until real vault_service wiring lands).
+#     CONNECTOR_DEV_AUTH         — allow X-User-Id header auth (default true in
+#                                   dev; flip false once real JWTs are in play).
+#     POSTGRES_HOST / POSTGRES_PORT / POSTGRES_DB
+#     POSTGRES_USER / POSTGRES_PASSWORD          (from user-secrets)
+#
+#   Platform / shared (injected via the umbrella `env:` block in
+#   deployment/helm/values-{staging,production}.yaml — duplicated here only
+#   for standalone-chart use):
+#     CONSUL_HOST / CONSUL_PORT / CONSUL_ENABLED
+#     NATS_URL / NATS_HOST / NATS_PORT
+#     REDIS_HOST / REDIS_PORT
+#     DB_POOL_BASE / DB_POOL_GROWTH / POD_REPLICA_COUNT  (epic #345 / #346)
+#     ENV / LOG_LEVEL / PYTHONPATH / PYTHONUNBUFFERED
+# =============================================================================
+
+enabled: true
+
+name: user-connector-service
+namespace: isa-cloud-staging
+
+image:
+  registry: harbor.local:30443
+  repository: isa/user-connector
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+replicas: 1
+
+port: 8292
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+
+health:
+  path: /health
+  initialDelaySeconds: 60
+  periodSeconds: 10
+
+service:
+  type: ClusterIP
+
+consul:
+  enabled: true
+
+# Service-specific env. Platform-wide env (POSTGRES_*, CONSUL_*, NATS_URL,
+# etc.) is injected by the umbrella values-{staging,production}.yaml `env:`
+# block via the shared isa-service chart. Standalone renders of this chart
+# still produce a working pod via the defaults below.
+env:
+  - name: SERVICE_NAME
+    value: "connector_service"
+  - name: SERVICE_PORT
+    value: "8292"
+  - name: ALLOW_CUSTOM_MCP_CONNECTORS
+    value: "true"
+  - name: ALLOW_PRIVATE_MCP_HOSTS
+    value: "false"
+  - name: CONNECTOR_USE_DEV_VAULT
+    value: "true"
+  - name: CONNECTOR_DEV_AUTH
+    value: "false"
