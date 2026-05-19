@@ -36,9 +36,7 @@ class ProceduralMemoryService:
         )
         self._collection_initialized = False  # Track if collection is ready
 
-        logger.info(
-            f"Procedural Memory Service initialized with ISA Model URL: {self.model_url}"
-        )
+        logger.info(f"Procedural Memory Service initialized with ISA Model URL: {self.model_url}")
 
     def _get_model_url(self) -> str:
         """Get ISA Model service URL via Consul or environment variable"""
@@ -81,7 +79,11 @@ class ProceduralMemoryService:
             logger.warning(f"Error ensuring Qdrant collection: {e}")
 
     async def store_procedural_memory(
-        self, user_id: str, dialog_content: str, importance_score: float = 0.5
+        self,
+        user_id: str,
+        dialog_content: str,
+        importance_score: float = 0.5,
+        auth_token: Optional[str] = None,
     ) -> MemoryOperationResult:
         """
         Extract and store procedural memories from dialog content using AI
@@ -90,6 +92,11 @@ class ProceduralMemoryService:
             user_id: User ID
             dialog_content: Dialog content to analyze
             importance_score: Importance score
+            auth_token: Optional bearer JWT forwarded to isA_Model so the
+                upstream can apply user-level quotas + audit. Same pattern as
+                summary_service.synthesize_summary (PR xenoISA/isA_user#454)
+                and factual_service (PR #468). None preserves the existing
+                service-level auth path.
 
         Returns:
             MemoryOperationResult
@@ -99,7 +106,7 @@ class ProceduralMemoryService:
             await self._ensure_collection()
 
             # Extract procedures using LLM
-            extraction_result = await self._extract_procedures(dialog_content)
+            extraction_result = await self._extract_procedures(dialog_content, auth_token=auth_token)
 
             if not extraction_result["success"]:
                 return MemoryOperationResult(
@@ -155,25 +162,15 @@ class ProceduralMemoryService:
                                             "vector": embedding,
                                             "payload": {
                                                 "user_id": user_id,
-                                                "skill_type": procedure.get(
-                                                    "skill_type", "general"
-                                                ),
-                                                "domain": procedure.get(
-                                                    "domain", "general"
-                                                ),
-                                                "difficulty_level": procedure.get(
-                                                    "difficulty_level", "medium"
-                                                ),
-                                                "created_at": datetime.now(
-                                                    timezone.utc
-                                                ).isoformat(),
+                                                "skill_type": procedure.get("skill_type", "general"),
+                                                "domain": procedure.get("domain", "general"),
+                                                "difficulty_level": procedure.get("difficulty_level", "medium"),
+                                                "created_at": datetime.now(timezone.utc).isoformat(),
                                             },
                                         }
                                     ],
                                 )
-                            logger.info(
-                                f"Stored embedding to Qdrant for procedural memory {memory_id}"
-                            )
+                            logger.info(f"Stored embedding to Qdrant for procedural memory {memory_id}")
                         except Exception as e:
                             logger.error(f"Failed to store embedding to Qdrant: {e}")
 
@@ -203,8 +200,21 @@ class ProceduralMemoryService:
                 message=f"Error: {str(e)}",
             )
 
-    async def _extract_procedures(self, dialog_content: str) -> Dict[str, Any]:
-        """Extract procedures using ISA Model LLM"""
+    async def _extract_procedures(
+        self,
+        dialog_content: str,
+        auth_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Extract procedures using ISA Model LLM.
+
+        Args:
+            dialog_content: Dialog content to analyze
+            auth_token: Optional bearer JWT to forward to isA_Model so the
+                upstream can apply user-level quotas + audit. Pattern mirrors
+                summary_service.synthesize_summary (PR xenoISA/isA_user#454)
+                and factual_service._extract_facts (PR #468). When None/empty,
+                the existing service-level auth path is kept.
+        """
         try:
             system_prompt = """You are a procedural knowledge extraction system. Extract how-to knowledge and procedures from the conversation and return them in JSON format.
 For each procedure, identify:
@@ -221,7 +231,16 @@ Return ONLY valid JSON with a "procedures" array."""
 
             prompt = f"Extract procedural knowledge from this conversation and return as JSON:\n\n{dialog_content}"
 
-            async with AsyncISAModel(base_url=self.model_url) as client:
+            # JWT pass-through to isA_Model (#464). Empty/None token → no
+            # extra_headers, preserving the existing service-level auth path.
+            normalized = (auth_token or "").strip()
+            if normalized and not normalized.lower().startswith("bearer "):
+                normalized = f"Bearer {normalized}"
+            client_kwargs: Dict[str, Any] = {"base_url": self.model_url}
+            if normalized:
+                client_kwargs["extra_headers"] = {"Authorization": normalized}
+
+            async with AsyncISAModel(**client_kwargs) as client:
                 response = await client.chat.completions.create(
                     model="gpt-4.1-nano",
                     messages=[
@@ -252,9 +271,7 @@ Return ONLY valid JSON with a "procedures" array."""
         """Generate embedding using ISA Model"""
         try:
             async with AsyncISAModel(base_url=self.model_url) as client:
-                embedding = await client.embeddings.create(
-                    input=text, model="text-embedding-3-small"
-                )
+                embedding = await client.embeddings.create(input=text, model="text-embedding-3-small")
                 return embedding.data[0].embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
@@ -262,16 +279,10 @@ Return ONLY valid JSON with a "procedures" array."""
 
     def _is_valid_procedure(self, procedure: Dict[str, Any]) -> bool:
         """Check if extracted procedure is valid"""
-        return bool(
-            procedure.get("content")
-            and procedure.get("skill_type")
-            and procedure.get("steps")
-        )
+        return bool(procedure.get("content") and procedure.get("skill_type") and procedure.get("steps"))
 
     # Search methods
-    async def search_procedures_by_domain(
-        self, user_id: str, domain: str, limit: int = 10
-    ) -> List[Dict[str, Any]]:
+    async def search_procedures_by_domain(self, user_id: str, domain: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search procedures by domain"""
         return await self.repository.search_by_domain(user_id, domain, limit)
 
@@ -311,9 +322,7 @@ Return ONLY valid JSON with a "procedures" array."""
             if query_embedding is None:
                 query_embedding = await self._generate_embedding(query)
             if query_embedding is None:
-                logger.warning(
-                    "Failed to generate query embedding, falling back to text search"
-                )
+                logger.warning("Failed to generate query embedding, falling back to text search")
                 return await self.search_procedures_by_skill_type(user_id, query, limit)
 
             logger.info(
@@ -321,9 +330,7 @@ Return ONLY valid JSON with a "procedures" array."""
             )
 
             # Search Qdrant for similar vectors with user_id filter
-            filter_conditions = {
-                "must": [{"field": "user_id", "match": {"keyword": user_id}}]
-            }
+            filter_conditions = {"must": [{"field": "user_id", "match": {"keyword": user_id}}]}
 
             async with self.qdrant:
                 search_results = await self.qdrant.search_with_filter(
@@ -337,25 +344,15 @@ Return ONLY valid JSON with a "procedures" array."""
                 )
 
             if not search_results:
-                logger.info(
-                    f"No vector search results for user {user_id} with threshold {score_threshold}"
-                )
+                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
                 return []
 
             # Get memory IDs and scores from results
             memory_ids = [str(result["id"]) for result in search_results]
-            scores = {
-                str(result["id"]): result.get("score", 0.0) for result in search_results
-            }
-            vectors = (
-                {str(result["id"]): result.get("vector") for result in search_results}
-                if with_vectors
-                else {}
-            )
+            scores = {str(result["id"]): result.get("score", 0.0) for result in search_results}
+            vectors = {str(result["id"]): result.get("vector") for result in search_results} if with_vectors else {}
 
-            logger.info(
-                f"Vector search found {len(memory_ids)} procedural matches for user {user_id}"
-            )
+            logger.info(f"Vector search found {len(memory_ids)} procedural matches for user {user_id}")
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)

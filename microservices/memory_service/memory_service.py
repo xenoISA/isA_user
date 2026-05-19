@@ -772,10 +772,23 @@ class MemoryService:
         return result
 
     async def store_episodic_memory(
-        self, user_id: str, dialog_content: str, importance_score: float = 0.5
+        self,
+        user_id: str,
+        dialog_content: str,
+        importance_score: float = 0.5,
+        auth_token: Optional[str] = None,
     ) -> MemoryOperationResult:
-        """Extract and store episodic memories from dialog using AI"""
-        result = await self.episodic_service.store_episodic_memory(user_id, dialog_content, importance_score)
+        """Extract and store episodic memories from dialog using AI.
+
+        ``auth_token`` is forwarded to isA_Model so the upstream can apply
+        user-level quotas + audit (xenoISA/isA_user#464). None preserves the
+        existing service-level auth path. Same JWT pass-through pattern as
+        summary_service.synthesize_summary (PR #454) and factual extract
+        (PR #468); this PR closes out the extract slice.
+        """
+        result = await self.episodic_service.store_episodic_memory(
+            user_id, dialog_content, importance_score, auth_token=auth_token
+        )
 
         # A-MEM: link associations for newly stored memories (background)
         if result.success and result.data and result.data.get("memory_ids"):
@@ -820,10 +833,23 @@ class MemoryService:
         return result
 
     async def store_procedural_memory(
-        self, user_id: str, dialog_content: str, importance_score: float = 0.5
+        self,
+        user_id: str,
+        dialog_content: str,
+        importance_score: float = 0.5,
+        auth_token: Optional[str] = None,
     ) -> MemoryOperationResult:
-        """Extract and store procedural memories from dialog using AI"""
-        result = await self.procedural_service.store_procedural_memory(user_id, dialog_content, importance_score)
+        """Extract and store procedural memories from dialog using AI.
+
+        ``auth_token`` is forwarded to isA_Model so the upstream can apply
+        user-level quotas + audit (xenoISA/isA_user#464). None preserves the
+        existing service-level auth path. Same JWT pass-through pattern as
+        summary_service.synthesize_summary (PR #454) and factual extract
+        (PR #468); this PR closes out the extract slice.
+        """
+        result = await self.procedural_service.store_procedural_memory(
+            user_id, dialog_content, importance_score, auth_token=auth_token
+        )
 
         # A-MEM: link associations for newly stored memories (background)
         if result.success and result.data and result.data.get("memory_ids"):
@@ -868,10 +894,23 @@ class MemoryService:
         return result
 
     async def store_semantic_memory(
-        self, user_id: str, dialog_content: str, importance_score: float = 0.5
+        self,
+        user_id: str,
+        dialog_content: str,
+        importance_score: float = 0.5,
+        auth_token: Optional[str] = None,
     ) -> MemoryOperationResult:
-        """Extract and store semantic memories from dialog using AI"""
-        result = await self.semantic_service.store_semantic_memory(user_id, dialog_content, importance_score)
+        """Extract and store semantic memories from dialog using AI.
+
+        ``auth_token`` is forwarded to isA_Model so the upstream can apply
+        user-level quotas + audit (xenoISA/isA_user#464). None preserves the
+        existing service-level auth path. Same JWT pass-through pattern as
+        summary_service.synthesize_summary (PR #454) and factual extract
+        (PR #468); this PR closes out the extract slice.
+        """
+        result = await self.semantic_service.store_semantic_memory(
+            user_id, dialog_content, importance_score, auth_token=auth_token
+        )
 
         # A-MEM: link associations for newly stored memories (background)
         if result.success and result.data and result.data.get("memory_ids"):

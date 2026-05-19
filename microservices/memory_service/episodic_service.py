@@ -36,9 +36,7 @@ class EpisodicMemoryService:
         )
         self._collection_initialized = False  # Track if collection is ready
 
-        logger.info(
-            f"Episodic Memory Service initialized with ISA Model URL: {self.model_url}"
-        )
+        logger.info(f"Episodic Memory Service initialized with ISA Model URL: {self.model_url}")
 
     def _get_model_url(self) -> str:
         """Get ISA Model service URL via Consul or environment variable"""
@@ -81,7 +79,11 @@ class EpisodicMemoryService:
             logger.warning(f"Error ensuring Qdrant collection: {e}")
 
     async def store_episodic_memory(
-        self, user_id: str, dialog_content: str, importance_score: float = 0.5
+        self,
+        user_id: str,
+        dialog_content: str,
+        importance_score: float = 0.5,
+        auth_token: Optional[str] = None,
     ) -> MemoryOperationResult:
         """
         Extract and store episodic memories from dialog content using AI
@@ -90,6 +92,11 @@ class EpisodicMemoryService:
             user_id: User ID
             dialog_content: Dialog content to analyze
             importance_score: Importance score
+            auth_token: Optional bearer JWT forwarded to isA_Model so the
+                upstream can apply user-level quotas + audit. Same pattern as
+                summary_service.synthesize_summary (PR xenoISA/isA_user#454)
+                and factual_service (PR #468). None preserves the existing
+                service-level auth path.
 
         Returns:
             MemoryOperationResult
@@ -99,7 +106,7 @@ class EpisodicMemoryService:
             await self._ensure_collection()
 
             # Extract episodes using LLM
-            extraction_result = await self._extract_episodes(dialog_content)
+            extraction_result = await self._extract_episodes(dialog_content, auth_token=auth_token)
 
             if not extraction_result["success"]:
                 return MemoryOperationResult(
@@ -124,9 +131,7 @@ class EpisodicMemoryService:
                     episode_date = None
                     if episode.get("episode_date"):
                         try:
-                            episode_date = datetime.fromisoformat(
-                                episode["episode_date"]
-                            )
+                            episode_date = datetime.fromisoformat(episode["episode_date"])
                         except Exception:
                             episode_date = None
 
@@ -139,9 +144,7 @@ class EpisodicMemoryService:
                         "event_type": episode.get("event_type", "general"),
                         "location": episode.get("location"),
                         "participants": episode.get("participants", []),
-                        "emotional_valence": float(
-                            episode.get("emotional_valence", 0.0)
-                        ),
+                        "emotional_valence": float(episode.get("emotional_valence", 0.0)),
                         "vividness": float(episode.get("vividness", 0.5)),
                         "episode_date": episode_date,
                         "importance_score": importance_score,
@@ -167,28 +170,16 @@ class EpisodicMemoryService:
                                             "vector": embedding,
                                             "payload": {
                                                 "user_id": user_id,
-                                                "event_type": episode.get(
-                                                    "event_type", "general"
-                                                ),
+                                                "event_type": episode.get("event_type", "general"),
                                                 "location": episode.get("location", ""),
-                                                "episode_date": episode.get(
-                                                    "episode_date", ""
-                                                ),
-                                                "emotional_valence": float(
-                                                    episode.get(
-                                                        "emotional_valence", 0.0
-                                                    )
-                                                ),
-                                                "created_at": datetime.now(
-                                                    timezone.utc
-                                                ).isoformat(),
+                                                "episode_date": episode.get("episode_date", ""),
+                                                "emotional_valence": float(episode.get("emotional_valence", 0.0)),
+                                                "created_at": datetime.now(timezone.utc).isoformat(),
                                             },
                                         }
                                     ],
                                 )
-                            logger.info(
-                                f"Stored embedding to Qdrant for memory {memory_id}"
-                            )
+                            logger.info(f"Stored embedding to Qdrant for memory {memory_id}")
                         except Exception as e:
                             logger.error(f"Failed to store embedding to Qdrant: {e}")
 
@@ -218,8 +209,21 @@ class EpisodicMemoryService:
                 message=f"Error: {str(e)}",
             )
 
-    async def _extract_episodes(self, dialog_content: str) -> Dict[str, Any]:
-        """Extract episodes using ISA Model LLM"""
+    async def _extract_episodes(
+        self,
+        dialog_content: str,
+        auth_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Extract episodes using ISA Model LLM.
+
+        Args:
+            dialog_content: Dialog content to analyze
+            auth_token: Optional bearer JWT to forward to isA_Model so the
+                upstream can apply user-level quotas + audit. Pattern mirrors
+                summary_service.synthesize_summary (PR xenoISA/isA_user#454)
+                and factual_service._extract_facts (PR #468). When None/empty,
+                the existing service-level auth path is kept.
+        """
         try:
             system_prompt = """You are an episodic memory extraction system. Extract personal experiences and events from the conversation and return them in JSON format.
 For each episode, identify:
@@ -236,7 +240,16 @@ Return ONLY valid JSON with an "episodes" array."""
 
             prompt = f"Extract episodic memories from this conversation and return as JSON:\n\n{dialog_content}"
 
-            async with AsyncISAModel(base_url=self.model_url) as client:
+            # JWT pass-through to isA_Model (#464). Empty/None token → no
+            # extra_headers, preserving the existing service-level auth path.
+            normalized = (auth_token or "").strip()
+            if normalized and not normalized.lower().startswith("bearer "):
+                normalized = f"Bearer {normalized}"
+            client_kwargs: Dict[str, Any] = {"base_url": self.model_url}
+            if normalized:
+                client_kwargs["extra_headers"] = {"Authorization": normalized}
+
+            async with AsyncISAModel(**client_kwargs) as client:
                 response = await client.chat.completions.create(
                     model="gpt-4.1-nano",
                     messages=[
@@ -277,9 +290,7 @@ Return ONLY valid JSON with an "episodes" array."""
         self, user_id: str, start_date: datetime, end_date: datetime, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search episodes by timeframe"""
-        return await self.repository.search_by_timeframe(
-            user_id, start_date, end_date, limit
-        )
+        return await self.repository.search_by_timeframe(user_id, start_date, end_date, limit)
 
     async def search_episodes_by_event_type(
         self, user_id: str, event_type: str, limit: int = 10
@@ -287,9 +298,7 @@ Return ONLY valid JSON with an "episodes" array."""
         """Search episodes by event type"""
         return await self.repository.search_by_event_type(user_id, event_type, limit)
 
-    async def search_episodes_by_location(
-        self, user_id: str, location: str, limit: int = 10
-    ) -> List[Dict[str, Any]]:
+    async def search_episodes_by_location(self, user_id: str, location: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search episodes by location"""
         return await self.repository.search_by_location(user_id, location, limit)
 
@@ -323,9 +332,7 @@ Return ONLY valid JSON with an "episodes" array."""
             if query_embedding is None:
                 query_embedding = await self._generate_embedding(query)
             if query_embedding is None:
-                logger.warning(
-                    "Failed to generate query embedding, falling back to text search"
-                )
+                logger.warning("Failed to generate query embedding, falling back to text search")
                 return await self.search_episodes_by_event_type(user_id, query, limit)
 
             logger.info(
@@ -333,9 +340,7 @@ Return ONLY valid JSON with an "episodes" array."""
             )
 
             # Search Qdrant for similar vectors with user_id filter
-            filter_conditions = {
-                "must": [{"field": "user_id", "match": {"keyword": user_id}}]
-            }
+            filter_conditions = {"must": [{"field": "user_id", "match": {"keyword": user_id}}]}
 
             async with self.qdrant:
                 search_results = await self.qdrant.search_with_filter(
@@ -349,25 +354,15 @@ Return ONLY valid JSON with an "episodes" array."""
                 )
 
             if not search_results:
-                logger.info(
-                    f"No vector search results for user {user_id} with threshold {score_threshold}"
-                )
+                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
                 return []
 
             # Get memory IDs and scores from results
             memory_ids = [str(result["id"]) for result in search_results]
-            scores = {
-                str(result["id"]): result.get("score", 0.0) for result in search_results
-            }
-            vectors = (
-                {str(result["id"]): result.get("vector") for result in search_results}
-                if with_vectors
-                else {}
-            )
+            scores = {str(result["id"]): result.get("score", 0.0) for result in search_results}
+            vectors = {str(result["id"]): result.get("vector") for result in search_results} if with_vectors else {}
 
-            logger.info(
-                f"Vector search found {len(memory_ids)} episodic matches for user {user_id}"
-            )
+            logger.info(f"Vector search found {len(memory_ids)} episodic matches for user {user_id}")
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)
@@ -418,9 +413,7 @@ Return ONLY valid JSON with an "episodes" array."""
             if query_embedding is None:
                 query_embedding = await self._generate_embedding(query)
             if query_embedding is None:
-                logger.warning(
-                    "Failed to generate query embedding, falling back to text search"
-                )
+                logger.warning("Failed to generate query embedding, falling back to text search")
                 return await self.search_episodes_by_event_type(user_id, query, limit)
 
             logger.info(
@@ -428,9 +421,7 @@ Return ONLY valid JSON with an "episodes" array."""
             )
 
             # Search Qdrant for similar vectors with user_id filter
-            filter_conditions = {
-                "must": [{"field": "user_id", "match": {"keyword": user_id}}]
-            }
+            filter_conditions = {"must": [{"field": "user_id", "match": {"keyword": user_id}}]}
 
             async with self.qdrant:
                 search_results = await self.qdrant.search_with_filter(
@@ -443,20 +434,14 @@ Return ONLY valid JSON with an "episodes" array."""
                 )
 
             if not search_results:
-                logger.info(
-                    f"No vector search results for episodic memories, user {user_id}"
-                )
+                logger.info(f"No vector search results for episodic memories, user {user_id}")
                 return []
 
             # Get memory IDs and scores from results
             memory_ids = [str(result["id"]) for result in search_results]
-            scores = {
-                str(result["id"]): result.get("score", 0.0) for result in search_results
-            }
+            scores = {str(result["id"]): result.get("score", 0.0) for result in search_results}
 
-            logger.info(
-                f"Vector search found {len(memory_ids)} episodic matches for user {user_id}"
-            )
+            logger.info(f"Vector search found {len(memory_ids)} episodic matches for user {user_id}")
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)

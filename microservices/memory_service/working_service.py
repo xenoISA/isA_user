@@ -35,9 +35,7 @@ class WorkingMemoryService:
         )
         self._collection_initialized = False  # Track if collection is ready
 
-        logger.info(
-            f"Working Memory Service initialized with ISA Model URL: {self.model_url}"
-        )
+        logger.info(f"Working Memory Service initialized with ISA Model URL: {self.model_url}")
 
     def _get_model_url(self) -> str:
         """Get ISA Model service URL via Consul or environment variable"""
@@ -92,6 +90,7 @@ class WorkingMemoryService:
         task_context: Dict[str, Any],
         priority: int = 5,
         ttl_seconds: int = 3600,
+        auth_token: Optional[str] = None,
     ) -> MemoryOperationResult:
         """
         Store working memory for current task
@@ -103,6 +102,12 @@ class WorkingMemoryService:
             task_context: Task context data
             priority: Priority level (1-10)
             ttl_seconds: Time to live in seconds
+            auth_token: Optional bearer JWT forwarded to isA_Model so the
+                upstream can apply user-level quotas + audit. Same pattern as
+                summary_service.synthesize_summary (PR xenoISA/isA_user#454)
+                and factual_service (PR #468). None preserves the existing
+                service-level auth path. Working memory has no LLM extraction
+                step, so the token is forwarded on the embedding call.
 
         Returns:
             MemoryOperationResult
@@ -113,8 +118,8 @@ class WorkingMemoryService:
 
             memory_id = str(uuid.uuid4())
 
-            # Generate embedding
-            embedding = await self._generate_embedding(content)
+            # Generate embedding (forwards JWT to isA_Model when provided)
+            embedding = await self._generate_embedding(content, auth_token=auth_token)
 
             # Calculate expiration time
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
@@ -157,16 +162,12 @@ class WorkingMemoryService:
                                         "task_id": task_id,
                                         "priority": priority,
                                         "expires_at": expires_at.isoformat(),
-                                        "created_at": datetime.now(
-                                            timezone.utc
-                                        ).isoformat(),
+                                        "created_at": datetime.now(timezone.utc).isoformat(),
                                     },
                                 }
                             ],
                         )
-                    logger.info(
-                        f"Stored embedding to Qdrant for working memory {memory_id}"
-                    )
+                    logger.info(f"Stored embedding to Qdrant for working memory {memory_id}")
                 except Exception as e:
                     logger.error(f"Failed to store embedding to Qdrant: {e}")
 
@@ -192,13 +193,33 @@ class WorkingMemoryService:
                 message=f"Error: {str(e)}",
             )
 
-    async def _generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding using ISA Model"""
+    async def _generate_embedding(
+        self,
+        text: str,
+        auth_token: Optional[str] = None,
+    ) -> List[float]:
+        """Generate embedding using ISA Model.
+
+        Args:
+            text: Text to embed
+            auth_token: Optional bearer JWT to forward to isA_Model so the
+                upstream can apply user-level quotas + audit. Pattern mirrors
+                summary_service.synthesize_summary (PR xenoISA/isA_user#454)
+                and factual_service._extract_facts (PR #468). When None/empty,
+                the existing service-level auth path is kept.
+        """
         try:
-            async with AsyncISAModel(base_url=self.model_url) as client:
-                embedding = await client.embeddings.create(
-                    input=text, model="text-embedding-3-small"
-                )
+            # JWT pass-through to isA_Model (#464). Empty/None token → no
+            # extra_headers, preserving the existing service-level auth path.
+            normalized = (auth_token or "").strip()
+            if normalized and not normalized.lower().startswith("bearer "):
+                normalized = f"Bearer {normalized}"
+            client_kwargs: Dict[str, Any] = {"base_url": self.model_url}
+            if normalized:
+                client_kwargs["extra_headers"] = {"Authorization": normalized}
+
+            async with AsyncISAModel(**client_kwargs) as client:
+                embedding = await client.embeddings.create(input=text, model="text-embedding-3-small")
                 return embedding.data[0].embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
@@ -208,9 +229,7 @@ class WorkingMemoryService:
         """Get active (non-expired) working memories"""
         return await self.repository.get_active_memories(user_id)
 
-    async def cleanup_expired_memories(
-        self, user_id: Optional[str] = None
-    ) -> MemoryOperationResult:
+    async def cleanup_expired_memories(self, user_id: Optional[str] = None) -> MemoryOperationResult:
         """Clean up expired working memories"""
         try:
             count = await self.repository.cleanup_expired_memories(user_id)
@@ -222,17 +241,13 @@ class WorkingMemoryService:
             )
         except Exception as e:
             logger.error(f"Error cleaning up expired memories: {e}")
-            return MemoryOperationResult(
-                success=False, operation="cleanup", message=f"Error: {str(e)}"
-            )
+            return MemoryOperationResult(success=False, operation="cleanup", message=f"Error: {str(e)}")
 
     async def search_by_task_id(
         self, user_id: str, task_id: str, include_expired: bool = False
     ) -> List[Dict[str, Any]]:
         """Search working memories by task ID"""
-        return await self.repository.search_by_task_id(
-            user_id, task_id, include_expired
-        )
+        return await self.repository.search_by_task_id(user_id, task_id, include_expired)
 
     async def vector_search(
         self,
@@ -274,9 +289,7 @@ class WorkingMemoryService:
             )
 
             # Search Qdrant for similar vectors with user_id filter
-            filter_conditions = {
-                "must": [{"field": "user_id", "match": {"keyword": user_id}}]
-            }
+            filter_conditions = {"must": [{"field": "user_id", "match": {"keyword": user_id}}]}
 
             async with self.qdrant:
                 search_results = await self.qdrant.search_with_filter(
@@ -290,25 +303,15 @@ class WorkingMemoryService:
                 )
 
             if not search_results:
-                logger.info(
-                    f"No vector search results for user {user_id} with threshold {score_threshold}"
-                )
+                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
                 return []
 
             # Get memory IDs and scores from results
             memory_ids = [str(result["id"]) for result in search_results]
-            scores = {
-                str(result["id"]): result.get("score", 0.0) for result in search_results
-            }
-            vectors = (
-                {str(result["id"]): result.get("vector") for result in search_results}
-                if with_vectors
-                else {}
-            )
+            scores = {str(result["id"]): result.get("score", 0.0) for result in search_results}
+            vectors = {str(result["id"]): result.get("vector") for result in search_results} if with_vectors else {}
 
-            logger.info(
-                f"Vector search found {len(memory_ids)} working memory matches for user {user_id}"
-            )
+            logger.info(f"Vector search found {len(memory_ids)} working memory matches for user {user_id}")
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)
@@ -318,9 +321,7 @@ class WorkingMemoryService:
                 from datetime import datetime, timezone
 
                 now = datetime.now(timezone.utc)
-                memories = [
-                    m for m in memories if m.get("expires_at") and m["expires_at"] > now
-                ]
+                memories = [m for m in memories if m.get("expires_at") and m["expires_at"] > now]
 
             # Add similarity scores (and optionally embeddings) to results
             for memory in memories:
