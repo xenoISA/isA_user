@@ -216,9 +216,29 @@ async def synthesize_summary(
         }
     except json.JSONDecodeError as e:
         logger.warning(f"LLM synthesis returned non-JSON, using fallback: {e}")
+        # #461: record the fallback to Sentry + Prometheus so silent
+        # degradations surface on the dashboard.  ParseError-class.
+        from .observability import record_upstream_fallback
+
+        record_upstream_fallback(
+            operation="summary_regenerate",
+            exc=e,
+            prompt_len=len(bulleted) if "bulleted" in locals() else None,
+            extra={"memories_in": n},
+        )
         return fallback_payload
     except Exception as e:
         logger.warning(f"LLM synthesis failed, using fallback summary: {e}")
+        # #461: catch-all upstream-error path — classify_reason maps Timeout /
+        # ConnectionError / HTTPError automatically.
+        from .observability import record_upstream_fallback
+
+        record_upstream_fallback(
+            operation="summary_regenerate",
+            exc=e,
+            prompt_len=len(bulleted) if "bulleted" in locals() else None,
+            extra={"memories_in": n},
+        )
         return fallback_payload
 
 

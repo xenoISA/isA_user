@@ -310,6 +310,23 @@ MINIO_ENDPOINT=localhost:9000
 LOKI_ENABLED=true
 LOKI_URL=http://localhost:3100
 LOG_LEVEL=DEBUG
+
+# Error tracking (Sentry) — optional. When unset, services run silently
+# without exporting fallback events. See xenoISA/isA_user#461.
+# Used today by: artifact_service, memory_service (upstream LLM/MCP
+# fallback paths emit sentry_sdk.capture_exception + the Prometheus counter
+# `<service>_upstream_fallback_total{operation, reason}`).
+# SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<project>
+# SENTRY_ENV=staging
+# SENTRY_TRACES_SAMPLE_RATE=0.0
+
+# Dashboards (deferred — Grafana JSON tracked under #461 follow-up):
+#   * sum by (operation, reason) (
+#       rate(artifact_service_upstream_fallback_total[5m])
+#     )
+#   * sum by (operation, reason) (
+#       rate(memory_service_upstream_fallback_total[5m])
+#     )
 ```
 
 ### gRPC Infrastructure Services (Kubernetes)
