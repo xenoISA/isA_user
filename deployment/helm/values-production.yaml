@@ -438,6 +438,13 @@ artifactService:
       value: "gpt-4.1-nano"
     - name: ARTIFACT_RUNTIME_PROVIDER
       value: "openai"
+    # Per-minute caps from microservices/artifact_service/main.py (PR #475).
+    # Production keeps the in-code defaults until traffic data justifies a
+    # change — bump via `--set artifactService.env[…]` if needed.
+    - name: ARTIFACT_RUNTIME_RATE_PER_MINUTE
+      value: "100"
+    - name: ARTIFACT_MCP_RATE_PER_MINUTE
+      value: "60"
 
 projectSharingService:
   enabled: true

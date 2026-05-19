@@ -391,7 +391,8 @@ artifactService:
     tag: latest
   # Service-specific env (artifact_service.py / _invoke_isa_model):
   #   ISA_MODEL_URL, ISA_MCP_URL, ARTIFACT_DAILY_QUOTA,
-  #   ARTIFACT_RUNTIME_MODEL, ARTIFACT_RUNTIME_PROVIDER
+  #   ARTIFACT_RUNTIME_MODEL, ARTIFACT_RUNTIME_PROVIDER,
+  #   ARTIFACT_RUNTIME_RATE_PER_MINUTE, ARTIFACT_MCP_RATE_PER_MINUTE (PR #475)
   # POSTGRES_*, CONSUL_*, NATS_URL come from the shared env block.
   env:
     - name: ISA_MODEL_URL
@@ -399,11 +400,17 @@ artifactService:
     - name: ISA_MCP_URL
       value: "http://isa-mcp.isa-cloud-staging.svc.cluster.local:8081/mcp"
     - name: ARTIFACT_DAILY_QUOTA
-      value: "50"
+      value: "200"
     - name: ARTIFACT_RUNTIME_MODEL
       value: "gpt-4.1-nano"
     - name: ARTIFACT_RUNTIME_PROVIDER
       value: "openai"
+    # Per-minute caps from microservices/artifact_service/main.py (PR #475).
+    # Staging uses the in-code defaults; tune up/down as load tests demand.
+    - name: ARTIFACT_RUNTIME_RATE_PER_MINUTE
+      value: "100"
+    - name: ARTIFACT_MCP_RATE_PER_MINUTE
+      value: "60"
 
 projectSharingService:
   enabled: true
