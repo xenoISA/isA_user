@@ -13,6 +13,10 @@ Per service we verify:
      `down_revision` references, exactly one head, and exactly one
      root, and the chain length matches the number of revision files.
 
+This file also pins the project_service head and asserts the
+``proj_005`` revision content — item #5 of the xenoISA/isA_#452 epic
+(backfill + declarative NOT NULL on ``projects.owner_id``).
+
 These are pure file/config tests — no database required — so they can
 run on the same CI lane as the existing L1/L2 Alembic suites.
 """
@@ -49,6 +53,12 @@ EXPECTED_HEAD = {
     "artifact_service": "art_004",
     "project_sharing_service": "psharing_001",
 }
+
+# Head expected for project_service after the proj_005 follow-up
+# (defensive backfill + declarative NOT NULL). Pinned separately
+# because project_service is not part of the ROLLOUT_SERVICES batch
+# above (it was the original adoption).
+PROJECT_SERVICE_HEAD = "proj_005"
 
 
 def _script_for(service: str) -> ScriptDirectory:
@@ -166,3 +176,155 @@ def test_revision_file_count_matches_chain(service: str) -> None:
         f"{len(chain)} revisions in the alembic chain. Likely a "
         "stranded file that's not referenced by any down_revision."
     )
+
+
+# ---------------------------------------------------------------------------
+# project_service — proj_005: backfill + declarative NOT NULL on owner_id.
+# (Item #5 of xenoISA/isA_#452 — follow-up to PR #467's proj_004 backfill.)
+# ---------------------------------------------------------------------------
+
+
+def test_project_service_head_is_proj_005() -> None:
+    """project_service head must be ``proj_005`` after the owner_id follow-up.
+
+    Pins the head so anyone adding a future revision has to update this
+    test consciously — the same protection ROLLOUT_SERVICES gets via
+    EXPECTED_HEAD.
+    """
+    script = _script_for("project_service")
+    heads = script.get_heads()
+    assert len(heads) == 1, (
+        f"project_service must have exactly one head, got {heads!r}. "
+        "Multiple heads usually mean a forked down_revision chain."
+    )
+    assert heads[0] == PROJECT_SERVICE_HEAD, (
+        f"project_service head drift: env.py resolved {heads[0]!r}, "
+        f"expected {PROJECT_SERVICE_HEAD!r}. If you intentionally added "
+        "a new revision, update PROJECT_SERVICE_HEAD in this test."
+    )
+
+
+def test_project_service_chain_is_intact() -> None:
+    """project_service revision chain must be unbroken through proj_005."""
+    script = _script_for("project_service")
+    revs = list(script.walk_revisions())
+    rev_ids = {r.revision for r in revs}
+
+    roots = [r for r in revs if r.down_revision is None]
+    assert (
+        len(roots) == 1
+    ), f"project_service should have exactly one root revision, found {len(roots)}: {[r.revision for r in roots]!r}"
+
+    for rev in revs:
+        if rev.down_revision is None:
+            continue
+        parents = (
+            rev.down_revision
+            if isinstance(rev.down_revision, tuple)
+            else (rev.down_revision,)
+        )
+        for parent in parents:
+            assert (
+                parent in rev_ids
+            ), f"project_service revision {rev.revision} references missing down_revision {parent!r}."
+
+
+def test_project_service_revision_file_count_matches_chain() -> None:
+    """Disk file count for project_service must equal chain length."""
+    versions_dir = get_service_version_path("project_service")
+    py_files = [p for p in versions_dir.glob("*.py") if not p.name.startswith("__")]
+
+    script = _script_for("project_service")
+    chain = list(script.walk_revisions())
+
+    assert len(chain) == len(
+        py_files
+    ), f"project_service: {len(py_files)} revision .py files on disk but {len(chain)} revisions in the alembic chain."
+
+
+def test_proj_005_backfills_owner_id_from_user_id() -> None:
+    """proj_005 must defensively backfill owner_id from user_id.
+
+    The backfill must be idempotent (WHERE owner_id is empty/NULL only)
+    and use ``user_id`` as the source — matching the proj_004 strategy
+    documented in PR #467 and the project_repository.create_project
+    ``effective_owner = owner_id or user_id`` invariant.
+    """
+    rev_file = (
+        get_service_version_path("project_service") / "005_assert_owner_id_not_null.py"
+    )
+    assert rev_file.exists(), (
+        "proj_005 revision file must exist at "
+        "microservices/project_service/alembic/versions/005_assert_owner_id_not_null.py"
+    )
+    content = rev_file.read_text()
+
+    # Backfill — copies user_id into owner_id, only where it's empty/NULL.
+    assert (
+        "UPDATE project.projects" in content
+    ), "proj_005 must run a defensive UPDATE on project.projects."
+    assert "user_id" in content, "proj_005 backfill must derive owner_id from user_id."
+    # Idempotency guard — the WHERE clause must restrict to empty/NULL rows
+    # so re-runs are no-ops on healthy databases.
+    assert (
+        "owner_id = ''" in content and "owner_id IS NULL" in content
+    ), "proj_005 must guard the UPDATE with `WHERE owner_id = '' OR owner_id IS NULL` for idempotency."
+
+
+def test_proj_005_declares_not_null_via_alter_column() -> None:
+    """proj_005 must enforce NOT NULL declaratively via op.alter_column.
+
+    The DB-level NOT NULL has been in place since proj_003 (via
+    ``TEXT NOT NULL DEFAULT ''``), but stating it via ``op.alter_column``
+    makes the invariant visible in the migration registry. A future
+    alembic autogenerate run will not propose to drop it.
+    """
+    rev_file = (
+        get_service_version_path("project_service") / "005_assert_owner_id_not_null.py"
+    )
+    content = rev_file.read_text()
+
+    assert (
+        "op.alter_column(" in content
+    ), "proj_005 must call op.alter_column to declare the constraint."
+    assert (
+        '"owner_id"' in content or "'owner_id'" in content
+    ), "proj_005 alter_column must target the owner_id column."
+    assert (
+        "nullable=False" in content
+    ), "proj_005 must declare nullable=False on owner_id."
+    assert (
+        'schema="project"' in content or "schema='project'" in content
+    ), "proj_005 alter_column must target the `project` schema explicitly — the public schema does not own this table."
+
+
+def test_proj_005_downgrade_is_documented_noop() -> None:
+    """proj_005's downgrade must be intentionally empty.
+
+    The backfill is not reversible (no signal to distinguish backfilled
+    rows from explicitly-set ones), and the NOT NULL constraint pre-
+    dates this revision — dropping it would weaken the schema below the
+    post-proj_003 baseline. A bare ``pass`` with a comment is the
+    correct shape.
+    """
+    rev_file = (
+        get_service_version_path("project_service") / "005_assert_owner_id_not_null.py"
+    )
+    content = rev_file.read_text()
+
+    # Locate the downgrade body.
+    assert "def downgrade()" in content
+    downgrade_body = content.split("def downgrade()", 1)[1]
+    # Must not reverse the backfill or drop NOT NULL.
+    assert "DROP NOT NULL" not in downgrade_body.upper(), (
+        "proj_005 downgrade must NOT drop the NOT NULL constraint — "
+        "that would weaken the schema below the post-proj_003 baseline."
+    )
+    assert "UPDATE" not in downgrade_body.upper(), (
+        "proj_005 downgrade must NOT attempt to reverse the backfill — "
+        "there is no signal to distinguish backfilled rows."
+    )
+    # And must explicitly contain a `pass` (or be visibly inert).
+    assert (
+        "    pass" in downgrade_body
+    ), "proj_005 downgrade should be a documented `pass` no-op."
