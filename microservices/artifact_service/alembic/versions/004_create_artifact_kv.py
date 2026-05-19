@@ -31,7 +31,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS artifact.artifact_kv (
             artifact_id VARCHAR(255) NOT NULL
                         REFERENCES artifact.artifacts(id) ON DELETE CASCADE,
@@ -48,9 +49,12 @@ def upgrade() -> None:
                 (scope = 'shared'   AND user_id =  '_shared')
             )
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_artifact_kv_lookup ON artifact.artifact_kv (artifact_id, scope)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_kv_lookup ON artifact.artifact_kv (artifact_id, scope)"
+    )
 
     op.execute(
         "COMMENT ON TABLE artifact.artifact_kv IS "

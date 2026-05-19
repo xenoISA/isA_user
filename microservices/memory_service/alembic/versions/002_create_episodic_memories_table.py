@@ -21,7 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.episodic_memories (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -42,10 +43,15 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             last_accessed_at TIMESTAMPTZ
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_episodic_memories_user_id ON memory.episodic_memories(user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_episodic_memories_event_type ON memory.episodic_memories(event_type)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_episodic_memories_user_id ON memory.episodic_memories(user_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_episodic_memories_event_type ON memory.episodic_memories(event_type)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_episodic_memories_location "
         "ON memory.episodic_memories USING gin(to_tsvector('english', location))"
@@ -65,7 +71,8 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS idx_episodic_memories_created_at ON memory.episodic_memories(created_at DESC)"
     )
 
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -78,20 +85,27 @@ def upgrade() -> None:
                     EXECUTE FUNCTION memory.update_updated_at();
             END IF;
         END$$;
-    """)
+    """
+    )
 
     op.execute(
         "COMMENT ON TABLE memory.episodic_memories IS "
         "'Episodic memories - personal experiences and events with temporal/spatial context'"
     )
-    op.execute("COMMENT ON COLUMN memory.episodic_memories.id IS 'Memory ID - also used as Qdrant point ID'")
+    op.execute(
+        "COMMENT ON COLUMN memory.episodic_memories.id IS 'Memory ID - also used as Qdrant point ID'"
+    )
     op.execute(
         "COMMENT ON COLUMN memory.episodic_memories.emotional_valence IS "
         "'Emotional tone: -1 (negative) to 1 (positive)'"
     )
-    op.execute("COMMENT ON COLUMN memory.episodic_memories.vividness IS 'How vivid/detailed the memory is (0-1)'")
+    op.execute(
+        "COMMENT ON COLUMN memory.episodic_memories.vividness IS 'How vivid/detailed the memory is (0-1)'"
+    )
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS trigger_update_episodic_memories_updated_at ON memory.episodic_memories")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trigger_update_episodic_memories_updated_at ON memory.episodic_memories"
+    )
     op.execute("DROP TABLE IF EXISTS memory.episodic_memories CASCADE")

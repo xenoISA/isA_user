@@ -21,7 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.procedural_memories (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -42,13 +43,18 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             last_accessed_at TIMESTAMPTZ
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_procedural_memories_user_id ON memory.procedural_memories(user_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_procedural_memories_user_id ON memory.procedural_memories(user_id)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_procedural_memories_skill_type ON memory.procedural_memories(skill_type)"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS idx_procedural_memories_domain ON memory.procedural_memories(domain)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_procedural_memories_domain ON memory.procedural_memories(domain)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_procedural_memories_difficulty ON memory.procedural_memories(difficulty_level)"
     )
@@ -60,7 +66,8 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS idx_procedural_memories_created_at ON memory.procedural_memories(created_at DESC)"
     )
 
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -73,13 +80,16 @@ def upgrade() -> None:
                     EXECUTE FUNCTION memory.update_updated_at();
             END IF;
         END$$;
-    """)
+    """
+    )
 
     op.execute(
         "COMMENT ON TABLE memory.procedural_memories IS "
         "'Procedural memories - how-to knowledge and skills with step-by-step procedures'"
     )
-    op.execute("COMMENT ON COLUMN memory.procedural_memories.id IS 'Memory ID - also used as Qdrant point ID'")
+    op.execute(
+        "COMMENT ON COLUMN memory.procedural_memories.id IS 'Memory ID - also used as Qdrant point ID'"
+    )
     op.execute(
         "COMMENT ON COLUMN memory.procedural_memories.steps IS "
         "'Procedure steps as JSON array with order and description'"
@@ -87,5 +97,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS trigger_update_procedural_memories_updated_at ON memory.procedural_memories")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trigger_update_procedural_memories_updated_at ON memory.procedural_memories"
+    )
     op.execute("DROP TABLE IF EXISTS memory.procedural_memories CASCADE")

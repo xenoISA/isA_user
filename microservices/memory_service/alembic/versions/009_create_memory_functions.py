@@ -38,7 +38,8 @@ _MEMORY_TABLES = (
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE OR REPLACE FUNCTION memory.track_memory_access(
             p_user_id VARCHAR(255),
             p_memory_type VARCHAR(20),
@@ -61,9 +62,11 @@ def upgrade() -> None:
                 updated_at = NOW();
         END;
         $$ LANGUAGE plpgsql
-    """)
+    """
+    )
 
-    op.execute("""
+    op.execute(
+        """
         CREATE OR REPLACE FUNCTION memory.update_memory_metadata()
         RETURNS TRIGGER AS $$
         DECLARE
@@ -97,14 +100,16 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql
-    """)
+    """
+    )
 
     # Attach the metadata trigger to every memory table. Guard each one
     # because CREATE TRIGGER has no IF NOT EXISTS.
     for table in _MEMORY_TABLES:
         prefix = table.replace("_memories", "")
         trigger_name = f"{prefix}_metadata_trigger"
-        op.execute(f"""
+        op.execute(
+            f"""
             DO $$
             BEGIN
                 IF NOT EXISTS (
@@ -117,7 +122,8 @@ def upgrade() -> None:
                         EXECUTE FUNCTION memory.update_memory_metadata();
                 END IF;
             END$$;
-        """)
+        """
+        )
 
     op.execute(
         "COMMENT ON FUNCTION memory.track_memory_access IS 'Track memory access for analytics and recommendations'"
@@ -131,6 +137,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     for table in _MEMORY_TABLES:
         prefix = table.replace("_memories", "")
-        op.execute(f"DROP TRIGGER IF EXISTS {prefix}_metadata_trigger ON memory.{table}")
+        op.execute(
+            f"DROP TRIGGER IF EXISTS {prefix}_metadata_trigger ON memory.{table}"
+        )
     op.execute("DROP FUNCTION IF EXISTS memory.update_memory_metadata()")
-    op.execute("DROP FUNCTION IF EXISTS memory.track_memory_access(VARCHAR, VARCHAR, VARCHAR)")
+    op.execute(
+        "DROP FUNCTION IF EXISTS memory.track_memory_access(VARCHAR, VARCHAR, VARCHAR)"
+    )

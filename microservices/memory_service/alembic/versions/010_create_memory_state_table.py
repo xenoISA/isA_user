@@ -27,7 +27,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.user_memory_state (
             user_id VARCHAR(255) PRIMARY KEY,
             paused BOOLEAN NOT NULL DEFAULT false,
@@ -37,7 +38,8 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-    """)
+    """
+    )
 
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_memory_state_paused "

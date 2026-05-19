@@ -96,9 +96,9 @@ def test_version_table_name_is_per_service(service: str) -> None:
     FROM alembic_version_<service>') would never find the row.
     """
     table = get_version_table(service)
-    assert table == f"alembic_version_{service}", (
-        f"version table for {service} must be 'alembic_version_{service}', got {table!r}"
-    )
+    assert (
+        table == f"alembic_version_{service}"
+    ), f"version table for {service} must be 'alembic_version_{service}', got {table!r}"
     # Sanity: per-service tables never collide with the default.
     assert table != "alembic_version"
 
@@ -134,7 +134,11 @@ def test_revision_chain_is_intact(service: str) -> None:
         if rev.down_revision is None:
             continue
         # down_revision can be a string or tuple-of-strings; normalise.
-        parents = rev.down_revision if isinstance(rev.down_revision, tuple) else (rev.down_revision,)
+        parents = (
+            rev.down_revision
+            if isinstance(rev.down_revision, tuple)
+            else (rev.down_revision,)
+        )
         for parent in parents:
             assert parent in rev_ids, (
                 f"{service} revision {rev.revision} references missing "

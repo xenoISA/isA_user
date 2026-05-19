@@ -22,7 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.memory_metadata (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -55,18 +56,31 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             UNIQUE(user_id, memory_type, memory_id)
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_metadata_user_type ON memory.memory_metadata(user_id, memory_type)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_metadata_memory ON memory.memory_metadata(memory_type, memory_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_metadata_access ON memory.memory_metadata(access_count DESC)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_user_type ON memory.memory_metadata(user_id, memory_type)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_memory ON memory.memory_metadata(memory_type, memory_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_access ON memory.memory_metadata(access_count DESC)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_metadata_quality "
         "ON memory.memory_metadata(accuracy_score DESC, relevance_score DESC)"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS idx_metadata_priority ON memory.memory_metadata(priority_level DESC)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_metadata_lifecycle ON memory.memory_metadata(lifecycle_stage)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_metadata_flags ON memory.memory_metadata USING gin(system_flags)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_priority ON memory.memory_metadata(priority_level DESC)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_lifecycle ON memory.memory_metadata(lifecycle_stage)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_flags ON memory.memory_metadata USING gin(system_flags)"
+    )
 
     op.execute(
         "COMMENT ON TABLE memory.memory_metadata IS "

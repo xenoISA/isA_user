@@ -35,7 +35,8 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute("CREATE SCHEMA IF NOT EXISTS project_sharing")
 
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_share_role') THEN
@@ -43,9 +44,11 @@ def upgrade() -> None:
                     AS ENUM ('viewer', 'editor', 'owner');
             END IF;
         END$$;
-    """)
+    """
+    )
 
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_share_status') THEN
@@ -53,9 +56,11 @@ def upgrade() -> None:
                     AS ENUM ('pending', 'accepted', 'revoked');
             END IF;
         END$$;
-    """)
+    """
+    )
 
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS project_sharing.project_shares (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             project_id      UUID NOT NULL,
@@ -68,9 +73,12 @@ def upgrade() -> None:
             accepted_at     TIMESTAMPTZ NULL,
             revoked_at      TIMESTAMPTZ NULL
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_project_shares_project_id ON project_sharing.project_shares(project_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_shares_project_id ON project_sharing.project_shares(project_id)"
+    )
 
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_project_shares_invite_token "
@@ -94,7 +102,9 @@ def upgrade() -> None:
         "COMMENT ON TABLE project_sharing.project_shares IS "
         "'Project-level invitations and memberships. Token-based accept flow.'"
     )
-    op.execute("COMMENT ON COLUMN project_sharing.project_shares.id IS 'Share record UUID (server-assigned)'")
+    op.execute(
+        "COMMENT ON COLUMN project_sharing.project_shares.id IS 'Share record UUID (server-assigned)'"
+    )
     op.execute(
         "COMMENT ON COLUMN project_sharing.project_shares.project_id IS "
         "'Project being shared (FK enforced by project_service, not DB-level)'"
@@ -107,14 +117,22 @@ def upgrade() -> None:
         "COMMENT ON COLUMN project_sharing.project_shares.invitee_email IS "
         "'Invitee email address (case-insensitive matched via lower() in pending unique idx)'"
     )
-    op.execute("COMMENT ON COLUMN project_sharing.project_shares.role IS 'Permission level: viewer | editor | owner'")
+    op.execute(
+        "COMMENT ON COLUMN project_sharing.project_shares.role IS 'Permission level: viewer | editor | owner'"
+    )
     op.execute(
         "COMMENT ON COLUMN project_sharing.project_shares.invite_token IS "
         "'URL-safe 22-char base62 token (128 bits entropy). Nulled on revoke.'"
     )
-    op.execute("COMMENT ON COLUMN project_sharing.project_shares.status IS 'Lifecycle: pending -> accepted | revoked'")
-    op.execute("COMMENT ON COLUMN project_sharing.project_shares.accepted_at IS 'Set when status flips to accepted'")
-    op.execute("COMMENT ON COLUMN project_sharing.project_shares.revoked_at IS 'Set when status flips to revoked'")
+    op.execute(
+        "COMMENT ON COLUMN project_sharing.project_shares.status IS 'Lifecycle: pending -> accepted | revoked'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN project_sharing.project_shares.accepted_at IS 'Set when status flips to accepted'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN project_sharing.project_shares.revoked_at IS 'Set when status flips to revoked'"
+    )
 
 
 def downgrade() -> None:

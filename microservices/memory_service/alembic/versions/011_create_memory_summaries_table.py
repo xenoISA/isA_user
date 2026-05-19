@@ -54,7 +54,9 @@ def upgrade() -> None:
         )
     )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_memory_summaries_user ON memory.memory_summaries (user_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_summaries_user ON memory.memory_summaries (user_id)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_summaries_scope_lookup "
         "ON memory.memory_summaries (user_id, scope, scope_id)"

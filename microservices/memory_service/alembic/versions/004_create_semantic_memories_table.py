@@ -21,7 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.semantic_memories (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -42,13 +43,18 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             last_accessed_at TIMESTAMPTZ
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_semantic_memories_user_id ON memory.semantic_memories(user_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_semantic_memories_user_id ON memory.semantic_memories(user_id)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_semantic_memories_concept_type ON memory.semantic_memories(concept_type)"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS idx_semantic_memories_category ON memory.semantic_memories(category)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_semantic_memories_category ON memory.semantic_memories(category)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_semantic_memories_abstraction ON memory.semantic_memories(abstraction_level)"
     )
@@ -60,7 +66,8 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS idx_semantic_memories_created_at ON memory.semantic_memories(created_at DESC)"
     )
 
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -73,16 +80,23 @@ def upgrade() -> None:
                     EXECUTE FUNCTION memory.update_updated_at();
             END IF;
         END$$;
-    """)
+    """
+    )
 
     op.execute(
         "COMMENT ON TABLE memory.semantic_memories IS "
         "'Semantic memories - concepts and general knowledge with definitions'"
     )
-    op.execute("COMMENT ON COLUMN memory.semantic_memories.id IS 'Memory ID - also used as Qdrant point ID'")
-    op.execute("COMMENT ON COLUMN memory.semantic_memories.properties IS 'Concept properties as JSON object'")
+    op.execute(
+        "COMMENT ON COLUMN memory.semantic_memories.id IS 'Memory ID - also used as Qdrant point ID'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN memory.semantic_memories.properties IS 'Concept properties as JSON object'"
+    )
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS trigger_update_semantic_memories_updated_at ON memory.semantic_memories")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trigger_update_semantic_memories_updated_at ON memory.semantic_memories"
+    )
     op.execute("DROP TABLE IF EXISTS memory.semantic_memories CASCADE")

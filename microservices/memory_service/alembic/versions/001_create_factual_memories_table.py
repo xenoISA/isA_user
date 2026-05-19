@@ -22,7 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.factual_memories (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -45,20 +46,31 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             last_accessed_at TIMESTAMPTZ
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_factual_memories_user_id ON memory.factual_memories(user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_factual_memories_fact_type ON memory.factual_memories(fact_type)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_factual_memories_user_id ON memory.factual_memories(user_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_factual_memories_fact_type ON memory.factual_memories(fact_type)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_factual_memories_subject "
         "ON memory.factual_memories USING gin(to_tsvector('english', subject))"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS idx_factual_memories_predicate ON memory.factual_memories(predicate)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_factual_memories_confidence ON memory.factual_memories(confidence)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_factual_memories_predicate ON memory.factual_memories(predicate)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_factual_memories_confidence ON memory.factual_memories(confidence)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_factual_memories_verification ON memory.factual_memories(verification_status)"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS idx_factual_memories_created_at ON memory.factual_memories(created_at DESC)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_factual_memories_created_at ON memory.factual_memories(created_at DESC)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_factual_memories_importance ON memory.factual_memories(importance_score DESC)"
     )
@@ -68,7 +80,8 @@ def upgrade() -> None:
     )
 
     # Trigger — guard with DO block since CREATE TRIGGER has no IF NOT EXISTS.
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -81,7 +94,8 @@ def upgrade() -> None:
                     EXECUTE FUNCTION memory.update_updated_at();
             END IF;
         END$$;
-    """)
+    """
+    )
 
     op.execute(
         "COMMENT ON TABLE memory.factual_memories IS "
@@ -97,5 +111,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS trigger_update_factual_memories_updated_at ON memory.factual_memories")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trigger_update_factual_memories_updated_at ON memory.factual_memories"
+    )
     op.execute("DROP TABLE IF EXISTS memory.factual_memories CASCADE")

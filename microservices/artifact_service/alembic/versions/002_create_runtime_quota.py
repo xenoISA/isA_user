@@ -23,7 +23,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS artifact.artifact_runtime_usage (
             artifact_id VARCHAR(255) NOT NULL
                         REFERENCES artifact.artifacts(id) ON DELETE CASCADE,
@@ -36,7 +37,8 @@ def upgrade() -> None:
             updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
             PRIMARY KEY (artifact_id, user_id, day_bucket)
         )
-    """)
+    """
+    )
 
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_artifact_runtime_usage_user_day "

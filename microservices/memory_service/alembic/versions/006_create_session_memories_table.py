@@ -22,7 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.session_memories (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -42,10 +43,15 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             last_accessed_at TIMESTAMPTZ
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_session_memories_user_id ON memory.session_memories(user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_session_memories_session_id ON memory.session_memories(session_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_memories_user_id ON memory.session_memories(user_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_memories_session_id ON memory.session_memories(session_id)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_memories_user_session "
         "ON memory.session_memories(user_id, session_id, interaction_sequence)"
@@ -54,10 +60,15 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS idx_session_memories_active "
         "ON memory.session_memories(user_id, active) WHERE active = true"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS idx_session_memories_session_type ON memory.session_memories(session_type)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_session_memories_created_at ON memory.session_memories(created_at DESC)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_memories_session_type ON memory.session_memories(session_type)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_memories_created_at ON memory.session_memories(created_at DESC)"
+    )
 
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -70,9 +81,11 @@ def upgrade() -> None:
                     EXECUTE FUNCTION memory.update_updated_at();
             END IF;
         END$$;
-    """)
+    """
+    )
 
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.session_summaries (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -82,10 +95,15 @@ def upgrade() -> None:
             message_count INTEGER DEFAULT 0,
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_session_summaries_user_id ON memory.session_summaries(user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_session_summaries_session_id ON memory.session_summaries(session_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_summaries_user_id ON memory.session_summaries(user_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_summaries_session_id ON memory.session_summaries(session_id)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_summaries_user_session ON memory.session_summaries(user_id, session_id)"
     )
@@ -96,8 +114,12 @@ def upgrade() -> None:
     op.execute(
         "COMMENT ON TABLE memory.session_memories IS 'Session memories - conversation context and interaction history'"
     )
-    op.execute("COMMENT ON TABLE memory.session_summaries IS 'Session summaries - condensed conversation summaries'")
-    op.execute("COMMENT ON COLUMN memory.session_memories.id IS 'Memory ID - also used as Qdrant point ID'")
+    op.execute(
+        "COMMENT ON TABLE memory.session_summaries IS 'Session summaries - condensed conversation summaries'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN memory.session_memories.id IS 'Memory ID - also used as Qdrant point ID'"
+    )
     op.execute(
         "COMMENT ON COLUMN memory.session_memories.interaction_sequence IS "
         "'Sequence number in the session for ordering'"
@@ -106,5 +128,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS memory.session_summaries CASCADE")
-    op.execute("DROP TRIGGER IF EXISTS trigger_update_session_memories_updated_at ON memory.session_memories")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trigger_update_session_memories_updated_at ON memory.session_memories"
+    )
     op.execute("DROP TABLE IF EXISTS memory.session_memories CASCADE")

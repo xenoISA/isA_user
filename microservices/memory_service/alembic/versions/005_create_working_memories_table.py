@@ -21,7 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.working_memories (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -41,18 +42,30 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             last_accessed_at TIMESTAMPTZ
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_working_memories_user_id ON memory.working_memories(user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_working_memories_task_id ON memory.working_memories(task_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_working_memories_priority ON memory.working_memories(priority DESC)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_working_memories_expires_at ON memory.working_memories(expires_at)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_working_memories_user_id ON memory.working_memories(user_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_working_memories_task_id ON memory.working_memories(task_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_working_memories_priority ON memory.working_memories(priority DESC)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_working_memories_expires_at ON memory.working_memories(expires_at)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_working_memories_user_expires ON memory.working_memories(user_id, expires_at)"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS idx_working_memories_created_at ON memory.working_memories(created_at DESC)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_working_memories_created_at ON memory.working_memories(created_at DESC)"
+    )
 
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -65,18 +78,25 @@ def upgrade() -> None:
                     EXECUTE FUNCTION memory.update_updated_at();
             END IF;
         END$$;
-    """)
+    """
+    )
 
     op.execute(
         "COMMENT ON TABLE memory.working_memories IS 'Working memories - temporary task-related information with TTL'"
     )
-    op.execute("COMMENT ON COLUMN memory.working_memories.id IS 'Memory ID - also used as Qdrant point ID'")
-    op.execute("COMMENT ON COLUMN memory.working_memories.expires_at IS 'Expiration timestamp for automatic cleanup'")
+    op.execute(
+        "COMMENT ON COLUMN memory.working_memories.id IS 'Memory ID - also used as Qdrant point ID'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN memory.working_memories.expires_at IS 'Expiration timestamp for automatic cleanup'"
+    )
     op.execute(
         "COMMENT ON COLUMN memory.working_memories.priority IS 'Priority level (1-10, higher is more important)'"
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS trigger_update_working_memories_updated_at ON memory.working_memories")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trigger_update_working_memories_updated_at ON memory.working_memories"
+    )
     op.execute("DROP TABLE IF EXISTS memory.working_memories CASCADE")

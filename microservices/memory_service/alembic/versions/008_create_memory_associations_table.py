@@ -21,7 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS memory.memory_associations (
             id VARCHAR(255) PRIMARY KEY,
             user_id VARCHAR(255) NOT NULL,
@@ -40,9 +41,12 @@ def upgrade() -> None:
             UNIQUE(user_id, source_memory_type, source_memory_id,
                    target_memory_type, target_memory_id, association_type)
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_associations_user ON memory.memory_associations(user_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_associations_user ON memory.memory_associations(user_id)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_associations_source "
         "ON memory.memory_associations(source_memory_type, source_memory_id)"
@@ -51,7 +55,9 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS idx_associations_target "
         "ON memory.memory_associations(target_memory_type, target_memory_id)"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS idx_associations_strength ON memory.memory_associations(strength DESC)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_associations_strength ON memory.memory_associations(strength DESC)"
+    )
 
     op.execute(
         "COMMENT ON TABLE memory.memory_associations IS 'Associations between memories for relationship mapping'"
@@ -60,7 +66,9 @@ def upgrade() -> None:
         "COMMENT ON COLUMN memory.memory_associations.association_type IS "
         "'Type of association: related, caused_by, prerequisite_for, etc.'"
     )
-    op.execute("COMMENT ON COLUMN memory.memory_associations.strength IS 'Association strength (0-1)'")
+    op.execute(
+        "COMMENT ON COLUMN memory.memory_associations.strength IS 'Association strength (0-1)'"
+    )
 
 
 def downgrade() -> None:

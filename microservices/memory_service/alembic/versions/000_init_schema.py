@@ -32,7 +32,8 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute("CREATE SCHEMA IF NOT EXISTS memory")
 
-    op.execute("""
+    op.execute(
+        """
         CREATE OR REPLACE FUNCTION memory.update_updated_at()
         RETURNS TRIGGER AS $$
         BEGIN
@@ -40,7 +41,8 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql
-    """)
+    """
+    )
 
     op.execute(
         "COMMENT ON SCHEMA memory IS "

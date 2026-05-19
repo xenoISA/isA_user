@@ -32,7 +32,8 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute("CREATE SCHEMA IF NOT EXISTS artifact")
 
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS artifact.artifacts (
             id                  VARCHAR(255) PRIMARY KEY,
             owner_user_id       VARCHAR(255) NOT NULL,
@@ -53,7 +54,8 @@ def upgrade() -> None:
             created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
             updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
         )
-    """)
+    """
+    )
 
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_artifacts_owner_live "
@@ -71,7 +73,8 @@ def upgrade() -> None:
         "WHERE parent_artifact_id <> ''"
     )
 
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS artifact.artifact_versions (
             id              VARCHAR(255) PRIMARY KEY,
             artifact_id     VARCHAR(255) NOT NULL
@@ -87,14 +90,16 @@ def upgrade() -> None:
             created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
             UNIQUE (artifact_id, number)
         )
-    """)
+    """
+    )
 
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_artifact_versions_lookup "
         "ON artifact.artifact_versions (artifact_id, number DESC)"
     )
 
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS artifact.artifact_shares (
             token       VARCHAR(32) PRIMARY KEY,
             artifact_id VARCHAR(255) NOT NULL
@@ -108,15 +113,20 @@ def upgrade() -> None:
             view_count  BIGINT NOT NULL DEFAULT 0,
             created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-    """)
+    """
+    )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_artifact_shares_artifact ON artifact.artifact_shares (artifact_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_shares_artifact ON artifact.artifact_shares (artifact_id)"
+    )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_artifact_shares_active "
         "ON artifact.artifact_shares (artifact_id) WHERE revoked_at IS NULL"
     )
 
-    op.execute("COMMENT ON SCHEMA artifact IS 'Artifact library backend (xenoISA/isA_user#441 / xenoISA/isA_#427)'")
+    op.execute(
+        "COMMENT ON SCHEMA artifact IS 'Artifact library backend (xenoISA/isA_user#441 / xenoISA/isA_#427)'"
+    )
 
 
 def downgrade() -> None:
