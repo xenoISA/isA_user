@@ -136,6 +136,13 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting Memory Service with AI capabilities...")
 
+    # #461: initialise Sentry early so startup failures surface in the
+    # dashboard.  Lazy import to avoid hard dependency for environments that
+    # don't ship sentry-sdk.  No-op when SENTRY_DSN is absent.
+    from .observability import init_sentry
+
+    init_sentry("memory_service")
+
     # Initialize event bus for subscribing to session events
     event_bus = None
     event_handlers = None

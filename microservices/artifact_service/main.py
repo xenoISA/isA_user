@@ -72,6 +72,12 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting Artifact Service...")
 
+    # #461: initialise Sentry first so anything that crashes during startup
+    # also lands in the dashboard.  No-op when SENTRY_DSN is absent (dev path).
+    from .observability import init_sentry
+
+    init_sentry("artifact_service")
+
     event_bus = None
     try:
         event_bus = await get_event_bus("artifact_service")
