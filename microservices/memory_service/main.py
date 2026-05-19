@@ -777,13 +777,22 @@ class SummarizeSessionRequest(BaseModel):
 
 
 @app.post("/api/v1/memories/factual/extract", response_model=MemoryOperationResult)
-async def store_factual_memory(request: StoreFactualMemoryRequest):
-    """Extract and store factual memories from dialog using AI"""
+async def store_factual_memory(
+    request: StoreFactualMemoryRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Extract and store factual memories from dialog using AI.
+
+    Forwards the caller's Authorization header to isA_Model so the upstream
+    can apply user-level quotas + audit (#464). Same pattern as
+    /api/v1/memories/summary/regenerate (PR #454).
+    """
     try:
         result = await memory_service.store_factual_memory(
             user_id=request.user_id,
             dialog_content=request.dialog_content,
             importance_score=request.importance_score,
+            auth_token=authorization,
         )
         return result
     except Exception as e:

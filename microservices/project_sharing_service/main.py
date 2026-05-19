@@ -10,11 +10,12 @@ Responsibilities:
 Paired with isA_/#429. Owns the project_sharing.project_shares table.
 """
 
+import hashlib
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 
 from core.config_manager import ConfigManager
 from core.graceful_shutdown import GracefulShutdown, shutdown_middleware
@@ -22,6 +23,7 @@ from core.health import HealthCheck
 from core.logger import setup_service_logger
 from core.metrics import setup_metrics
 from core.nats_client import get_event_bus
+from core.rate_limiter import InMemoryBackend, RateLimitConfig, SlidingWindowCounter
 from isa_common.consul_client import ConsulRegistry
 
 from .factory import create_project_sharing_service
@@ -48,6 +50,47 @@ config = config_manager.get_service_config()
 
 # Setup loggers
 logger = setup_service_logger("project_sharing_service")
+
+# ----------------------------------------------------------------------------
+# Per-user invite rate limit (xenoISA/isA_user#464 — defense in depth).
+#
+# APISIX handles real prod limits; this is an in-process sliding-window cap to
+# prevent invite-spam from a single caller (e.g. a runaway script with valid
+# auth). Key is the Authorization-header SHA1 prefix when present, else the
+# client IP — so the same user can't trivially evade by changing IPs and an
+# unauthenticated burst is still capped per-IP.
+# ----------------------------------------------------------------------------
+_INVITE_RATE_LIMIT = RateLimitConfig(requests=10, window_seconds=60)
+_invite_rate_counter = SlidingWindowCounter(InMemoryBackend())
+
+
+def _rate_limit_key(request: Request) -> str:
+    """Stable per-caller key — prefer JWT, fall back to IP."""
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth:
+        token = auth.strip()
+        # 12-char SHA1 prefix is enough entropy for an in-process counter and
+        # avoids holding raw tokens in the rate-limit map.
+        return "jwt:" + hashlib.sha1(token.encode("utf-8")).hexdigest()[:12]
+    if request.client and request.client.host:
+        return "ip:" + request.client.host
+    return "anon"
+
+
+async def enforce_invite_rate_limit(request: Request) -> None:
+    """FastAPI dependency: 429 when the caller exceeds 10 invites/min."""
+    key = f"invite:{_rate_limit_key(request)}"
+    allowed, info = await _invite_rate_counter.check(key, _INVITE_RATE_LIMIT)
+    if not allowed:
+        retry_after = info.get("retry_after") or _INVITE_RATE_LIMIT.window_seconds
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "detail": "rate limit: 10/min",
+                "limit_type": "per_minute",
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
 
 
 class ProjectSharingMicroservice:
@@ -192,13 +235,17 @@ async def health_check():
     "/api/v1/projects/{project_id}/shares",
     response_model=ShareResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(enforce_invite_rate_limit)],
 )
 async def invite_to_project(
     project_id: str,
     request: CreateShareRequest,
     sharing_service: ProjectSharingService = Depends(get_sharing_service),
 ):
-    """Invite a user to a project. Idempotent on (project_id, lower(email)) while pending."""
+    """Invite a user to a project. Idempotent on (project_id, lower(email)) while pending.
+
+    Rate limited to 10 req/min per caller (JWT-keyed, IP fallback) — see
+    enforce_invite_rate_limit. Returns 429 with Retry-After when exceeded."""
     try:
         return await sharing_service.invite(project_id, request)
     except ProjectShareValidationError as e:

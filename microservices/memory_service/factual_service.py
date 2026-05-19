@@ -44,9 +44,7 @@ class FactualMemoryService:
         )
         self._collection_initialized = False  # Track if collection is ready
 
-        logger.info(
-            f"Factual Memory Service initialized with ISA Model URL: {self.model_url}"
-        )
+        logger.info(f"Factual Memory Service initialized with ISA Model URL: {self.model_url}")
 
     def _get_model_url(self) -> str:
         """Get ISA Model service URL via Consul or environment variable"""
@@ -92,22 +90,22 @@ class FactualMemoryService:
                         field_name="user_id",
                         field_type="keyword",
                     )
-                    logger.info(
-                        f"Created Qdrant collection: {collection_name} with user_id index"
-                    )
+                    logger.info(f"Created Qdrant collection: {collection_name} with user_id index")
                 else:
                     # Collection exists, log its info
                     info = await self.qdrant.get_collection_info(collection_name)
-                    logger.info(
-                        f"Qdrant collection '{collection_name}' already exists: {info}"
-                    )
+                    logger.info(f"Qdrant collection '{collection_name}' already exists: {info}")
 
             self._collection_initialized = True
         except Exception as e:
             logger.error(f"Error ensuring Qdrant collection: {e}", exc_info=True)
 
     async def store_factual_memory(
-        self, user_id: str, dialog_content: str, importance_score: float = 0.5
+        self,
+        user_id: str,
+        dialog_content: str,
+        importance_score: float = 0.5,
+        auth_token: Optional[str] = None,
     ) -> MemoryOperationResult:
         """
         Extract and store factual memories from dialog content using AI
@@ -125,7 +123,7 @@ class FactualMemoryService:
             await self._ensure_collection()
 
             # Extract facts using LLM
-            extraction_result = await self._extract_facts(dialog_content)
+            extraction_result = await self._extract_facts(dialog_content, auth_token=auth_token)
 
             if not extraction_result["success"]:
                 return MemoryOperationResult(
@@ -167,19 +165,13 @@ class FactualMemoryService:
 
                     # Generate embedding for the fact content
                     fact_content = self._create_fact_content(fact)
-                    logger.info(
-                        f"Generating embedding for fact: {fact_content[:100]}..."
-                    )
+                    logger.info(f"Generating embedding for fact: {fact_content[:100]}...")
                     embedding = await self._generate_embedding(fact_content)
 
                     if not embedding:
-                        logger.warning(
-                            f"Failed to generate embedding for fact: {fact_content[:50]}"
-                        )
+                        logger.warning(f"Failed to generate embedding for fact: {fact_content[:50]}")
                     else:
-                        logger.info(
-                            f"Generated embedding with {len(embedding)} dimensions"
-                        )
+                        logger.info(f"Generated embedding with {len(embedding)} dimensions")
 
                     # PostgreSQL data (no embedding)
                     memory_data = {
@@ -191,9 +183,7 @@ class FactualMemoryService:
                         "subject": str(fact.get("subject", "")),
                         "predicate": str(fact.get("predicate", "")),
                         "object_value": object_value,
-                        "fact_context": str(fact.get("context", ""))
-                        if fact.get("context")
-                        else None,
+                        "fact_context": str(fact.get("context", "")) if fact.get("context") else None,
                         "source": "dialog",
                         "verification_status": "unverified",
                         "related_facts": [],
@@ -221,15 +211,9 @@ class FactualMemoryService:
                                                 "vector": embedding,
                                                 "payload": {
                                                     "user_id": user_id,
-                                                    "fact_type": fact.get(
-                                                        "fact_type", "general"
-                                                    ),
-                                                    "subject": str(
-                                                        fact.get("subject", "")
-                                                    ),
-                                                    "created_at": datetime.now(
-                                                        timezone.utc
-                                                    ).isoformat(),
+                                                    "fact_type": fact.get("fact_type", "general"),
+                                                    "subject": str(fact.get("subject", "")),
+                                                    "created_at": datetime.now(timezone.utc).isoformat(),
                                                 },
                                             }
                                         ],
@@ -243,9 +227,7 @@ class FactualMemoryService:
                                     exc_info=True,
                                 )
                         else:
-                            logger.warning(
-                                f"Skipping Qdrant storage for {memory_id} - no embedding"
-                            )
+                            logger.warning(f"Skipping Qdrant storage for {memory_id} - no embedding")
 
                         stored_count += 1
                         stored_ids.append(memory_id)
@@ -273,12 +255,20 @@ class FactualMemoryService:
                 message=f"Error: {str(e)}",
             )
 
-    async def _extract_facts(self, dialog_content: str) -> Dict[str, Any]:
+    async def _extract_facts(
+        self,
+        dialog_content: str,
+        auth_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Extract facts from dialog using ISA Model LLM
+        Extract facts from dialog using ISA Model LLM.
 
         Args:
             dialog_content: Dialog content to analyze
+            auth_token: Optional bearer JWT to forward to isA_Model so the
+                upstream can apply user-level quotas + audit. Pattern mirrors
+                summary_service.synthesize_summary (PR xenoISA/isA_user#454).
+                When None/empty, the existing service-level auth path is kept.
 
         Returns:
             Dictionary with extraction results
@@ -298,7 +288,16 @@ Return ONLY valid JSON with a "facts" array. Example:
 
             prompt = f"Extract facts from this conversation and return as JSON:\n\n{dialog_content}"
 
-            async with AsyncISAModel(base_url=self.model_url) as client:
+            # JWT pass-through to isA_Model (#464). Empty/None token → no
+            # extra_headers, preserving the existing service-level auth path.
+            normalized = (auth_token or "").strip()
+            if normalized and not normalized.lower().startswith("bearer "):
+                normalized = f"Bearer {normalized}"
+            client_kwargs: Dict[str, Any] = {"base_url": self.model_url}
+            if normalized:
+                client_kwargs["extra_headers"] = {"Authorization": normalized}
+
+            async with AsyncISAModel(**client_kwargs) as client:
                 response = await client.chat.completions.create(
                     model="gpt-4.1-nano",
                     messages=[
@@ -337,9 +336,7 @@ Return ONLY valid JSON with a "facts" array. Example:
         """
         try:
             async with AsyncISAModel(base_url=self.model_url) as client:
-                embedding = await client.embeddings.create(
-                    input=text, model="text-embedding-3-small"
-                )
+                embedding = await client.embeddings.create(input=text, model="text-embedding-3-small")
                 return embedding.data[0].embedding
 
         except Exception as e:
@@ -381,15 +378,11 @@ Return ONLY valid JSON with a "facts" array. Example:
             return f"User fact: {subject} {predicate} {obj_value}"
 
     # Search methods
-    async def search_facts_by_subject(
-        self, user_id: str, subject: str, limit: int = 10
-    ) -> List[Dict[str, Any]]:
+    async def search_facts_by_subject(self, user_id: str, subject: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search factual memories by subject"""
         return await self.repository.search_by_subject(user_id, subject, limit)
 
-    async def search_facts_by_type(
-        self, user_id: str, fact_type: str, limit: int = 10
-    ) -> List[Dict[str, Any]]:
+    async def search_facts_by_type(self, user_id: str, fact_type: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search factual memories by type"""
         return await self.repository.search_by_fact_type(user_id, fact_type, limit)
 
@@ -397,9 +390,7 @@ Return ONLY valid JSON with a "facts" array. Example:
         self, user_id: str, min_confidence: float = 0.7, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search high-confidence facts"""
-        return await self.repository.search_by_confidence(
-            user_id, min_confidence, limit
-        )
+        return await self.repository.search_by_confidence(user_id, min_confidence, limit)
 
     async def vector_search(
         self,
@@ -431,23 +422,17 @@ Return ONLY valid JSON with a "facts" array. Example:
             if query_embedding is None:
                 query_embedding = await self._generate_embedding(query)
             if query_embedding is None:
-                logger.warning(
-                    "Failed to generate query embedding, falling back to text search"
-                )
+                logger.warning("Failed to generate query embedding, falling back to text search")
                 return await self.search_facts_by_subject(user_id, query, limit)
 
-            logger.info(
-                f"Generated query embedding with {len(query_embedding)} dimensions for: {query[:50]}..."
-            )
+            logger.info(f"Generated query embedding with {len(query_embedding)} dimensions for: {query[:50]}...")
 
             # Debug: Check collection status
             async with self.qdrant:
                 # Count total points in collection
                 try:
                     point_count = await self.qdrant.count_points("factual_memories")
-                    logger.info(
-                        f"Collection 'factual_memories' has {point_count} total points"
-                    )
+                    logger.info(f"Collection 'factual_memories' has {point_count} total points")
                 except Exception as e:
                     logger.warning(f"Could not count points: {e}")
 
@@ -479,9 +464,7 @@ Return ONLY valid JSON with a "facts" array. Example:
 
             # Search Qdrant for similar vectors using isa_common wrapper
             # The wrapper expects filter_conditions as a dict with 'must', 'should', 'must_not' keys
-            filter_conditions = {
-                "must": [{"field": "user_id", "match": {"keyword": user_id}}]
-            }
+            filter_conditions = {"must": [{"field": "user_id", "match": {"keyword": user_id}}]}
             logger.info(f"Searching with filter for user_id={user_id}")
 
             async with self.qdrant:
@@ -496,26 +479,16 @@ Return ONLY valid JSON with a "facts" array. Example:
                 )
 
             if not search_results:
-                logger.info(
-                    f"No vector search results for user {user_id} with threshold {score_threshold}"
-                )
+                logger.info(f"No vector search results for user {user_id} with threshold {score_threshold}")
                 return []
 
             # Get memory IDs and scores from results (returns list of dicts)
             memory_ids = [str(result["id"]) for result in search_results]
-            scores = {
-                str(result["id"]): result.get("score", 0.0) for result in search_results
-            }
+            scores = {str(result["id"]): result.get("score", 0.0) for result in search_results}
             # Capture vectors for MMR re-ranking when requested
-            vectors = (
-                {str(result["id"]): result.get("vector") for result in search_results}
-                if with_vectors
-                else {}
-            )
+            vectors = {str(result["id"]): result.get("vector") for result in search_results} if with_vectors else {}
 
-            logger.info(
-                f"Vector search found {len(memory_ids)} matches in Qdrant for user {user_id}"
-            )
+            logger.info(f"Vector search found {len(memory_ids)} matches in Qdrant for user {user_id}")
 
             # Fetch full memory data from PostgreSQL
             memories = await self.repository.get_by_ids(memory_ids)
