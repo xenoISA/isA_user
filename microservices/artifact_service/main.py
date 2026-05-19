@@ -17,10 +17,12 @@ Port: 8291
 
 from __future__ import annotations
 
+import hashlib
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from core.config_manager import ConfigManager
@@ -29,6 +31,7 @@ from core.health import HealthCheck
 from core.logger import setup_service_logger
 from core.metrics import setup_metrics
 from core.nats_client import get_event_bus
+from core.rate_limiter import InMemoryBackend, RateLimitConfig, SlidingWindowCounter
 from isa_common.consul_client import ConsulRegistry
 
 from .factory import create_artifact_service
@@ -65,6 +68,111 @@ consul_registry: Optional[ConsulRegistry] = None
 shutdown_manager = GracefulShutdown("artifact_service")
 
 
+# ----------------------------------------------------------------------------
+# Per-caller in-process rate limits (xenoISA/isA_user#464 — defense in depth).
+#
+# APISIX handles real prod limits at the edge; this in-process sliding-window
+# cap protects against burst abuse from a single caller with valid auth (e.g.
+# a runaway script). Mirrors the pattern in project_sharing_service.main —
+# JWT SHA1 prefix is the key when an Authorization header is present, else
+# the client IP. That way the same user can't trivially evade by rotating
+# IPs and unauthenticated bursts are still capped per-IP.
+#
+# Two independent buckets:
+#   - runtime/invoke → ARTIFACT_RUNTIME_RATE_PER_MINUTE  (default 100/min)
+#   - mcp/call       → ARTIFACT_MCP_RATE_PER_MINUTE      (default  60/min)
+#
+# Both are env-overridable so the golden tests can dial them down without
+# making 100+ HTTP calls per test. Same pattern as ARTIFACT_DAILY_QUOTA.
+# ----------------------------------------------------------------------------
+DEFAULT_RUNTIME_RATE_PER_MINUTE = 100
+DEFAULT_MCP_RATE_PER_MINUTE = 60
+
+
+def _runtime_rate_per_minute() -> int:
+    raw = os.getenv("ARTIFACT_RUNTIME_RATE_PER_MINUTE")
+    if not raw:
+        return DEFAULT_RUNTIME_RATE_PER_MINUTE
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_RUNTIME_RATE_PER_MINUTE
+
+
+def _mcp_rate_per_minute() -> int:
+    raw = os.getenv("ARTIFACT_MCP_RATE_PER_MINUTE")
+    if not raw:
+        return DEFAULT_MCP_RATE_PER_MINUTE
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_MCP_RATE_PER_MINUTE
+
+
+_runtime_invoke_rate_counter = SlidingWindowCounter(InMemoryBackend())
+_mcp_call_rate_counter = SlidingWindowCounter(InMemoryBackend())
+
+
+def _rate_limit_key(request: Request) -> str:
+    """Stable per-caller key — prefer JWT, fall back to IP."""
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth:
+        token = auth.strip()
+        # 12-char SHA1 prefix is enough entropy for an in-process counter and
+        # avoids holding raw tokens in the rate-limit map.
+        return "jwt:" + hashlib.sha1(token.encode("utf-8")).hexdigest()[:12]
+    if request.client and request.client.host:
+        return "ip:" + request.client.host
+    return "anon"
+
+
+async def enforce_runtime_invoke_rate_limit(request: Request) -> None:
+    """FastAPI dependency: 429 when the caller exceeds the per-minute cap on
+    ``/runtime/invoke``. Independent from the per-day quota gate in the service
+    layer — frontends branch on ``detail.limit_type`` to differentiate UX
+    (per_minute vs per_day)."""
+    limit = _runtime_rate_per_minute()
+    config = RateLimitConfig(requests=limit, window_seconds=60)
+    key = f"artifact:runtime-invoke:{_rate_limit_key(request)}"
+    allowed, info = await _runtime_invoke_rate_counter.check(key, config)
+    if not allowed:
+        retry_after = info.get("retry_after") or config.window_seconds
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "per_minute_rate_exceeded",
+                "detail": f"rate limit: {limit}/min",
+                "limit_type": "per_minute",
+                "limit": limit,
+                "retry_after": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+async def enforce_mcp_call_rate_limit(request: Request) -> None:
+    """FastAPI dependency: 429 when the caller exceeds the per-minute cap on
+    ``/mcp/call``. Tool calls are typically more expensive than runtime invokes
+    so the default cap is lower (60/min vs 100/min)."""
+    limit = _mcp_rate_per_minute()
+    config = RateLimitConfig(requests=limit, window_seconds=60)
+    key = f"artifact:mcp-call:{_rate_limit_key(request)}"
+    allowed, info = await _mcp_call_rate_counter.check(key, config)
+    if not allowed:
+        retry_after = info.get("retry_after") or config.window_seconds
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "per_minute_rate_exceeded",
+                "detail": f"rate limit: {limit}/min",
+                "limit_type": "per_minute",
+                "limit": limit,
+                "retry_after": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global artifact_service, consul_registry
@@ -83,7 +191,9 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("artifact_service")
         logger.info("Event bus initialized")
     except Exception as e:
-        logger.warning(f"Event bus init failed: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"Event bus init failed: {e}. Continuing without event publishing."
+        )
 
     artifact_service = create_artifact_service(event_bus=event_bus)
 
@@ -109,7 +219,9 @@ async def lifespan(app: FastAPI):
             consul_registry.register()
             consul_registry.start_maintenance()
             shutdown_manager.set_consul_registry(consul_registry)
-            logger.info(f"Registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"Registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"Failed to register with Consul: {e}")
             consul_registry = None
@@ -133,7 +245,9 @@ app = FastAPI(
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, service_name="artifact_service")
 
-health = HealthCheck("artifact_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "artifact_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/artifacts/health")
@@ -170,7 +284,9 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
     is present (e.g. dev/no-auth path) we return ``None`` and the upstream
     keeps using its existing default auth.
     """
-    authorization = request.headers.get("authorization") or request.headers.get("Authorization")
+    authorization = request.headers.get("authorization") or request.headers.get(
+        "Authorization"
+    )
     if not authorization:
         return None
     parts = authorization.strip().split(None, 1)
@@ -241,7 +357,9 @@ class UpdateArtifactBody(BaseModel):
 async def update_artifact(artifact_id: str, body: UpdateArtifactBody):
     """Patch artifact: title, visibility, ai_runtime_enabled, storage_scope, metadata."""
     try:
-        return await artifact_service.update_artifact(artifact_id, body.update, body.user_id)
+        return await artifact_service.update_artifact(
+            artifact_id, body.update, body.user_id
+        )
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"update_artifact failed: {e}")
@@ -272,7 +390,9 @@ class AddVersionBody(BaseModel):
 async def add_version(artifact_id: str, body: AddVersionBody):
     """Append a new immutable version. Auto-increments number when omitted."""
     try:
-        return await artifact_service.add_version(artifact_id, body.version, body.user_id)
+        return await artifact_service.add_version(
+            artifact_id, body.version, body.user_id
+        )
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"add_version failed: {e}")
@@ -345,7 +465,9 @@ async def list_artifact_shares(
 async def read_public_artifact_share(
     token: str,
     v: Optional[int] = Query(None, description="Pin to a specific version number"),
-    org_id: Optional[str] = Query(None, description="Caller org id for org-scoped shares"),
+    org_id: Optional[str] = Query(
+        None, description="Caller org id for org-scoped shares"
+    ),
 ):
     """Public reader — resolves token → artifact + version. 410 if revoked/expired."""
     try:
@@ -405,6 +527,7 @@ from .models import (  # noqa: E402
 @app.post(
     "/api/v1/artifacts/{artifact_id}/runtime/invoke",
     response_model=ArtifactRuntimeInvokeResponse,
+    dependencies=[Depends(enforce_runtime_invoke_rate_limit)],
 )
 async def runtime_invoke(
     artifact_id: str,
@@ -420,18 +543,28 @@ async def runtime_invoke(
     check + usage upsert run inside the service layer so we never book a
     call we refused.
 
+    Two independent 429 paths:
+      - per-minute burst cap (enforce_runtime_invoke_rate_limit dependency)
+        → ``detail.limit_type == 'per_minute'``
+      - per-day quota (ArtifactQuotaExceededError from the service layer)
+        → ``detail.error == 'daily_quota_exceeded'``
+    The frontend branches on these markers to pick UX (banner vs cooldown).
+
     The caller's bearer token (when present) is forwarded to isA_Model so
     user-level rate limits + audit apply to the upstream call.
     """
     try:
         auth_token = _extract_bearer_token(request)
-        return await artifact_service.runtime_invoke(artifact_id, body, auth_token=auth_token)
+        return await artifact_service.runtime_invoke(
+            artifact_id, body, auth_token=auth_token
+        )
     except ArtifactQuotaExceededError as e:
         response.headers["Retry-After"] = str(e.retry_after)
         raise HTTPException(
             status_code=429,
             detail={
                 "error": "daily_quota_exceeded",
+                "limit_type": "per_day",
                 "calls_today": e.calls_today,
                 "quota": e.quota,
                 "retry_after": e.retry_after,
@@ -484,6 +617,7 @@ async def mcp_approve(artifact_id: str, body: MCPApproveRequest):
 @app.post(
     "/api/v1/artifacts/{artifact_id}/mcp/call",
     response_model=MCPCallResponse,
+    dependencies=[Depends(enforce_mcp_call_rate_limit)],
 )
 async def mcp_call(artifact_id: str, body: MCPCallRequest, request: Request):
     """MCP tool call — gated by an active ``allow``+``always`` grant.
@@ -538,11 +672,15 @@ async def list_mcp_grants(
 async def kv_get(
     artifact_id: str,
     key: str,
-    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    scope: ArtifactKVScope = Query(
+        ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"
+    ),
     user_id: Optional[str] = Query(None, description="Required when scope=personal"),
 ):
     try:
-        return await artifact_service.kv_get(artifact_id, key, scope=scope, user_id=user_id)
+        return await artifact_service.kv_get(
+            artifact_id, key, scope=scope, user_id=user_id
+        )
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"kv_get failed: {e}")
@@ -557,11 +695,15 @@ async def kv_put(
     artifact_id: str,
     key: str,
     body: ArtifactKVValueRequest,
-    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    scope: ArtifactKVScope = Query(
+        ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"
+    ),
     user_id: Optional[str] = Query(None, description="Required when scope=personal"),
 ):
     try:
-        return await artifact_service.kv_put(artifact_id, key, value=body.value, scope=scope, user_id=user_id)
+        return await artifact_service.kv_put(
+            artifact_id, key, value=body.value, scope=scope, user_id=user_id
+        )
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"kv_put failed: {e}")
@@ -572,11 +714,15 @@ async def kv_put(
 async def kv_delete(
     artifact_id: str,
     key: str,
-    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    scope: ArtifactKVScope = Query(
+        ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"
+    ),
     user_id: Optional[str] = Query(None, description="Required when scope=personal"),
 ):
     try:
-        ok = await artifact_service.kv_delete(artifact_id, key, scope=scope, user_id=user_id)
+        ok = await artifact_service.kv_delete(
+            artifact_id, key, scope=scope, user_id=user_id
+        )
         return {"success": ok}
     except Exception as e:
         _raise_for_artifact_error(e)
