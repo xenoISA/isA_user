@@ -359,3 +359,61 @@ services:
     name: user-developer-service
     repository: isa/user-developer
     port: 8261
+  # ---------------------------------------------------------------------------
+  # New microservices (xenoISA/isA_user epic isA_/#452, issue #462)
+  # Per-service env overrides for these live in the `artifactService` and
+  # `projectSharingService` blocks below — deploy.sh consumes the `services:`
+  # map for naming/port; sub-charts under deployment/helm/charts/* mirror the
+  # same defaults for standalone renders.
+  # ---------------------------------------------------------------------------
+  artifact:
+    name: user-artifact-service
+    repository: isa/user-artifact
+    port: 8291
+  projectSharing:
+    name: user-project-sharing-service
+    repository: isa/user-project-sharing
+    port: 8270
+
+# =============================================================================
+# Per-service overrides for the new microservices (#462)
+# =============================================================================
+# These match the structure called for in the issue spec. The shared `env:`
+# block above is injected into every service; the entries below are appended
+# by callers that consume the per-service overrides (sub-chart render or
+# overlay) so artifact-only knobs (ISA_MODEL_URL, ARTIFACT_DAILY_QUOTA, etc.)
+# don't pollute unrelated services.
+# =============================================================================
+artifactService:
+  enabled: true
+  image:
+    repository: isa/user-artifact
+    tag: latest
+  # Service-specific env (artifact_service.py / _invoke_isa_model):
+  #   ISA_MODEL_URL, ISA_MCP_URL, ARTIFACT_DAILY_QUOTA,
+  #   ARTIFACT_RUNTIME_MODEL, ARTIFACT_RUNTIME_PROVIDER
+  # POSTGRES_*, CONSUL_*, NATS_URL come from the shared env block.
+  env:
+    - name: ISA_MODEL_URL
+      value: "http://isa-model.isa-cloud-staging.svc.cluster.local:8082"
+    - name: ISA_MCP_URL
+      value: "http://isa-mcp.isa-cloud-staging.svc.cluster.local:8081/mcp"
+    - name: ARTIFACT_DAILY_QUOTA
+      value: "50"
+    - name: ARTIFACT_RUNTIME_MODEL
+      value: "gpt-4.1-nano"
+    - name: ARTIFACT_RUNTIME_PROVIDER
+      value: "openai"
+
+projectSharingService:
+  enabled: true
+  image:
+    repository: isa/user-project-sharing
+    tag: latest
+  # Service-specific env (project_sharing_service.py):
+  #   PROJECT_SHARE_ACCEPT_BASE_URL
+  # POSTGRES_*, CONSUL_*, NATS_URL come from the shared env block via
+  # service discovery.
+  env:
+    - name: PROJECT_SHARE_ACCEPT_BASE_URL
+      value: "https://staging.app.isa.dev/shares/accept"

@@ -1,0 +1,28 @@
+apiVersion: v2
+name: artifact-service
+description: |
+  Helm chart for the isA_user artifact_service (xenoISA/isA_user#441).
+
+  Renders a Deployment + Service + HPA for the artifact library microservice
+  on port 8291. The service stores versioned AI-generated artifacts and
+  delegates LLM calls to isA_Model via ISA_MODEL_URL and tool calls to
+  isA_MCP via ISA_MCP_URL.
+
+  This chart mirrors the structure of the shared isa-service chart at
+  isA_Cloud/deployments/charts/isa-service so it can be installed standalone
+  for one-off envs without pulling the cluster-wide chart. For the main
+  cluster deploy path, prefer wiring the service into the `services:` map
+  in deployment/helm/values-{staging,production}.yaml — `deploy.sh` then
+  iterates and renders via the shared chart.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - artifact
+  - microservice
+  - isa-user
+home: https://github.com/xenoISA/isA_user
+sources:
+  - https://github.com/xenoISA/isA_user
+maintainers:
+  - name: isa-platform

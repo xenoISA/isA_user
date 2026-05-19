@@ -249,3 +249,17 @@ services:
     name: user-developer-service
     repository: isa/user-developer
     port: 8261
+  # ---------------------------------------------------------------------------
+  # New microservices (xenoISA/isA_user epic isA_/#452, issue #462)
+  # ---------------------------------------------------------------------------
+  # Sub-charts live at deployment/helm/charts/{artifact,project-sharing}-service
+  # for standalone-render use. The shared isa-service chart still drives the
+  # cluster deploy via deploy.sh + the entries below.
+  artifact:
+    name: user-artifact-service
+    repository: isa/user-artifact
+    port: 8291
+  projectSharing:
+    name: user-project-sharing-service
+    repository: isa/user-project-sharing
+    port: 8270

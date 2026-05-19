@@ -1,0 +1,94 @@
+# =============================================================================
+# artifact_service — Helm values (xenoISA/isA_user#441, epic isA_/#452)
+# =============================================================================
+# Render:
+#   helm template deployment/helm/charts/artifact-service/ \
+#     -f deployment/helm/charts/artifact-service/values.yaml
+#
+# -----------------------------------------------------------------------------
+# Environment variables consumed by the service (microservices/artifact_service):
+# -----------------------------------------------------------------------------
+#   Service-specific (read in artifact_service.py):
+#     ISA_MODEL_URL            — base URL for isA_Model HTTP API
+#                                (default: http://localhost:8082)
+#     ISA_MCP_URL              — base URL for isA_MCP MCP endpoint
+#                                (default: http://localhost:8081/mcp)
+#     ARTIFACT_RUNTIME_MODEL   — model id used by _invoke_isa_model
+#                                (default: gpt-4.1-nano)
+#     ARTIFACT_RUNTIME_PROVIDER — provider for model routing
+#                                (default: openai)
+#     ARTIFACT_DAILY_QUOTA     — per-user daily generation cap, "" disables
+#
+#   Platform / shared (injected via the umbrella `env:` block in
+#   deployment/helm/values-{staging,production}.yaml — duplicated here only
+#   for standalone-chart use):
+#     POSTGRES_HOST / POSTGRES_PORT / POSTGRES_DB
+#     POSTGRES_USER / POSTGRES_PASSWORD          (from user-secrets)
+#     CONSUL_HOST / CONSUL_PORT / CONSUL_ENABLED
+#     NATS_URL / NATS_HOST / NATS_PORT
+#     REDIS_HOST / REDIS_PORT
+#     DB_POOL_BASE / DB_POOL_GROWTH / POD_REPLICA_COUNT  (epic #345 / #346)
+#     ENV / LOG_LEVEL / PYTHONPATH / PYTHONUNBUFFERED
+# =============================================================================
+
+enabled: true
+
+name: user-artifact-service
+namespace: isa-cloud-staging
+
+image:
+  registry: harbor.local:30443
+  repository: isa/user-artifact
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+replicas: 1
+
+port: 8291
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+
+health:
+  path: /health
+  initialDelaySeconds: 60
+  periodSeconds: 10
+
+service:
+  type: ClusterIP
+
+consul:
+  enabled: true
+
+# Service-specific env. Platform-wide env (POSTGRES_*, CONSUL_*, NATS_URL,
+# etc.) is injected by the umbrella values-{staging,production}.yaml `env:`
+# block via the shared isa-service chart; only artifact-only knobs live here
+# so that one-off renders of this sub-chart still produce a working pod.
+env:
+  - name: SERVICE_NAME
+    value: "artifact_service"
+  - name: SERVICE_PORT
+    value: "8291"
+  - name: ISA_MODEL_URL
+    value: "http://isa-model.isa-cloud-staging.svc.cluster.local:8082"
+  - name: ISA_MCP_URL
+    value: "http://isa-mcp.isa-cloud-staging.svc.cluster.local:8081/mcp"
+  - name: ARTIFACT_RUNTIME_MODEL
+    value: "gpt-4.1-nano"
+  - name: ARTIFACT_RUNTIME_PROVIDER
+    value: "openai"
+  - name: ARTIFACT_DAILY_QUOTA
+    value: "50"
