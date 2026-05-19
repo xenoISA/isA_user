@@ -1,0 +1,26 @@
+apiVersion: v2
+name: project-sharing-service
+description: |
+  Helm chart for the isA_user project_sharing_service (xenoISA/isA_user#442).
+
+  Renders a Deployment + Service + HPA for the project-level invite / accept /
+  revoke microservice on port 8270. Pairs with isA_/#429 (isA_Frame consumer).
+
+  Mirrors the shared isa-service chart at
+  isA_Cloud/deployments/charts/isa-service so the chart can be installed
+  standalone for one-off envs. For the main cluster deploy path, the service
+  is also wired into the `services:` map in
+  deployment/helm/values-{staging,production}.yaml and rendered by deploy.sh
+  against the shared chart.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - project-sharing
+  - microservice
+  - isa-user
+home: https://github.com/xenoISA/isA_user
+sources:
+  - https://github.com/xenoISA/isA_user
+maintainers:
+  - name: isa-platform

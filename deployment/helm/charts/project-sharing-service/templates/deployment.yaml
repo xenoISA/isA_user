@@ -1,0 +1,57 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Values.name }}
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/part-of: isa-user
+    app.kubernetes.io/component: project-sharing
+spec:
+  replicas: {{ .Values.replicas | default .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.name }}
+      {{- if .Values.consul.enabled }}
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        consul.hashicorp.com/service-name: {{ .Values.name }}
+      {{- end }}
+    spec:
+      containers:
+      - name: {{ .Values.name }}
+        image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.port }}
+          name: http
+        env:
+        {{- with .Values.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        resources:
+          requests:
+            memory: {{ .Values.resources.requests.memory }}
+            cpu: {{ .Values.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.resources.limits.memory }}
+            cpu: {{ .Values.resources.limits.cpu }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.health.path }}
+            port: {{ .Values.port }}
+          initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
+          periodSeconds: {{ .Values.health.periodSeconds }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.health.path }}
+            port: {{ .Values.port }}
+          initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
+          periodSeconds: {{ .Values.health.periodSeconds }}
+{{- end }}

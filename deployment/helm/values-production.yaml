@@ -398,3 +398,52 @@ services:
     name: user-developer-service
     repository: isa/user-developer
     port: 8261
+  # ---------------------------------------------------------------------------
+  # New microservices (xenoISA/isA_user epic isA_/#452, issue #462)
+  # Per-service env overrides for these live in the `artifactService` and
+  # `projectSharingService` blocks below — deploy.sh consumes the `services:`
+  # map for naming/port; sub-charts under deployment/helm/charts/* mirror the
+  # same defaults for standalone renders.
+  # ---------------------------------------------------------------------------
+  artifact:
+    name: user-artifact-service
+    repository: isa/user-artifact
+    port: 8291
+  projectSharing:
+    name: user-project-sharing-service
+    repository: isa/user-project-sharing
+    port: 8270
+
+# =============================================================================
+# Per-service overrides for the new microservices (#462)
+# =============================================================================
+# Production-pinned settings — bump image.tag in CI via
+# `--set artifactService.image.tag=$VERSION`. Real secrets (e.g., an
+# ISA_MODEL provider API key, if added later) MUST come from `user-secrets`
+# via valueFrom.secretKeyRef, not be inlined here.
+# =============================================================================
+artifactService:
+  enabled: true
+  image:
+    repository: isa/user-artifact
+    tag: "0.0.0"
+  env:
+    - name: ISA_MODEL_URL
+      value: "http://isa-model.isa-cloud-production.svc.cluster.local:8082"
+    - name: ISA_MCP_URL
+      value: "http://isa-mcp.isa-cloud-production.svc.cluster.local:8081/mcp"
+    - name: ARTIFACT_DAILY_QUOTA
+      value: "100"
+    - name: ARTIFACT_RUNTIME_MODEL
+      value: "gpt-4.1-nano"
+    - name: ARTIFACT_RUNTIME_PROVIDER
+      value: "openai"
+
+projectSharingService:
+  enabled: true
+  image:
+    repository: isa/user-project-sharing
+    tag: "0.0.0"
+  env:
+    - name: PROJECT_SHARE_ACCEPT_BASE_URL
+      value: "https://app.isa.dev/shares/accept"

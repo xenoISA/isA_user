@@ -1,0 +1,81 @@
+# =============================================================================
+# project_sharing_service — Helm values (xenoISA/isA_user#442, epic isA_/#452)
+# =============================================================================
+# Render:
+#   helm template deployment/helm/charts/project-sharing-service/ \
+#     -f deployment/helm/charts/project-sharing-service/values.yaml
+#
+# -----------------------------------------------------------------------------
+# Environment variables consumed by the service
+# (microservices/project_sharing_service):
+# -----------------------------------------------------------------------------
+#   Service-specific (read in project_sharing_service.py /
+#                     project_share_repository.py):
+#     PROJECT_SHARE_ACCEPT_BASE_URL — front-end base URL for accept links
+#                                     (default: https://app.isa.dev/shares/accept)
+#     POSTGRES_HOST / POSTGRES_PORT / POSTGRES_DB
+#     POSTGRES_USER / POSTGRES_PASSWORD          (from user-secrets)
+#
+#   Platform / shared (injected via the umbrella `env:` block in
+#   deployment/helm/values-{staging,production}.yaml — duplicated here only
+#   for standalone-chart use):
+#     CONSUL_HOST / CONSUL_PORT / CONSUL_ENABLED
+#     NATS_URL / NATS_HOST / NATS_PORT
+#     REDIS_HOST / REDIS_PORT
+#     DB_POOL_BASE / DB_POOL_GROWTH / POD_REPLICA_COUNT  (epic #345 / #346)
+#     ENV / LOG_LEVEL / PYTHONPATH / PYTHONUNBUFFERED
+# =============================================================================
+
+enabled: true
+
+name: user-project-sharing-service
+namespace: isa-cloud-staging
+
+image:
+  registry: harbor.local:30443
+  repository: isa/user-project-sharing
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+replicas: 1
+
+port: 8270
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+
+health:
+  path: /health
+  initialDelaySeconds: 60
+  periodSeconds: 10
+
+service:
+  type: ClusterIP
+
+consul:
+  enabled: true
+
+# Service-specific env. Platform-wide env (POSTGRES_*, CONSUL_*, NATS_URL,
+# etc.) is injected by the umbrella values-{staging,production}.yaml `env:`
+# block via the shared isa-service chart. Standalone renders of this chart
+# still produce a working pod via the defaults below.
+env:
+  - name: SERVICE_NAME
+    value: "project_sharing_service"
+  - name: SERVICE_PORT
+    value: "8270"
+  - name: PROJECT_SHARE_ACCEPT_BASE_URL
+    value: "https://staging.app.isa.dev/shares/accept"
