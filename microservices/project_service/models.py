@@ -1,6 +1,6 @@
 """Project Service Pydantic Models (#258, #296, #297)"""
 
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -67,6 +67,18 @@ class ProjectFileListResponse(BaseModel):
 class ProjectListResponse(BaseModel):
     projects: List[ProjectResponse]
     total: int
+
+
+class ProjectExportResponse(BaseModel):
+    schema_version: str = "project-export-v1"
+    service: str = "project_service"
+    user_id: str
+    organization_id: Optional[str] = None
+    gdpr_request_id: Optional[str] = None
+    exported_at: str
+    projects: List[ProjectResponse]
+    project_files: Dict[str, List[ProjectFileResponse]]
+    counts: Dict[str, Any]
 
 
 class ErrorResponse(BaseModel):

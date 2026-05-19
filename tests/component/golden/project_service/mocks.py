@@ -81,6 +81,8 @@ class MockProjectRepository:
         limit: int = 50,
         offset: int = 0,
         organization_id: str = None,
+        include_archived: bool = False,
+        starred_only: bool = False,
     ) -> List[Dict[str, Any]]:
         if self._should_fail:
             raise self._should_fail
@@ -94,6 +96,36 @@ class MockProjectRepository:
         else:
             user_projects = [
                 p for p in self._projects.values() if p["user_id"] == user_id
+            ]
+        if not include_archived:
+            user_projects = [p for p in user_projects if p.get("archived_at") is None]
+        if starred_only:
+            user_projects = [
+                p for p in user_projects if p.get("starred_at") is not None
+            ]
+        user_projects.sort(key=lambda p: p["updated_at"], reverse=True)
+        return user_projects[offset : offset + limit]
+
+    async def list_projects_for_export(
+        self,
+        user_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        organization_id: str = None,
+    ) -> List[Dict[str, Any]]:
+        if self._should_fail:
+            raise self._should_fail
+        user_projects = [
+            p
+            for p in self._projects.values()
+            if p["user_id"] == user_id or p.get("owner_id") == user_id
+        ]
+        if organization_id:
+            user_projects = [
+                p
+                for p in user_projects
+                if p.get("organization_id") == organization_id
+                or p.get("org_id") == organization_id
             ]
         user_projects.sort(key=lambda p: p["updated_at"], reverse=True)
         return user_projects[offset : offset + limit]
