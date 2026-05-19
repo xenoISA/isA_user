@@ -374,6 +374,10 @@ services:
     name: user-project-sharing-service
     repository: isa/user-project-sharing
     port: 8270
+  connector:
+    name: user-connector-service
+    repository: isa/user-connector
+    port: 8292
 
 # =============================================================================
 # Per-service overrides for the new microservices (#462)
@@ -424,3 +428,27 @@ projectSharingService:
   env:
     - name: PROJECT_SHARE_ACCEPT_BASE_URL
       value: "https://staging.app.isa.dev/shares/accept"
+
+connectorService:
+  enabled: true
+  image:
+    repository: isa/user-connector
+    tag: latest
+  # Service-specific env (connector_service — xenoISA/isA_#464):
+  #   ALLOW_CUSTOM_MCP_CONNECTORS — gate POST/DELETE/revalidate on /custom
+  #   ALLOW_PRIVATE_MCP_HOSTS    — bypass private-IP block (dev only, must
+  #                                 stay false in staging/production)
+  #   CONNECTOR_USE_DEV_VAULT    — in-process secret stub; flip to false
+  #                                 once the real vault_service wiring lands
+  #   CONNECTOR_DEV_AUTH         — X-User-Id header fallback; off in staging
+  # POSTGRES_*, CONSUL_*, NATS_URL come from the shared env block via
+  # service discovery.
+  env:
+    - name: ALLOW_CUSTOM_MCP_CONNECTORS
+      value: "true"
+    - name: ALLOW_PRIVATE_MCP_HOSTS
+      value: "false"
+    - name: CONNECTOR_USE_DEV_VAULT
+      value: "true"
+    - name: CONNECTOR_DEV_AUTH
+      value: "false"

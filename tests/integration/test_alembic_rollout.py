@@ -43,6 +43,7 @@ ROLLOUT_SERVICES = (
     "memory_service",
     "artifact_service",
     "project_sharing_service",
+    "connector_service",
 )
 
 # Expected HEAD per service. Kept here (rather than read from disk) so
@@ -52,6 +53,7 @@ EXPECTED_HEAD = {
     "memory_service": "mem_011",
     "artifact_service": "art_004",
     "project_sharing_service": "psharing_001",
+    "connector_service": "conn_001",
 }
 
 # Head expected for project_service after the proj_005 follow-up
@@ -328,3 +330,88 @@ def test_proj_005_downgrade_is_documented_noop() -> None:
     assert (
         "    pass" in downgrade_body
     ), "proj_005 downgrade should be a documented `pass` no-op."
+
+
+# ---------------------------------------------------------------------------
+# connector_service — conn_001 (xenoISA/isA_#464 backend slice).
+#
+# Four extra cases that pin the shape of the new service's first
+# revision, mirroring the protections the ROLLOUT_SERVICES + project_service
+# blocks above give the existing chains.
+# ---------------------------------------------------------------------------
+
+
+def test_connector_service_head_is_conn_001() -> None:
+    """connector_service head must be ``conn_001`` after the #464 backend slice."""
+    script = _script_for("connector_service")
+    heads = script.get_heads()
+    assert (
+        len(heads) == 1
+    ), f"connector_service must have exactly one head, got {heads!r}."
+    assert heads[0] == "conn_001", (
+        f"connector_service head drift: env.py resolved {heads[0]!r}, "
+        "expected 'conn_001'. Update this test if a new revision was added intentionally."
+    )
+
+
+def test_conn_001_creates_connector_schema_and_tables() -> None:
+    """conn_001 must create the ``connector`` schema plus both tables."""
+    rev_file = (
+        get_service_version_path("connector_service")
+        / "conn_001_create_connector_tables.py"
+    )
+    assert rev_file.exists(), (
+        "conn_001 revision file must exist at "
+        "microservices/connector_service/alembic/versions/conn_001_create_connector_tables.py"
+    )
+    content = rev_file.read_text()
+
+    assert (
+        "CREATE SCHEMA IF NOT EXISTS connector" in content
+    ), "conn_001 must create the `connector` schema idempotently."
+    assert (
+        "CREATE TABLE IF NOT EXISTS connector.connector" in content
+    ), "conn_001 must create the per-user `connector.connector` install-state table."
+    assert (
+        "CREATE TABLE IF NOT EXISTS connector.custom_mcp_connector" in content
+    ), "conn_001 must create the `connector.custom_mcp_connector` table."
+
+
+def test_conn_001_enforces_unique_constraints() -> None:
+    """conn_001 must constrain duplicate (user, connector_id) and (user, url)."""
+    rev_file = (
+        get_service_version_path("connector_service")
+        / "conn_001_create_connector_tables.py"
+    )
+    content = rev_file.read_text()
+    assert (
+        "uq_connector_user_connector" in content
+    ), "conn_001 must add UNIQUE(user_id, connector_id) on connector.connector."
+    assert "uq_custom_mcp_user_url" in content, (
+        "conn_001 must add UNIQUE(user_id, url) on connector.custom_mcp_connector — "
+        "this is the idempotency guard for POST /connectors/custom."
+    )
+
+
+def test_conn_001_constrains_status_and_auth_kind() -> None:
+    """conn_001 must CHECK status + auth_kind values so the API and DB agree."""
+    rev_file = (
+        get_service_version_path("connector_service")
+        / "conn_001_create_connector_tables.py"
+    )
+    content = rev_file.read_text()
+    # status enum on connector.connector
+    assert "ck_connector_status" in content
+    for v in ("connected", "pending_auth", "error", "disconnected"):
+        assert v in content, f"conn_001 must allow status={v!r} on connector.connector."
+    # auth_kind + status on custom_mcp_connector
+    assert "ck_custom_mcp_auth_kind" in content
+    for v in ("none", "pat", "oauth_oob"):
+        assert (
+            v in content
+        ), f"conn_001 must allow auth_kind={v!r} on custom_mcp_connector."
+    assert "ck_custom_mcp_status" in content
+    for v in ("pending", "active", "error", "revoked"):
+        assert (
+            v in content
+        ), f"conn_001 must allow status={v!r} on custom_mcp_connector."
