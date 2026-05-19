@@ -32,9 +32,16 @@ from core.nats_client import Event
 
 from .models import (
     Artifact,
+    ArtifactKVResponse,
+    ArtifactKVScope,
+    ArtifactMCPGrant,
+    ArtifactMCPGrantsListResponse,
     ArtifactCreateRequest,
     ArtifactListItem,
     ArtifactListResponse,
+    ArtifactRuntimeInvokeRequest,
+    ArtifactRuntimeInvokeResponse,
+    ArtifactRuntimeUsageResponse,
     ArtifactScope,
     ArtifactShare,
     ArtifactShareVisibility,
@@ -45,6 +52,9 @@ from .models import (
     ArtifactVisibility,
     PublicArtifactResponse,
     PublicArtifactShareMeta,
+    MCPApproveRequest,
+    MCPCallRequest,
+    MCPCallResponse,
     PublishArtifactRequest,
     PublishArtifactResponse,
     RemixArtifactRequest,
@@ -262,11 +272,17 @@ class _McpSession:
             resp = await client.post(self.server_url, json=rpc_body, headers=headers)
 
         if resp.status_code in (401, 404):
-            raise _McpSessionExpired(f"MCP session expired (HTTP {resp.status_code}); re-initializing")
+            raise _McpSessionExpired(
+                f"MCP session expired (HTTP {resp.status_code}); re-initializing"
+            )
         if resp.status_code >= 400:
-            raise RuntimeError(f"isA_MCP returned HTTP {resp.status_code}: {resp.text[:500]}")
+            raise RuntimeError(
+                f"isA_MCP returned HTTP {resp.status_code}: {resp.text[:500]}"
+            )
 
-        new_session_id = resp.headers.get("Mcp-Session-Id") or resp.headers.get("mcp-session-id")
+        new_session_id = resp.headers.get("Mcp-Session-Id") or resp.headers.get(
+            "mcp-session-id"
+        )
         if not expect_response or not resp.content:
             return None, new_session_id
 
@@ -288,7 +304,9 @@ class _McpSession:
                 "clientInfo": {"name": MCP_CLIENT_NAME, "version": MCP_CLIENT_VERSION},
             },
         }
-        _payload, session_id = await self._post(init_body, expect_response=True, auth_token=auth_token)
+        _payload, session_id = await self._post(
+            init_body, expect_response=True, auth_token=auth_token
+        )
         if session_id:
             self.session_id = session_id
 
@@ -326,12 +344,16 @@ class _McpSession:
                 "server_id": self.server_id,
             },
         }
-        payload, _session_id = await self._post(call_body, expect_response=True, auth_token=auth_token)
+        payload, _session_id = await self._post(
+            call_body, expect_response=True, auth_token=auth_token
+        )
         if payload is None:
             raise RuntimeError("isA_MCP tools/call returned empty body")
         # JSON-RPC envelopes wrap the answer in ``result``; surface that when
         # present, otherwise the raw payload (servers vary).
-        result = payload.get("result", payload) if isinstance(payload, dict) else payload
+        result = (
+            payload.get("result", payload) if isinstance(payload, dict) else payload
+        )
         return {"tool_name": tool_name, "server_id": self.server_id, "result": result}
 
 
@@ -380,11 +402,15 @@ class ArtifactService:
 
     def _assert_owner(self, artifact: Artifact, user_id: str) -> None:
         if artifact.owner_user_id != user_id:
-            raise ArtifactPermissionError("Only the artifact owner may perform this action")
+            raise ArtifactPermissionError(
+                "Only the artifact owner may perform this action"
+            )
 
     # ==================== Create ====================
 
-    async def create_artifact(self, request: ArtifactCreateRequest, user_id: str) -> Artifact:
+    async def create_artifact(
+        self, request: ArtifactCreateRequest, user_id: str
+    ) -> Artifact:
         if not request.title.strip():
             raise ArtifactValidationError("title is required")
         if not request.version.content:
@@ -455,7 +481,10 @@ class ArtifactService:
             raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
         # In Phase 1 only the owner may read. Public/org visibility is resolved
         # via the share-token reader in a follow-up (#441 story 5).
-        if artifact.owner_user_id != user_id and artifact.visibility == ArtifactVisibility.PRIVATE:
+        if (
+            artifact.owner_user_id != user_id
+            and artifact.visibility == ArtifactVisibility.PRIVATE
+        ):
             raise ArtifactPermissionError("Access denied to this artifact")
         return artifact
 
@@ -479,7 +508,9 @@ class ArtifactService:
 
     # ==================== Update ====================
 
-    async def update_artifact(self, artifact_id: str, request: ArtifactUpdateRequest, user_id: str) -> Artifact:
+    async def update_artifact(
+        self, artifact_id: str, request: ArtifactUpdateRequest, user_id: str
+    ) -> Artifact:
         artifact = await self.repo.get_artifact(artifact_id)
         if not artifact:
             raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
@@ -605,13 +636,17 @@ class ArtifactService:
             return False
         return True
 
-    async def publish_artifact(self, artifact_id: str, request: PublishArtifactRequest) -> PublishArtifactResponse:
+    async def publish_artifact(
+        self, artifact_id: str, request: PublishArtifactRequest
+    ) -> PublishArtifactResponse:
         artifact = await self.repo.get_artifact(artifact_id)
         if not artifact:
             raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
         self._assert_owner(artifact, request.user_id)
 
-        if request.visibility == ArtifactShareVisibility.ORG and not (request.org_id or artifact.owner_org_id):
+        if request.visibility == ArtifactShareVisibility.ORG and not (
+            request.org_id or artifact.owner_org_id
+        ):
             raise ArtifactValidationError(
                 "visibility=org requires either request.org_id or owner_org_id on the artifact"
             )
@@ -620,7 +655,9 @@ class ArtifactService:
         if request.version_pin is not None:
             existing_numbers = {v.number for v in artifact.versions}
             if request.version_pin not in existing_numbers:
-                raise ArtifactValidationError(f"version_pin {request.version_pin} not present on artifact")
+                raise ArtifactValidationError(
+                    f"version_pin {request.version_pin} not present on artifact"
+                )
 
         share = ArtifactShare(
             token=self._new_share_token(),
@@ -639,7 +676,9 @@ class ArtifactService:
                 "artifact_id": artifact_id,
                 "token": created.token,
                 "user_id": request.user_id,
-                "visibility": created.visibility.value if hasattr(created.visibility, "value") else created.visibility,
+                "visibility": created.visibility.value
+                if hasattr(created.visibility, "value")
+                else created.visibility,
                 "timestamp": datetime.utcnow().isoformat(),
             },
         )
@@ -655,7 +694,9 @@ class ArtifactService:
             artifact_id=artifact_id,
         )
 
-    async def revoke_artifact(self, artifact_id: str, request: RevokeArtifactRequest) -> RevokeArtifactResponse:
+    async def revoke_artifact(
+        self, artifact_id: str, request: RevokeArtifactRequest
+    ) -> RevokeArtifactResponse:
         artifact = await self.repo.get_artifact(artifact_id)
         if not artifact:
             raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
@@ -679,7 +720,9 @@ class ArtifactService:
             )
         return RevokeArtifactResponse(revoked=revoked)
 
-    async def list_shares(self, artifact_id: str, user_id: str) -> ArtifactSharesListResponse:
+    async def list_shares(
+        self, artifact_id: str, user_id: str
+    ) -> ArtifactSharesListResponse:
         artifact = await self.repo.get_artifact(artifact_id)
         if not artifact:
             raise ArtifactNotFoundError(f"artifact {artifact_id} not found")
@@ -708,7 +751,9 @@ class ArtifactService:
             raise ArtifactValidationError(f"share {token} is revoked or expired")
         if share.visibility == ArtifactShareVisibility.ORG and share.org_id:
             if not org_id or org_id != share.org_id:
-                raise ArtifactPermissionError("share is org-scoped and caller org does not match")
+                raise ArtifactPermissionError(
+                    "share is org-scoped and caller org does not match"
+                )
 
         artifact = await self.repo.get_artifact(share.artifact_id)
         if not artifact:
@@ -719,9 +764,13 @@ class ArtifactService:
         target_number = version or share.version_pin
         chosen: Optional[ArtifactVersion] = None
         if target_number is not None:
-            chosen = next((v for v in artifact.versions if v.number == target_number), None)
+            chosen = next(
+                (v for v in artifact.versions if v.number == target_number), None
+            )
             if chosen is None:
-                raise ArtifactValidationError(f"version {target_number} not present on artifact")
+                raise ArtifactValidationError(
+                    f"version {target_number} not present on artifact"
+                )
         else:
             # Latest version (versions are ordered v1..N in the repo loader; pick max).
             if artifact.versions:
@@ -749,7 +798,9 @@ class ArtifactService:
         if not share:
             raise ArtifactNotFoundError(f"share {request.token} not found")
         if not self._share_is_active(share):
-            raise ArtifactValidationError(f"share {request.token} is revoked or expired")
+            raise ArtifactValidationError(
+                f"share {request.token} is revoked or expired"
+            )
 
         source = await self.repo.get_artifact(share.artifact_id)
         if not source:
@@ -758,7 +809,9 @@ class ArtifactService:
         target_number = share.version_pin
         chosen: Optional[ArtifactVersion] = None
         if target_number is not None:
-            chosen = next((v for v in source.versions if v.number == target_number), None)
+            chosen = next(
+                (v for v in source.versions if v.number == target_number), None
+            )
         else:
             if source.versions:
                 chosen = max(source.versions, key=lambda v: v.number)
@@ -852,7 +905,9 @@ class ArtifactService:
         from isa_model.inference_client import AsyncISAModel
 
         envelope = self._build_runtime_prompt(artifact, user_prompt)
-        extra_headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else None
+        extra_headers = (
+            {"Authorization": f"Bearer {auth_token}"} if auth_token else None
+        )
         async with AsyncISAModel(
             base_url=_isa_model_url(),
             extra_headers=extra_headers,
@@ -912,8 +967,16 @@ class ArtifactService:
             output, llm_in, llm_out = await self._call_isa_model(
                 artifact, request.prompt, max_tokens, auth_token=auth_token
             )
-            tokens_in = llm_in if isinstance(llm_in, int) and llm_in > 0 else max(1, len(request.prompt) // 4)
-            tokens_out = llm_out if isinstance(llm_out, int) and llm_out > 0 else max(1, len(output) // 4)
+            tokens_in = (
+                llm_in
+                if isinstance(llm_in, int) and llm_in > 0
+                else max(1, len(request.prompt) // 4)
+            )
+            tokens_out = (
+                llm_out
+                if isinstance(llm_out, int) and llm_out > 0
+                else max(1, len(output) // 4)
+            )
         except Exception as e:
             logger.warning(
                 "artifact runtime_invoke falling back to stub — isA_Model unreachable: %s",
@@ -950,7 +1013,9 @@ class ArtifactService:
             quota=quota,
         )
 
-    async def runtime_usage(self, artifact_id: str, user_id: str) -> "ArtifactRuntimeUsageResponse":
+    async def runtime_usage(
+        self, artifact_id: str, user_id: str
+    ) -> "ArtifactRuntimeUsageResponse":
         from .models import ArtifactRuntimeUsageResponse
 
         artifact = await self.repo.get_artifact(artifact_id)
@@ -978,7 +1043,9 @@ class ArtifactService:
     # fall through to the approval prompt every call — Phase 3 only persists
     # the long-lived approval; richer session-scoped behaviour lands later.
 
-    async def mcp_approve(self, artifact_id: str, request: "MCPApproveRequest") -> "ArtifactMCPGrant":
+    async def mcp_approve(
+        self, artifact_id: str, request: "MCPApproveRequest"
+    ) -> "ArtifactMCPGrant":
         from .models import ArtifactMCPGrant, MCPApproveRequest  # noqa: F401
 
         artifact = await self.repo.get_artifact(artifact_id)
@@ -1005,8 +1072,12 @@ class ArtifactService:
                 "user_id": request.user_id,
                 "tool_name": request.tool_name,
                 "server_id": request.server_id,
-                "decision": grant.decision.value if hasattr(grant.decision, "value") else grant.decision,
-                "scope": grant.scope.value if hasattr(grant.scope, "value") else grant.scope,
+                "decision": grant.decision.value
+                if hasattr(grant.decision, "value")
+                else grant.decision,
+                "scope": grant.scope.value
+                if hasattr(grant.scope, "value")
+                else grant.scope,
                 "timestamp": datetime.utcnow().isoformat(),
             },
         )
@@ -1040,14 +1111,20 @@ class ArtifactService:
         """
         session = self._get_mcp_session(server_id, artifact_id=artifact_id)
         try:
-            return await session.tools_call(tool_name, args or {}, auth_token=auth_token)
+            return await session.tools_call(
+                tool_name, args or {}, auth_token=auth_token
+            )
         except _McpSessionExpired:
             # Session expired (401/404 from the server) — drop the cached id,
             # re-init from scratch, and retry once.
             session.reset()
-            return await session.tools_call(tool_name, args or {}, auth_token=auth_token)
+            return await session.tools_call(
+                tool_name, args or {}, auth_token=auth_token
+            )
 
-    def _get_mcp_session(self, server_id: str, *, artifact_id: Optional[str]) -> "_McpSession":
+    def _get_mcp_session(
+        self, server_id: str, *, artifact_id: Optional[str]
+    ) -> "_McpSession":
         """Return a process-cached session client for (artifact_id, server_id)."""
         cache = getattr(self, "_mcp_sessions", None)
         if cache is None:
@@ -1122,7 +1199,9 @@ class ArtifactService:
                 scope_used=MCPGrantScope.ALWAYS,
             )
 
-    async def list_mcp_grants(self, artifact_id: str, user_id: str) -> "ArtifactMCPGrantsListResponse":
+    async def list_mcp_grants(
+        self, artifact_id: str, user_id: str
+    ) -> "ArtifactMCPGrantsListResponse":
         from .models import ArtifactMCPGrantsListResponse
 
         artifact = await self.repo.get_artifact(artifact_id)
@@ -1161,7 +1240,9 @@ class ArtifactService:
         # shared
         if scope == ArtifactKVScope.SHARED:
             if is_write and artifact.storage_scope != ArtifactStorageScope.SHARED:
-                raise ArtifactPermissionError("artifact.storage_scope must be 'shared' for shared-scope writes")
+                raise ArtifactPermissionError(
+                    "artifact.storage_scope must be 'shared' for shared-scope writes"
+                )
             return
 
     async def kv_get(
