@@ -105,6 +105,38 @@ class FakeMemoryExportClient:
         return deepcopy(self.payload)
 
 
+class FakeAccountExportClient:
+    def __init__(self, payload=None):
+        self.calls = []
+        self.payload = payload or {
+            "schema_version": "account-export-v1",
+            "service": "account_service",
+            "user_id": "user-1",
+            "organization_id": "org-1",
+            "gdpr_request_id": "gdpr_req_1",
+            "profile": {
+                "user_id": "user-1",
+                "email": "user@example.com",
+                "name": "User One",
+                "preferences": {"theme": "dark"},
+            },
+            "claims": {
+                "user_id": "user-1",
+                "name": "User One",
+                "is_active": True,
+                "admin_roles": [],
+            },
+            "counts": {
+                "records": 1,
+                "sections": {"profile": 1, "claims": 1, "preferences": 1},
+            },
+        }
+
+    async def export_user_data(self, **kwargs):
+        self.calls.append(kwargs)
+        return deepcopy(self.payload)
+
+
 class FakeEventBus:
     def __init__(self):
         self.published = []
@@ -270,6 +302,61 @@ async def test_run_export_request_aggregates_memory_service_export_adapter():
     assert completed.per_service_status["memory_service"]["records_exported"] == 2
     manifest = completed.metadata["export_manifest"]
     assert manifest["services"]["memory_service"]["records"] == 2
+
+
+async def test_run_export_request_aggregates_account_service_export_adapter():
+    repository = FakeGDPRRepository()
+    repository.checks.append(_check("user-1"))
+    storage = FakeArtifactStorageClient()
+    account_client = FakeAccountExportClient()
+    service = _build_service(
+        repository,
+        artifact_storage_client=storage,
+        enable_artifact_storage=True,
+        gdpr_export_clients={"account_service": account_client},
+    )
+    data_request = await service.create_data_request(
+        GDPRDataRequestCreate(
+            request_type=GDPRDataRequestType.EXPORT,
+            user_id="user-1",
+            organization_id="org-1",
+            requested_by="admin-1",
+        )
+    )
+
+    completed = await service.run_data_request(data_request.request_id)
+
+    assert account_client.calls == [
+        {
+            "user_id": "user-1",
+            "organization_id": "org-1",
+            "request_id": data_request.request_id,
+        }
+    ]
+    bundle = json.loads(storage.uploads[0]["file_content"].decode("utf-8"))
+    assert bundle["services"]["account_service"]["records"] == 1
+    assert (
+        bundle["services"]["account_service"]["payload"]["profile"]["email"]
+        == "user@example.com"
+    )
+    assert completed.per_service_status["account_service"]["status"] == "completed"
+    assert completed.per_service_status["account_service"]["records_exported"] == 1
+    manifest = completed.metadata["export_manifest"]
+    assert manifest["services"]["account_service"]["records"] == 1
+
+
+async def test_default_gdpr_export_clients_include_account_service(monkeypatch):
+    monkeypatch.setenv("GDPR_MEMORY_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_ACCOUNT_EXPORT_ENABLED", "true")
+    monkeypatch.setenv("ACCOUNT_SERVICE_URL", "http://account-service:8202")
+
+    service = ComplianceService.__new__(ComplianceService)
+    clients = service._default_gdpr_export_clients()
+
+    assert list(clients) == ["account_service"]
+    assert clients["account_service"].base_url == "http://account-service:8202"
+    assert hasattr(clients["account_service"], "export_user_data")
+    await clients["account_service"].close()
 
 
 async def test_run_export_request_marks_requested_service_without_adapter_not_configured():

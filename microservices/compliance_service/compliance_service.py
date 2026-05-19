@@ -492,17 +492,26 @@ class ComplianceService:
         }
 
     def _default_gdpr_export_clients(self) -> Dict[str, Any]:
-        memory_enabled = os.getenv("GDPR_MEMORY_EXPORT_ENABLED", "true").lower()
-        if memory_enabled in {"0", "false", "no", "off"}:
-            return {}
+        clients: Dict[str, Any] = {}
+        if self._gdpr_export_client_enabled("GDPR_ACCOUNT_EXPORT_ENABLED"):
+            from microservices.account_service.client import AccountServiceClient
 
-        from microservices.memory_service.client import MemoryServiceClient
+            clients["account_service"] = AccountServiceClient(
+                base_url=os.getenv("ACCOUNT_SERVICE_URL", "http://localhost:8202")
+            )
 
-        return {
-            "memory_service": MemoryServiceClient(
+        if self._gdpr_export_client_enabled("GDPR_MEMORY_EXPORT_ENABLED"):
+            from microservices.memory_service.client import MemoryServiceClient
+
+            clients["memory_service"] = MemoryServiceClient(
                 base_url=os.getenv("MEMORY_SERVICE_URL", "http://localhost:8223")
             )
-        }
+        return clients
+
+    @staticmethod
+    def _gdpr_export_client_enabled(env_key: str) -> bool:
+        configured = os.getenv(env_key, "true").lower()
+        return configured not in {"0", "false", "no", "off"}
 
     def _gdpr_export_clients(self) -> Dict[str, Any]:
         return dict(getattr(self, "gdpr_export_clients", None) or {})

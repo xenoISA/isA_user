@@ -6,6 +6,7 @@ Client library for other microservices to interact with account service
 
 import httpx
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,46 @@ class AccountServiceClient:
         except Exception as e:
             logger.error(f"Error getting account claims: {e}")
             return None
+
+    async def export_user_data(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export account-owned user data for GDPR subject access workflows.
+
+        The account row is the source record; auth claims are included as a
+        derived identity view because they expose platform roles that are not
+        returned by the public profile endpoint.
+        """
+        profile = await self.get_account_profile(user_id)
+        claims = await self.get_account_claims(user_id)
+        preferences = {}
+        if isinstance(profile, dict) and isinstance(profile.get("preferences"), dict):
+            preferences = profile["preferences"]
+
+        sections = {
+            "profile": 1 if profile else 0,
+            "claims": 1 if claims else 0,
+            "preferences": 1 if preferences else 0,
+        }
+
+        return {
+            "schema_version": "account-export-v1",
+            "service": "account_service",
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "gdpr_request_id": request_id,
+            "exported_at": datetime.utcnow().isoformat(),
+            "profile": profile,
+            "claims": claims,
+            "counts": {
+                "records": 1 if profile or claims else 0,
+                "sections": sections,
+            },
+        }
 
     async def get_account_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """
