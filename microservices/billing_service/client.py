@@ -370,6 +370,70 @@ class BillingServiceClient:
             logger.error(f"Error getting billing record: {e}")
             return None
 
+    async def export_user_data(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Export billing-owned user data for GDPR subject access workflows."""
+        billing_records = await self.get_user_billing_records(
+            user_id=user_id,
+            organization_id=organization_id,
+            limit=1000,
+            offset=0,
+        )
+        usage_aggregations = await self.get_usage_aggregations(
+            user_id=user_id,
+            organization_id=organization_id,
+            group_by="day",
+        )
+
+        billing_record_count = self._export_collection_count(
+            billing_records, candidate_keys=("records", "items", "data", "results")
+        )
+        usage_record_count = self._export_collection_count(
+            usage_aggregations, candidate_keys=("items", "records", "data", "results")
+        )
+
+        return {
+            "schema_version": "billing-export-v1",
+            "service": "billing_service",
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "gdpr_request_id": request_id,
+            "exported_at": datetime.utcnow().isoformat(),
+            "billing_records": billing_records or {},
+            "usage_aggregations": usage_aggregations or {},
+            "counts": {
+                "records": billing_record_count + usage_record_count,
+                "sections": {
+                    "billing_records": billing_record_count,
+                    "usage_aggregations": usage_record_count,
+                },
+            },
+        }
+
+    @staticmethod
+    def _export_collection_count(payload: Any, candidate_keys: tuple[str, ...]) -> int:
+        if isinstance(payload, list):
+            return len(payload)
+        if not isinstance(payload, dict):
+            return 0
+
+        for key in ("total", "total_count", "count"):
+            value = payload.get(key)
+            if isinstance(value, int):
+                return value
+
+        for key in candidate_keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return len(value)
+            if isinstance(value, int):
+                return value
+        return 0
+
     async def update_billing_status(
         self,
         billing_id: str,
