@@ -7,6 +7,7 @@ Client library for other microservices to interact with session service
 import httpx
 from core.service_discovery import get_service_discovery
 import logging
+from datetime import datetime
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -244,10 +245,15 @@ class SessionServiceClient:
             >>> sessions = await client.get_user_sessions("user123", active_only=True)
         """
         try:
-            params = {"active_only": active_only, "page": page, "page_size": page_size}
+            params = {
+                "user_id": user_id,
+                "active_only": active_only,
+                "page": page,
+                "page_size": page_size,
+            }
 
             response = await self.client.get(
-                f"{self.base_url}/api/v1/users/{user_id}/sessions", params=params
+                f"{self.base_url}/api/v1/sessions", params=params
             )
             response.raise_for_status()
             return response.json()
@@ -258,6 +264,75 @@ class SessionServiceClient:
         except Exception as e:
             logger.error(f"Error getting user sessions: {e}")
             return None
+
+    async def export_user_data(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Export session-owned user data for GDPR subject access workflows."""
+        sessions = await self.get_user_sessions(
+            user_id=user_id,
+            active_only=False,
+            page=1,
+            page_size=1000,
+        )
+        session_items = self._export_collection_items(
+            sessions, candidate_keys=("sessions", "items", "data", "results")
+        )
+
+        session_messages: Dict[str, Any] = {}
+        message_records = 0
+        for session in session_items:
+            if not isinstance(session, dict):
+                continue
+            session_id = session.get("session_id") or session.get("id")
+            if not session_id:
+                continue
+            messages = await self.get_messages(
+                session_id=session_id,
+                user_id=user_id,
+                page=1,
+                page_size=1000,
+            )
+            session_messages[session_id] = messages or {}
+            message_records += len(
+                self._export_collection_items(
+                    messages, candidate_keys=("messages", "items", "data", "results")
+                )
+            )
+
+        return {
+            "schema_version": "session-export-v1",
+            "service": "session_service",
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "gdpr_request_id": request_id,
+            "exported_at": datetime.utcnow().isoformat(),
+            "sessions": sessions or {},
+            "session_messages": session_messages,
+            "counts": {
+                "records": len(session_items) + message_records,
+                "sections": {
+                    "sessions": len(session_items),
+                    "messages": message_records,
+                },
+            },
+        }
+
+    @staticmethod
+    def _export_collection_items(payload: Any, candidate_keys: tuple[str, ...]) -> list:
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            return []
+
+        for key in candidate_keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+        return []
 
     async def get_session_summary(
         self, session_id: str, user_id: Optional[str] = None
