@@ -506,6 +506,12 @@ class ComplianceService:
             clients["memory_service"] = MemoryServiceClient(
                 base_url=os.getenv("MEMORY_SERVICE_URL", "http://localhost:8223")
             )
+        if self._gdpr_export_client_enabled("GDPR_STORAGE_EXPORT_ENABLED"):
+            from microservices.storage_service.client import StorageServiceClient
+
+            clients["storage_service"] = StorageServiceClient(
+                base_url=os.getenv("STORAGE_SERVICE_URL", "http://localhost:8209")
+            )
         return clients
 
     @staticmethod

@@ -137,6 +137,37 @@ class FakeAccountExportClient:
         return deepcopy(self.payload)
 
 
+class FakeStorageExportClient:
+    def __init__(self, payload=None):
+        self.calls = []
+        self.payload = payload or {
+            "schema_version": "storage-export-v1",
+            "service": "storage_service",
+            "user_id": "user-1",
+            "organization_id": "org-1",
+            "gdpr_request_id": "gdpr_req_1",
+            "files": [{"file_id": "file-1", "filename": "guide.md"}],
+            "albums": {"albums": [{"album_id": "album-1", "name": "Launch"}]},
+            "storage_stats": {"total_files": 1},
+            "storage_quota": {"used_bytes": 1024},
+            "intelligence_stats": {"indexed_files": 1},
+            "counts": {
+                "records": 2,
+                "sections": {
+                    "files": 1,
+                    "albums": 1,
+                    "storage_stats": 1,
+                    "storage_quota": 1,
+                    "intelligence_stats": 1,
+                },
+            },
+        }
+
+    async def export_user_data(self, **kwargs):
+        self.calls.append(kwargs)
+        return deepcopy(self.payload)
+
+
 class FakeEventBus:
     def __init__(self):
         self.published = []
@@ -347,6 +378,7 @@ async def test_run_export_request_aggregates_account_service_export_adapter():
 
 async def test_default_gdpr_export_clients_include_account_service(monkeypatch):
     monkeypatch.setenv("GDPR_MEMORY_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_STORAGE_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_ACCOUNT_EXPORT_ENABLED", "true")
     monkeypatch.setenv("ACCOUNT_SERVICE_URL", "http://account-service:8202")
 
@@ -357,6 +389,62 @@ async def test_default_gdpr_export_clients_include_account_service(monkeypatch):
     assert clients["account_service"].base_url == "http://account-service:8202"
     assert hasattr(clients["account_service"], "export_user_data")
     await clients["account_service"].close()
+
+
+async def test_run_export_request_aggregates_storage_service_export_adapter():
+    repository = FakeGDPRRepository()
+    repository.checks.append(_check("user-1"))
+    storage = FakeArtifactStorageClient()
+    storage_export_client = FakeStorageExportClient()
+    service = _build_service(
+        repository,
+        artifact_storage_client=storage,
+        enable_artifact_storage=True,
+        gdpr_export_clients={"storage_service": storage_export_client},
+    )
+    data_request = await service.create_data_request(
+        GDPRDataRequestCreate(
+            request_type=GDPRDataRequestType.EXPORT,
+            user_id="user-1",
+            organization_id="org-1",
+            requested_by="admin-1",
+        )
+    )
+
+    completed = await service.run_data_request(data_request.request_id)
+
+    assert storage_export_client.calls == [
+        {
+            "user_id": "user-1",
+            "organization_id": "org-1",
+            "request_id": data_request.request_id,
+        }
+    ]
+    bundle = json.loads(storage.uploads[0]["file_content"].decode("utf-8"))
+    assert bundle["services"]["storage_service"]["records"] == 2
+    assert (
+        bundle["services"]["storage_service"]["payload"]["files"][0]["file_id"]
+        == "file-1"
+    )
+    assert completed.per_service_status["storage_service"]["status"] == "completed"
+    assert completed.per_service_status["storage_service"]["records_exported"] == 2
+    manifest = completed.metadata["export_manifest"]
+    assert manifest["services"]["storage_service"]["records"] == 2
+
+
+async def test_default_gdpr_export_clients_include_storage_service(monkeypatch):
+    monkeypatch.setenv("GDPR_ACCOUNT_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_MEMORY_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_STORAGE_EXPORT_ENABLED", "true")
+    monkeypatch.setenv("STORAGE_SERVICE_URL", "http://storage-service:8209")
+
+    service = ComplianceService.__new__(ComplianceService)
+    clients = service._default_gdpr_export_clients()
+
+    assert list(clients) == ["storage_service"]
+    assert clients["storage_service"].base_url == "http://storage-service:8209"
+    assert hasattr(clients["storage_service"], "export_user_data")
+    await clients["storage_service"].close()
 
 
 async def test_run_export_request_marks_requested_service_without_adapter_not_configured():
