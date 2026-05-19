@@ -801,13 +801,22 @@ async def store_factual_memory(
 
 
 @app.post("/api/v1/memories/episodic/extract", response_model=MemoryOperationResult)
-async def store_episodic_memory(request: StoreEpisodicMemoryRequest):
-    """Extract and store episodic memories from dialog using AI"""
+async def store_episodic_memory(
+    request: StoreEpisodicMemoryRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Extract and store episodic memories from dialog using AI.
+
+    Forwards the caller's Authorization header to isA_Model so the upstream
+    can apply user-level quotas + audit (#464). Same pattern as
+    /api/v1/memories/factual/extract (PR #468).
+    """
     try:
         result = await memory_service.store_episodic_memory(
             user_id=request.user_id,
             dialog_content=request.dialog_content,
             importance_score=request.importance_score,
+            auth_token=authorization,
         )
         return result
     except Exception as e:
@@ -816,13 +825,22 @@ async def store_episodic_memory(request: StoreEpisodicMemoryRequest):
 
 
 @app.post("/api/v1/memories/procedural/extract", response_model=MemoryOperationResult)
-async def store_procedural_memory(request: StoreProceduralMemoryRequest):
-    """Extract and store procedural memories from dialog using AI"""
+async def store_procedural_memory(
+    request: StoreProceduralMemoryRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Extract and store procedural memories from dialog using AI.
+
+    Forwards the caller's Authorization header to isA_Model so the upstream
+    can apply user-level quotas + audit (#464). Same pattern as
+    /api/v1/memories/factual/extract (PR #468).
+    """
     try:
         result = await memory_service.store_procedural_memory(
             user_id=request.user_id,
             dialog_content=request.dialog_content,
             importance_score=request.importance_score,
+            auth_token=authorization,
         )
         return result
     except Exception as e:
@@ -831,13 +849,22 @@ async def store_procedural_memory(request: StoreProceduralMemoryRequest):
 
 
 @app.post("/api/v1/memories/semantic/extract", response_model=MemoryOperationResult)
-async def store_semantic_memory(request: StoreSemanticMemoryRequest):
-    """Extract and store semantic memories from dialog using AI"""
+async def store_semantic_memory(
+    request: StoreSemanticMemoryRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Extract and store semantic memories from dialog using AI.
+
+    Forwards the caller's Authorization header to isA_Model so the upstream
+    can apply user-level quotas + audit (#464). Same pattern as
+    /api/v1/memories/factual/extract (PR #468).
+    """
     try:
         result = await memory_service.store_semantic_memory(
             user_id=request.user_id,
             dialog_content=request.dialog_content,
             importance_score=request.importance_score,
+            auth_token=authorization,
         )
         return result
     except Exception as e:
@@ -1042,8 +1069,17 @@ async def summarize_session(session_id: str, request: SummarizeSessionRequest):
 
 
 @app.post("/api/v1/memories/working/store", response_model=MemoryOperationResult)
-async def store_working_memory(request: StoreWorkingMemoryRequest):
-    """Store working memory from dialog"""
+async def store_working_memory(
+    request: StoreWorkingMemoryRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Store working memory from dialog.
+
+    Forwards the caller's Authorization header to isA_Model so the upstream
+    can apply user-level quotas + audit (#464). Same pattern as
+    /api/v1/memories/factual/extract (PR #468). Working memory has no LLM
+    extraction step, so the JWT is forwarded on the embedding call.
+    """
     try:
         import uuid
 
@@ -1063,6 +1099,7 @@ async def store_working_memory(request: StoreWorkingMemoryRequest):
             task_context=task_context,
             priority=5,
             ttl_seconds=request.ttl_seconds,
+            auth_token=authorization,
         )
         return result
     except Exception as e:
