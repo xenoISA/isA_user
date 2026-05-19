@@ -63,11 +63,17 @@ class ComplianceService:
         config=None,
         policy_cache: Optional[RedisCache] = None,
         artifact_storage_client=None,
+        gdpr_export_clients: Optional[Dict[str, Any]] = None,
         enable_gdpr_artifact_storage: Optional[bool] = None,
     ):
         self.repository = ComplianceRepository(config=config)
         self.event_bus = event_bus
         self.artifact_storage_client = artifact_storage_client
+        self.gdpr_export_clients = (
+            gdpr_export_clients
+            if gdpr_export_clients is not None
+            else self._default_gdpr_export_clients()
+        )
         if enable_gdpr_artifact_storage is None:
             storage_enabled = os.getenv("GDPR_EXPORT_STORAGE_ENABLED", "true").lower()
             self.enable_gdpr_artifact_storage = storage_enabled not in {
@@ -335,33 +341,77 @@ class ComplianceService:
         self, run_options: Optional[GDPRDataRequestRunRequest]
     ) -> List[str]:
         if run_options and run_options.service_names:
-            return run_options.service_names
-        return ["compliance_service"]
+            return list(dict.fromkeys(run_options.service_names))
+
+        service_names = ["compliance_service"]
+        for service_name in sorted(self._gdpr_export_clients().keys()):
+            if service_name not in service_names:
+                service_names.append(service_name)
+        return service_names
 
     async def _run_export_data_request(
         self, data_request: GDPRDataRequest, service_names: List[str]
     ) -> Dict[str, Any]:
         generated_at = datetime.utcnow()
-        checks = await self.repository.get_checks_by_user(
-            user_id=data_request.user_id,
-            limit=10000,
-        )
         per_service_status = self._empty_service_status(service_names)
+        exported_services: Dict[str, Any] = {}
+        manifest_services: Dict[str, Any] = {}
+
+        if "compliance_service" in service_names:
+            checks = await self.repository.get_checks_by_user(
+                user_id=data_request.user_id,
+                limit=10000,
+            )
+            exported_services["compliance_service"] = {
+                "records": len(checks),
+                "checks": [check.model_dump(mode="json") for check in checks],
+            }
+            manifest_services["compliance_service"] = {"records": len(checks)}
+            per_service_status["compliance_service"] = {
+                "status": "completed",
+                "records_exported": len(checks),
+                "records_deleted": 0,
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+
+        for service_name in service_names:
+            if service_name == "compliance_service":
+                continue
+            client = self._gdpr_export_clients().get(service_name)
+            if not client:
+                continue
+
+            payload = await self._export_external_gdpr_service(
+                service_name=service_name,
+                client=client,
+                data_request=data_request,
+            )
+            records_exported = self._count_export_records(payload)
+            exported_services[service_name] = {
+                "records": records_exported,
+                "payload": payload,
+            }
+            manifest_services[service_name] = {"records": records_exported}
+            per_service_status[service_name] = {
+                "status": "completed",
+                "records_exported": records_exported,
+                "records_deleted": 0,
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+
         export_bundle = {
             "request_id": data_request.request_id,
             "request_type": data_request.request_type.value,
             "user_id": data_request.user_id,
             "organization_id": data_request.organization_id,
             "generated_at": generated_at.isoformat(),
-            "services": {
-                "compliance_service": {
-                    "records": len(checks),
-                    "checks": [check.model_dump(mode="json") for check in checks],
-                }
-            },
+            "services": exported_services,
         }
         artifact = await self._persist_export_artifact(data_request, export_bundle)
         artifact_uri = artifact["artifact_uri"]
+        records_exported = sum(
+            int(service.get("records", 0)) for service in manifest_services.values()
+        )
 
         metadata = dict(data_request.metadata or {})
         metadata["export_manifest"] = {
@@ -376,20 +426,13 @@ class ComplianceService:
             "size_bytes": artifact["size_bytes"],
             "sha256": artifact["sha256"],
             "generated_at": generated_at.isoformat(),
-            "services": {
-                "compliance_service": {
-                    "records": len(checks),
-                }
-            },
+            "services": manifest_services,
         }
-        per_service_status["compliance_service"] = {
-            "status": "completed",
-            "records_exported": len(checks),
-            "records_deleted": 0,
-            "artifact_uri": artifact_uri,
-            "completed_at": datetime.utcnow().isoformat(),
-        }
+        for status in per_service_status.values():
+            if status.get("status") == "completed":
+                status["artifact_uri"] = artifact_uri
         return {
+            "records_exported": records_exported,
             "artifact_uri": artifact_uri,
             "per_service_status": per_service_status,
             "metadata": metadata,
@@ -447,6 +490,68 @@ class ComplianceService:
             for service_name in service_names
             if service_name != "compliance_service"
         }
+
+    def _default_gdpr_export_clients(self) -> Dict[str, Any]:
+        memory_enabled = os.getenv("GDPR_MEMORY_EXPORT_ENABLED", "true").lower()
+        if memory_enabled in {"0", "false", "no", "off"}:
+            return {}
+
+        from microservices.memory_service.client import MemoryServiceClient
+
+        return {
+            "memory_service": MemoryServiceClient(
+                base_url=os.getenv("MEMORY_SERVICE_URL", "http://localhost:8223")
+            )
+        }
+
+    def _gdpr_export_clients(self) -> Dict[str, Any]:
+        return dict(getattr(self, "gdpr_export_clients", None) or {})
+
+    async def _export_external_gdpr_service(
+        self,
+        *,
+        service_name: str,
+        client: Any,
+        data_request: GDPRDataRequest,
+    ) -> Dict[str, Any]:
+        exporter = getattr(client, "export_user_data", None)
+        if exporter is None:
+            exporter = getattr(client, "export_memory", None)
+        if exporter is None:
+            raise RuntimeError(f"{service_name} does not expose a GDPR export adapter")
+
+        payload = await exporter(
+            user_id=data_request.user_id,
+            organization_id=data_request.organization_id,
+            request_id=data_request.request_id,
+        )
+        if payload is None:
+            return {}
+        if hasattr(payload, "model_dump"):
+            return payload.model_dump(mode="json")
+        return dict(payload)
+
+    @staticmethod
+    def _count_export_records(payload: Dict[str, Any]) -> int:
+        counts = payload.get("counts") if isinstance(payload, dict) else None
+        if isinstance(counts, dict):
+            for key in ("records", "memories", "items", "total"):
+                value = counts.get(key)
+                if isinstance(value, int):
+                    return value
+            by_type = counts.get("by_type")
+            if isinstance(by_type, dict):
+                return sum(
+                    value for value in by_type.values() if isinstance(value, int)
+                )
+
+        for key in ("records", "memories", "items", "checks"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return len(value)
+            if isinstance(value, int):
+                return value
+        return 0
 
     def _gdpr_artifact_storage_enabled(self) -> bool:
         return bool(getattr(self, "enable_gdpr_artifact_storage", False))

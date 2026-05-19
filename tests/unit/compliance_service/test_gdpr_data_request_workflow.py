@@ -13,6 +13,7 @@ from microservices.compliance_service.models import (
     ComplianceStatus,
     ContentType,
     GDPRDataRequestCreate,
+    GDPRDataRequestRunRequest,
     GDPRDataRequestStatus,
     GDPRDataRequestType,
     GDPRDeletionApprovalRequest,
@@ -85,6 +86,25 @@ class FakeArtifactStorageClient:
         }
 
 
+class FakeMemoryExportClient:
+    def __init__(self, payload=None):
+        self.calls = []
+        self.payload = payload or {
+            "schema_version": "memory-export-v1",
+            "user_id": "user-1",
+            "scope": "user",
+            "memories": [
+                {"id": "mem-1", "type": "factual", "content": "likes tea"},
+                {"id": "mem-2", "type": "semantic", "content": "Python"},
+            ],
+            "counts": {"memories": 2, "by_type": {"factual": 1, "semantic": 1}},
+        }
+
+    async def export_user_data(self, **kwargs):
+        self.calls.append(kwargs)
+        return deepcopy(self.payload)
+
+
 class FakeEventBus:
     def __init__(self):
         self.published = []
@@ -98,12 +118,14 @@ def _build_service(
     repository: FakeGDPRRepository,
     artifact_storage_client=None,
     enable_artifact_storage: bool = False,
+    gdpr_export_clients=None,
 ) -> ComplianceService:
     service = ComplianceService.__new__(ComplianceService)
     service.repository = repository
     service.event_bus = None
     service.artifact_storage_client = artifact_storage_client
     service.enable_gdpr_artifact_storage = enable_artifact_storage
+    service.gdpr_export_clients = gdpr_export_clients or {}
     service.enable_openai_moderation = False
     service.enable_local_checks = False
     service._stats = {"total_checks": 0, "blocked_content": 0, "flagged_content": 0}
@@ -208,6 +230,79 @@ async def test_run_export_request_persists_json_bundle_to_storage():
     assert manifest["artifact_uri"] == "storage://files/file-gdpr-export-1"
     assert manifest["services"]["compliance_service"]["records"] == 1
     assert "sha256" in manifest
+
+
+async def test_run_export_request_aggregates_memory_service_export_adapter():
+    repository = FakeGDPRRepository()
+    repository.checks.append(_check("user-1"))
+    storage = FakeArtifactStorageClient()
+    memory_client = FakeMemoryExportClient()
+    service = _build_service(
+        repository,
+        artifact_storage_client=storage,
+        enable_artifact_storage=True,
+        gdpr_export_clients={"memory_service": memory_client},
+    )
+    data_request = await service.create_data_request(
+        GDPRDataRequestCreate(
+            request_type=GDPRDataRequestType.EXPORT,
+            user_id="user-1",
+            organization_id="org-1",
+            requested_by="admin-1",
+        )
+    )
+
+    completed = await service.run_data_request(data_request.request_id)
+
+    assert memory_client.calls == [
+        {
+            "user_id": "user-1",
+            "organization_id": "org-1",
+            "request_id": data_request.request_id,
+        }
+    ]
+    bundle = json.loads(storage.uploads[0]["file_content"].decode("utf-8"))
+    assert bundle["services"]["memory_service"]["records"] == 2
+    assert (
+        bundle["services"]["memory_service"]["payload"]["memories"][0]["id"] == "mem-1"
+    )
+    assert completed.per_service_status["memory_service"]["status"] == "completed"
+    assert completed.per_service_status["memory_service"]["records_exported"] == 2
+    manifest = completed.metadata["export_manifest"]
+    assert manifest["services"]["memory_service"]["records"] == 2
+
+
+async def test_run_export_request_marks_requested_service_without_adapter_not_configured():
+    repository = FakeGDPRRepository()
+    storage = FakeArtifactStorageClient()
+    service = _build_service(
+        repository,
+        artifact_storage_client=storage,
+        enable_artifact_storage=True,
+        gdpr_export_clients={},
+    )
+    data_request = await service.create_data_request(
+        GDPRDataRequestCreate(
+            request_type=GDPRDataRequestType.EXPORT,
+            user_id="user-1",
+            organization_id="org-1",
+            requested_by="admin-1",
+        )
+    )
+
+    completed = await service.run_data_request(
+        data_request.request_id,
+        GDPRDataRequestRunRequest(service_names=["memory_service"]),
+    )
+
+    assert completed.per_service_status["memory_service"] == {
+        "status": "not_configured",
+        "records_exported": 0,
+        "records_deleted": 0,
+        "error": "adapter_not_configured",
+    }
+    bundle = json.loads(storage.uploads[0]["file_content"].decode("utf-8"))
+    assert "memory_service" not in bundle["services"]
 
 
 async def test_get_data_request_artifact_refreshes_storage_download_url():
