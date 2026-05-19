@@ -17,10 +17,12 @@ Port: 8291
 
 from __future__ import annotations
 
+import hashlib
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from core.config_manager import ConfigManager
@@ -29,6 +31,7 @@ from core.health import HealthCheck
 from core.logger import setup_service_logger
 from core.metrics import setup_metrics
 from core.nats_client import get_event_bus
+from core.rate_limiter import InMemoryBackend, RateLimitConfig, SlidingWindowCounter
 from isa_common.consul_client import ConsulRegistry
 
 from .factory import create_artifact_service
@@ -63,6 +66,111 @@ logger = setup_service_logger("artifact_service")
 artifact_service = None
 consul_registry: Optional[ConsulRegistry] = None
 shutdown_manager = GracefulShutdown("artifact_service")
+
+
+# ----------------------------------------------------------------------------
+# Per-caller in-process rate limits (xenoISA/isA_user#464 — defense in depth).
+#
+# APISIX handles real prod limits at the edge; this in-process sliding-window
+# cap protects against burst abuse from a single caller with valid auth (e.g.
+# a runaway script). Mirrors the pattern in project_sharing_service.main —
+# JWT SHA1 prefix is the key when an Authorization header is present, else
+# the client IP. That way the same user can't trivially evade by rotating
+# IPs and unauthenticated bursts are still capped per-IP.
+#
+# Two independent buckets:
+#   - runtime/invoke → ARTIFACT_RUNTIME_RATE_PER_MINUTE  (default 100/min)
+#   - mcp/call       → ARTIFACT_MCP_RATE_PER_MINUTE      (default  60/min)
+#
+# Both are env-overridable so the golden tests can dial them down without
+# making 100+ HTTP calls per test. Same pattern as ARTIFACT_DAILY_QUOTA.
+# ----------------------------------------------------------------------------
+DEFAULT_RUNTIME_RATE_PER_MINUTE = 100
+DEFAULT_MCP_RATE_PER_MINUTE = 60
+
+
+def _runtime_rate_per_minute() -> int:
+    raw = os.getenv("ARTIFACT_RUNTIME_RATE_PER_MINUTE")
+    if not raw:
+        return DEFAULT_RUNTIME_RATE_PER_MINUTE
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_RUNTIME_RATE_PER_MINUTE
+
+
+def _mcp_rate_per_minute() -> int:
+    raw = os.getenv("ARTIFACT_MCP_RATE_PER_MINUTE")
+    if not raw:
+        return DEFAULT_MCP_RATE_PER_MINUTE
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_MCP_RATE_PER_MINUTE
+
+
+_runtime_invoke_rate_counter = SlidingWindowCounter(InMemoryBackend())
+_mcp_call_rate_counter = SlidingWindowCounter(InMemoryBackend())
+
+
+def _rate_limit_key(request: Request) -> str:
+    """Stable per-caller key — prefer JWT, fall back to IP."""
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth:
+        token = auth.strip()
+        # 12-char SHA1 prefix is enough entropy for an in-process counter and
+        # avoids holding raw tokens in the rate-limit map.
+        return "jwt:" + hashlib.sha1(token.encode("utf-8")).hexdigest()[:12]
+    if request.client and request.client.host:
+        return "ip:" + request.client.host
+    return "anon"
+
+
+async def enforce_runtime_invoke_rate_limit(request: Request) -> None:
+    """FastAPI dependency: 429 when the caller exceeds the per-minute cap on
+    ``/runtime/invoke``. Independent from the per-day quota gate in the service
+    layer — frontends branch on ``detail.limit_type`` to differentiate UX
+    (per_minute vs per_day)."""
+    limit = _runtime_rate_per_minute()
+    config = RateLimitConfig(requests=limit, window_seconds=60)
+    key = f"artifact:runtime-invoke:{_rate_limit_key(request)}"
+    allowed, info = await _runtime_invoke_rate_counter.check(key, config)
+    if not allowed:
+        retry_after = info.get("retry_after") or config.window_seconds
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "per_minute_rate_exceeded",
+                "detail": f"rate limit: {limit}/min",
+                "limit_type": "per_minute",
+                "limit": limit,
+                "retry_after": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+async def enforce_mcp_call_rate_limit(request: Request) -> None:
+    """FastAPI dependency: 429 when the caller exceeds the per-minute cap on
+    ``/mcp/call``. Tool calls are typically more expensive than runtime invokes
+    so the default cap is lower (60/min vs 100/min)."""
+    limit = _mcp_rate_per_minute()
+    config = RateLimitConfig(requests=limit, window_seconds=60)
+    key = f"artifact:mcp-call:{_rate_limit_key(request)}"
+    allowed, info = await _mcp_call_rate_counter.check(key, config)
+    if not allowed:
+        retry_after = info.get("retry_after") or config.window_seconds
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "per_minute_rate_exceeded",
+                "detail": f"rate limit: {limit}/min",
+                "limit_type": "per_minute",
+                "limit": limit,
+                "retry_after": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
 
 
 @asynccontextmanager
@@ -405,6 +513,7 @@ from .models import (  # noqa: E402
 @app.post(
     "/api/v1/artifacts/{artifact_id}/runtime/invoke",
     response_model=ArtifactRuntimeInvokeResponse,
+    dependencies=[Depends(enforce_runtime_invoke_rate_limit)],
 )
 async def runtime_invoke(
     artifact_id: str,
@@ -420,6 +529,13 @@ async def runtime_invoke(
     check + usage upsert run inside the service layer so we never book a
     call we refused.
 
+    Two independent 429 paths:
+      - per-minute burst cap (enforce_runtime_invoke_rate_limit dependency)
+        → ``detail.limit_type == 'per_minute'``
+      - per-day quota (ArtifactQuotaExceededError from the service layer)
+        → ``detail.error == 'daily_quota_exceeded'``
+    The frontend branches on these markers to pick UX (banner vs cooldown).
+
     The caller's bearer token (when present) is forwarded to isA_Model so
     user-level rate limits + audit apply to the upstream call.
     """
@@ -432,6 +548,7 @@ async def runtime_invoke(
             status_code=429,
             detail={
                 "error": "daily_quota_exceeded",
+                "limit_type": "per_day",
                 "calls_today": e.calls_today,
                 "quota": e.quota,
                 "retry_after": e.retry_after,
@@ -484,6 +601,7 @@ async def mcp_approve(artifact_id: str, body: MCPApproveRequest):
 @app.post(
     "/api/v1/artifacts/{artifact_id}/mcp/call",
     response_model=MCPCallResponse,
+    dependencies=[Depends(enforce_mcp_call_rate_limit)],
 )
 async def mcp_call(artifact_id: str, body: MCPCallRequest, request: Request):
     """MCP tool call — gated by an active ``allow``+``always`` grant.
