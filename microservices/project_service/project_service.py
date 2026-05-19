@@ -76,17 +76,27 @@ class ProjectService:
     def _project_org_id(project: Dict[str, Any]) -> Optional[str]:
         return project.get("organization_id") or project.get("org_id")
 
-    async def _has_org_access(self, organization_id: str, user_id: str, write: bool = False) -> bool:
+    async def _has_org_access(
+        self, organization_id: str, user_id: str, write: bool = False
+    ) -> bool:
         if user_id == "internal-service":
             return True
         if self.organization_access is None:
             return False
 
         if write:
-            return bool(await self.organization_access.check_admin_access(organization_id, user_id))
-        return bool(await self.organization_access.check_user_access(organization_id, user_id))
+            return bool(
+                await self.organization_access.check_admin_access(
+                    organization_id, user_id
+                )
+            )
+        return bool(
+            await self.organization_access.check_user_access(organization_id, user_id)
+        )
 
-    async def _require_org_access(self, organization_id: str, user_id: str, write: bool = False) -> None:
+    async def _require_org_access(
+        self, organization_id: str, user_id: str, write: bool = False
+    ) -> None:
         if not await self._has_org_access(organization_id, user_id, write=write):
             raise ProjectPermissionError("Not authorized to access this organization")
 
@@ -131,8 +141,12 @@ class ProjectService:
 
         count = await self.repository.count_projects(user_id)
         if count >= MAX_PROJECTS_PER_USER:
-            raise ProjectLimitExceeded(f"User has reached the {MAX_PROJECTS_PER_USER}-project limit")
-        result = await self.repository.create_project(user_id, name, description, custom_instructions, organization_id)
+            raise ProjectLimitExceeded(
+                f"User has reached the {MAX_PROJECTS_PER_USER}-project limit"
+            )
+        result = await self.repository.create_project(
+            user_id, name, description, custom_instructions, organization_id
+        )
         await self._publish("create", user_id, result["id"], success=True)
         return result
 
@@ -166,6 +180,71 @@ class ProjectService:
             starred_only=starred_only,
         )
 
+    async def export_user_data(
+        self,
+        user_id: str,
+        organization_id: str = None,
+        request_id: str = None,
+    ) -> Dict[str, Any]:
+        """Export project-owned subject data for GDPR access requests."""
+        project_page_size = 100
+        file_page_size = 500
+        projects: List[Dict[str, Any]] = []
+        project_files: Dict[str, List[Dict[str, Any]]] = {}
+
+        project_offset = 0
+        while True:
+            project_page = await self.repository.list_projects_for_export(
+                user_id,
+                limit=project_page_size,
+                offset=project_offset,
+                organization_id=organization_id,
+            )
+            projects.extend(project_page)
+            if len(project_page) < project_page_size:
+                break
+            project_offset += project_page_size
+
+        file_records = 0
+        for project in projects:
+            project_id = project.get("id")
+            if not project_id:
+                continue
+
+            files: List[Dict[str, Any]] = []
+            file_offset = 0
+            while True:
+                file_page = await self.repository.list_project_files(
+                    project_id,
+                    limit=file_page_size,
+                    offset=file_offset,
+                )
+                files.extend(file_page)
+                if len(file_page) < file_page_size:
+                    break
+                file_offset += file_page_size
+
+            project_files[project_id] = files
+            file_records += len(files)
+
+        return {
+            "schema_version": "project-export-v1",
+            "service": "project_service",
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "gdpr_request_id": request_id,
+            "exported_at": datetime.now(tz=timezone.utc).isoformat(),
+            "projects": projects,
+            "project_files": project_files,
+            "counts": {
+                "records": len(projects) + file_records,
+                "sections": {
+                    "projects": len(projects),
+                    "project_files": file_records,
+                },
+            },
+        }
+
     async def update_project(
         self,
         project_id: str,
@@ -180,7 +259,9 @@ class ProjectService:
         await self._publish("update", user_id, project_id, success=True)
         return result
 
-    async def delete_project(self, project_id: str, user_id: str, organization_id: str = None) -> bool:
+    async def delete_project(
+        self, project_id: str, user_id: str, organization_id: str = None
+    ) -> bool:
         await self._verify_access(project_id, user_id, organization_id, write=True)
         deleted = await self.repository.delete_project(project_id)
         await self._publish("delete", user_id, project_id, success=True)
@@ -239,7 +320,9 @@ class ProjectService:
         # Fire-and-forget share revocation. Never raises.
         if self.project_sharing_client is not None:
             try:
-                revoked = await self.project_sharing_client.revoke_all_shares(project_id)
+                revoked = await self.project_sharing_client.revoke_all_shares(
+                    project_id
+                )
                 if not revoked:
                     logger.info(
                         "project %s archived; share revocation deferred to reconcile job",
@@ -293,7 +376,9 @@ class ProjectService:
         if self.storage_client is None:
             raise ProjectStorageError("Storage client is not configured")
 
-        project = await self._verify_access(project_id, user_id, organization_id, write=True)
+        project = await self._verify_access(
+            project_id, user_id, organization_id, write=True
+        )
         file_content = await file.read()
         upload_result = await self.storage_client.upload_file(
             file_content=file_content,
@@ -317,7 +402,9 @@ class ProjectService:
             file_type=upload_result.get("content_type") or file.content_type,
             file_size=upload_result.get("file_size") or len(file_content),
         )
-        await self._publish("upload_file", user_id, project_id, success=True, detail=persisted["id"])
+        await self._publish(
+            "upload_file", user_id, project_id, success=True, detail=persisted["id"]
+        )
         return persisted
 
     async def delete_project_file(
@@ -335,10 +422,14 @@ class ProjectService:
         if not project_file:
             raise ProjectNotFoundError(f"Project file {file_id} not found")
 
-        deleted = await self.storage_client.delete_file(file_id, user_id, permanent=True)
+        deleted = await self.storage_client.delete_file(
+            file_id, user_id, permanent=True
+        )
         if not deleted:
             raise ProjectStorageError(f"Failed to delete storage file {file_id}")
 
         await self.repository.delete_project_file(project_id, file_id)
-        await self._publish("delete_file", user_id, project_id, success=True, detail=file_id)
+        await self._publish(
+            "delete_file", user_id, project_id, success=True, detail=file_id
+        )
         return True

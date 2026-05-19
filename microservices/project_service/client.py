@@ -18,6 +18,7 @@ import httpx
 import logging
 from typing import Optional, List, Dict, Any
 
+from core.auth_dependencies import INTERNAL_SERVICE_SECRET
 from core.service_discovery import get_service_discovery
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,12 @@ class ProjectServiceClient:
 
     def _headers(self, auth_token: str) -> Dict[str, str]:
         return {"Authorization": auth_token}
+
+    def _internal_headers(self) -> Dict[str, str]:
+        return {
+            "X-Internal-Service": "true",
+            "X-Internal-Service-Secret": INTERNAL_SERVICE_SECRET,
+        }
 
     # ── CRUD ─────────────────────────────────────────────────────────────
 
@@ -131,6 +138,34 @@ class ProjectServiceClient:
             return None
         except Exception as e:
             logger.error("list_projects error: %s", e)
+            return None
+
+    async def export_user_data(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Export project-owned user data for GDPR subject access workflows."""
+        try:
+            params = {"user_id": user_id}
+            if organization_id is not None:
+                params["organization_id"] = organization_id
+            if request_id is not None:
+                params["request_id"] = request_id
+
+            resp = await self.client.get(
+                f"{self.base_url}/api/v1/projects/export",
+                params=params,
+                headers=self._internal_headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            logger.error("export_user_data failed: %s", e.response.status_code)
+            return None
+        except Exception as e:
+            logger.error("export_user_data error: %s", e)
             return None
 
     async def update_project(

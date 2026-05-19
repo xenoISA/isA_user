@@ -32,6 +32,7 @@ from .models import (
     ProjectListResponse,
     ProjectFileResponse,
     ProjectFileListResponse,
+    ProjectExportResponse,
 )
 from .protocols import (
     ProjectNotFoundError,
@@ -202,7 +203,10 @@ async def get_authenticated_caller(request: Request) -> str:
 
     x_internal_service = request.headers.get("X-Internal-Service")
     x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
-    if x_internal_service == "true" and x_internal_service_secret == INTERNAL_SERVICE_SECRET:
+    if (
+        x_internal_service == "true"
+        and x_internal_service_secret == INTERNAL_SERVICE_SECRET
+    ):
         return "internal-service"
 
     authorization = request.headers.get("authorization")
@@ -223,11 +227,31 @@ async def get_authenticated_caller(request: Request) -> str:
     )
 
 
+async def get_internal_service_caller(request: Request) -> str:
+    """Require platform internal-service headers for privileged service routes."""
+    from core.auth_dependencies import INTERNAL_SERVICE_SECRET
+
+    x_internal_service = request.headers.get("X-Internal-Service")
+    x_internal_service_secret = request.headers.get("X-Internal-Service-Secret")
+    if (
+        x_internal_service == "true"
+        and x_internal_service_secret == INTERNAL_SERVICE_SECRET
+    ):
+        return "internal-service"
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Internal service authentication required",
+    )
+
+
 # =============================================================================
 # Health
 # =============================================================================
 
-health = HealthCheck("project_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "project_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/projects/health")
@@ -268,8 +292,12 @@ async def list_projects(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     organization_id: str = Query(None, min_length=1),
-    include_archived: bool = Query(False, description="Include archived projects (default: hide)"),
-    starred_only: bool = Query(False, description="Only return projects with starred_at set"),
+    include_archived: bool = Query(
+        False, description="Include archived projects (default: hide)"
+    ),
+    starred_only: bool = Query(
+        False, description="Only return projects with starred_at set"
+    ),
     svc=Depends(get_service),
     caller_id: str = Depends(get_authenticated_caller),
 ):
@@ -285,6 +313,21 @@ async def list_projects(
         **kwargs,
     )
     return {"projects": projects, "total": len(projects)}
+
+
+@app.get("/api/v1/projects/export", response_model=ProjectExportResponse)
+async def export_project_data(
+    user_id: str = Query(..., min_length=1),
+    organization_id: str = Query(None, min_length=1),
+    request_id: str = Query(None, min_length=1),
+    svc=Depends(get_service),
+    _caller_id: str = Depends(get_internal_service_caller),
+):
+    return await svc.export_user_data(
+        user_id=user_id,
+        organization_id=organization_id,
+        request_id=request_id,
+    )
 
 
 @app.get("/api/v1/projects/{project_id}", response_model=ProjectResponse)
@@ -457,4 +500,6 @@ async def delete_project_file(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("microservices.project_service.main:app", host="0.0.0.0", port=8260, reload=True)
+    uvicorn.run(
+        "microservices.project_service.main:app", host="0.0.0.0", port=8260, reload=True
+    )

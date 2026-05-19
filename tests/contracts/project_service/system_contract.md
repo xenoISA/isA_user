@@ -81,6 +81,7 @@ Protected routes:
 
 - `POST /api/v1/projects`
 - `GET /api/v1/projects`
+- `GET /api/v1/projects/export` (internal service only, GDPR subject export)
 - `GET /api/v1/projects/{project_id}`
 - `PUT /api/v1/projects/{project_id}`
 - `DELETE /api/v1/projects/{project_id}`
@@ -120,6 +121,7 @@ Mapped exceptions:
 - `InvalidProjectUpdate` -> `422`
 - `RepositoryError` -> `500`
 - `ProjectStorageError` -> `502`
+- non-internal callers to `GET /api/v1/projects/export` -> `403`
 
 Error response shape:
 

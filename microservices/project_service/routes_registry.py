@@ -28,6 +28,12 @@ PROJECT_SERVICE_ROUTES = [
         "description": "List projects",
     },
     {
+        "path": "/api/v1/projects/export",
+        "methods": ["GET"],
+        "auth_required": True,
+        "description": "Internal GDPR project export",
+    },
+    {
         "path": "/api/v1/projects/{project_id}",
         "methods": ["GET"],
         "auth_required": True,
@@ -116,8 +122,12 @@ def get_routes_for_consul() -> Dict[str, Any]:
         "route_count": str(len(PROJECT_SERVICE_ROUTES)),
         "base_path": "/api/v1/projects",
         "methods": "GET,POST,PUT,DELETE",
-        "public_count": str(sum(1 for r in PROJECT_SERVICE_ROUTES if not r["auth_required"])),
-        "protected_count": str(sum(1 for r in PROJECT_SERVICE_ROUTES if r["auth_required"])),
+        "public_count": str(
+            sum(1 for r in PROJECT_SERVICE_ROUTES if not r["auth_required"])
+        ),
+        "protected_count": str(
+            sum(1 for r in PROJECT_SERVICE_ROUTES if r["auth_required"])
+        ),
     }
 
 

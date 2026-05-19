@@ -7,7 +7,7 @@ project CRUD metadata and project knowledge file responses.
 
 from datetime import datetime, timezone
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -65,6 +65,20 @@ class ProjectFileListResponseContract(BaseModel):
 
     files: List[ProjectFileResponseContract]
     total: int = Field(..., ge=0)
+
+
+class ProjectExportResponseContract(BaseModel):
+    """Contract for internal GDPR project export responses."""
+
+    schema_version: str = "project-export-v1"
+    service: str = "project_service"
+    user_id: str = Field(..., min_length=1)
+    organization_id: Optional[str] = None
+    gdpr_request_id: Optional[str] = None
+    exported_at: str = Field(..., min_length=1)
+    projects: List[ProjectResponseContract]
+    project_files: Dict[str, List[ProjectFileResponseContract]]
+    counts: dict
 
 
 class ProjectErrorResponseContract(BaseModel):

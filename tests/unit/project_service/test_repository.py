@@ -70,7 +70,7 @@ async def test_initialize_bootstraps_schema_once():
     await ProjectRepository.initialize(repository)
 
     assert repository._tables_initialized is True
-    assert repository.db.execute.await_count == 9
+    assert repository.db.execute.await_count == 15
 
 
 @pytest.mark.asyncio

@@ -68,7 +68,8 @@ class ProjectStorageError(ProjectServiceException):
 class ProjectRepositoryProtocol(Protocol):
     """Interface for Project Repository — implementations provide data access."""
 
-    async def initialize(self) -> None: ...
+    async def initialize(self) -> None:
+        ...
 
     async def create_project(
         self,
@@ -78,9 +79,11 @@ class ProjectRepositoryProtocol(Protocol):
         custom_instructions: str = None,
         organization_id: Optional[str] = None,
         owner_id: Optional[str] = None,
-    ) -> Dict[str, Any]: ...
+    ) -> Dict[str, Any]:
+        ...
 
-    async def get_project(self, project_id: str) -> Optional[Dict[str, Any]]: ...
+    async def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        ...
 
     async def list_projects(
         self,
@@ -90,19 +93,41 @@ class ProjectRepositoryProtocol(Protocol):
         organization_id: Optional[str] = None,
         include_archived: bool = False,
         starred_only: bool = False,
-    ) -> List[Dict[str, Any]]: ...
+    ) -> List[Dict[str, Any]]:
+        ...
 
-    async def update_project(self, project_id: str, **updates) -> Optional[Dict[str, Any]]: ...
+    async def list_projects_for_export(
+        self,
+        user_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        organization_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        ...
 
-    async def delete_project(self, project_id: str) -> bool: ...
+    async def update_project(
+        self, project_id: str, **updates
+    ) -> Optional[Dict[str, Any]]:
+        ...
 
-    async def set_instructions(self, project_id: str, instructions: str) -> bool: ...
+    async def delete_project(self, project_id: str) -> bool:
+        ...
 
-    async def set_starred(self, project_id: str, starred: bool) -> Optional[Dict[str, Any]]: ...
+    async def set_instructions(self, project_id: str, instructions: str) -> bool:
+        ...
 
-    async def set_archived(self, project_id: str, archived: bool) -> Optional[Dict[str, Any]]: ...
+    async def set_starred(
+        self, project_id: str, starred: bool
+    ) -> Optional[Dict[str, Any]]:
+        ...
 
-    async def count_projects(self, user_id: str) -> int: ...
+    async def set_archived(
+        self, project_id: str, archived: bool
+    ) -> Optional[Dict[str, Any]]:
+        ...
+
+    async def count_projects(self, user_id: str) -> int:
+        ...
 
     async def create_project_file(
         self,
@@ -112,24 +137,29 @@ class ProjectRepositoryProtocol(Protocol):
         storage_path: str,
         file_type: str = None,
         file_size: int = None,
-    ) -> Dict[str, Any]: ...
+    ) -> Dict[str, Any]:
+        ...
 
     async def list_project_files(
         self,
         project_id: str,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]: ...
+    ) -> List[Dict[str, Any]]:
+        ...
 
     async def get_project_file(
         self,
         project_id: str,
         file_id: str,
-    ) -> Optional[Dict[str, Any]]: ...
+    ) -> Optional[Dict[str, Any]]:
+        ...
 
-    async def delete_project_file(self, project_id: str, file_id: str) -> bool: ...
+    async def delete_project_file(self, project_id: str, file_id: str) -> bool:
+        ...
 
-    async def cleanup(self) -> None: ...
+    async def cleanup(self) -> None:
+        ...
 
 
 # =============================================================================
@@ -141,16 +171,19 @@ class ProjectRepositoryProtocol(Protocol):
 class EventBusProtocol(Protocol):
     """Interface for Event Bus — no I/O imports."""
 
-    async def publish_event(self, event: Any) -> None: ...
+    async def publish_event(self, event: Any) -> None:
+        ...
 
 
 @runtime_checkable
 class OrganizationAccessProtocol(Protocol):
     """Interface for validating organization access before sharing projects."""
 
-    async def check_user_access(self, organization_id: str, user_id: str) -> bool: ...
+    async def check_user_access(self, organization_id: str, user_id: str) -> bool:
+        ...
 
-    async def check_admin_access(self, organization_id: str, user_id: str) -> bool: ...
+    async def check_admin_access(self, organization_id: str, user_id: str) -> bool:
+        ...
 
 
 @runtime_checkable
@@ -169,11 +202,13 @@ class StorageServiceProtocol(Protocol):
         tags: Optional[List[str]] = None,
         auto_delete_after_days: Optional[int] = None,
         enable_indexing: bool = True,
-    ) -> Optional[Dict[str, Any]]: ...
+    ) -> Optional[Dict[str, Any]]:
+        ...
 
     async def delete_file(
         self,
         file_id: str,
         user_id: str,
         permanent: bool = False,
-    ) -> bool: ...
+    ) -> bool:
+        ...

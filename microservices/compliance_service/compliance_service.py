@@ -526,6 +526,12 @@ class ComplianceService:
             clients["session_service"] = SessionServiceClient(
                 base_url=os.getenv("SESSION_SERVICE_URL", "http://localhost:8207")
             )
+        if self._gdpr_export_client_enabled("GDPR_PROJECT_EXPORT_ENABLED"):
+            from microservices.project_service.client import ProjectServiceClient
+
+            clients["project_service"] = ProjectServiceClient(
+                base_url=os.getenv("PROJECT_SERVICE_URL", "http://localhost:8260")
+            )
         return clients
 
     @staticmethod

@@ -85,6 +85,8 @@ async def test_list_projects_forwards_organization_filter(client, mock_service):
         "member-1",
         50,
         0,
+        include_archived=False,
+        starred_only=False,
         organization_id="org-1",
     )
 
