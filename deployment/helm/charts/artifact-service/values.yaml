@@ -18,6 +18,14 @@
 #     ARTIFACT_RUNTIME_PROVIDER — provider for model routing
 #                                (default: openai)
 #     ARTIFACT_DAILY_QUOTA     — per-user daily generation cap, "" disables
+#     ARTIFACT_RUNTIME_RATE_PER_MINUTE — per-user/min cap on
+#                                /api/v1/artifacts/{id}/runtime/invoke
+#                                (default: 100, set in microservices/
+#                                 artifact_service/main.py — PR #475)
+#     ARTIFACT_MCP_RATE_PER_MINUTE — per-user/min cap on
+#                                /api/v1/artifacts/{id}/mcp/call
+#                                (default: 60, set in microservices/
+#                                 artifact_service/main.py — PR #475)
 #
 #   Platform / shared (injected via the umbrella `env:` block in
 #   deployment/helm/values-{staging,production}.yaml — duplicated here only
@@ -92,3 +100,11 @@ env:
     value: "openai"
   - name: ARTIFACT_DAILY_QUOTA
     value: "50"
+  # Per-minute rate limits (PR #475). Sub-chart standalone defaults mirror
+  # the in-code defaults from microservices/artifact_service/main.py so a
+  # one-off `helm template` produces a working pod. The umbrella
+  # values-{staging,production}.yaml override these per environment.
+  - name: ARTIFACT_RUNTIME_RATE_PER_MINUTE
+    value: "100"
+  - name: ARTIFACT_MCP_RATE_PER_MINUTE
+    value: "60"
