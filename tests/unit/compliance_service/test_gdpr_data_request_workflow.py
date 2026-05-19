@@ -194,6 +194,28 @@ class FakeBillingExportClient:
         return deepcopy(self.payload)
 
 
+class FakeSessionExportClient:
+    def __init__(self, payload=None):
+        self.calls = []
+        self.payload = payload or {
+            "schema_version": "session-export-v1",
+            "service": "session_service",
+            "user_id": "user-1",
+            "organization_id": "org-1",
+            "gdpr_request_id": "gdpr_req_1",
+            "sessions": {"sessions": [{"session_id": "sess-1"}], "total": 1},
+            "session_messages": {"sess-1": {"messages": [{"message_id": "msg-1"}]}},
+            "counts": {
+                "records": 2,
+                "sections": {"sessions": 1, "messages": 1},
+            },
+        }
+
+    async def export_user_data(self, **kwargs):
+        self.calls.append(kwargs)
+        return deepcopy(self.payload)
+
+
 class FakeEventBus:
     def __init__(self):
         self.published = []
@@ -405,6 +427,7 @@ async def test_run_export_request_aggregates_account_service_export_adapter():
 async def test_default_gdpr_export_clients_include_account_service(monkeypatch):
     monkeypatch.setenv("GDPR_BILLING_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_MEMORY_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_SESSION_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_STORAGE_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_ACCOUNT_EXPORT_ENABLED", "true")
     monkeypatch.setenv("ACCOUNT_SERVICE_URL", "http://account-service:8202")
@@ -463,6 +486,7 @@ async def test_default_gdpr_export_clients_include_storage_service(monkeypatch):
     monkeypatch.setenv("GDPR_ACCOUNT_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_BILLING_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_MEMORY_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_SESSION_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_STORAGE_EXPORT_ENABLED", "true")
     monkeypatch.setenv("STORAGE_SERVICE_URL", "http://storage-service:8209")
 
@@ -521,6 +545,7 @@ async def test_run_export_request_aggregates_billing_service_export_adapter():
 async def test_default_gdpr_export_clients_include_billing_service(monkeypatch):
     monkeypatch.setenv("GDPR_ACCOUNT_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_MEMORY_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_SESSION_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_STORAGE_EXPORT_ENABLED", "false")
     monkeypatch.setenv("GDPR_BILLING_EXPORT_ENABLED", "true")
     monkeypatch.setenv("BILLING_SERVICE_URL", "http://billing-service:8220")
@@ -532,6 +557,66 @@ async def test_default_gdpr_export_clients_include_billing_service(monkeypatch):
     assert clients["billing_service"].base_url == "http://billing-service:8220"
     assert hasattr(clients["billing_service"], "export_user_data")
     await clients["billing_service"].close()
+
+
+async def test_run_export_request_aggregates_session_service_export_adapter():
+    repository = FakeGDPRRepository()
+    repository.checks.append(_check("user-1"))
+    storage = FakeArtifactStorageClient()
+    session_client = FakeSessionExportClient()
+    service = _build_service(
+        repository,
+        artifact_storage_client=storage,
+        enable_artifact_storage=True,
+        gdpr_export_clients={"session_service": session_client},
+    )
+    data_request = await service.create_data_request(
+        GDPRDataRequestCreate(
+            request_type=GDPRDataRequestType.EXPORT,
+            user_id="user-1",
+            organization_id="org-1",
+            requested_by="admin-1",
+        )
+    )
+
+    completed = await service.run_data_request(data_request.request_id)
+
+    assert session_client.calls == [
+        {
+            "user_id": "user-1",
+            "organization_id": "org-1",
+            "request_id": data_request.request_id,
+        }
+    ]
+    bundle = json.loads(storage.uploads[0]["file_content"].decode("utf-8"))
+    assert bundle["services"]["session_service"]["records"] == 2
+    assert (
+        bundle["services"]["session_service"]["payload"]["sessions"]["sessions"][0][
+            "session_id"
+        ]
+        == "sess-1"
+    )
+    assert completed.per_service_status["session_service"]["status"] == "completed"
+    assert completed.per_service_status["session_service"]["records_exported"] == 2
+    manifest = completed.metadata["export_manifest"]
+    assert manifest["services"]["session_service"]["records"] == 2
+
+
+async def test_default_gdpr_export_clients_include_session_service(monkeypatch):
+    monkeypatch.setenv("GDPR_ACCOUNT_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_BILLING_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_MEMORY_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_STORAGE_EXPORT_ENABLED", "false")
+    monkeypatch.setenv("GDPR_SESSION_EXPORT_ENABLED", "true")
+    monkeypatch.setenv("SESSION_SERVICE_URL", "http://session-service:8207")
+
+    service = ComplianceService.__new__(ComplianceService)
+    clients = service._default_gdpr_export_clients()
+
+    assert list(clients) == ["session_service"]
+    assert clients["session_service"].base_url == "http://session-service:8207"
+    assert hasattr(clients["session_service"], "export_user_data")
+    await clients["session_service"].close()
 
 
 async def test_run_export_request_marks_requested_service_without_adapter_not_configured():
