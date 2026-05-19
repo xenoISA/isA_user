@@ -512,6 +512,12 @@ class ComplianceService:
             clients["storage_service"] = StorageServiceClient(
                 base_url=os.getenv("STORAGE_SERVICE_URL", "http://localhost:8209")
             )
+        if self._gdpr_export_client_enabled("GDPR_BILLING_EXPORT_ENABLED"):
+            from microservices.billing_service.client import BillingServiceClient
+
+            clients["billing_service"] = BillingServiceClient(
+                base_url=os.getenv("BILLING_SERVICE_URL", "http://localhost:8220")
+            )
         return clients
 
     @staticmethod
