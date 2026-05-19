@@ -191,7 +191,9 @@ async def lifespan(app: FastAPI):
         event_bus = await get_event_bus("artifact_service")
         logger.info("Event bus initialized")
     except Exception as e:
-        logger.warning(f"Event bus init failed: {e}. Continuing without event publishing.")
+        logger.warning(
+            f"Event bus init failed: {e}. Continuing without event publishing."
+        )
 
     artifact_service = create_artifact_service(event_bus=event_bus)
 
@@ -217,7 +219,9 @@ async def lifespan(app: FastAPI):
             consul_registry.register()
             consul_registry.start_maintenance()
             shutdown_manager.set_consul_registry(consul_registry)
-            logger.info(f"Registered with Consul: {route_meta.get('route_count')} routes")
+            logger.info(
+                f"Registered with Consul: {route_meta.get('route_count')} routes"
+            )
         except Exception as e:
             logger.warning(f"Failed to register with Consul: {e}")
             consul_registry = None
@@ -241,7 +245,9 @@ app = FastAPI(
 app.add_middleware(shutdown_middleware, shutdown_manager=shutdown_manager)
 setup_metrics(app, service_name="artifact_service")
 
-health = HealthCheck("artifact_service", version="1.0.0", shutdown_manager=shutdown_manager)
+health = HealthCheck(
+    "artifact_service", version="1.0.0", shutdown_manager=shutdown_manager
+)
 
 
 @app.get("/api/v1/artifacts/health")
@@ -278,7 +284,9 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
     is present (e.g. dev/no-auth path) we return ``None`` and the upstream
     keeps using its existing default auth.
     """
-    authorization = request.headers.get("authorization") or request.headers.get("Authorization")
+    authorization = request.headers.get("authorization") or request.headers.get(
+        "Authorization"
+    )
     if not authorization:
         return None
     parts = authorization.strip().split(None, 1)
@@ -349,7 +357,9 @@ class UpdateArtifactBody(BaseModel):
 async def update_artifact(artifact_id: str, body: UpdateArtifactBody):
     """Patch artifact: title, visibility, ai_runtime_enabled, storage_scope, metadata."""
     try:
-        return await artifact_service.update_artifact(artifact_id, body.update, body.user_id)
+        return await artifact_service.update_artifact(
+            artifact_id, body.update, body.user_id
+        )
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"update_artifact failed: {e}")
@@ -380,7 +390,9 @@ class AddVersionBody(BaseModel):
 async def add_version(artifact_id: str, body: AddVersionBody):
     """Append a new immutable version. Auto-increments number when omitted."""
     try:
-        return await artifact_service.add_version(artifact_id, body.version, body.user_id)
+        return await artifact_service.add_version(
+            artifact_id, body.version, body.user_id
+        )
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"add_version failed: {e}")
@@ -453,7 +465,9 @@ async def list_artifact_shares(
 async def read_public_artifact_share(
     token: str,
     v: Optional[int] = Query(None, description="Pin to a specific version number"),
-    org_id: Optional[str] = Query(None, description="Caller org id for org-scoped shares"),
+    org_id: Optional[str] = Query(
+        None, description="Caller org id for org-scoped shares"
+    ),
 ):
     """Public reader — resolves token → artifact + version. 410 if revoked/expired."""
     try:
@@ -541,7 +555,9 @@ async def runtime_invoke(
     """
     try:
         auth_token = _extract_bearer_token(request)
-        return await artifact_service.runtime_invoke(artifact_id, body, auth_token=auth_token)
+        return await artifact_service.runtime_invoke(
+            artifact_id, body, auth_token=auth_token
+        )
     except ArtifactQuotaExceededError as e:
         response.headers["Retry-After"] = str(e.retry_after)
         raise HTTPException(
@@ -656,11 +672,15 @@ async def list_mcp_grants(
 async def kv_get(
     artifact_id: str,
     key: str,
-    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    scope: ArtifactKVScope = Query(
+        ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"
+    ),
     user_id: Optional[str] = Query(None, description="Required when scope=personal"),
 ):
     try:
-        return await artifact_service.kv_get(artifact_id, key, scope=scope, user_id=user_id)
+        return await artifact_service.kv_get(
+            artifact_id, key, scope=scope, user_id=user_id
+        )
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"kv_get failed: {e}")
@@ -675,11 +695,15 @@ async def kv_put(
     artifact_id: str,
     key: str,
     body: ArtifactKVValueRequest,
-    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    scope: ArtifactKVScope = Query(
+        ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"
+    ),
     user_id: Optional[str] = Query(None, description="Required when scope=personal"),
 ):
     try:
-        return await artifact_service.kv_put(artifact_id, key, value=body.value, scope=scope, user_id=user_id)
+        return await artifact_service.kv_put(
+            artifact_id, key, value=body.value, scope=scope, user_id=user_id
+        )
     except Exception as e:
         _raise_for_artifact_error(e)
         logger.error(f"kv_put failed: {e}")
@@ -690,11 +714,15 @@ async def kv_put(
 async def kv_delete(
     artifact_id: str,
     key: str,
-    scope: ArtifactKVScope = Query(ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"),
+    scope: ArtifactKVScope = Query(
+        ArtifactKVScope.PERSONAL, description="KV scope: personal or shared"
+    ),
     user_id: Optional[str] = Query(None, description="Required when scope=personal"),
 ):
     try:
-        ok = await artifact_service.kv_delete(artifact_id, key, scope=scope, user_id=user_id)
+        ok = await artifact_service.kv_delete(
+            artifact_id, key, scope=scope, user_id=user_id
+        )
         return {"success": ok}
     except Exception as e:
         _raise_for_artifact_error(e)

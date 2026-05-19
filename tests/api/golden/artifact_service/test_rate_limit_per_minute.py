@@ -108,7 +108,9 @@ async def _create_artifact(
 
 
 class TestRuntimeInvokePerMinute:
-    async def test_runtime_invoke_429s_after_cap_calls_per_minute(self, http_client, user_id, auth_headers):
+    async def test_runtime_invoke_429s_after_cap_calls_per_minute(
+        self, http_client, user_id, auth_headers
+    ):
         """N+1th /runtime/invoke call inside a minute MUST 429 with per_minute marker."""
         if RUNTIME_RATE_PER_MIN > 50:
             pytest.skip(
@@ -152,7 +154,9 @@ class TestRuntimeInvokePerMinute:
         assert isinstance(detail, dict), detail
         assert detail.get("limit_type") == "per_minute", detail
 
-    async def test_per_minute_429_includes_retry_after_header(self, http_client, user_id, auth_headers):
+    async def test_per_minute_429_includes_retry_after_header(
+        self, http_client, user_id, auth_headers
+    ):
         if RUNTIME_RATE_PER_MIN > 50:
             pytest.skip("cap too high for burst test")
 
@@ -173,7 +177,9 @@ class TestRuntimeInvokePerMinute:
         # Retry-After header set (case-insensitive).
         header_keys = {k.lower() for k in over.headers.keys()}
         assert "retry-after" in header_keys, list(over.headers.keys())
-        retry_after = over.headers.get("Retry-After") or over.headers.get("retry-after") or "0"
+        retry_after = (
+            over.headers.get("Retry-After") or over.headers.get("retry-after") or "0"
+        )
         assert int(retry_after) > 0
 
     async def test_different_users_have_separate_buckets(
@@ -206,7 +212,9 @@ class TestRuntimeInvokePerMinute:
         # 200 means it went through; a 429 would only be OK if it carried the
         # per_day marker (different limiter — but other_user_id has 0 calls so
         # that's also impossible). Anything else is a leak across buckets.
-        assert first_b.status_code == 200, f"separate auth bucket leaked: {first_b.status_code} / {first_b.text}"
+        assert (
+            first_b.status_code == 200
+        ), f"separate auth bucket leaked: {first_b.status_code} / {first_b.text}"
 
 
 # ==========================================================================
@@ -215,9 +223,13 @@ class TestRuntimeInvokePerMinute:
 
 
 class TestMCPCallPerMinute:
-    async def test_mcp_call_429s_after_cap_calls_per_minute(self, http_client, user_id, auth_headers):
+    async def test_mcp_call_429s_after_cap_calls_per_minute(
+        self, http_client, user_id, auth_headers
+    ):
         if MCP_RATE_PER_MIN > 50:
-            pytest.skip(f"ARTIFACT_MCP_RATE_PER_MINUTE={MCP_RATE_PER_MIN} too high — set <=10 for tests.")
+            pytest.skip(
+                f"ARTIFACT_MCP_RATE_PER_MINUTE={MCP_RATE_PER_MIN} too high — set <=10 for tests."
+            )
 
         art = await _create_artifact(http_client, user_id)
         # The first MCP call (no grant) returns 200 with requires_approval=True,
@@ -262,7 +274,9 @@ class TestMCPCallPerMinute:
 
 
 class TestPerDayVsPerMinuteIndependent:
-    async def test_per_day_and_per_minute_are_independent(self, http_client, user_id, auth_headers):
+    async def test_per_day_and_per_minute_are_independent(
+        self, http_client, user_id, auth_headers
+    ):
         """Exceeding the per-day quota MUST 429 with the existing daily marker.
         The per-minute 429 carries a different marker so the BFF can branch
         on detail.limit_type / detail.error to pick UX.
