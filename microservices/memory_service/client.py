@@ -46,6 +46,30 @@ class MemoryServiceClient:
             response.raise_for_status()
             return response.json()
 
+    async def export_user_data(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Export a user's memory corpus for GDPR data-request aggregation."""
+        params = {"user_id": user_id, "scope": "user"}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(
+                f"{self.base_url}/api/v1/memories/export",
+                params=params,
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            payload = response.json()
+
+        if organization_id is not None:
+            payload.setdefault("organization_id", organization_id)
+        if request_id is not None:
+            payload.setdefault("gdpr_request_id", request_id)
+        payload.setdefault("service", "memory_service")
+        return payload
+
     # ==================== AI-Powered Memory Extraction ====================
 
     async def extract_factual_memory(
