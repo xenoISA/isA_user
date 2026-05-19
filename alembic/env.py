@@ -3,11 +3,13 @@
 Supports per-service migrations via: alembic -x service=<name>
 Each service gets its own version table and version directory.
 """
+
 import sys
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool, text
+from alembic.script import ScriptDirectory
+from sqlalchemy import engine_from_config, pool
 
 # Add project root to path so we can import core.migration_helpers
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -28,10 +30,27 @@ validate_service_name(service_name)
 # Override sqlalchemy.url from environment variables
 config.set_main_option("sqlalchemy.url", get_database_url())
 
-# Set per-service version locations and version table
+# Set per-service version locations and version table.
+#
+# Alembic's `ScriptDirectory` is constructed from `config` BEFORE env.py
+# runs, so updating `version_locations` here would not affect the bound
+# script — the CLI would still resolve revisions from the default
+# `alembic/versions/` (which is empty). We rebuild the ScriptDirectory
+# and reassign it on the environment context so per-service revisions
+# are actually discovered.
 version_path = str(get_service_version_path(service_name))
 config.set_main_option("version_locations", version_path)
 version_table = get_version_table(service_name)
+
+# Rebuild ScriptDirectory with the per-service version path. Mutate the
+# existing script in place because the alembic CLI's CommandLine has
+# already captured the original ScriptDirectory reference — reassigning
+# `context.script` does not propagate.
+_rebuilt = ScriptDirectory.from_config(config)
+_script = context.script
+_script.dir = _rebuilt.dir
+_script._version_locations = _rebuilt._version_locations
+_script.revision_map = _rebuilt.revision_map
 
 
 def run_migrations_offline() -> None:
