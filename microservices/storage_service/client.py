@@ -9,6 +9,7 @@ import os
 from core.service_discovery import get_service_discovery
 from core.auth_dependencies import INTERNAL_SERVICE_SECRET
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -217,6 +218,86 @@ class StorageServiceClient:
         except Exception as e:
             logger.error(f"Error listing files: {e}")
             return None
+
+    async def export_user_data(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export storage-owned user data for GDPR subject access workflows.
+
+        This exports metadata inventories and derived usage/quota state. It does
+        not inline binary file contents into the compliance artifact.
+        """
+        files = await self.list_files(
+            user_id=user_id,
+            organization_id=organization_id,
+            limit=1000,
+            offset=0,
+        )
+        storage_stats = await self.get_storage_stats(
+            user_id=user_id,
+            organization_id=organization_id,
+        )
+        storage_quota = await self.get_storage_quota(
+            user_id=user_id,
+            organization_id=organization_id,
+        )
+        albums = await self.list_user_albums(user_id=user_id, limit=1000, offset=0)
+        intelligence_stats = await self.get_intelligence_stats(user_id)
+
+        file_records = self._export_collection_count(
+            files, candidate_keys=("files", "items", "data", "results")
+        )
+        album_records = self._export_collection_count(
+            albums, candidate_keys=("albums", "items", "data", "results")
+        )
+
+        return {
+            "schema_version": "storage-export-v1",
+            "service": "storage_service",
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "gdpr_request_id": request_id,
+            "exported_at": datetime.utcnow().isoformat(),
+            "files": files or [],
+            "albums": albums or {},
+            "storage_stats": storage_stats,
+            "storage_quota": storage_quota,
+            "intelligence_stats": intelligence_stats,
+            "counts": {
+                "records": file_records + album_records,
+                "sections": {
+                    "files": file_records,
+                    "albums": album_records,
+                    "storage_stats": 1 if storage_stats else 0,
+                    "storage_quota": 1 if storage_quota else 0,
+                    "intelligence_stats": 1 if intelligence_stats else 0,
+                },
+            },
+        }
+
+    @staticmethod
+    def _export_collection_count(payload: Any, candidate_keys: tuple[str, ...]) -> int:
+        if isinstance(payload, list):
+            return len(payload)
+        if not isinstance(payload, dict):
+            return 0
+
+        for key in ("total", "total_count", "count"):
+            value = payload.get(key)
+            if isinstance(value, int):
+                return value
+
+        for key in candidate_keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return len(value)
+            if isinstance(value, int):
+                return value
+        return 0
 
     async def get_download_url(
         self, file_id: str, user_id: str, expires_minutes: int = 60
