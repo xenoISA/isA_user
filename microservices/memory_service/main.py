@@ -16,7 +16,13 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+
+from core.auth_dependencies import (
+    is_internal_service_request,
+    require_auth_or_internal_service,
+)
+
 
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
@@ -69,6 +75,26 @@ shutdown_manager = GracefulShutdown("memory_service")
 # request so the rest of the service starts even when the user_memory_state
 # table hasn't been migrated yet. (xenoISA/isA_user#439)
 _memory_state_repo = None
+
+
+def _enforce_memory_owner(authed_user_id: str, requested_user_id: Optional[str]) -> str:
+    """Enforce per-user memory ownership for the CRUD API (#485).
+
+    Internal-service callers may act on any user's memories (service-to-service).
+    Authenticated end-users may ONLY access their own — a mismatch is a 403,
+    and a missing requested user_id defaults to the authenticated identity.
+
+    Returns the effective user_id to use for the operation.
+    """
+    if is_internal_service_request(authed_user_id):
+        # Service-to-service: trust the explicit target, fall back to marker.
+        return requested_user_id or authed_user_id
+    if requested_user_id and requested_user_id != authed_user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden — you may only access your own memories",
+        )
+    return authed_user_id
 
 
 def _get_state_repo():
@@ -1235,9 +1261,15 @@ async def get_related_memories(
 
 
 @app.get("/api/v1/memories/{memory_type}/{memory_id}")
-async def get_memory(memory_type: MemoryType, memory_id: str, user_id: Optional[str] = Query(None)):
-    """Get memory by ID and type"""
+async def get_memory(
+    memory_type: MemoryType,
+    memory_id: str,
+    user_id: Optional[str] = Query(None),
+    authed_user_id: str = Depends(require_auth_or_internal_service),
+):
+    """Get memory by ID and type. Auth + ownership enforced (#485)."""
     try:
+        user_id = _enforce_memory_owner(authed_user_id, user_id)
         result = await memory_service.get_memory(memory_id, memory_type, user_id)
         if not result:
             raise HTTPException(status_code=404, detail="Memory not found")
@@ -1251,14 +1283,16 @@ async def get_memory(memory_type: MemoryType, memory_id: str, user_id: Optional[
 
 @app.get("/api/v1/memories")
 async def list_memories(
-    user_id: str = Query(...),
+    user_id: Optional[str] = Query(None),
     memory_type: Optional[MemoryType] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     importance_min: Optional[float] = Query(None),
+    authed_user_id: str = Depends(require_auth_or_internal_service),
 ):
-    """List memories for a user"""
+    """List memories for a user. Auth + ownership enforced (#485)."""
     try:
+        user_id = _enforce_memory_owner(authed_user_id, user_id)
         params = MemoryListParams(
             user_id=user_id,
             memory_type=memory_type,
@@ -1333,10 +1367,12 @@ async def update_memory(
     memory_type: MemoryType,
     memory_id: str,
     request: MemoryUpdateRequest,
-    user_id: str = Query(...),
+    user_id: Optional[str] = Query(None),
+    authed_user_id: str = Depends(require_auth_or_internal_service),
 ):
-    """Update a memory"""
+    """Update a memory. Auth + ownership enforced (#485)."""
     try:
+        user_id = _enforce_memory_owner(authed_user_id, user_id)
         result = await memory_service.update_memory(
             memory_id=memory_id,
             memory_type=memory_type,
@@ -1350,9 +1386,15 @@ async def update_memory(
 
 
 @app.delete("/api/v1/memories/{memory_type}/{memory_id}", response_model=MemoryOperationResult)
-async def delete_memory(memory_type: MemoryType, memory_id: str, user_id: str = Query(...)):
-    """Delete a memory"""
+async def delete_memory(
+    memory_type: MemoryType,
+    memory_id: str,
+    user_id: Optional[str] = Query(None),
+    authed_user_id: str = Depends(require_auth_or_internal_service),
+):
+    """Delete a memory. Auth + ownership enforced (#485)."""
     try:
+        user_id = _enforce_memory_owner(authed_user_id, user_id)
         result = await memory_service.delete_memory(memory_id, memory_type, user_id)
         return result
     except Exception as e:
