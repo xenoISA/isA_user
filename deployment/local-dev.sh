@@ -48,7 +48,7 @@ cd "$PROJECT_ROOT"
 TIER1_SERVICES="auth_service account_service organization_service"
 
 # Tier 2: Core Platform — depends on Tier 1, required by MCP/Agent SDK
-TIER2_SERVICES="session_service authorization_service wallet_service memory_service storage_service event_service audit_service notification_service"
+TIER2_SERVICES="session_service authorization_service wallet_service memory_service storage_service event_service audit_service notification_service project_service"
 
 # Tier 3: Business — depends on Tier 1+2, required by Model/Agent SDK/OS
 TIER3_SERVICES="billing_service subscription_service product_service telemetry_service vault_service"

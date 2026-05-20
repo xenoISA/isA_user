@@ -23,7 +23,7 @@ if not INTERNAL_SERVICE_SECRET:
         logger.warning("INTERNAL_SERVICE_SECRET not set — using insecure dev default. Do NOT use in production.")
 
 # Auth service URL for JWT verification
-AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:8201")
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://127.0.0.1:8201")
 
 # Shared HTTP client with connection pooling + keepalive.
 # Reusing a single AsyncClient avoids per-request TCP handshakes against the auth
@@ -160,6 +160,9 @@ async def require_auth_or_internal_service(
     )
 
 
+get_authenticated_caller = require_auth_or_internal_service
+
+
 async def optional_auth_or_internal_service(
     x_internal_service: Optional[str] = Header(None, alias="X-Internal-Service"),
     x_internal_service_secret: Optional[str] = Header(None, alias="X-Internal-Service-Secret"),
@@ -219,6 +222,7 @@ def is_internal_service_request(user_id: str) -> bool:
 
 __all__ = [
     "require_auth_or_internal_service",
+    "get_authenticated_caller",
     "optional_auth_or_internal_service",
     "is_internal_service_request",
     "aclose_http_client",

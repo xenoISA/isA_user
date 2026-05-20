@@ -96,3 +96,32 @@ class ProjectService:
         result = await self.repository.set_instructions(project_id, instructions)
         await self._publish("set_instructions", user_id, project_id, success=True)
         return result
+
+    async def list_project_files(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        await self._verify_ownership(project_id, user_id)
+        return await self.repository.list_project_files(project_id)
+
+    async def create_project_file(
+        self,
+        project_id: str,
+        user_id: str,
+        filename: str,
+        file_type: str = None,
+        file_size: int = None,
+    ) -> Dict[str, Any]:
+        await self._verify_ownership(project_id, user_id)
+        result = await self.repository.create_project_file(
+            project_id,
+            user_id,
+            filename,
+            file_type,
+            file_size,
+        )
+        await self._publish("file_upload", user_id, project_id, success=True, detail=filename)
+        return result
+
+    async def delete_project_file(self, project_id: str, user_id: str, file_id: str) -> bool:
+        await self._verify_ownership(project_id, user_id)
+        result = await self.repository.delete_project_file(project_id, file_id)
+        await self._publish("file_delete", user_id, project_id, success=True, detail=file_id)
+        return result

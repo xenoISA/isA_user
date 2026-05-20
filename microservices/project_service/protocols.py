@@ -70,6 +70,19 @@ class ProjectRepositoryProtocol(Protocol):
 
     async def set_instructions(self, project_id: str, instructions: str) -> bool: ...
 
+    async def list_project_files(self, project_id: str) -> List[Dict[str, Any]]: ...
+
+    async def create_project_file(
+        self,
+        project_id: str,
+        user_id: str,
+        filename: str,
+        file_type: str = None,
+        file_size: int = None,
+    ) -> Dict[str, Any]: ...
+
+    async def delete_project_file(self, project_id: str, file_id: str) -> bool: ...
+
     async def count_projects(self, user_id: str) -> int: ...
 
     async def cleanup(self) -> None: ...

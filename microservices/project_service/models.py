@@ -56,6 +56,11 @@ class ProjectListResponse(BaseModel):
     total: int
 
 
+class ProjectFileListResponse(BaseModel):
+    files: List[ProjectFileResponse]
+    total: int
+
+
 class ErrorResponse(BaseModel):
     status: str = "error"
     error: str

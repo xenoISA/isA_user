@@ -1,5 +1,6 @@
 """Project Repository — PostgreSQL data access (#258, #295, #296, #298)"""
 import logging
+import os
 import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
@@ -17,14 +18,23 @@ class ProjectRepository:
         self.schema = "project"
         self.table = "projects"
         self.files_table = "project_files"
-        pg_config = config_manager.get_service_connection("postgres")
+        host, port = config_manager.discover_service(
+            service_name="postgres_service",
+            default_host="localhost",
+            default_port=5432,
+            env_host_key="POSTGRES_HOST",
+            env_port_key="POSTGRES_PORT",
+        )
         self.db = AsyncPostgresClient(
-            host=pg_config["host"],
-            port=pg_config["port"],
-            database=pg_config["database"],
-            user=pg_config["user"],
-            password=pg_config["password"],
+            host=host,
+            port=port,
+            database=os.getenv("POSTGRES_DB", "isa_platform"),
+            username=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
             schema=self.schema,
+            user_id="project_service",
+            min_pool_size=1,
+            max_pool_size=2,
         )
 
     async def create_project(self, user_id: str, name: str, description: str = None, custom_instructions: str = None) -> Dict[str, Any]:
@@ -89,6 +99,94 @@ class ProjectRepository:
 
     async def set_instructions(self, project_id: str, instructions: str) -> bool:
         return bool(await self.update_project(project_id, custom_instructions=instructions))
+
+    async def _ensure_files_table(self) -> None:
+        try:
+            async with self.db:
+                await self.db.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {self.schema}.{self.files_table} (
+                        id TEXT PRIMARY KEY,
+                        project_id TEXT NOT NULL REFERENCES {self.schema}.{self.table}(id) ON DELETE CASCADE,
+                        user_id TEXT NOT NULL,
+                        filename TEXT NOT NULL,
+                        file_type TEXT,
+                        file_size BIGINT,
+                        storage_path TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL
+                    )
+                    """,
+                    params=[],
+                )
+                await self.db.execute(
+                    f"ALTER TABLE {self.schema}.{self.files_table} ADD COLUMN IF NOT EXISTS user_id TEXT",
+                    params=[],
+                )
+        except Exception as e:
+            raise RepositoryError("Failed to ensure project files table", cause=e) from e
+
+    async def list_project_files(self, project_id: str) -> List[Dict[str, Any]]:
+        await self._ensure_files_table()
+        try:
+            async with self.db:
+                rows = await self.db.query(
+                    f"""
+                    SELECT id, project_id, filename, file_type, file_size, storage_path, created_at
+                    FROM {self.schema}.{self.files_table}
+                    WHERE project_id = $1
+                    ORDER BY created_at DESC
+                    """,
+                    params=[project_id],
+                )
+            return [dict(r) for r in (rows or [])]
+        except Exception as e:
+            raise RepositoryError("Failed to list project files", cause=e) from e
+
+    async def create_project_file(
+        self,
+        project_id: str,
+        user_id: str,
+        filename: str,
+        file_type: str = None,
+        file_size: int = None,
+    ) -> Dict[str, Any]:
+        await self._ensure_files_table()
+        file_id = str(uuid.uuid4())
+        now = datetime.now(tz=timezone.utc)
+        storage_path = f"project/{project_id}/{file_id}/{filename}"
+        try:
+            async with self.db:
+                await self.db.execute(
+                    f"""
+                    INSERT INTO {self.schema}.{self.files_table}
+                    (id, project_id, user_id, filename, file_type, file_size, storage_path, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    params=[file_id, project_id, user_id, filename, file_type, file_size, storage_path, now],
+                )
+        except Exception as e:
+            raise RepositoryError("Failed to create project file", cause=e) from e
+        return {
+            "id": file_id,
+            "project_id": project_id,
+            "filename": filename,
+            "file_type": file_type,
+            "file_size": file_size,
+            "storage_path": storage_path,
+            "created_at": now,
+        }
+
+    async def delete_project_file(self, project_id: str, file_id: str) -> bool:
+        await self._ensure_files_table()
+        try:
+            async with self.db:
+                await self.db.execute(
+                    f"DELETE FROM {self.schema}.{self.files_table} WHERE project_id = $1 AND id = $2",
+                    params=[project_id, file_id],
+                )
+            return True
+        except Exception as e:
+            raise RepositoryError("Failed to delete project file", cause=e) from e
 
     async def count_projects(self, user_id: str) -> int:
         try:

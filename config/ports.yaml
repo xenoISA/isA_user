@@ -368,6 +368,11 @@ microservices:
     k8s_service: "event"
     description: "Event sourcing"
 
+  project_service:
+    port: 8260
+    k8s_service: "project"
+    description: "Project workspaces and knowledge files"
+
   # Extended Services (8250+)
   membership_service:
     port: 8250
