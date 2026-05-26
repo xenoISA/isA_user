@@ -46,6 +46,7 @@ The isA User Platform follows a modern microservices architecture with:
 | **subscription_service** | 8228 | Subscription lifecycle management |
 | **membership_service** | 8250 | Membership tiers and management |
 | **document_service** | 8227 | Document management and processing |
+| **training_service** | 8262 | Operational training runtime sourced from isA_Training content |
 
 ### Media & Content Services
 
@@ -567,6 +568,7 @@ isA_user/
 │   ├── credit_service/
 │   ├── subscription_service/
 │   ├── document_service/
+│   ├── training_service/
 │   ├── membership_service/
 │   ├── campaign_service/
 │   ├── inventory_service/

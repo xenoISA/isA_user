@@ -54,7 +54,7 @@ TIER1_SERVICES="auth_service account_service organization_service"
 TIER2_SERVICES="session_service authorization_service wallet_service memory_service storage_service event_service audit_service notification_service project_service"
 
 # Tier 3: Business — depends on Tier 1+2, required by Model/Agent SDK/OS/Console
-TIER3_SERVICES="billing_service subscription_service product_service telemetry_service vault_service developer_service"
+TIER3_SERVICES="billing_service subscription_service product_service telemetry_service vault_service developer_service training_service"
 
 # Tier 4: Optional — domain features, not required for core platform
 TIER4_SERVICES="payment_service order_service task_service calendar_service weather_service album_service device_service ota_service media_service location_service compliance_service document_service credit_service invitation_service membership_service campaign_service inventory_service tax_service fulfillment_service sharing_service project_sharing_service connector_service"

@@ -1,0 +1,19 @@
+{
+  "entry": [
+    {
+      "id": "entry-1",
+      "module": "AI认知",
+      "knowledge": "Agent basics",
+      "difficulty": "foundation",
+      "type": "单选",
+      "stem": "Which option best describes an Agent?",
+      "options": {
+        "A": "A static document",
+        "B": "A goal-driven system that can use tools",
+        "C": "A spreadsheet template"
+      },
+      "answer": "B",
+      "explanation": "Agents pursue goals through tools, state, and policy."
+    }
+  ]
+}

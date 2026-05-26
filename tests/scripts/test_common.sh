@@ -65,6 +65,7 @@ get_service_port() {
         sharing_service) echo "8255" ;;
         project_service) echo "8260" ;;
         developer_service) echo "8261" ;;
+        training_service) echo "8262" ;;
         *) echo "" ;;
     esac
 }
