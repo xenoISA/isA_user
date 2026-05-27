@@ -16,8 +16,16 @@ name: CI
 on:
   push:
     branches: [main, develop, 'release/*']
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
   # ---------------------------------------------------------------------------
   # On-demand trigger for the heavyweight K8s integration job (#354).
   # The path-filtered ``k8s-integration`` job only runs automatically when
@@ -45,7 +53,7 @@ jobs:
   # ===========================================================================
   unit-component:
     name: Unit & Component Tests
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -125,7 +133,7 @@ jobs:
   # ===========================================================================
   integration:
     name: Integration Tests
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: unit-component
     if: github.event_name == 'push'
 
@@ -208,7 +216,7 @@ jobs:
   # ===========================================================================
   lint:
     name: Lint & Type Check
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -271,7 +279,7 @@ jobs:
   # ===========================================================================
   contracts:
     name: Validate Contracts
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -319,7 +327,7 @@ jobs:
   # ===========================================================================
   build:
     name: Build Images
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [unit-component, lint]
     if: github.event_name == 'push'
 
@@ -362,7 +370,7 @@ jobs:
   # ---------------------------------------------------------------------------
   k8s-paths-filter:
     name: K8s Paths Filter
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.filter.outputs.scale_path }}
     steps:
@@ -383,7 +391,7 @@ jobs:
 
   k8s-integration:
     name: K8s Integration Test
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [unit-component, k8s-paths-filter]
     # Run when the scale path changed OR a maintainer explicitly opted in
     # via workflow_dispatch. We deliberately skip on PRs that don't touch
@@ -468,7 +476,7 @@ jobs:
   # ===========================================================================
   summary:
     name: Test Summary
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [unit-component, integration, contracts]
     if: always()
 
