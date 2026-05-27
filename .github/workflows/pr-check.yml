@@ -25,7 +25,7 @@ jobs:
   # ===========================================================================
   changes:
     name: Detect Changes
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       services: ${{ steps.changes.outputs.services }}
       has_services: ${{ steps.changes.outputs.has_services }}
@@ -67,7 +67,7 @@ jobs:
   # ===========================================================================
   cdd-check:
     name: CDD Completeness
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: changes
     if: needs.changes.outputs.has_services == 'true'
 
@@ -139,7 +139,7 @@ jobs:
   # ===========================================================================
   test-coverage:
     name: Test Coverage
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: changes
     if: needs.changes.outputs.has_services == 'true'
 
@@ -193,7 +193,7 @@ jobs:
   # ===========================================================================
   test-pyramid:
     name: Test Pyramid Completeness
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: changes
     if: needs.changes.outputs.has_services == 'true'
 
@@ -230,7 +230,7 @@ jobs:
   # ===========================================================================
   di-pattern:
     name: DI Pattern Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: changes
     if: needs.changes.outputs.has_services == 'true'
 
@@ -261,7 +261,7 @@ jobs:
   # ===========================================================================
   summary:
     name: PR Summary
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [changes, cdd-check, test-coverage, test-pyramid, di-pattern]
     if: always()
 
