@@ -55,42 +55,6 @@ logger = app_logger  # for backward compatibility
 
 shutdown_manager = GracefulShutdown("wallet_service")
 
-# =============================================================================
-# OLD: Legacy event handlers (KEPT FOR BACKWARD COMPATIBILITY - DO NOT USE)
-# These are now in events/handlers.py
-# =============================================================================
-
-# Track processed event IDs for idempotency (DEPRECATED - moved to events/handlers.py)
-processed_event_ids = set()
-
-
-def is_event_processed(event_id: str) -> bool:
-    """Check if event has already been processed (idempotency) - DEPRECATED"""
-    return event_id in processed_event_ids
-
-
-def mark_event_processed(event_id: str):
-    """Mark event as processed - DEPRECATED"""
-    global processed_event_ids
-    processed_event_ids.add(event_id)
-    if len(processed_event_ids) > 10000:
-        # Remove oldest half to prevent memory bloat
-        processed_event_ids = set(list(processed_event_ids)[5000:])
-
-
-# ==================== Event Handlers (DEPRECATED - moved to events/handlers.py) ====================
-
-"""
-# DEPRECATED: These handlers have been moved to events/handlers.py
-# Keeping commented code for reference during migration
-#
-# - handle_payment_completed() -> events/handlers.py
-# - handle_user_created() -> events/handlers.py
-#
-# All event handlers are now registered via get_event_handlers() in lifespan()
-"""
-
-
 class WalletMicroservice:
     """Wallet microservice core class"""
 
