@@ -9,7 +9,8 @@
 #   ./deployment/local-dev.sh --run-all                  # Run ALL services (tiered startup)
 #   ./deployment/local-dev.sh --run-group <1-4>          # Run a specific tier
 #   ./deployment/local-dev.sh --stop-all                 # Stop ALL services
-#   ./deployment/local-dev.sh --status                   # Show status
+#   ./deployment/local-dev.sh --status                   # Show status (flags crashed services)
+#   ./deployment/local-dev.sh --restart-crashed          # Restart services whose PIDs died
 #
 # Service Tiers:
 #   Tier 1 — Foundation:  auth, account, organization (no internal deps)
@@ -44,7 +45,10 @@ cd "$PROJECT_ROOT"
 #                   payment, wallet, storage, telemetry, memory, task, campaign
 #   isA_OS      → auth, account, billing, telemetry
 #   isA_Data    → auth
-#   isA_Console → auth, account, project, developer
+#   isA_Console → auth, account, session, organization, authorization, audit,
+#                  event, billing, payment, developer (plus optional: invitation,
+#                  compliance, telemetry). Pages: /dashboard/{subscription,usage,
+#                  activity,admin,health} all need payment, event, and billing.
 # =============================================================================
 
 # Tier 1: Foundation — no isA_user deps, everything else depends on these
@@ -53,11 +57,14 @@ TIER1_SERVICES="auth_service account_service organization_service"
 # Tier 2: Core Platform — depends on Tier 1, required by MCP/Agent SDK
 TIER2_SERVICES="session_service authorization_service wallet_service memory_service storage_service event_service audit_service notification_service project_service"
 
-# Tier 3: Business — depends on Tier 1+2, required by Model/Agent SDK/OS/Console
-TIER3_SERVICES="billing_service subscription_service product_service telemetry_service vault_service developer_service training_service"
+# Tier 3: Business — depends on Tier 1+2, required by Model/Agent SDK/OS/Console.
+# payment_service moved here from Tier 4 — Console's subscription/usage/activity
+# pages depend on it, and was the root cause of #490 (500s while service was
+# absent because --run-core skipped it).
+TIER3_SERVICES="billing_service subscription_service product_service telemetry_service vault_service developer_service payment_service training_service"
 
 # Tier 4: Optional — domain features, not required for core platform
-TIER4_SERVICES="payment_service order_service task_service calendar_service weather_service album_service device_service ota_service media_service location_service compliance_service document_service credit_service invitation_service membership_service campaign_service inventory_service tax_service fulfillment_service sharing_service project_sharing_service connector_service"
+TIER4_SERVICES="order_service task_service calendar_service weather_service album_service device_service ota_service media_service location_service compliance_service document_service credit_service invitation_service membership_service campaign_service inventory_service tax_service fulfillment_service sharing_service project_sharing_service connector_service"
 
 TIER_NAMES=("" "Foundation" "Core Platform" "Business" "Optional")
 
@@ -149,6 +156,11 @@ start_tier() {
             --host 0.0.0.0 --port "$SERVICE_PORT" \
             --reload --reload-dir "microservices/$SERVICE_NAME" --reload-dir "core" \
             > "logs/$SERVICE_NAME.log" 2>&1 &
+
+        # Record the PID so --status can detect a crashed service (port closed but
+        # PID file present + process dead). Tracked by #494.
+        mkdir -p pids
+        echo "$!" > "pids/$SERVICE_NAME.pid"
 
         started_services="$started_services $SERVICE_NAME:$SERVICE_PORT"
         tier_count=$((tier_count + 1))
@@ -475,6 +487,9 @@ case "${1:-}" in
                     echo "  Stopped $SERVICE_NAME (port $SERVICE_PORT)"
                 fi
             fi
+            # Clear the PID file so the next --status doesn't misreport a clean
+            # stop as a CRASHED service. (Fixes #494)
+            rm -f "pids/$SERVICE_NAME.pid"
         done
 
         echo "All services stopped."
@@ -485,6 +500,28 @@ case "${1:-}" in
         .venv/bin/pip show isa-common isa-model 2>/dev/null | grep -E "Name|Version|Location" || echo "Not installed"
         echo ""
 
+        # Helper: classify a service as RUNNING / CRASHED / stopped.
+        # CRASHED = we have a PID file (we started it) but the port is closed
+        # and the recorded PID is no longer a live process. (Fixes #494)
+        report_service_status() {
+            local svc=$1
+            local port=$2
+            local pid_file="pids/$svc.pid"
+            if lsof -ti:"$port" >/dev/null 2>&1; then
+                echo "  ✓ $svc (port $port) - RUNNING"
+                return
+            fi
+            if [ -f "$pid_file" ]; then
+                local pid
+                pid=$(cat "$pid_file" 2>/dev/null)
+                if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+                    echo "  ⚠ $svc (port $port) - CRASHED (pid $pid dead; see logs/$svc.log)"
+                    return
+                fi
+            fi
+            echo "  ✗ $svc (port $port) - stopped"
+        }
+
         for tier_num in 1 2 3 4; do
             tier_name="${TIER_NAMES[$tier_num]}"
             echo "Tier $tier_num — $tier_name:"
@@ -492,11 +529,7 @@ case "${1:-}" in
                 if [ -d "microservices/$SERVICE_NAME" ]; then
                     SERVICE_PORT=$(get_service_port "$SERVICE_NAME")
                     if [ -n "$SERVICE_PORT" ]; then
-                        if lsof -ti:"$SERVICE_PORT" >/dev/null 2>&1; then
-                            echo "  ✓ $SERVICE_NAME (port $SERVICE_PORT) - RUNNING"
-                        else
-                            echo "  ✗ $SERVICE_NAME (port $SERVICE_PORT) - stopped"
-                        fi
+                        report_service_status "$SERVICE_NAME" "$SERVICE_PORT"
                     fi
                 fi
             done
@@ -516,17 +549,58 @@ case "${1:-}" in
             for SERVICE_NAME in $UNTIERED; do
                 SERVICE_PORT=$(get_service_port "$SERVICE_NAME")
                 if [ -n "$SERVICE_PORT" ]; then
-                    if lsof -ti:"$SERVICE_PORT" >/dev/null 2>&1; then
-                        echo "  ✓ $SERVICE_NAME (port $SERVICE_PORT) - RUNNING"
-                    else
-                        echo "  ✗ $SERVICE_NAME (port $SERVICE_PORT) - stopped"
-                    fi
+                    report_service_status "$SERVICE_NAME" "$SERVICE_PORT"
                 fi
             done
             echo ""
         fi
 
         show_consul_critical_checks
+        ;;
+
+    --restart-crashed)
+        # Walk tiers 1-3 and restart any service whose recorded PID is dead
+        # while its port is no longer listening. Logs into logs/<svc>.log.
+        # (Fixes #494)
+        if [ -f "deployment/environments/dev.env" ]; then
+            export $(grep -v '^#' deployment/environments/dev.env | grep -v '^$' | xargs)
+        fi
+        mkdir -p logs pids
+        export PYTHONPATH="$PROJECT_ROOT"
+        RESTARTED=0
+        for tier_num in 1 2 3; do
+            for SERVICE_NAME in $(get_tier_services "$tier_num"); do
+                [ -d "microservices/$SERVICE_NAME" ] || continue
+                SERVICE_PORT=$(get_service_port "$SERVICE_NAME") || continue
+                [ -n "$SERVICE_PORT" ] || continue
+                # Skip services that are healthy
+                if lsof -ti:"$SERVICE_PORT" >/dev/null 2>&1; then
+                    continue
+                fi
+                # Only restart if we have a PID file (i.e. we started it before)
+                pid_file="pids/$SERVICE_NAME.pid"
+                [ -f "$pid_file" ] || continue
+                pid=$(cat "$pid_file" 2>/dev/null)
+                if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                    continue
+                fi
+                echo "Restarting crashed service: $SERVICE_NAME (was pid $pid, port $SERVICE_PORT)"
+                SERVICE_PORT_ENV="$(echo "$SERVICE_NAME" | tr '[:lower:]' '[:upper:]')_PORT"
+                env "$SERVICE_PORT_ENV=$SERVICE_PORT" PORT="$SERVICE_PORT" \
+                    nohup .venv/bin/python -m uvicorn microservices.$SERVICE_NAME.main:app \
+                        --host 0.0.0.0 --port "$SERVICE_PORT" \
+                        --reload --reload-dir "microservices/$SERVICE_NAME" --reload-dir "core" \
+                        > "logs/$SERVICE_NAME.log" 2>&1 &
+                echo "$!" > "$pid_file"
+                RESTARTED=$((RESTARTED + 1))
+                sleep 1
+            done
+        done
+        if [ "$RESTARTED" -eq 0 ]; then
+            echo "No crashed services detected in tiers 1-3."
+        else
+            echo "Restarted $RESTARTED service(s). Use '$0 --status' to confirm."
+        fi
         ;;
 
     *)
@@ -538,7 +612,8 @@ case "${1:-}" in
         echo "  $0 --run-all                  # Run ALL services (tiers 1-4, health-gated)"
         echo "  $0 --run-group <1-4>          # Run a specific tier"
         echo "  $0 --stop-all                 # Stop ALL microservices"
-        echo "  $0 --status                   # Show status by tier"
+        echo "  $0 --status                   # Show status by tier (flags crashed services)"
+        echo "  $0 --restart-crashed          # Restart crashed services in tiers 1-3"
         echo ""
         echo "Service Tiers:"
         echo "  1 — Foundation:    auth, account, organization"

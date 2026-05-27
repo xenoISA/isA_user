@@ -45,7 +45,7 @@ jobs:
   # ===========================================================================
   unit-component:
     name: Unit & Component Tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -125,7 +125,7 @@ jobs:
   # ===========================================================================
   integration:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: unit-component
     if: github.event_name == 'push'
 
@@ -208,7 +208,7 @@ jobs:
   # ===========================================================================
   lint:
     name: Lint & Type Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -271,7 +271,7 @@ jobs:
   # ===========================================================================
   contracts:
     name: Validate Contracts
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -319,7 +319,7 @@ jobs:
   # ===========================================================================
   build:
     name: Build Images
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [unit-component, lint]
     if: github.event_name == 'push'
 
@@ -362,7 +362,7 @@ jobs:
   # ---------------------------------------------------------------------------
   k8s-paths-filter:
     name: K8s Paths Filter
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       should_run: ${{ steps.filter.outputs.scale_path }}
     steps:
@@ -383,7 +383,7 @@ jobs:
 
   k8s-integration:
     name: K8s Integration Test
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [unit-component, k8s-paths-filter]
     # Run when the scale path changed OR a maintainer explicitly opted in
     # via workflow_dispatch. We deliberately skip on PRs that don't touch
@@ -468,7 +468,7 @@ jobs:
   # ===========================================================================
   summary:
     name: Test Summary
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [unit-component, integration, contracts]
     if: always()
 
