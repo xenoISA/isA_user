@@ -15,6 +15,10 @@ name: PR Check
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
 
 env:
   PYTHON_VERSION: '3.11'
@@ -25,7 +29,7 @@ jobs:
   # ===========================================================================
   changes:
     name: Detect Changes
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.changes.outputs.services }}
       has_services: ${{ steps.changes.outputs.has_services }}
@@ -67,7 +71,7 @@ jobs:
   # ===========================================================================
   cdd-check:
     name: CDD Completeness
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.has_services == 'true'
 
@@ -139,7 +143,7 @@ jobs:
   # ===========================================================================
   test-coverage:
     name: Test Coverage
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.has_services == 'true'
 
@@ -193,7 +197,7 @@ jobs:
   # ===========================================================================
   test-pyramid:
     name: Test Pyramid Completeness
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.has_services == 'true'
 
@@ -230,7 +234,7 @@ jobs:
   # ===========================================================================
   di-pattern:
     name: DI Pattern Check
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.has_services == 'true'
 
@@ -261,7 +265,7 @@ jobs:
   # ===========================================================================
   summary:
     name: PR Summary
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [changes, cdd-check, test-coverage, test-pyramid, di-pattern]
     if: always()
 

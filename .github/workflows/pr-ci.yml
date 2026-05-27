@@ -22,8 +22,16 @@ name: PR CI
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
 
 # Cancel superseded runs on the same PR/branch to save CI minutes.
 concurrency:
@@ -48,7 +56,7 @@ jobs:
   # zeroed (run `ruff check tests/ --fix` + manual sweep).
   lint:
     name: Lint (ruff baseline)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -79,7 +87,7 @@ jobs:
   # full inventory is covered by tests/unit/test_microservice_startup_packaging.py.
   import-smoke:
     name: Service-import smoke
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -127,7 +135,7 @@ jobs:
   # in tests/integration/ or tests/api/ and is gated by ci.yml.
   unit-component:
     name: Unit + component tests
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
