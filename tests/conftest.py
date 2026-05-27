@@ -97,6 +97,7 @@ class TestConfig:
         "document_service": 8227,
         "subscription_service": 8228,
         "event_service": 8230,
+        "training_service": 8262,
     }
 
     # Infrastructure

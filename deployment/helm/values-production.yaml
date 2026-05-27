@@ -398,6 +398,10 @@ services:
     name: user-developer-service
     repository: isa/user-developer
     port: 8261
+  training:
+    name: user-training-service
+    repository: isa/user-training
+    port: 8262
   # ---------------------------------------------------------------------------
   # New microservices (xenoISA/isA_user epic isA_/#452, issue #462)
   # Per-service env overrides for these live in the `artifactService` and

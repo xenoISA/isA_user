@@ -1,0 +1,40 @@
+{
+  "platform": "isA_Training",
+  "series": [
+    { "code": "F", "name": "Foundation" },
+    { "code": "B", "name": "Business" },
+    { "code": "T", "name": "Technology" },
+    { "code": "G", "name": "Governance" },
+    { "code": "V", "name": "Vertical" },
+    { "code": "K", "name": "K12" }
+  ],
+  "courses": [
+    {
+      "code": "F1",
+      "title": "Agent operating model",
+      "series": "F",
+      "seriesName": "Foundation",
+      "durationHours": 2,
+      "audience": "all",
+      "sourceFile": "F/F1-Agent.pptx",
+      "courseFile": "courses/F1.json"
+    },
+    { "code": "F2", "title": "Agent anatomy", "series": "F", "seriesName": "Foundation", "durationHours": 2, "audience": "all" },
+    { "code": "F3", "title": "AOM method", "series": "F", "seriesName": "Foundation", "durationHours": 2, "audience": "all" },
+    { "code": "B1", "title": "Business opportunity", "series": "B", "seriesName": "Business", "durationHours": 2, "audience": "enterprise" },
+    { "code": "B2", "title": "Proposal design", "series": "B", "seriesName": "Business", "durationHours": 2, "audience": "enterprise" },
+    { "code": "B3", "title": "Delivery playbook", "series": "B", "seriesName": "Business", "durationHours": 2, "audience": "enterprise" },
+    { "code": "T0", "title": "LLM baseline", "series": "T", "seriesName": "Technology", "durationHours": 2, "audience": "engineer" },
+    { "code": "T1", "title": "Agent architecture", "series": "T", "seriesName": "Technology", "durationHours": 2, "audience": "engineer" },
+    { "code": "T2", "title": "AI SDLC", "series": "T", "seriesName": "Technology", "durationHours": 2, "audience": "engineer" },
+    { "code": "T3", "title": "Platform modules", "series": "T", "seriesName": "Technology", "durationHours": 2, "audience": "engineer" },
+    { "code": "T4", "title": "Integration engineering", "series": "T", "seriesName": "Technology", "durationHours": 2, "audience": "engineer" },
+    { "code": "T5", "title": "Observability and deployment", "series": "T", "seriesName": "Technology", "durationHours": 2, "audience": "engineer" },
+    { "code": "G1", "title": "Agent strategy", "series": "G", "seriesName": "Governance", "durationHours": 2, "audience": "enterprise" },
+    { "code": "G2", "title": "Governance model", "series": "G", "seriesName": "Governance", "durationHours": 2, "audience": "enterprise" },
+    { "code": "V1", "title": "Cross-border commerce", "series": "V", "seriesName": "Vertical", "durationHours": 2, "audience": "enterprise" },
+    { "code": "V2", "title": "DTC agent", "series": "V", "seriesName": "Vertical", "durationHours": 2, "audience": "enterprise" },
+    { "code": "V3", "title": "Platform landing", "series": "V", "seriesName": "Vertical", "durationHours": 2, "audience": "enterprise" },
+    { "code": "K1", "title": "K12 PBL intro", "series": "K", "seriesName": "K12", "durationHours": 2, "audience": "k12" }
+  ]
+}

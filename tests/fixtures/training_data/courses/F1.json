@@ -1,0 +1,29 @@
+{
+  "code": "F1",
+  "title": "Agent operating model",
+  "series": "F",
+  "seriesName": "Foundation",
+  "durationHours": 2,
+  "audience": "all",
+  "sourceFile": "F/F1-Agent.pptx",
+  "slides": [
+    {
+      "n": 1,
+      "title": "SECTION 1",
+      "body": "SECTION 1\nAgent basics",
+      "notes": "Offline facilitator introduction."
+    },
+    {
+      "n": 2,
+      "title": "Agent concept",
+      "body": "Agent = goal, tools, memory, policy.",
+      "notes": "Learner discussion."
+    },
+    {
+      "n": 3,
+      "title": "Lab briefing",
+      "body": "Prepare the agent hello lab.",
+      "notes": "Hands-on activity."
+    }
+  ]
+}

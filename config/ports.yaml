@@ -415,6 +415,11 @@ microservices:
     k8s_service: "developer"
     description: "Developer journey cockpit"
 
+  training_service:
+    port: 8262
+    k8s_service: "training"
+    description: "Operational training runtime"
+
   project_sharing_service:
     port: 8270
     k8s_service: "project-sharing"

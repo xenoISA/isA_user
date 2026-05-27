@@ -70,6 +70,9 @@ source:
     - name: billing_service
       path: billing_service/
       description: Billing service
+    - name: training_service
+      path: training_service/
+      description: Operational training runtime service
     - name: calendar_service
       path: calendar_service/
       description: Calendar service
