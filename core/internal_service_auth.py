@@ -9,8 +9,7 @@ Internal Service Authentication Middleware
 2. 在客户端发送请求时添加内部服务标识 header
 """
 
-from fastapi import Request, HTTPException, status
-from typing import Optional
+from fastapi import Request
 import os
 import logging
 
@@ -82,107 +81,8 @@ class InternalServiceAuth:
         return "internal-service"
 
 
-async def require_auth_or_internal_service(request: Request) -> Optional[str]:  # noqa: F811
-    """
-    DEPRECATED: Use core.auth_dependencies.require_auth_or_internal_service instead.
-    This version does not support API Key auth.
-
-    认证中间件依赖函数
-
-    允许两种认证方式：
-    1. 内部服务认证（X-Internal-Service headers with secret）
-    2. Bearer JWT 认证（Authorization header verified via auth service）
-
-    Args:
-        request: FastAPI Request 对象
-
-    Returns:
-        user_id: 用户ID 或 "internal-service"
-
-    Raises:
-        HTTPException: 401 如果认证失败
-    """
-    # 首先检查是否是内部服务请求
-    if InternalServiceAuth.is_internal_service_request(request):
-        return InternalServiceAuth.get_service_user_id()
-
-    # 检查 Authorization: Bearer <jwt> 认证
-    authorization = request.headers.get("authorization")
-    if authorization and authorization.startswith("Bearer "):
-        import httpx
-        token = authorization[7:]
-        auth_service_url = os.getenv("AUTH_SERVICE_URL", "http://localhost:8201")
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{auth_service_url}/api/v1/auth/verify-token",
-                    json={"token": token},
-                    timeout=5.0,
-                )
-                if response.status_code == 200:
-                    result = response.json()
-                    if result.get("valid"):
-                        return result.get("user_id")
-        except Exception as e:
-            logger.warning(f"Failed to verify Bearer token: {e}")
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="User authentication required"
-    )
-
-
-def create_internal_service_bypass_dependency():
-    """
-    创建一个允许内部服务绕过认证的依赖函数
-
-    Returns:
-        依赖函数
-
-    用法:
-        from core.internal_service_auth import create_internal_service_bypass_dependency
-
-        OptionalAuth = create_internal_service_bypass_dependency()
-
-        @app.get("/api/v1/resource")
-        async def get_resource(user_id: Optional[str] = Depends(OptionalAuth)):
-            # user_id 可能是 None（内部服务）或实际用户ID
-            ...
-    """
-    async def optional_auth(request: Request) -> Optional[str]:
-        # 如果是内部服务请求，返回特殊标识
-        if InternalServiceAuth.is_internal_service_request(request):
-            return InternalServiceAuth.get_service_user_id()
-
-        # 检查 Authorization: Bearer <jwt> 认证
-        authorization = request.headers.get("authorization")
-        if authorization and authorization.startswith("Bearer "):
-            import httpx
-            token = authorization[7:]
-            auth_service_url = os.getenv("AUTH_SERVICE_URL", "http://localhost:8201")
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{auth_service_url}/api/v1/auth/verify-token",
-                        json={"token": token},
-                        timeout=5.0,
-                    )
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get("valid"):
-                            return result.get("user_id")
-            except Exception as e:
-                logger.warning(f"Failed to verify Bearer token: {e}")
-
-        return None
-
-    return optional_auth
-
-
 __all__ = [
     "InternalServiceAuth",
-    "require_auth_or_internal_service",
-    "create_internal_service_bypass_dependency",
     "INTERNAL_SERVICE_HEADER",
-    "INTERNAL_SERVICE_SECRET_HEADER"
+    "INTERNAL_SERVICE_SECRET_HEADER",
 ]
