@@ -112,6 +112,12 @@ AUTH_SERVICE_ROUTES = [
         "auth_required": False,
         "description": "Authenticate user with email and password",
     },
+    {
+        "path": "/api/v1/auth/logout",
+        "methods": ["POST"],
+        "auth_required": False,
+        "description": "Clear refresh-token cookie (logout)",
+    },
     # Admin authentication
     {
         "path": "/api/v1/auth/admin/login",
@@ -340,7 +346,7 @@ def get_routes_by_category() -> Dict[str, List[Dict[str, Any]]]:
 # Service metadata for Consul registration
 SERVICE_METADATA = {
     "service_name": "auth_service",
-    "version": "2.1.0",  # Version bump for login feature
+    "version": "2.2.0",  # Bumped for HttpOnly refresh cookies (issue #499)
     "tags": ["v2", "user-microservice", "authentication"],
     "capabilities": [
         "jwt_verification",
@@ -350,6 +356,8 @@ SERVICE_METADATA = {
         "device_authentication",
         "user_registration",
         "user_login",
+        "user_logout",
         "admin_authentication",
+        "httponly_refresh_cookie",
     ],
 }

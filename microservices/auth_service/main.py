@@ -28,6 +28,7 @@ from fastapi import (
     status,
     Query,
     Form,
+    Response,
     Security,
     Request,
 )
@@ -533,6 +534,91 @@ app.add_middleware(
     # gave api-key quota counters the same treatment via rate_limit_state.
     backend=build_rate_limit_backend(service_name="auth_service"),
 )
+
+
+# ================================
+# Refresh-Token Cookie Helpers
+# ================================
+#
+# Implements the security baseline from xenoISA/isA_'s
+# cross-surface-auth-contract.md + auth-cookie-strategy.md:
+#   - Refresh tokens MUST be HttpOnly + SameSite=Lax cookies
+#   - Secure flag only in production (allows http on local/dev)
+#   - Domain=.iapro.ai so the cookie is shared across subdomains
+#     (isA_, isA_Console, isA_Docs) for cross-surface refresh
+#   - Lifetime = refresh token TTL (default 7 days)
+#
+# Access tokens stay in memory only — returned in the JSON body.
+#
+# Issue: xenoISA/isA_user#499. Unblocks xenoISA/isA_#488 smoke test.
+
+REFRESH_COOKIE_NAME = "refresh_token"
+# Match factory.py refresh_token_expiry (7 days). Override via env if needed.
+REFRESH_COOKIE_MAX_AGE_DEFAULT = 604800
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean-ish env var. Accepts 1/0, true/false (case-insensitive)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _refresh_cookie_settings() -> Dict[str, Any]:
+    """Resolve cookie attributes from env at call time so tests can override.
+
+    Defaults are production-safe (Secure=True). Local/dev should set
+    SECURE_COOKIES=false (most dev compose files do).
+    """
+    return {
+        "domain": os.getenv("AUTH_COOKIE_DOMAIN", ".iapro.ai") or None,
+        "secure": _env_bool("SECURE_COOKIES", default=True),
+        "samesite": os.getenv("AUTH_COOKIE_SAMESITE", "lax"),
+        "max_age": int(
+            os.getenv("REFRESH_TOKEN_TTL_SECONDS", str(REFRESH_COOKIE_MAX_AGE_DEFAULT))
+        ),
+        "path": "/",
+    }
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    """Attach the refresh token to the response as an HttpOnly cookie."""
+    if not refresh_token:
+        return
+    s = _refresh_cookie_settings()
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        max_age=s["max_age"],
+        path=s["path"],
+        domain=s["domain"],
+        secure=s["secure"],
+        httponly=True,
+        samesite=s["samesite"],
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    """Expire the refresh-token cookie. Used by /logout."""
+    s = _refresh_cookie_settings()
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        path=s["path"],
+        domain=s["domain"],
+    )
+
+
+def _return_refresh_in_body() -> bool:
+    """Transition flag: when True, the JSON body still includes refresh_token.
+
+    Default False — frontend smoke test in xenoISA/isA_#488 requires the body
+    to NOT contain the refresh token. Flip RETURN_REFRESH_TOKEN_IN_BODY=true
+    only during a short backwards-compat window for downstream clients that
+    haven't migrated yet. Plan to remove this flag entirely once all SDK
+    consumers (isA_App_SDK, isA_Console, isA_Docs) read the cookie.
+    """
+    return _env_bool("RETURN_REFRESH_TOKEN_IN_BODY", default=False)
 
 
 # Dependency Injection
@@ -1240,6 +1326,7 @@ async def verify_registration(
 @app.post("/api/v1/auth/login", response_model=LoginResponse)
 async def login(
     request: LoginRequest,
+    response: Response,
     auth_service: AuthenticationService = Depends(get_auth_service),
 ):
     """Authenticate user with email and password.
@@ -1250,7 +1337,12 @@ async def login(
       "password": "your_password"
     }
 
-    Returns access and refresh tokens on success.
+    Returns an access token in the JSON body. The refresh token is set as
+    an HttpOnly, SameSite=Lax cookie (Secure in production) — never returned
+    in JSON unless the legacy RETURN_REFRESH_TOKEN_IN_BODY flag is enabled
+    for the backwards-compat transition window.
+
+    Spec: cross-surface-auth-contract.md (xenoISA/isA_).
     """
     try:
         result = await auth_service.login(
@@ -1266,13 +1358,18 @@ async def login(
                 detail=result.get("error", "Authentication failed"),
             )
 
+        # Always set the HttpOnly refresh cookie when we have one.
+        _set_refresh_cookie(response, result.get("refresh_token") or "")
+
         return LoginResponse(
             success=True,
             user_id=result.get("user_id"),
             email=result.get("email"),
             name=result.get("name"),
             access_token=result.get("access_token"),
-            refresh_token=result.get("refresh_token"),
+            # Legacy: only echo refresh_token in body when the deprecation flag
+            # is on. Default: None — clients must read the cookie.
+            refresh_token=result.get("refresh_token") if _return_refresh_in_body() else None,
             token_type=result.get("token_type"),
             expires_in=result.get("expires_in"),
         )
@@ -1330,12 +1427,16 @@ class AdminVerifyResponse(BaseModel):
 @app.post("/api/v1/auth/admin/login", response_model=AdminLoginResponse)
 async def admin_login(
     request: AdminLoginRequest,
+    response: Response,
     auth_service: AuthenticationService = Depends(get_auth_service),
 ):
     """Authenticate admin user with email and password.
 
     Returns admin JWT with scope=super_admin and admin_roles claim.
     Admin tokens expire in 4 hours (shorter than regular tokens).
+
+    Same refresh-cookie behaviour as /api/v1/auth/login — refresh token is
+    set as an HttpOnly cookie and (by default) omitted from the JSON body.
 
     Example:
     {
@@ -1355,6 +1456,8 @@ async def admin_login(
                 detail=result.get("error", "Admin authentication failed"),
             )
 
+        _set_refresh_cookie(response, result.get("refresh_token") or "")
+
         return AdminLoginResponse(
             success=True,
             user_id=result.get("user_id"),
@@ -1362,7 +1465,7 @@ async def admin_login(
             name=result.get("name"),
             admin_roles=result.get("admin_roles"),
             access_token=result.get("access_token"),
-            refresh_token=result.get("refresh_token"),
+            refresh_token=result.get("refresh_token") if _return_refresh_in_body() else None,
             token_type=result.get("token_type"),
             expires_in=result.get("expires_in"),
         )
@@ -1559,20 +1662,58 @@ async def generate_token_pair(
         )
 
 
+class RefreshTokenBody(BaseModel):
+    """Legacy refresh body — accepted only during the transition window.
+
+    Once all clients (isA_App_SDK, isA_Console, isA_Docs) rely on the
+    HttpOnly cookie, this model and the body fallback below should be
+    removed. Tracked via xenoISA/isA_user#499.
+    """
+
+    refresh_token: Optional[str] = Field(
+        None, description="Legacy refresh token (prefer the cookie)"
+    )
+
+
 @app.post("/api/v1/auth/refresh")
 async def refresh_token(
-    request: RefreshTokenRequest,
+    request: Request,
+    response: Response,
     auth_service: AuthenticationService = Depends(get_auth_service),
+    body: Optional[RefreshTokenBody] = None,
 ):
-    """Refresh access token using refresh token"""
+    """Refresh the access token.
+
+    Reads the refresh token from the ``refresh_token`` HttpOnly cookie set
+    by /login. During the transition window, also accepts a JSON body with
+    ``refresh_token`` for clients that haven't migrated. Returns a new
+    access token in the JSON body and rotates the cookie via Set-Cookie.
+
+    The new refresh token is never returned in the JSON body (cookie only),
+    matching the cross-surface-auth-contract.md spec.
+    """
     try:
-        result = await auth_service.refresh_access_token(request.refresh_token)
+        token = request.cookies.get(REFRESH_COOKIE_NAME)
+        if not token and body is not None:
+            token = body.refresh_token
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing refresh token",
+            )
+
+        result = await auth_service.refresh_access_token(token)
 
         if not result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=result.get("error", "Token refresh failed"),
             )
+
+        # Rotate the cookie if the service issued a fresh refresh token.
+        new_refresh = result.get("refresh_token")
+        if new_refresh:
+            _set_refresh_cookie(response, new_refresh)
 
         return {
             "success": True,
@@ -1590,6 +1731,19 @@ async def refresh_token(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Token refresh failed",
         )
+
+
+@app.post("/api/v1/auth/logout")
+async def logout(response: Response):
+    """Clear the refresh-token cookie.
+
+    Stateless: simply expires the HttpOnly cookie so the browser stops
+    sending it on subsequent /refresh calls. Access tokens are
+    short-lived and already discarded by the client at logout. Returning
+    a structured body so SDK clients can branch on ``success``.
+    """
+    _clear_refresh_cookie(response)
+    return {"success": True}
 
 
 class UserInfoRequest(BaseModel):
